@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     "issues",
     "users",
     "projects",
+    "teams",
 ]
 
 MIDDLEWARE = [

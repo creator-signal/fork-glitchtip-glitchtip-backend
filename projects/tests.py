@@ -50,3 +50,19 @@ class ProjectsAPITestCase(APITestCase):
         link_header = res.get("Link")
         self.assertIn('results="true"', link_header)
 
+    def test_project_isolation(self):
+        """ Users should only access projects in their organization """
+        user1 = self.user
+        user2 = baker.make("users.user")
+        org1 = baker.make("organizations.Organization")
+        org2 = baker.make("organizations.Organization")
+        org1.add_user(user1)
+        org2.add_user(user2)
+        project1 = baker.make("projects.Project", organization=org1)
+        project2 = baker.make("projects.Project", organization=org2)
+
+        res = self.client.get(self.url)
+        self.assertContains(res, project1.name)
+        self.assertNotContains(res, project2.name)
+
+        # self.assertEqual(self.client.get(self.url + project1.slug), 404)
