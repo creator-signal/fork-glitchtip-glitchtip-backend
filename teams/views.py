@@ -1,5 +1,5 @@
 from rest_framework import viewsets, exceptions
-from organizations.models import Organization
+from organizations_ext.models import Organization, OrganizationUserRole
 from .serializers import TeamSerializer
 from .models import Team
 
@@ -18,7 +18,7 @@ class TeamViewSet(viewsets.ModelViewSet):
             organization = Organization.objects.get(
                 slug=self.kwargs.get("organization_slug"),
                 users=self.request.user,
-                organization_users__is_admin=True,
+                organization_users__role__gte=OrganizationUserRole.ADMIN,
             )
         except Organization.DoesNotExist:
             raise exceptions.ValidationError("Organization does not exist")

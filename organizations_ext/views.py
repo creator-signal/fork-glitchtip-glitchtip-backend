@@ -1,5 +1,5 @@
 from rest_framework import viewsets
-from organizations.models import Organization
+from .models import Organization
 from .serializers.serializers import (
     OrganizationSerializer,
     OrganizationDetailSerializer,

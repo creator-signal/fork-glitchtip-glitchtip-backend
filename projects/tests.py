@@ -33,7 +33,7 @@ class ProjectsAPITestCase(APITestCase):
         self.assertNotEqual(projects[0].slug, projects[1].slug)
         self.assertEqual(ProjectKey.objects.all().count(), 2)
 
-        org2 = baker.make("organizations.Organization")
+        org2 = baker.make("organizations_ext.Organization")
         org2_project = Project.objects.create(name=name, organization=org2)
         # The same slug can exist between multiple organizations
         self.assertEqual(projects[0].slug, org2_project.slug)
@@ -54,8 +54,8 @@ class ProjectsAPITestCase(APITestCase):
         """ Users should only access projects in their organization """
         user1 = self.user
         user2 = baker.make("users.user")
-        org1 = baker.make("organizations.Organization")
-        org2 = baker.make("organizations.Organization")
+        org1 = baker.make("organizations_ext.Organization")
+        org2 = baker.make("organizations_ext.Organization")
         org1.add_user(user1)
         org2.add_user(user2)
         project1 = baker.make("projects.Project", organization=org1)
