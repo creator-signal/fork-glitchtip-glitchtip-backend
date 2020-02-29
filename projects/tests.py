@@ -2,6 +2,7 @@ from django.conf import settings
 from rest_framework.test import APITestCase
 from model_bakery import baker
 from glitchtip import test_utils  # pylint: disable=unused-import
+from organizations_ext.models import OrganizationUserRole
 from .models import ProjectKey, Project
 
 
@@ -19,7 +20,9 @@ class ProjectsAPITestCase(APITestCase):
         self.assertEqual(ProjectKey.objects.all().count(), 1)
 
     def test_projects_api_list(self):
-        project = baker.make("projects.Project")
+        organization = baker.make("organizations_ext.Organization")
+        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
+        project = baker.make("projects.Project", organization=organization)
         res = self.client.get(self.url)
         self.assertContains(res, project.name)
 
@@ -43,7 +46,11 @@ class ProjectsAPITestCase(APITestCase):
         Test link header pagination
         """
         page_size = settings.REST_FRAMEWORK.get("PAGE_SIZE")
-        projects = baker.make("projects.Project", _quantity=page_size + 1)
+        organization = baker.make("organizations_ext.Organization")
+        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
+        projects = baker.make(
+            "projects.Project", organization=organization, _quantity=page_size + 1
+        )
         res = self.client.get(self.url)
         self.assertNotContains(res, projects[0].name)
         self.assertContains(res, projects[-1].name)
