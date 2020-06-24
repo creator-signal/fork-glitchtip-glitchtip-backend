@@ -1,15 +1,16 @@
 from django.core import mail
+from django.test import override_settings
 from django.shortcuts import reverse
 from rest_framework.test import APITestCase
 from model_bakery import baker
 from glitchtip import test_utils  # pylint: disable=unused-import
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 from organizations_ext.models import OrganizationUserRole
-from .models import UserProjectAlert
+from .models import UserProjectAlert, User
 
 
-class OrganizationsAPITestCase(APITestCase):
-    def test_organizations_retrieve(self):
+class UserRegistrationTestCase(APITestCase):
+    def test_create_user(self):
         url = reverse("rest_register")
         data = {
             "email": "test@example.com",
@@ -19,6 +20,25 @@ class OrganizationsAPITestCase(APITestCase):
         res = self.client.post(url, data)
         self.assertContains(res, "key", status_code=201)
 
+    @override_settings(ENABLE_OPEN_USER_REGISTRATION=False)
+    def test_closed_registration(self):
+        """ Only first user/organization may register """
+        url = reverse("rest_register")
+        data = {
+            "email": "test@example.com",
+            "password1": "hunter222",
+            "password2": "hunter222",
+        }
+        res = self.client.post(url, data)
+        self.assertEqual(res.status_code, 201)
+        # Can't make more users once Organization is made
+        baker.make("organizations_ext.Organization")
+        data["email"] = "another@example.com"
+        res = self.client.post(url, data)
+        self.assertEqual(res.status_code, 403)
+        # Can't make more organizations outside of Django Admin
+        user = User.objects.first()
+        self.client.force_login(user)
 
 class UsersTestCase(GlitchTipTestCase):
     def setUp(self):
@@ -50,20 +70,6 @@ class UsersTestCase(GlitchTipTestCase):
         url = reverse("organization-members-list", args=[other_organization.slug])
         res = self.client.get(url)
         self.assertNotContains(res, other_user.email)
-
-    # def test_organization_members_create(self):
-    #     url = reverse("organization-members-list", args=[self.organization.slug])
-    #     data = {
-    #         "email": "new@example.com",
-    #         "role": "member",
-    #         "teams": [],
-    #         "user": "new@example.com",
-    #     }
-    #     res = self.client.post(url, data)
-    #     self.assertEqual(res.status_code, 201)
-    #     # TODO pending functionality
-    #     # self.assertTrue(res.data["pending"])
-    #     User.objects.get(pk=res.data["id"])
 
     def test_emails_retrieve(self):
         email_address = baker.make("account.EmailAddress", user=self.user)

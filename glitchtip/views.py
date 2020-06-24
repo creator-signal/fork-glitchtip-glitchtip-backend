@@ -3,6 +3,7 @@ from django.http import HttpResponse
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
+from organizations_ext.models import Organization
 
 try:
     from djstripe.settings import STRIPE_PUBLIC_KEY
@@ -18,6 +19,9 @@ class SettingsView(APIView):
     def get(self, request, format=None):
         social_auth = settings.ENABLE_SOCIAL_AUTH
         billing_enabled = settings.BILLING_ENABLED
+        enable_user_registration = settings.ENABLE_OPEN_USER_REGISTRATION
+        if not enable_user_registration:
+            enable_user_registration = Organization.objects.exists()
         stripe_public_key = None
         if billing_enabled:
             stripe_public_key = STRIPE_PUBLIC_KEY
@@ -25,6 +29,7 @@ class SettingsView(APIView):
             {
                 "socialAuth": social_auth,
                 "billingEnabled": billing_enabled,
+                "enableUserRegistration": enable_user_registration,
                 "stripePublicKey": stripe_public_key,
                 "matomoURL": settings.MATOMO_URL,
                 "matomoSiteId": settings.MATOMO_SITE_ID,
