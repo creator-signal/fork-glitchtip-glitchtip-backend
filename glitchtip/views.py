@@ -3,7 +3,7 @@ from django.http import HttpResponse
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
-from organizations_ext.models import Organization
+from users.utils import is_user_registration_open
 
 try:
     from djstripe.settings import STRIPE_PUBLIC_KEY
@@ -19,9 +19,7 @@ class SettingsView(APIView):
     def get(self, request, format=None):
         social_auth = settings.ENABLE_SOCIAL_AUTH
         billing_enabled = settings.BILLING_ENABLED
-        enable_user_registration = settings.ENABLE_OPEN_USER_REGISTRATION
-        if not enable_user_registration:
-            enable_user_registration = Organization.objects.exists()
+        enable_user_registration = is_user_registration_open()
         stripe_public_key = None
         if billing_enabled:
             stripe_public_key = STRIPE_PUBLIC_KEY

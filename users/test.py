@@ -20,25 +20,39 @@ class UserRegistrationTestCase(APITestCase):
         res = self.client.post(url, data)
         self.assertContains(res, "key", status_code=201)
 
-    @override_settings(ENABLE_OPEN_USER_REGISTRATION=False)
     def test_closed_registration(self):
         """ Only first user/organization may register """
         url = reverse("rest_register")
+        org_url = reverse("organization-list")
         data = {
             "email": "test@example.com",
             "password1": "hunter222",
             "password2": "hunter222",
         }
+        org_data = {"name": "test"}
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 201)
         # Can't make more users once Organization is made
         baker.make("organizations_ext.Organization")
         data["email"] = "another@example.com"
-        res = self.client.post(url, data)
-        self.assertEqual(res.status_code, 403)
-        # Can't make more organizations outside of Django Admin
-        user = User.objects.first()
-        self.client.force_login(user)
+        with override_settings(ENABLE_OPEN_USER_REGISTRATION=False):
+            res = self.client.post(url, data)
+            self.assertEqual(res.status_code, 403)
+            # Can't make more organizations outside of Django Admin
+            user = User.objects.first()
+            self.client.force_login(user)
+            res = self.client.post(org_url, org_data)
+            self.assertEqual(res.status_code, 403)
+        # When True, users can register and create more orgs
+        with override_settings(ENABLE_OPEN_USER_REGISTRATION=True):
+            res = self.client.post(url, data)
+            self.assertEqual(res.status_code, 201)
+            # Can't make more organizations outside of Django Admin
+            user = User.objects.first()
+            self.client.force_login(user)
+            res = self.client.post(org_url, org_data)
+            self.assertEqual(res.status_code, 201)
+
 
 class UsersTestCase(GlitchTipTestCase):
     def setUp(self):
@@ -73,7 +87,7 @@ class UsersTestCase(GlitchTipTestCase):
 
     def test_emails_retrieve(self):
         email_address = baker.make("account.EmailAddress", user=self.user)
-        another_user= baker.make("users.user")
+        another_user = baker.make("users.user")
         another_email_address = baker.make("account.EmailAddress", user=another_user)
         url = reverse("user-emails-list", args=["me"])
         res = self.client.get(url)
@@ -129,9 +143,7 @@ class UsersTestCase(GlitchTipTestCase):
             ).exists()
         )
 
-        extra_email = baker.make(
-            "account.EmailAddress", verified=True, user=self.user
-        )
+        extra_email = baker.make("account.EmailAddress", verified=True, user=self.user)
         data = {"email": extra_email.email}
         res = self.client.put(url, data)
         self.assertEqual(self.user.emailaddress_set.filter(primary=True).count(), 1)
