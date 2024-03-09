@@ -13,8 +13,6 @@ from apps.projects.urls import router as projectsRouter
 from apps.teams.urls import router as teamsRouter
 from apps.users.urls import router as usersRouter
 from apps.users.views import SocialAccountDisconnectView
-from issues.urls import router as issuesRouter
-from issues.views import EventJsonView
 
 from . import social
 from .api import api
@@ -22,7 +20,6 @@ from .views import APIRootView, health
 
 router = routers.DefaultRouter()
 router.registry.extend(projectsRouter.registry)
-router.registry.extend(issuesRouter.registry)
 router.registry.extend(organizationsRouter.registry)
 router.registry.extend(teamsRouter.registry)
 router.registry.extend(usersRouter.registry)
@@ -63,7 +60,6 @@ if settings.BILLING_ENABLED:
 
 urlpatterns += [
     path("api/0/", include("apps.projects.urls")),
-    path("api/0/", include("issues.urls")),
     path("api/0/", include("apps.users.urls")),
     path("api/0/", include("apps.organizations_ext.urls")),
     path("api/0/", include("apps.teams.urls")),
@@ -72,15 +68,7 @@ urlpatterns += [
     path("api/0/", include("apps.stats.urls")),
     path("api/0/", include("apps.wizard.urls")),
     path("api/mfa/", include("django_rest_mfa.urls")),
-    path("api/", include("events.urls")),
-    path("api/embed/", include("apps.user_reports.urls")),
     path("", include("apps.uptime.urls")),
-    # What an oddball API endpoint
-    path(
-        "organizations/<slug:org>/issues/<int:issue>/events/<str:event>/json/",
-        EventJsonView.as_view(),
-        name="event_json",
-    ),
     path("api/test/", include("test_api.urls")),
     path("rest-auth/login/", MFALoginView.as_view()),
     path("rest-auth/", include("dj_rest_auth.urls")),
@@ -116,7 +104,7 @@ urlpatterns += [
         name="password_reset_confirm",
     ),
     path("accept/", include(invitation_backend().get_urls())),
-    path("api/0/observability/", include("observability.urls")),
+    path("api/0/observability/", include("apps.observability.urls")),
 ]
 
 if settings.BILLING_ENABLED:

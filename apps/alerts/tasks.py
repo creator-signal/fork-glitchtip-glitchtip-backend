@@ -4,7 +4,7 @@ from celery import shared_task
 from django.db.models import Count
 from django.utils import timezone
 
-from issues.models import Issue
+from apps.issue_events.models import Issue
 
 from .models import Notification, ProjectAlert
 
@@ -27,10 +27,10 @@ def process_event_alerts():
         issues = (
             Issue.objects.filter(
                 project_id=alert.project_id,
-                event__created__gte=start_time,
+                issueevent__received__gte=start_time,
             )
             .exclude(notification__project_alert=alert)
-            .annotate(num_events=Count("event"))
+            .annotate(num_events=Count("issueevent"))
             .filter(num_events__gte=quantity_in_timespan)
         )
         if issues:

@@ -4,7 +4,6 @@ from rest_framework_nested import routers
 from apps.alerts.views import ProjectAlertViewSet
 from apps.environments.views import EnvironmentProjectViewSet
 from apps.releases.views import ReleaseFileViewSet, ReleaseViewSet
-from issues.views import EventViewSet, IssueViewSet
 
 from .views import ProjectKeyViewSet, ProjectTeamViewSet, ProjectViewSet
 
@@ -13,8 +12,6 @@ router.register(r"projects", ProjectViewSet)
 
 projects_router = routers.NestedSimpleRouter(router, r"projects", lookup="project")
 projects_router.register(r"keys", ProjectKeyViewSet, basename="project-keys")
-projects_router.register(r"issues", IssueViewSet, basename="project-issues")
-projects_router.register(r"events", EventViewSet, basename="project-events")
 projects_router.register(r"alerts", ProjectAlertViewSet, basename="project-alerts")
 projects_router.register(r"teams", ProjectTeamViewSet, basename="project-teams")
 projects_router.register(

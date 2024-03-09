@@ -3,10 +3,9 @@ import uuid
 from django.contrib.postgres.fields import HStoreField
 from django.db import models
 
+from apps.projects.tasks import update_event_project_hourly_statistic
 from glitchtip.base_models import CreatedModel
 from glitchtip.model_utils import FromStringIntegerChoices
-from apps.projects.tasks import update_event_project_hourly_statistic
-from apps.user_reports.models import UserReport
 
 
 class AbstractEvent(CreatedModel):
@@ -126,10 +125,6 @@ class Event(AbstractEvent):
     @property
     def user(self):
         return self.data.get("user")
-
-    @property
-    def user_report(self):
-        return UserReport.objects.filter(event_id=self.pk).first()
 
     def _build_context(self, context: list, base_line_no: int, is_pre: bool):
         context_length = len(context)

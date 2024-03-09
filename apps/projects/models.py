@@ -11,7 +11,7 @@ from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
 from glitchtip.base_models import CreatedModel, SoftDeleteModel
-from observability.metrics import clear_metrics_cache
+from apps.observability.metrics import clear_metrics_cache
 
 
 class Project(CreatedModel, SoftDeleteModel):

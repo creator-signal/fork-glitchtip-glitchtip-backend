@@ -83,7 +83,6 @@ if GLITCHTIP_URL.scheme not in ["http", "https"]:
 # Is running unit test
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 
-GLITCHTIP_ENABLE_NEW_ISSUES = env.bool("GLITCHTIP_ENABLE_NEW_ISSUES", default=TESTING)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 4294967295  # TMP REMOVE THIS
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
@@ -228,7 +227,6 @@ INSTALLED_APPS += [
     "events",
     "issues",
     "apps.users",
-    "apps.user_reports",
     "apps.importer",
     "apps.uptime",
     "apps.performance",
@@ -238,13 +236,9 @@ INSTALLED_APPS += [
     "apps.difs",
     "apps.api_tokens",
     "apps.files",
+    "apps.issue_events",
+    "apps.event_ingest",
 ]
-
-if GLITCHTIP_ENABLE_NEW_ISSUES:
-    INSTALLED_APPS += [
-        "apps.issue_events",
-        "apps.event_ingest",
-    ]
 
 
 IS_CELERY = env.bool("IS_CELERY", False)

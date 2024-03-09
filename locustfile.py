@@ -99,9 +99,8 @@ class WebsiteUser(HttpUser):
         event_url = f"/api/{project_id}/store/?sentry_key={dsn}"
         event = generate_random_event(True)
         res = self.client.post(event_url, json=event)
-        if os.environ.get("GLITCHTIP_ENABLE_NEW_ISSUES"):
-            task_id = res.json().get("task_id")
-            self.celery_client.monitor_task("ingest_event", task_id)
+        task_id = res.json().get("task_id")
+        self.celery_client.monitor_task("ingest_event", task_id)
 
     # @task
     # def test_debug_task(self):

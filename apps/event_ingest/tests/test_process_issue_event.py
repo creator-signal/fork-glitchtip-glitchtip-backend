@@ -213,10 +213,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         except FileExistsError:
             pass
         shutil.copyfile(
-            "./events/tests/test_data/bundle.js", "./uploads/file_blobs/bundle.js"
+            "./apps/event_ingest/tests/test_data/bundle.js",
+            "./uploads/file_blobs/bundle.js",
         )
         shutil.copyfile(
-            "./events/tests/test_data/bundle.js.map",
+            "./apps/event_ingest/tests/test_data/bundle.js.map",
             "./uploads/file_blobs/bundle.js.map",
         )
         data = sample_event | {"release": release.version}
