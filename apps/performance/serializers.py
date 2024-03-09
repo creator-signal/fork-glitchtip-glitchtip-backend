@@ -9,6 +9,8 @@ from ipware import get_client_ip
 from rest_framework import serializers
 from rest_framework.exceptions import ErrorDetail, ValidationError
 
+from apps.environments.models import Environment
+from apps.releases.models import Release
 from glitchtip.serializers import FlexibleDateTimeField
 
 from .models import Span, TransactionEvent, TransactionGroup
