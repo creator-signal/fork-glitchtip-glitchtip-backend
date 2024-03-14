@@ -8,16 +8,25 @@ from django.conf import settings
 from django.utils.timezone import now
 from django.contrib.postgres.search import SearchVector
 
+from apps.issue_events.constants import IssueEventType
+
 
 MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 10000)
 
+def event_type_to_int(type_string):
+    for event_type in IssueEventType:
+        if event_type.label == type_string:
+            return event_type
+    return 0
 
 def reformat_data(data):
-    if "exception" in data:
+    if "exception" in data and data["exception"]:
         if "values" in data["exception"]:
             data["exception"] = data["exception"]["values"]
+    if "breadcrumbs" in data and data["breadcrumbs"]:
+        if "values" in data["breadcrumbs"]:
+            data["breadcrumbs"] = data["breadcrumbs"]["values"]
     return data
-
 
 def daterange(start_date, end_date):
     for n in range(int((end_date - start_date).days)):
@@ -46,7 +55,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
 
     oldest_event = Event.objects.order_by("-created")[
         MIGRATION_LIMIT : MIGRATION_LIMIT + 1
-    ].values("created")
+    ].first()
     start_migration_date = oldest_event.created if oldest_event else None
 
     old_issues = OldIssue.objects.all().defer("search_vector", "tags")
@@ -74,7 +83,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
             [
                 IssueEvent(
                     id=event.event_id,
-                    type=event.data.get("type", 0),
+                    type=event_type_to_int(event.data.get("type", "default")),
                     timestamp=event.timestamp if event.timestamp else event.created,
                     received=event.created,
                     title=event.data.get("title"),
