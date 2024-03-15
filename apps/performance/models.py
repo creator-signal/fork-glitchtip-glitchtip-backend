@@ -1,10 +1,35 @@
+import uuid
+
 from django.contrib.postgres.fields import HStoreField
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 
 from apps.projects.tasks import update_transaction_event_project_hourly_statistic
-from events.models import AbstractEvent
 from glitchtip.base_models import CreatedModel
+
+
+class AbstractEvent(CreatedModel):
+    event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    data = models.JSONField(help_text="General event data that is searchable")
+    timestamp = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Date created as claimed by client it came from",
+    )
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return self.event_id_hex
+
+    @property
+    def event_id_hex(self):
+        """The public key without dashes"""
+        if self.event_id:
+            if isinstance(self.event_id, str):
+                return self.event_id
+            return self.event_id.hex
 
 
 class TransactionGroup(CreatedModel):

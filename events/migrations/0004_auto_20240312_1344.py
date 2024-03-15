@@ -30,6 +30,8 @@ def daterange(start_date, end_date):
 
 
 def migrate_issue_events(apps, schema_editor):
+    if settings.TESTING:
+        return
     today = now()
     days_ago = timedelta(days=settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS + 1)
     with connection.cursor() as cursor:
