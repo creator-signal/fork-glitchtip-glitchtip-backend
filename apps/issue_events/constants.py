@@ -3,7 +3,7 @@ from django.db import models
 from glitchtip.model_utils import FromStringIntegerChoices
 
 
-class IssueEventType(models.IntegerChoices):
+class IssueEventType(FromStringIntegerChoices):
     DEFAULT = 0, "default"
     ERROR = 1, "error"
     CSP = 2, "csp"

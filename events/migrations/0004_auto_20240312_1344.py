@@ -13,11 +13,6 @@ from apps.issue_events.constants import IssueEventType
 
 MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 10000)
 
-def event_type_to_int(type_string):
-    for event_type in IssueEventType:
-        if event_type.label == type_string:
-            return event_type
-    return 0
 
 def reformat_data(data):
     if "exception" in data and data["exception"]:
@@ -27,6 +22,7 @@ def reformat_data(data):
         if "values" in data["breadcrumbs"]:
             data["breadcrumbs"] = data["breadcrumbs"]["values"]
     return data
+
 
 def daterange(start_date, end_date):
     for n in range(int((end_date - start_date).days)):
@@ -83,7 +79,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
             [
                 IssueEvent(
                     id=event.event_id,
-                    type=event_type_to_int(event.data.get("type", "default")),
+                    type=IssueEventType.from_string(event.data.get("type", "default")),
                     timestamp=event.timestamp if event.timestamp else event.created,
                     received=event.created,
                     title=event.data.get("title"),
