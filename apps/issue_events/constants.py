@@ -1,4 +1,3 @@
-from django.db import models
 
 from glitchtip.model_utils import FromStringIntegerChoices
 
