@@ -104,8 +104,7 @@ class MessageEntry(Schema):
 
 class APIEventBreadcrumb(EventBreadcrumb):
     """Slightly modified Breadcrumb for sentry api compatibility"""
-
-    event_id: None = None
+    event_id: Optional[str] = None
 
 
 class BreadcrumbsEntry(Schema):
