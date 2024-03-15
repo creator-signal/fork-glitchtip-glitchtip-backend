@@ -13,7 +13,7 @@ class StatsV2APITestCase(GlitchTipTestCase):
         )
 
     def test_get(self):
-        baker.make("events.Event", issue__project=self.project)
+        baker.make("issue_events.IssueEvent", issue__project=self.project)
         start = timezone.now() - timezone.timedelta(hours=2)
         end = timezone.now()
         res = self.client.get(

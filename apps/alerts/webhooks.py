@@ -7,8 +7,6 @@ from django.conf import settings
 from .constants import RecipientType
 
 if TYPE_CHECKING:
-    from issues.models import Issue
-
     from .models import Notification
 
 

@@ -1,5 +1,4 @@
 import datetime
-import os
 import time
 
 from celery.result import AsyncResult

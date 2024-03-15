@@ -3,7 +3,7 @@ from unittest import mock
 from django.test import TestCase
 from model_bakery import baker
 
-from events.models import LogLevel
+from apps.issue_events.constants import LogLevel
 
 from ..constants import RecipientType
 from ..models import Notification

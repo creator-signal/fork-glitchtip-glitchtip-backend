@@ -8,9 +8,7 @@ from django.urls import reverse
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
-from events.models import Event
 from events.test_data.event_generator import get_seeded_benchmark_events
-from events.views import EventStoreAPIView
 
 
 class Command(BaseCommand):

@@ -104,7 +104,7 @@ class ObservabilityAPITestCase(APITestCase):
         self.assertEqual(projs_metric, 1)
 
         # delete project
-        proj.delete()
+        proj.force_delete()
 
         # test
         metrics = self._get_metrics()

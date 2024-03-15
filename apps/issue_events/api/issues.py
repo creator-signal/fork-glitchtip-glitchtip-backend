@@ -15,13 +15,12 @@ from pydantic.functional_validators import BeforeValidator
 from typing_extensions import Annotated
 
 from apps.organizations_ext.models import Organization
-from events.models import LogLevel
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 
-from ..constants import EventStatus
+from ..constants import EventStatus, LogLevel
 from ..models import Issue
 from ..schema import IssueDetailSchema, IssueSchema, IssueTagSchema
 from ..tasks import delete_issue_task

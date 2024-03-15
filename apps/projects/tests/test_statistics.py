@@ -11,7 +11,7 @@ class ProjectStatisticsTestCase(GlitchTipTestCase):
         self.project = baker.make("projects.Project")
 
     def test_event_update_count(self):
-        baker.make("events.Event", issue__project=self.project)
+        baker.make("issue_events.IssueEvent", issue__project=self.project)
         EventProjectHourlyStatistic.update(self.project.pk, timezone.now())
         self.assertTrue(
             EventProjectHourlyStatistic.objects.filter(
