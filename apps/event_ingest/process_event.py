@@ -510,7 +510,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         }
         for hash_obj in hash_queryset:
             if (
-                hash_obj["value"].hex == issue_hash
+                hash_obj["value"].hex == processing_event.issue_hash
                 and hash_obj["project_id"] == project_id
             ):
                 processing_event.issue_id = hash_obj["issue_id"]
@@ -527,7 +527,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                         **issue_defaults,
                     )
                     new_issue_hash = IssueHash.objects.create(
-                        issue=issue, value=issue_hash, project_id=project_id
+                        issue=issue,
+                        value=processing_event.issue_hash,
+                        project_id=project_id,
                     )
                     check_set_issue_id(
                         processing_events,
@@ -539,7 +541,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 processing_event.issue_created = True
             except IntegrityError:
                 processing_event.issue_id = IssueHash.objects.get(
-                    project_id=project_id, value=issue_hash
+                    project_id=project_id, value=processing_event.issue_hash
                 ).issue_id
         issue_events.append(
             IssueEvent(

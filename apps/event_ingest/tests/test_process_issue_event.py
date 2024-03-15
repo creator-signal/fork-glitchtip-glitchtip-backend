@@ -47,6 +47,26 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ).exists()
         )
 
+    def test_two_issues(self):
+        self.process_events(
+            [
+                {
+                    "message": "a",
+                },
+                {
+                    "message": "b",
+                },
+            ]
+        )
+        self.assertEqual(Issue.objects.count(), 2)
+        self.assertEqual(IssueHash.objects.count(), 2)
+        self.assertEqual(IssueEvent.objects.count(), 2)
+        self.assertTrue(
+            EventProjectHourlyStatistic.objects.filter(
+                count=2, project=self.project
+            ).exists()
+        )
+
     def test_query_release_environment_difs(self):
         """Test efficiency of existing release/environment/dif"""
         project2 = baker.make("projects.Project", organization=self.organization)
