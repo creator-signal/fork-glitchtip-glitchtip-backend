@@ -152,7 +152,7 @@ class DiscordWebhookPayload:
     embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(url, issues: list["Issue"], issue_count: int = 1):
+def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
     embeds: list[DiscordEmbed] = []
 
     for issue in issues:
@@ -240,7 +240,7 @@ class GoogleChatCard:
         ]
         return self
 
-    def construct_issue_card(self, title: str, issue: "Issue"):
+    def construct_issue_card(self, title: str, issue):
         self.header = dict(title=title, subtitle=issue.project.name)
         section_header = "<font color='{}'>{}</font>".format(
             issue.get_hex_color(), str(issue)
