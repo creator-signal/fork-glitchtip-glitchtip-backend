@@ -35,6 +35,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 issue__project__organization=organization,
                 _quantity=3,
             )
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project__organization=organization,
+                count=3,
+            )
             set_organization_throttle()
             organization.refresh_from_db()
             self.assertTrue(organization.is_accepting_events)
@@ -43,6 +48,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 "issue_events.IssueEvent",
                 issue__project__organization=organization,
                 _quantity=8,
+            )
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project__organization=organization,
+                count=8,
             )
             set_organization_throttle()
             organization.refresh_from_db()
@@ -67,6 +77,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 "issue_events.IssueEvent",
                 issue__project__organization=organization,
                 _quantity=10,
+            )
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project__organization=organization,
+                count=10,
             )
             baker.make(
                 "performance.TransactionEvent",
@@ -97,6 +112,7 @@ class OrganizationThrottlingTestCase(TestCase):
                 current_period_end=timezone.make_aware(timezone.datetime(2000, 2, 1)),
             )
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=3)
+            baker.make("projects.EventProjectHourlyStatistic", project=project, count=3)
             baker.make(
                 "performance.TransactionEvent",
                 group__project=project,
@@ -126,6 +142,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 "issue_events.IssueEvent",
                 issue__project__organization=organization,
                 _quantity=2,
+            )
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project__organization=organization,
+                count=2,
             )
         with self.assertNumQueries(4):
             set_organization_throttle()

@@ -42,6 +42,11 @@ class OrganizationWarnThrottlingTestCase(TestCase):
             )
             subscription.save()
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=9)
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project=project,
+                count=9,
+            )
             warn_organization_throttle()
             self.assertEqual(len(mail.outbox), 1)
             warn_organization_throttle()
@@ -59,5 +64,10 @@ class OrganizationWarnThrottlingTestCase(TestCase):
             self.assertEqual(len(mail.outbox), 1)
 
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=9)
+            baker.make(
+                "projects.EventProjectHourlyStatistic",
+                project=project,
+                count=9,
+            )
             warn_organization_throttle()
             self.assertEqual(len(mail.outbox), 2)
