@@ -37,7 +37,9 @@ def cleanup_old_files():
         file_blobs = (
             FileBlob.objects.filter(created__lt=days_ago)
             .exclude(file__created__gte=days_ago)
-            .exclude(file__releasefile__release__projects__issue__created__gte=days_ago)
+            .exclude(  # TODO Fix this
+                file__releasefile__release__projects__issues__timestamp__gte=days_ago
+            )
         ).only("id", "blob")[:1000]
         ids = []
         for file_blob in file_blobs:
