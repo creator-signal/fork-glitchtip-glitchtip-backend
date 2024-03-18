@@ -99,7 +99,7 @@ class SubscriptionAPITestCase(APITestCase):
                 issue__project__organization=self.organization,
             )
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project__organization=self.organization,
                 count=1,
             )

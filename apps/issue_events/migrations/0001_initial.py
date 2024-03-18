@@ -12,15 +12,16 @@ import uuid
 from django.conf import settings
 from django.db import migrations, models
 
+from glitchtip.model_utils import TestDefaultPartition
+
 from .functions.partition import create_partitions
-from .functions.default_partition import TestDefaultPartition
 
 
 class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("projects", "0013_merge_20231017_1350"),
+        ("projects", "0014_auto_20240318_1449"),
         (
             "releases",
             "0001_squashed_0004_alter_release_id_alter_releasefile_id_and_more",

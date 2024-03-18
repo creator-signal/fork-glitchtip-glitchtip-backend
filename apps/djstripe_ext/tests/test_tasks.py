@@ -43,7 +43,7 @@ class OrganizationWarnThrottlingTestCase(TestCase):
             subscription.save()
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=9)
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project=project,
                 count=9,
             )
@@ -65,7 +65,7 @@ class OrganizationWarnThrottlingTestCase(TestCase):
 
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=9)
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project=project,
                 count=9,
             )

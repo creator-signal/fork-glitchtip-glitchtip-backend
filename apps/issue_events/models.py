@@ -6,7 +6,7 @@ from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
 
-from glitchtip.base_models import CreatedModel, SoftDeleteModel
+from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 from psqlextra.models import PostgresPartitionedModel
 from psqlextra.types import PostgresPartitioningMethod
 from sentry.constants import MAX_CULPRIT_LENGTH
@@ -33,7 +33,7 @@ class TagValue(models.Model):
     value = models.CharField(max_length=255, unique=True)
 
 
-class IssueTag(PostgresPartitionedModel, models.Model):
+class IssueTag(AggregationModel):
     """
     This model is a aggregate of event tags for an issue.
     It is denormalized data that powers fast search results.
@@ -53,9 +53,8 @@ class IssueTag(PostgresPartitionedModel, models.Model):
             )
         ]
 
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["date"]
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
 
 class Issue(SoftDeleteModel):

@@ -598,10 +598,10 @@ def update_statistics(
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO projects_eventprojecthourlystatistic (date, project_id, count)\n"
+            "INSERT INTO projects_issueeventprojecthourlystatistic (date, project_id, count)\n"
             f"VALUES {args_str}\n"
             "ON CONFLICT (project_id, date)\n"
-            "DO UPDATE SET count = projects_eventprojecthourlystatistic.count + EXCLUDED.count;"
+            "DO UPDATE SET count = projects_issueeventprojecthourlystatistic.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
 

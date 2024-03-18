@@ -12,7 +12,7 @@ from django_extensions.db.fields import AutoSlugField
 
 from apps.issue_events.models import Issue, IssueEvent
 from apps.observability.metrics import clear_metrics_cache
-from glitchtip.base_models import CreatedModel, SoftDeleteModel
+from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 
 
 class Project(CreatedModel, SoftDeleteModel):
@@ -191,14 +191,17 @@ class ProjectKey(CreatedModel):
         )
 
 
-class ProjectStatisticBase(models.Model):
+class ProjectStatisticBase(AggregationModel):
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
-    date = models.DateTimeField()
-    count = models.PositiveIntegerField()
 
     class Meta:
         unique_together = (("project", "date"),)
         abstract = True
+
+
+class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
     @classmethod
     def update(cls, project_id: int, start_time: datetime):
@@ -239,8 +242,6 @@ class ProjectStatisticBase(models.Model):
                 update_fields=["count"],
             )
 
-
-class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
     @classmethod
     def aggregate_queryset(
         cls,
@@ -271,35 +272,9 @@ class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
         )
 
 
-class EventProjectHourlyStatistic(ProjectStatisticBase):
-    @classmethod
-    def aggregate_queryset(
-        cls,
-        project_queryset,
-        previous_hour: datetime,
-        current_hour: datetime,
-        next_hour: datetime,
-    ):
-        # Redundant filter optimization - otherwise all rows are scanned
-        return project_queryset.filter(
-            issues__issueevent__received__gte=previous_hour,
-            issues__issueevent__received__lt=next_hour,
-        ).aggregate(
-            previous_hour_count=Count(
-                "issues__issueevent",
-                filter=Q(
-                    issues__issueevent__received__gte=previous_hour,
-                    issues__issueevent__received__lt=current_hour,
-                ),
-            ),
-            current_hour_count=Count(
-                "issues__issueevent",
-                filter=Q(
-                    issues__issueevent__received__gte=current_hour,
-                    issues__issueevent__received__lt=next_hour,
-                ),
-            ),
-        )
+class IssueEventProjectHourlyStatistic(ProjectStatisticBase):
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
 
 class ProjectAlertStatus(models.IntegerChoices):

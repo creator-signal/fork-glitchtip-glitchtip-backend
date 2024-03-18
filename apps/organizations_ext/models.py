@@ -168,7 +168,7 @@ class OrganizationManager(OrgManager):
         queryset = self.annotate(
             issue_event_count=Coalesce(
                 SubquerySum(
-                    "projects__eventprojecthourlystatistic__count",
+                    "projects__issueeventprojecthourlystatistic__count",
                     filter=event_subscription_filter,
                 ),
                 0,

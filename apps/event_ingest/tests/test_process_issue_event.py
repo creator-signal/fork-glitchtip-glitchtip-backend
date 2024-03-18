@@ -7,7 +7,7 @@ from model_bakery import baker
 
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
-from apps.projects.models import EventProjectHourlyStatistic
+from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
 
 from ..process_event import process_issue_events
@@ -42,7 +42,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertEqual(IssueHash.objects.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 2)
         self.assertTrue(
-            EventProjectHourlyStatistic.objects.filter(
+            IssueEventProjectHourlyStatistic.objects.filter(
                 count=2, project=self.project
             ).exists()
         )
@@ -62,7 +62,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertEqual(IssueHash.objects.count(), 2)
         self.assertEqual(IssueEvent.objects.count(), 2)
         self.assertTrue(
-            EventProjectHourlyStatistic.objects.filter(
+            IssueEventProjectHourlyStatistic.objects.filter(
                 count=2, project=self.project
             ).exists()
         )

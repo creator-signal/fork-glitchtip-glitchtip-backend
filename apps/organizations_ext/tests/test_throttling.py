@@ -36,7 +36,7 @@ class OrganizationThrottlingTestCase(TestCase):
                 _quantity=3,
             )
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project__organization=organization,
                 count=3,
             )
@@ -50,7 +50,7 @@ class OrganizationThrottlingTestCase(TestCase):
                 _quantity=8,
             )
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project__organization=organization,
                 count=8,
             )
@@ -79,7 +79,7 @@ class OrganizationThrottlingTestCase(TestCase):
                 _quantity=10,
             )
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project__organization=organization,
                 count=10,
             )
@@ -112,7 +112,9 @@ class OrganizationThrottlingTestCase(TestCase):
                 current_period_end=timezone.make_aware(timezone.datetime(2000, 2, 1)),
             )
             baker.make("issue_events.IssueEvent", issue__project=project, _quantity=3)
-            baker.make("projects.EventProjectHourlyStatistic", project=project, count=3)
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic", project=project, count=3
+            )
             baker.make(
                 "performance.TransactionEvent",
                 group__project=project,
@@ -144,7 +146,7 @@ class OrganizationThrottlingTestCase(TestCase):
                 _quantity=2,
             )
             baker.make(
-                "projects.EventProjectHourlyStatistic",
+                "projects.IssueEventProjectHourlyStatistic",
                 project__organization=organization,
                 count=2,
             )
