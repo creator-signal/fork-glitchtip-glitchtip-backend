@@ -99,6 +99,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
 class Migration(migrations.Migration):
     dependencies = [
         ("events", "0001_squashed_0003_auto_20210219_1951"),
+        ("issues", "0013_alter_comment_options_alter_issue_unique_together_and_more"),
         ("issue_events", "0001_initial"),
     ]
 
