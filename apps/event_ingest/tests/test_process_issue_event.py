@@ -252,6 +252,14 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         self.assertTrue(IssueEvent.objects.filter(release=release).exists())
 
+    def test_search_vector(self):
+        word = "orange"
+        for _ in range(2):
+            self.process_events([{"message": word}])
+        issue = Issue.objects.filter(search_vector=word).first()
+        self.assertTrue(issue)
+        self.assertEqual(len(issue.search_vector.split(" ")), 1)
+
 
 class SentryCompatTestCase(EventIngestTestCase):
     """

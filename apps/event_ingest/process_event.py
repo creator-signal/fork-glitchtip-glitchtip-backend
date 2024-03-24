@@ -67,8 +67,12 @@ class ProcessingEvent:
 @dataclass
 class IssueUpdate:
     last_seen: datetime
+    search_vector: str
     added_count: int = 1
-    search_vector: str = ""
+
+
+def get_search_vector(event: ProcessingEvent) -> str:
+    return f"{event.title} {event.transaction}"
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
@@ -83,19 +87,22 @@ def update_issues(processing_events: list[ProcessingEvent]):
         issue_id = processing_event.issue_id
         if issue_id in issues_to_update:
             issues_to_update[issue_id].added_count += 1
-            issues_to_update[issue_id].search_vector += f" {processing_event.title}"
+            issues_to_update[
+                issue_id
+            ].search_vector += f" {get_search_vector(processing_event)}"
             if issues_to_update[issue_id].last_seen < processing_event.event.received:
                 issues_to_update[issue_id].last_seen = processing_event.event.received
         elif issue_id:
             issues_to_update[issue_id] = IssueUpdate(
-                last_seen=processing_event.event.received
+                last_seen=processing_event.event.received,
+                search_vector=get_search_vector(processing_event),
             )
 
     for issue_id, value in issues_to_update.items():
         Issue.objects.filter(id=issue_id).update(
             count=F("count") + value.added_count,
-            search_vector=SearchVector(
-                PipeConcat(F("search_vector"), SearchVector(Value(value.search_vector)))
+            search_vector=PipeConcat(
+                F("search_vector"), SearchVector(Value(value.search_vector))
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),
         )
