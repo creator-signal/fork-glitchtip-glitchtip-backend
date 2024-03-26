@@ -31,14 +31,28 @@ class OrganizationThrottlingTestCase(TestCase):
                 current_period_end=timezone.make_aware(timezone.datetime(2000, 1, 31)),
             )
             baker.make(
-                "events.Event", issue__project__organization=organization, _quantity=3
+                "issue_events.IssueEvent",
+                issue__project__organization=organization,
+                _quantity=3,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=organization,
+                count=3,
             )
             set_organization_throttle()
             organization.refresh_from_db()
             self.assertTrue(organization.is_accepting_events)
 
             baker.make(
-                "events.Event", issue__project__organization=organization, _quantity=8
+                "issue_events.IssueEvent",
+                issue__project__organization=organization,
+                _quantity=8,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=organization,
+                count=8,
             )
             set_organization_throttle()
             organization.refresh_from_db()
@@ -60,7 +74,14 @@ class OrganizationThrottlingTestCase(TestCase):
 
             # Throttle again
             baker.make(
-                "events.Event", issue__project__organization=organization, _quantity=10
+                "issue_events.IssueEvent",
+                issue__project__organization=organization,
+                _quantity=10,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=organization,
+                count=10,
             )
             baker.make(
                 "performance.TransactionEvent",
@@ -90,7 +111,10 @@ class OrganizationThrottlingTestCase(TestCase):
                 status="active",
                 current_period_end=timezone.make_aware(timezone.datetime(2000, 2, 1)),
             )
-            baker.make("events.Event", issue__project=project, _quantity=3)
+            baker.make("issue_events.IssueEvent", issue__project=project, _quantity=3)
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic", project=project, count=3
+            )
             baker.make(
                 "performance.TransactionEvent",
                 group__project=project,
@@ -117,7 +141,14 @@ class OrganizationThrottlingTestCase(TestCase):
                 status="active",
             )
             baker.make(
-                "events.Event", issue__project__organization=organization, _quantity=2
+                "issue_events.IssueEvent",
+                issue__project__organization=organization,
+                _quantity=2,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=organization,
+                count=2,
             )
         with self.assertNumQueries(4):
             set_organization_throttle()
@@ -131,7 +162,7 @@ class OrganizationThrottlingTestCase(TestCase):
         user = baker.make("users.user")
         organization.add_user(user)
         project = baker.make("projects.Project", organization=organization)
-        baker.make("events.Event", issue__project=project, _quantity=2)
+        baker.make("issue_events.IssueEvent", issue__project=project, _quantity=2)
         set_organization_throttle()
         organization.refresh_from_db()
         self.assertFalse(organization.is_accepting_events)

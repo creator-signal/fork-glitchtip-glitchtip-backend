@@ -2,12 +2,10 @@
 
 from django.db import migrations
 
-from .sql.functions import UPDATE_ISSUE_INDEX
-
 
 class Migration(migrations.Migration):
     dependencies = [
         ("issues", "0010_auto_20221202_0110"),
     ]
 
-    operations = [migrations.RunSQL(UPDATE_ISSUE_INDEX)]
+    operations = []

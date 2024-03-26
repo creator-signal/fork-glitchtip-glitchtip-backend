@@ -88,10 +88,21 @@ class SubscriptionAPITestCase(APITestCase):
             + "events_count/"
         )
         with freeze_time(timezone.datetime(2020, 3, 1)):
-            baker.make("events.Event", issue__project__organization=self.organization)
+            baker.make(
+                "issue_events.IssueEvent",
+                issue__project__organization=self.organization,
+            )
         with freeze_time(timezone.datetime(2020, 1, 5)):
-            baker.make("events.Event")
-            baker.make("events.Event", issue__project__organization=self.organization)
+            baker.make("issue_events.IssueEvent")
+            baker.make(
+                "issue_events.IssueEvent",
+                issue__project__organization=self.organization,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=self.organization,
+                count=1,
+            )
             baker.make(
                 "performance.TransactionEvent",
                 group__project__organization=self.organization,

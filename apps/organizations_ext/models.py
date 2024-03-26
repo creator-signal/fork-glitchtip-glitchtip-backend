@@ -15,7 +15,7 @@ from organizations.managers import OrgManager
 from organizations.signals import owner_changed, user_added
 from sql_util.utils import SubqueryCount, SubquerySum
 
-from observability.metrics import clear_metrics_cache
+from apps.observability.metrics import clear_metrics_cache
 
 from .fields import OrganizationSlugField
 
@@ -168,7 +168,7 @@ class OrganizationManager(OrgManager):
         queryset = self.annotate(
             issue_event_count=Coalesce(
                 SubquerySum(
-                    "projects__eventprojecthourlystatistic__count",
+                    "projects__issueeventprojecthourlystatistic__count",
                     filter=event_subscription_filter,
                 ),
                 0,

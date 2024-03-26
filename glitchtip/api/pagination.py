@@ -131,7 +131,7 @@ class AsyncLinkHeaderPagination(CursorPagination):
                 next_position,
                 previous_position,
             )
-            if has_next
+            if has_previous
             else None
         )
 

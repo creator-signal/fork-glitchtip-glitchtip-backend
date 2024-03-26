@@ -11,10 +11,9 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.event_ingest.model_functions import PipeConcat
-from events.models import LogLevel
 from glitchtip.test_utils.test_case import APIPermissionTestCase, GlitchTipTestCaseMixin
 
-from ..constants import EventStatus
+from ..constants import EventStatus, LogLevel
 from ..models import Issue
 
 logger = logging.getLogger(__name__)

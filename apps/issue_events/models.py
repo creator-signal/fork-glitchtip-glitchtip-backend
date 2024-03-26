@@ -1,11 +1,12 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
 
-from glitchtip.base_models import CreatedModel, SoftDeleteModel
+from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 from psqlextra.models import PostgresPartitionedModel
 from psqlextra.types import PostgresPartitioningMethod
 from sentry.constants import MAX_CULPRIT_LENGTH
@@ -32,7 +33,7 @@ class TagValue(models.Model):
     value = models.CharField(max_length=255, unique=True)
 
 
-class IssueTag(PostgresPartitionedModel, models.Model):
+class IssueTag(AggregationModel):
     """
     This model is a aggregate of event tags for an issue.
     It is denormalized data that powers fast search results.
@@ -52,9 +53,8 @@ class IssueTag(PostgresPartitionedModel, models.Model):
             )
         ]
 
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["date"]
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
 
 class Issue(SoftDeleteModel):
@@ -93,6 +93,17 @@ class Issue(SoftDeleteModel):
         indexes = [
             GinIndex(fields=["search_vector"]),
         ]
+
+    def get_detail_url(self):
+        return f"{settings.GLITCHTIP_URL.geturl()}/{self.project.organization.slug}/issues/{self.pk}"
+
+    def get_hex_color(self):
+        if self.level == LogLevel.INFO:
+            return "#4b60b4"
+        elif self.level is LogLevel.WARNING:
+            return "#e9b949"
+        elif self.level in [LogLevel.ERROR, LogLevel.FATAL]:
+            return "#e52b50"
 
     @property
     def short_id_display(self):

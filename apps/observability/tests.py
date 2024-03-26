@@ -1,12 +1,35 @@
+from collections.abc import Iterable, Mapping
+from typing import Optional
+
 from django.urls import reverse
 from model_bakery import baker
 from prometheus_client import Metric
+from prometheus_client.parser import text_string_to_metric_families
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from events.tests.tests import get_sample_value, parse_prometheus_text
-
 from .metrics import clear_metrics_cache, organizations_metric, projects_metric
+
+
+def get_sample_value(
+    metric_families: Iterable[Metric],
+    metric_name: str,
+    metric_type: str,
+    labels: Mapping[str, str],
+) -> Optional[float]:
+    for metric_family in metric_families:
+        if metric_family.name != metric_name or metric_family.type != metric_type:
+            continue
+        for metric in metric_family.samples:
+            if metric[1] != labels:
+                continue
+            return metric.value
+    return None
+
+
+def parse_prometheus_text(text: str) -> list[Metric]:
+    parser = text_string_to_metric_families(text)
+    return list(parser)
 
 
 class ObservabilityAPITestCase(APITestCase):
@@ -81,7 +104,7 @@ class ObservabilityAPITestCase(APITestCase):
         self.assertEqual(projs_metric, 1)
 
         # delete project
-        proj.delete()
+        proj.force_delete()
 
         # test
         metrics = self._get_metrics()

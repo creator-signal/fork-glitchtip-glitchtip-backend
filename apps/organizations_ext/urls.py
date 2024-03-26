@@ -16,7 +16,6 @@ from apps.uptime.views import (
     StatusPageViewSet,
 )
 from glitchtip.routers import BulkSimpleRouter
-from issues.views import IssueViewSet
 
 from .views import (
     AcceptInviteView,
@@ -31,7 +30,6 @@ router.register(r"organizations", OrganizationViewSet)
 organizations_router = routers.NestedSimpleRouter(
     router, r"organizations", lookup="organization"
 )
-organizations_router.register(r"issues", IssueViewSet, basename="organization-issues")
 organizations_router.register(
     r"teams", NestedTeamViewSet, basename="organization-teams"
 )

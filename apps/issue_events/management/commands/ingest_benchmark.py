@@ -8,9 +8,7 @@ from django.urls import reverse
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
-from events.models import Event
 from events.test_data.event_generator import get_seeded_benchmark_events
-from events.views import EventStoreAPIView
 
 
 class Command(BaseCommand):
@@ -41,12 +39,12 @@ class Command(BaseCommand):
             factory.post(url, data=json.dumps(event), content_type="application/json")
             for event in get_seeded_benchmark_events(quantity=quantity)
         ]
-        view = EventStoreAPIView.as_view()
+        view = EventStoreAPIView.as_view()  # noqa: F821
 
         start = timer()
         for request in requests:
             view(request, id=project_id)
         end = timer()
         print(end - start)
-        assert Event.objects.filter(issue__project=project).count() == quantity
+        assert Event.objects.filter(issue__project=project).count() == quantity  # noqa: F821
         project.issue_set.all().delete()

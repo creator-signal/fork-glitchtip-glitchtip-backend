@@ -67,8 +67,12 @@ class ProcessingEvent:
 @dataclass
 class IssueUpdate:
     last_seen: datetime
+    search_vector: str
     added_count: int = 1
-    search_vector: str = ""
+
+
+def get_search_vector(event: ProcessingEvent) -> str:
+    return f"{event.title} {event.transaction}"
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
@@ -83,19 +87,22 @@ def update_issues(processing_events: list[ProcessingEvent]):
         issue_id = processing_event.issue_id
         if issue_id in issues_to_update:
             issues_to_update[issue_id].added_count += 1
-            issues_to_update[issue_id].search_vector += f" {processing_event.title}"
+            issues_to_update[
+                issue_id
+            ].search_vector += f" {get_search_vector(processing_event)}"
             if issues_to_update[issue_id].last_seen < processing_event.event.received:
                 issues_to_update[issue_id].last_seen = processing_event.event.received
         elif issue_id:
             issues_to_update[issue_id] = IssueUpdate(
-                last_seen=processing_event.event.received
+                last_seen=processing_event.event.received,
+                search_vector=get_search_vector(processing_event),
             )
 
     for issue_id, value in issues_to_update.items():
         Issue.objects.filter(id=issue_id).update(
             count=F("count") + value.added_count,
-            search_vector=SearchVector(
-                PipeConcat(F("search_vector"), SearchVector(Value(value.search_vector)))
+            search_vector=PipeConcat(
+                F("search_vector"), SearchVector(Value(value.search_vector))
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),
         )
@@ -510,7 +517,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         }
         for hash_obj in hash_queryset:
             if (
-                hash_obj["value"].hex == issue_hash
+                hash_obj["value"].hex == processing_event.issue_hash
                 and hash_obj["project_id"] == project_id
             ):
                 processing_event.issue_id = hash_obj["issue_id"]
@@ -527,7 +534,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                         **issue_defaults,
                     )
                     new_issue_hash = IssueHash.objects.create(
-                        issue=issue, value=issue_hash, project_id=project_id
+                        issue=issue,
+                        value=processing_event.issue_hash,
+                        project_id=project_id,
                     )
                     check_set_issue_id(
                         processing_events,
@@ -539,7 +548,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 processing_event.issue_created = True
             except IntegrityError:
                 processing_event.issue_id = IssueHash.objects.get(
-                    project_id=project_id, value=issue_hash
+                    project_id=project_id, value=processing_event.issue_hash
                 ).issue_id
         issue_events.append(
             IssueEvent(
@@ -596,10 +605,10 @@ def update_statistics(
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO projects_eventprojecthourlystatistic (date, project_id, count)\n"
+            "INSERT INTO projects_issueeventprojecthourlystatistic (date, project_id, count)\n"
             f"VALUES {args_str}\n"
             "ON CONFLICT (project_id, date)\n"
-            "DO UPDATE SET count = projects_eventprojecthourlystatistic.count + EXCLUDED.count;"
+            "DO UPDATE SET count = projects_issueeventprojecthourlystatistic.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
 

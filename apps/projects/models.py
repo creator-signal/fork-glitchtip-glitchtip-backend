@@ -10,8 +10,9 @@ from django.db.models import Count, Q
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
-from glitchtip.base_models import CreatedModel, SoftDeleteModel
-from observability.metrics import clear_metrics_cache
+from apps.issue_events.models import Issue, IssueEvent
+from apps.observability.metrics import clear_metrics_cache
+from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 
 
 class Project(CreatedModel, SoftDeleteModel):
@@ -64,16 +65,12 @@ class Project(CreatedModel, SoftDeleteModel):
 
     def force_delete(self, *args, **kwargs):
         """Really delete the project and all related data."""
-        # avoid circular import
-        from events.models import Event
-        from issues.models import Issue
-
         # bulk delete all events
-        events_qs = Event.objects.filter(issue__project=self)
+        events_qs = IssueEvent.objects.filter(issue__project=self)
         events_qs._raw_delete(events_qs.db)
 
         # bulk delete all issues in batches of 1k
-        issues_qs = self.issue_set.order_by("id")
+        issues_qs = self.issues.order_by("id")
         while True:
             try:
                 issue_delimiter = issues_qs.values_list("id", flat=True)[
@@ -194,14 +191,17 @@ class ProjectKey(CreatedModel):
         )
 
 
-class ProjectStatisticBase(models.Model):
+class ProjectStatisticBase(AggregationModel):
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
-    date = models.DateTimeField()
-    count = models.PositiveIntegerField()
 
     class Meta:
         unique_together = (("project", "date"),)
         abstract = True
+
+
+class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
     @classmethod
     def update(cls, project_id: int, start_time: datetime):
@@ -242,8 +242,6 @@ class ProjectStatisticBase(models.Model):
                 update_fields=["count"],
             )
 
-
-class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
     @classmethod
     def aggregate_queryset(
         cls,
@@ -274,35 +272,9 @@ class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
         )
 
 
-class EventProjectHourlyStatistic(ProjectStatisticBase):
-    @classmethod
-    def aggregate_queryset(
-        cls,
-        project_queryset,
-        previous_hour: datetime,
-        current_hour: datetime,
-        next_hour: datetime,
-    ):
-        # Redundant filter optimization - otherwise all rows are scanned
-        return project_queryset.filter(
-            issue__event__created__gte=previous_hour,
-            issue__event__created__lt=next_hour,
-        ).aggregate(
-            previous_hour_count=Count(
-                "issue__event",
-                filter=Q(
-                    issue__event__created__gte=previous_hour,
-                    issue__event__created__lt=current_hour,
-                ),
-            ),
-            current_hour_count=Count(
-                "issue__event",
-                filter=Q(
-                    issue__event__created__gte=current_hour,
-                    issue__event__created__lt=next_hour,
-                ),
-            ),
-        )
+class IssueEventProjectHourlyStatistic(ProjectStatisticBase):
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
 
 
 class ProjectAlertStatus(models.IntegerChoices):

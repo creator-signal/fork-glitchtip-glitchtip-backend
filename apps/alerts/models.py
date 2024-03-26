@@ -49,7 +49,7 @@ class AlertRecipient(models.Model):
 class Notification(CreatedModel):
     project_alert = models.ForeignKey(ProjectAlert, on_delete=models.CASCADE)
     is_sent = models.BooleanField(default=False)
-    issues = models.ManyToManyField("issues.Issue")
+    issues = models.ManyToManyField("issue_events.Issue")
 
     def send_notifications(self):
         for recipient in self.project_alert.alertrecipient_set.all():

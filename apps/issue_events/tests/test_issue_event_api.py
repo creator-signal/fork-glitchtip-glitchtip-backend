@@ -56,6 +56,8 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
             res = self.client.get(url)
 
         self.assertEqual(res.headers.get("X-Hits"), "52")
+        self.assertIn('rel="previous"; results="false"', res.headers.get("Link"))
+
         self.assertEqual(res.json()[0]["id"], last_event.pk.hex)
         self.assertNotContains(res, first_event.pk.hex)
 
@@ -65,6 +67,9 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.get(links[1])
 
         self.assertEqual(res.headers.get("X-Hits"), "52")
+        self.assertIn('rel="previous"; results="true"', res.headers.get("Link"))
+        self.assertIn('rel="next"; results="false"', res.headers.get("Link"))
+
         self.assertEqual(res.json()[-1]["id"], first_event.pk.hex)
         self.assertNotContains(res, last_event.pk.hex)
 

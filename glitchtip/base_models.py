@@ -1,5 +1,8 @@
 from django.db import models
 
+from psqlextra.models import PostgresPartitionedModel
+from psqlextra.types import PostgresPartitioningMethod
+
 
 class CreatedModel(models.Model):
     created = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -38,3 +41,20 @@ class SoftDeleteModel(models.Model):
     def force_delete(self, *args, **kwargs):
         """Delete the record from the database"""
         super().delete(*args, **kwargs)
+
+
+class AggregationModel(PostgresPartitionedModel, models.Model):
+    """
+    Partitioned base model for storing aggregate statistics in such as per
+    time delta counts of events
+    """
+
+    date = models.DateTimeField()
+    count = models.PositiveIntegerField()
+
+    class Meta:
+        abstract = True
+
+    class PartitioningMeta:
+        method = PostgresPartitioningMethod.RANGE
+        key = ["date"]

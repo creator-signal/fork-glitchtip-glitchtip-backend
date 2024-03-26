@@ -3,7 +3,7 @@ from unittest import mock
 from django.test import TestCase
 from model_bakery import baker
 
-from events.models import LogLevel
+from apps.issue_events.constants import LogLevel
 
 from ..constants import RecipientType
 from ..models import Notification
@@ -31,9 +31,9 @@ class WebhookTestCase(TestCase):
 
     @mock.patch("requests.post")
     def test_send_issue_as_webhook(self, mock_post):
-        issue = baker.make("issues.Issue", level=LogLevel.WARNING, short_id=1)
-        issue2 = baker.make("issues.Issue", level=LogLevel.ERROR, short_id=2)
-        issue3 = baker.make("issues.Issue", level=LogLevel.NOTSET)
+        issue = baker.make("issue_events.Issue", level=LogLevel.WARNING, short_id=1)
+        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        issue3 = baker.make("issue_events.Issue", level=LogLevel.NOTSET)
         send_issue_as_webhook(TEST_URL, [issue, issue2, issue3], 3)
         mock_post.assert_called_once()
 
@@ -52,13 +52,13 @@ class WebhookTestCase(TestCase):
             recipient_type=RecipientType.GENERAL_WEBHOOK,
             url="example.com",
         )
-        issue = baker.make("issues.Issue", project=project)
+        issue = baker.make("issue_events.Issue", project=project)
 
-        baker.make("events.Event", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue)
         process_event_alerts()
         self.assertEqual(Notification.objects.count(), 0)
 
-        baker.make("events.Event", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue)
         process_event_alerts()
         self.assertEqual(
             Notification.objects.filter(
@@ -70,9 +70,9 @@ class WebhookTestCase(TestCase):
 
     @mock.patch("requests.post")
     def test_send_issue_as_discord_webhook(self, mock_post):
-        issue = baker.make("issues.Issue", level=LogLevel.WARNING, short_id=5)
-        issue2 = baker.make("issues.Issue", level=LogLevel.ERROR, short_id=6)
-        issue3 = baker.make("issues.Issue", level=LogLevel.NOTSET)
+        issue = baker.make("issue_events.Issue", level=LogLevel.WARNING, short_id=5)
+        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=6)
+        issue3 = baker.make("issue_events.Issue", level=LogLevel.NOTSET)
 
         send_issue_as_discord_webhook(DISCORD_TEST_URL, [issue, issue2, issue3], 3)
 
@@ -80,6 +80,6 @@ class WebhookTestCase(TestCase):
 
     @mock.patch("requests.post")
     def test_send_issue_as_googlechat_webhook(self, mock_post):
-        issue = baker.make("issues.Issue", level=LogLevel.ERROR, short_id=7)
+        issue = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=7)
         send_issue_as_googlechat_webhook(GOOGLE_CHAT_TEST_URL, [issue])
         mock_post.assert_called_once()

@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 import requests
 from django.conf import settings
@@ -7,8 +7,6 @@ from django.conf import settings
 from .constants import RecipientType
 
 if TYPE_CHECKING:
-    from issues.models import Issue
-
     from .models import Notification
 
 
@@ -26,8 +24,8 @@ class WebhookAttachment:
     text: str
     image_url: Optional[str] = None
     color: Optional[str] = None
-    fields: Optional[List[WebhookAttachmentField]] = None
-    mrkdown_in: Optional[List[str]] = None
+    fields: Optional[list[WebhookAttachmentField]] = None
+    mrkdown_in: Optional[list[str]] = None
 
 
 @dataclass
@@ -45,15 +43,15 @@ class MSTeamsSection:
 class WebhookPayload:
     alias: str
     text: str
-    attachments: List[WebhookAttachment]
-    sections: List[MSTeamsSection]
+    attachments: list[WebhookAttachment]
+    sections: list[MSTeamsSection]
 
 
 def send_webhook(
     url: str,
     message: str,
-    attachments: Optional[List[WebhookAttachment]] = None,
-    sections: Optional[List[MSTeamsSection]] = None,
+    attachments: Optional[list[WebhookAttachment]] = None,
+    sections: Optional[list[MSTeamsSection]] = None,
 ):
     if not attachments:
         attachments = []
@@ -62,18 +60,20 @@ def send_webhook(
     data = WebhookPayload(
         alias="GlitchTip", text=message, attachments=attachments, sections=sections
     )
-    return requests.post(url, json=asdict(data), headers={'Content-type': 'application/json'}, timeout=10)
+    return requests.post(
+        url, json=asdict(data), headers={"Content-type": "application/json"}, timeout=10
+    )
 
 
-def send_issue_as_webhook(url, issues: List["Issue"], issue_count: int = 1):
+def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
     """
     Notification about issues via webhook.
     url: Webhook URL
     issues: This should be only the issues to send as attachment
     issue_count - total issues, may be greater than len(issues)
     """
-    attachments: List[WebhookAttachment] = []
-    sections: List[MSTeamsSection] = []
+    attachments: list[WebhookAttachment] = []
+    sections: list[MSTeamsSection] = []
     for issue in issues:
         fields = [
             WebhookAttachmentField(
@@ -82,21 +82,29 @@ def send_issue_as_webhook(url, issues: List["Issue"], issue_count: int = 1):
                 short=True,
             )
         ]
-        environment = issue.tags.get("environment")
+        environment = (
+            issue.issuetag_set.filter(tag_key__key="environment")
+            .values("tag_value__value")
+            .first()
+        )
         if environment:
             fields.append(
                 WebhookAttachmentField(
                     title="Environment",
-                    value=environment[0],
+                    value=environment.value,
                     short=True,
                 )
             )
-        release = issue.tags.get("release")
+        release = (
+            issue.issuetag_set.filter(tag_key__key="release")
+            .values("tag_value__value")
+            .first()
+        )
         if release:
             fields.append(
                 WebhookAttachmentField(
                     title="Release",
-                    value=release[0],
+                    value=release.value,
                     short=False,
                 )
             )
@@ -135,17 +143,17 @@ class DiscordEmbed:
     description: str
     color: int
     url: str
-    fields: List[DiscordField]
+    fields: list[DiscordField]
 
 
 @dataclass
 class DiscordWebhookPayload:
     content: str
-    embeds: List[DiscordEmbed]
+    embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(url, issues: List["Issue"], issue_count: int = 1):
-    embeds: List[DiscordEmbed] = []
+def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
+    embeds: list[DiscordEmbed] = []
 
     for issue in issues:
         fields = [
@@ -155,21 +163,29 @@ def send_issue_as_discord_webhook(url, issues: List["Issue"], issue_count: int =
                 inline=True,
             )
         ]
-        environment = issue.tags.get("environment")
+        environment = (
+            issue.issuetag_set.filter(tag_key__key="environment")
+            .values("tag_value__value")
+            .first()
+        )
         if environment:
             fields.append(
                 DiscordField(
                     name="Environment",
-                    value=environment[0],
+                    value=environment.value,
                     inline=True,
                 )
             )
-        release = issue.tags.get("release")
+        release = (
+            issue.issuetag_set.filter(tag_key__key="release")
+            .values("tag_value__value")
+            .first()
+        )
         if release:
             fields.append(
                 DiscordField(
                     name="Release",
-                    value=release[0],
+                    value=release.value,
                     inline=False,
                 )
             )
@@ -193,15 +209,15 @@ def send_issue_as_discord_webhook(url, issues: List["Issue"], issue_count: int =
     return send_discord_webhook(url, message, embeds)
 
 
-def send_discord_webhook(url: str, message: str, embeds: List[DiscordEmbed]):
+def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed]):
     payload = DiscordWebhookPayload(content=message, embeds=embeds)
     return requests.post(url, json=asdict(payload), timeout=10)
 
 
 @dataclass
 class GoogleChatCard:
-    header: Dict = None
-    sections: List[Dict] = None
+    header: Optional[dict] = None
+    sections: Optional[list[dict]] = None
 
     def construct_uptime_card(self, title: str, subtitle: str, text: str, url: str):
         self.header = dict(
@@ -224,22 +240,30 @@ class GoogleChatCard:
         ]
         return self
 
-    def construct_issue_card(self, title: str, issue: "Issue"):
+    def construct_issue_card(self, title: str, issue):
         self.header = dict(title=title, subtitle=issue.project.name)
         section_header = "<font color='{}'>{}</font>".format(
             issue.get_hex_color(), str(issue)
         )
         widgets = []
         widgets.append(dict(decoratedText=dict(topLabel="Culprit", text=issue.culprit)))
-        environment = issue.tags.get("environment")
+        environment = (
+            issue.issuetag_set.filter(tag_key__key="environment")
+            .values("tag_value__value")
+            .first()
+        )
         if environment:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Environment", text=environment[0]))
+                dict(decoratedText=dict(topLabel="Environment", text=environment.value))
             )
-        release = issue.tags.get("release")
+        release = (
+            issue.issuetag_set.filter(tag_key__key="release")
+            .values("tag_value__value")
+            .first()
+        )
         if release:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Release", text=release[0]))
+                dict(decoratedText=dict(topLabel="Release", text=release.value))
             )
         widgets.append(
             dict(
@@ -259,13 +283,13 @@ class GoogleChatCard:
 
 @dataclass
 class GoogleChatWebhookPayload:
-    cardsV2: List[Dict[str, GoogleChatCard]] = field(default_factory=list)
+    cardsV2: list[dict[str, GoogleChatCard]] = field(default_factory=list)
 
     def add_card(self, card):
         return self.cardsV2.append(dict(cardId="createCardMessage", card=card))
 
 
-def send_googlechat_webhook(url: str, cards: List[GoogleChatCard]):
+def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
     """
     Send Google Chat compatible message as documented in
     https://developers.google.com/chat/messages-overview
@@ -275,7 +299,7 @@ def send_googlechat_webhook(url: str, cards: List[GoogleChatCard]):
     return requests.post(url, json=asdict(payload), timeout=10)
 
 
-def send_issue_as_googlechat_webhook(url, issues: List["Issue"]):
+def send_issue_as_googlechat_webhook(url, issues: list):
     cards = []
     for issue in issues:
         card = GoogleChatCard().construct_issue_card(

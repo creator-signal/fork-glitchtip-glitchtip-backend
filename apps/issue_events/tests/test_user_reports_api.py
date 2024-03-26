@@ -55,9 +55,9 @@ class UserReportAPIPermissionTests(APIPermissionTestCase):
     def setUp(self):
         self.create_org_team_project()
         self.set_client_credentials(self.auth_token.token)
-        self.issue = baker.make("issues.Issue", project=self.project)
+        self.issue = baker.make("issue_events.Issue", project=self.project)
         self.user_report = baker.make(
-            "user_reports.UserReport", project=self.project, issue=self.issue
+            "issue_events.UserReport", project=self.project, issue=self.issue
         )
         self.list_url = list_user_reports_url(self.issue.id)
 

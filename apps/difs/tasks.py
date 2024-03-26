@@ -11,7 +11,6 @@ from apps.difs.stacktrace_processor import StacktraceProcessor
 from apps.event_ingest.schema import ErrorIssueEventSchema, StackTraceFrame
 from apps.files.models import File, FileBlob
 from apps.projects.models import Project
-from events.models import Event
 
 
 def getLogger():
@@ -46,45 +45,6 @@ def difs_assemble(project_slug, name, checksum, chunks, debug_id):
         getLogger().error("difs_assemble: Checksum mismatched: %s", name)
     except Exception as err:
         getLogger().error("difs_assemble: %s", err)
-
-
-def difs_run_resolve_stacktrace(event_id):
-    difs_resolve_stacktrace.delay(event_id)
-
-
-@shared_task
-def difs_resolve_stacktrace(event_id):
-    event = Event.objects.get(event_id=event_id)
-    event_json = event.data
-    exception = event_json.get("exception")
-
-    if exception is None:
-        # It is not a crash report event
-        return
-
-    project_id = event.issue.project_id
-
-    difs = DebugInformationFile.objects.filter(project_id=project_id).order_by(
-        "-created"
-    )
-    resolved_stracktrackes = []
-
-    for dif in difs:
-        if StacktraceProcessor.is_supported(event_json, dif) is False:
-            continue
-        blobs = [dif.file.blob]
-        with difs_concat_file_blobs_to_disk(blobs) as symbol_file:
-            remapped_stacktrace = StacktraceProcessor.resolve_stacktrace(
-                event_json, symbol_file.name
-            )
-            if remapped_stacktrace is not None and remapped_stacktrace.score > 0:
-                resolved_stracktrackes.append(remapped_stacktrace)
-    if len(resolved_stracktrackes) > 0:
-        best_remapped_stacktrace = max(
-            resolved_stracktrackes, key=lambda item: item.score
-        )
-        StacktraceProcessor.update_frames(event, best_remapped_stacktrace.frames)
-        event.save()
 
 
 def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int):

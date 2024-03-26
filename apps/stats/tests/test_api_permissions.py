@@ -9,7 +9,7 @@ class StatsAPIPermissionTests(APIPermissionTestCase):
         self.create_user_org()
         self.set_client_credentials(self.auth_token.token)
         self.event = baker.make(
-            "events.Event", issue__project__organization=self.organization
+            "issue_events.IssueEvent", issue__project__organization=self.organization
         )
         self.url = reverse(
             "stats-v2", kwargs={"organization_slug": self.organization.slug}

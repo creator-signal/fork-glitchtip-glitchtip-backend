@@ -7,7 +7,7 @@ from model_bakery import baker
 
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
-from apps.projects.models import EventProjectHourlyStatistic
+from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
 
 from ..process_event import process_issue_events
@@ -42,7 +42,27 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertEqual(IssueHash.objects.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 2)
         self.assertTrue(
-            EventProjectHourlyStatistic.objects.filter(
+            IssueEventProjectHourlyStatistic.objects.filter(
+                count=2, project=self.project
+            ).exists()
+        )
+
+    def test_two_issues(self):
+        self.process_events(
+            [
+                {
+                    "message": "a",
+                },
+                {
+                    "message": "b",
+                },
+            ]
+        )
+        self.assertEqual(Issue.objects.count(), 2)
+        self.assertEqual(IssueHash.objects.count(), 2)
+        self.assertEqual(IssueEvent.objects.count(), 2)
+        self.assertTrue(
+            IssueEventProjectHourlyStatistic.objects.filter(
                 count=2, project=self.project
             ).exists()
         )
@@ -213,10 +233,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         except FileExistsError:
             pass
         shutil.copyfile(
-            "./events/tests/test_data/bundle.js", "./uploads/file_blobs/bundle.js"
+            "./apps/event_ingest/tests/test_data/bundle.js",
+            "./uploads/file_blobs/bundle.js",
         )
         shutil.copyfile(
-            "./events/tests/test_data/bundle.js.map",
+            "./apps/event_ingest/tests/test_data/bundle.js.map",
             "./uploads/file_blobs/bundle.js.map",
         )
         data = sample_event | {"release": release.version}
@@ -230,6 +251,14 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             13,
         )
         self.assertTrue(IssueEvent.objects.filter(release=release).exists())
+
+    def test_search_vector(self):
+        word = "orange"
+        for _ in range(2):
+            self.process_events([{"message": word}])
+        issue = Issue.objects.filter(search_vector=word).first()
+        self.assertTrue(issue)
+        self.assertEqual(len(issue.search_vector.split(" ")), 1)
 
 
 class SentryCompatTestCase(EventIngestTestCase):

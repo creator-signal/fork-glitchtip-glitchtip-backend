@@ -307,7 +307,7 @@ class ItemHeaderSchema(Schema):
 class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
     root: list[dict[str, Any]]
     _header: EnvelopeHeaderSchema
-    _items: list[tuple[ItemHeaderSchema, IngestIssueEvent]] = []
+    _items: list[tuple[ItemHeaderSchema, Union[IngestIssueEvent, dict[str, Any]]]] = []
 
     @model_validator(mode="after")
     def validate_envelope(self) -> "EnvelopeSchema":
@@ -329,6 +329,9 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
                 except ValidationError as err:
                     logger.warning("Envelope Event item invalid", exc_info=True)
                     raise err
+                self._items.append((item_header, item))
+            elif item_header.type == "transaction":
+                item = data.pop(0)
                 self._items.append((item_header, item))
 
         return self

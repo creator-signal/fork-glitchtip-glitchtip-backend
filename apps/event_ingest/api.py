@@ -1,12 +1,16 @@
 from typing import Optional
 
 from anonymizeip import anonymize_ip
+from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db.models.expressions import RawSQL
 from django.http import HttpResponse
 from ipware import get_client_ip
 from ninja import Router, Schema
 from ninja.errors import ValidationError
 
+from apps.performance.serializers import TransactionEventSerializer
+from apps.projects.models import Project
 from glitchtip.utils import async_call_celery_task
 
 from .authentication import EventAuthHttpRequest, event_auth
@@ -106,7 +110,7 @@ async def event_envelope(
 
     header = payload._header
     for item_header, item in payload._items:
-        if item_header.type == "event":
+        if item_header.type == "event" and isinstance(item, IngestIssueEvent):
             if item.user:
                 item.user.ip_address = client_ip
             else:
@@ -122,9 +126,27 @@ async def event_envelope(
             # The primary key of an event is uuid, received
             if cache_set_nx("uuid" + issue_event.event_id.hex, True) is True:
                 await async_call_celery_task(ingest_event, issue_event.dict())
-        elif item_header.type == "transaction":
-            pass
-            # ingest_transaction.delay(project_id, {})
+        elif item_header.type == "transaction" and isinstance(item, dict):
+            # Shim in legacy DRF handling, improve this later
+            project = (
+                await Project.objects.filter(id=project_id)
+                .annotate(
+                    release_id=RawSQL(
+                        "select releases_release.id from releases_release inner join releases_releaseproject on releases_releaseproject.release_id = releases_release.id and releases_releaseproject.project_id=%s where version=%s limit 1",
+                        [project_id, item.get("release")],
+                    ),
+                    environment_id=RawSQL(
+                        "select environments_environment.id from environments_environment inner join environments_environmentproject on environments_environmentproject.environment_id = environments_environment.id and environments_environmentproject.project_id=%s where environments_environment.name=%s limit 1",
+                        [project_id, item.get("environment")],
+                    ),
+                )
+                .aget()
+            )
+            serializer = TransactionEventSerializer(
+                data=item, context={"request": request, "project": project}
+            )
+            serializer.is_valid(raise_exception=True)
+            await sync_to_async(serializer.save)()
 
     return {"id": header.event_id.hex}
 

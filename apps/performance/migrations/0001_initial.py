@@ -12,7 +12,6 @@ class Migration(migrations.Migration):
             "projects",
             "0001_squashed_0009_alter_project_id_alter_projectcounter_id_and_more",
         ),
-        ("events", "0001_squashed_0003_auto_20210116_2110"),
     ]
 
     operations = [
