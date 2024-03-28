@@ -41,6 +41,13 @@ urlpatterns = [
         TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),
     ),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
+    # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
+    path(
+        "organizations/<slug:organization_slug>/issues/<int:issue_id>/events/<event_id>/json/",
+        RedirectView.as_view(
+            url="/api/0/organizations/%(organization_slug)s/issues/%(issue_id)s/events/%(event_id)s/json/",
+        ),
+    ),
     path("api/", api.urls),
     path("api/0/", APIRootView.as_view(), name="api-root-view"),
     path("api/0/", include(router.urls)),
