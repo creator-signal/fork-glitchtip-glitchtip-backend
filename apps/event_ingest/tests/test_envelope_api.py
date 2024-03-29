@@ -70,3 +70,13 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
+
+    # Cannot get assertLogs to work
+    # def test_invalid_event_warning(self):
+    #     with self.assertLogs("glitchtip.api.api", level="WARNING") as cm:
+    #         res = self.client.post(
+    #             self.url,
+    #             '{"lol": "haha"}',
+    #             content_type="application/x-sentry-envelope",
+    #         )
+    #     self.assertEqual(res.status_code, 422)

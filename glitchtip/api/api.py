@@ -1,3 +1,5 @@
+import json
+import logging
 from typing import Optional
 
 from allauth.socialaccount.models import SocialApp
@@ -6,6 +8,8 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpRequest
 from ninja import Field, ModelSchema, NinjaAPI
+from ninja.errors import ValidationError
+from sentry_sdk import capture_exception, set_context, set_level
 
 from apps.api_tokens.api import router as api_tokens_router
 from apps.event_ingest.api import router as event_ingest_router
@@ -24,6 +28,8 @@ try:
 except ImportError:
     pass
 
+logger = logging.getLogger(__name__)
+
 api = NinjaAPI(
     parser=EnvelopeParser(),
     title="GlitchTip API",
@@ -35,6 +41,24 @@ api.add_router("0", api_tokens_router)
 api.add_router("", event_ingest_router)
 api.add_router("0", issue_events_router)
 api.add_router("embed", embed_router)
+
+
+# Would be better at the router level
+# https://github.com/vitalik/django-ninja/issues/442
+@api.exception_handler(ValidationError)
+def log_validation(request, exc):
+    if request.resolver_match.route == "api/<project_id>/envelope/":
+        set_level("warning")
+        try:
+            set_context("incoming event", json.loads(request.body))
+        except json.decoder.JSONDecodeError:
+            pass
+        capture_exception(exc)
+        print("I Did log")
+        print(logger)
+        print(__name__)
+        logger.warning(f"Validation error on {request.path}", exc_info=exc)
+    return api.create_response(request, {"detail": exc.errors}, status=422)
 
 
 @api.exception_handler(ThrottleException)

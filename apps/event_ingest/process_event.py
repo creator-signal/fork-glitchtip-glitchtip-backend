@@ -23,7 +23,7 @@ from apps.alerts.models import Notification
 from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.environments.models import Environment, EnvironmentProject
-from apps.issue_events.constants import EventStatus
+from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import (
     Issue,
     IssueEvent,
@@ -59,6 +59,7 @@ class ProcessingEvent:
     metadata: dict[str, Any]
     event_data: dict[str, Any]
     event_tags: dict[str, str]
+    level: Optional[LogLevel] = None
     issue_id: Optional[int] = None
     issue_created = False
     release_id: Optional[int] = None
@@ -491,6 +492,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 event=ingest_event,
                 issue_hash=issue_hash,
                 title=title,
+                level=LogLevel.from_string(event.level) if event.level else None,
                 transaction=culprit,
                 metadata=metadata,
                 event_data=event_data,
@@ -515,6 +517,8 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             "first_seen": processing_event.event.received,
             "last_seen": processing_event.event.received,
         }
+        if level := processing_event.level:
+            issue_defaults["level"] = level
         for hash_obj in hash_queryset:
             if (
                 hash_obj["value"].hex == processing_event.issue_hash
@@ -555,6 +559,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 id=processing_event.event.event_id,
                 issue_id=processing_event.issue_id,
                 type=event_type,
+                level=processing_event.level
+                if processing_event.level
+                else LogLevel.ERROR,
                 timestamp=processing_event.event.payload.timestamp,
                 received=processing_event.event.received,
                 title=processing_event.title,

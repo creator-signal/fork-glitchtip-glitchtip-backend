@@ -104,6 +104,7 @@ class MessageEntry(Schema):
 
 class APIEventBreadcrumb(EventBreadcrumb):
     """Slightly modified Breadcrumb for sentry api compatibility"""
+
     event_id: Optional[str] = None
 
 
@@ -121,9 +122,11 @@ class Request(CamelSchema, BaseRequest):
     @computed_field
     @property
     def inferred_content_type(self) -> Optional[str]:
-        return next(
-            (value for key, value in self.headers if key == "Content-Type"), None
-        )
+        if self.headers:
+            return next(
+                (value for key, value in self.headers if key == "Content-Type"), None
+            )
+        return None
 
 
 class RequestEntry(Schema):
