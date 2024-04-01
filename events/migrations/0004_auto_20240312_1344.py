@@ -62,7 +62,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
 
     for old_issue in old_issues:
         issue = Issue.objects.create(
-            culprit=old_issue.culprit[:200],
+            culprit=old_issue.culprit[:1024],
             level=old_issue.level,
             metadata=old_issue.metadata,
             project=old_issue.project,
@@ -85,7 +85,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
                     timestamp=event.timestamp if event.timestamp else event.created,
                     received=event.created,
                     title=event.data.get("title"),
-                    transaction=event.data.get("culprit"),
+                    transaction=event.data.get("culprit")[:200],
                     level=event.level,
                     data=reformat_data(event.data),
                     tags=event.tags,
