@@ -11,7 +11,7 @@ from django.contrib.postgres.search import SearchVector
 from apps.issue_events.constants import IssueEventType
 
 
-MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 10000)
+MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 50000)
 
 
 def reformat_data(data):
@@ -58,7 +58,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
 
     old_issues = OldIssue.objects.all().defer("search_vector", "tags")
     if start_migration_date:
-        old_issues = old_issues.filter(created__gt=start_migration_date)
+        old_issues = old_issues.filter(last_seen__gt=start_migration_date)
 
     for old_issue in old_issues:
         issue = Issue.objects.create(
