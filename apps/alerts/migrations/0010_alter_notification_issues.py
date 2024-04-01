@@ -4,16 +4,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('alerts', '0009_alter_alertrecipient_recipient_type'),
-        ('issue_events', '0001_initial'),
+        ("alerts", "0009_alter_alertrecipient_recipient_type"),
+        ("issue_events", "0001_initial"),
     ]
 
     operations = [
-        migrations.AlterField(
-            model_name='notification',
-            name='issues',
-            field=models.ManyToManyField(to='issue_events.issue'),
+        migrations.RemoveField(
+            model_name="notification",
+            name="issues",
+            field=models.ManyToManyField(to="issue_events.issue"),
+        ),
+        migrations.AddField(
+            model_name="notification",
+            name="issues",
+            field=models.ManyToManyField(to="issue_events.issue"),
         ),
     ]
