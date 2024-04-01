@@ -62,7 +62,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
 
     for old_issue in old_issues:
         issue = Issue.objects.create(
-            culprit=old_issue.culprit,
+            culprit=old_issue.culprit[:200],
             level=old_issue.level,
             metadata=old_issue.metadata,
             project=old_issue.project,
