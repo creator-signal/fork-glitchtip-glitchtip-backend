@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 
 import requests
 from django.conf import settings
+from django.db.models import F
 
 from .constants import RecipientType
 
@@ -84,27 +85,27 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
         ]
         environment = (
             issue.issuetag_set.filter(tag_key__key="environment")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if environment:
             fields.append(
                 WebhookAttachmentField(
                     title="Environment",
-                    value=environment.value,
+                    value=environment['value'],
                     short=True,
                 )
             )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if release:
             fields.append(
                 WebhookAttachmentField(
                     title="Release",
-                    value=release.value,
+                    value=release['value'],
                     short=False,
                 )
             )
@@ -165,27 +166,27 @@ def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
         ]
         environment = (
             issue.issuetag_set.filter(tag_key__key="environment")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if environment:
             fields.append(
                 DiscordField(
                     name="Environment",
-                    value=environment.value,
+                    value=environment['value'],
                     inline=True,
                 )
             )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if release:
             fields.append(
                 DiscordField(
                     name="Release",
-                    value=release.value,
+                    value=release['value'],
                     inline=False,
                 )
             )
@@ -249,21 +250,21 @@ class GoogleChatCard:
         widgets.append(dict(decoratedText=dict(topLabel="Culprit", text=issue.culprit)))
         environment = (
             issue.issuetag_set.filter(tag_key__key="environment")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if environment:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Environment", text=environment.value))
+                dict(decoratedText=dict(topLabel="Environment", text=environment['value']))
             )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
-            .values("tag_value__value")
+            .values(value=F("tag_value__value"))
             .first()
         )
         if release:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Release", text=release.value))
+                dict(decoratedText=dict(topLabel="Release", text=release['value']))
             )
         widgets.append(
             dict(
