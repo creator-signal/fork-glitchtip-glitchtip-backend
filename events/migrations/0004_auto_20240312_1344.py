@@ -12,6 +12,7 @@ from apps.issue_events.constants import IssueEventType
 
 
 MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 50000)
+MIGRATION_LIMIT = int(MIGRATION_LIMIT)
 
 
 def reformat_data(data):
