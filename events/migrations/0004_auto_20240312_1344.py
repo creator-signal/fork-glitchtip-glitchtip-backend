@@ -14,6 +14,8 @@ from apps.issue_events.constants import IssueEventType
 MIGRATION_LIMIT = os.getenv("ISSUE_EVENT_MIGRATION_LIMIT", 50000)
 MIGRATION_LIMIT = int(MIGRATION_LIMIT)
 
+EVENT_LIMIT = os.getenv("EVENT_PER_ISSUE_MIGRATION_LIMIT", 1000)
+EVENT_LIMIT = int(EVENT_LIMIT)
 
 def reformat_data(data):
     if "exception" in data and data["exception"]:
@@ -92,7 +94,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
                     tags=event.tags,
                     issue=issue,
                 )
-                for event in events[:1000]
+                for event in events[:EVENT_LIMIT]
             ]
         )
 
