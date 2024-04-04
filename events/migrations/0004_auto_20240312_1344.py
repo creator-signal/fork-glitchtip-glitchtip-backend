@@ -92,7 +92,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
                     tags=event.tags,
                     issue=issue,
                 )
-                for event in events
+                for event in events[:1000]
             ]
         )
 
