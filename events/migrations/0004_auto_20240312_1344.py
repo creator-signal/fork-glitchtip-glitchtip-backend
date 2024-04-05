@@ -75,6 +75,7 @@ COMMENT ON TABLE {table_name} IS 'psqlextra_auto_partitioned';
             short_id=old_issue.short_id,
             search_vector=SearchVector(Value(old_issue.title)),
             count=old_issue.count,
+            first_seen=old_issue.created,
             last_seen=old_issue.last_seen,
         )
         events = old_issue.event_set.order_by("-created")

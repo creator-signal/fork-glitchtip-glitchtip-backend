@@ -44,10 +44,7 @@ def to_camel_with_lower_id(string: str) -> str:
 
 class IssueSchema(ModelSchema):
     id: str
-    first_seen: datetime = Field(validation_alias="created")
-    last_seen: datetime
     count: str
-    culprit: str
     type: str = Field(validation_alias="get_type_display")
     level: str = Field(validation_alias="get_level_display")
     status: str = Field(validation_alias="get_status_display")
@@ -76,7 +73,13 @@ class IssueSchema(ModelSchema):
 
     class Config:
         model = Issue
-        model_fields = ["id", "title", "metadata", "count", "last_seen"]
+        model_fields = [
+            "title",
+            "metadata",
+            "culprit",
+            "first_seen",
+            "last_seen",
+        ]
         alias_generator = to_camel_with_lower_id
         coerce_numbers_to_str = True
         populate_by_name = True
