@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Optional
 
@@ -49,14 +48,8 @@ api.add_router("embed", embed_router)
 def log_validation(request, exc):
     if request.resolver_match.route == "api/<project_id>/envelope/":
         set_level("warning")
-        try:
-            set_context("incoming event", json.loads(request.body))
-        except json.decoder.JSONDecodeError:
-            pass
+        set_context("incoming event", request.body)
         capture_exception(exc)
-        print("I Did log")
-        print(logger)
-        print(__name__)
         logger.warning(f"Validation error on {request.path}", exc_info=exc)
     return api.create_response(request, {"detail": exc.errors}, status=422)
 

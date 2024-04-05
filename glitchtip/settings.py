@@ -19,6 +19,7 @@ from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
+from django.http import UnreadablePostError
 from sentry_sdk.integrations.django import DjangoIntegration
 
 env = environ.FileAwareEnv(
@@ -119,9 +120,13 @@ STATIC_URL = "/static/"
 # GlitchTip can track GlitchTip's own errors.
 # If enabling this, use a different server to avoid infinite loops.
 def before_send(event, hint):
-    """Don't log django.DisallowedHost errors in Sentry."""
+    """Don't log useless, inactionable errors in Sentry."""
     if "log_record" in hint:
         if hint["log_record"].name == "django.security.DisallowedHost":
+            return None
+    if "exc_info" in hint:
+        _, exc_value, _ = hint["exc_info"]
+        if isinstance(exc_value, UnreadablePostError):
             return None
 
     return event
