@@ -72,13 +72,30 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 
-    # Cannot get assertLogs to work
-    @mock.patch("glitchtip.api.api.logger.warning")
-    def test_invalid_event_warning(self, mock_log):
+    def test_nothing_event(self):
         res = self.client.post(
             self.url,
             '{}\n{"lol": "haha"}',
             content_type="application/x-sentry-envelope",
         )
-        mock_log.assert_called_once()
+        self.assertEqual(res.status_code, 200)
+
+    @mock.patch("glitchtip.api.api.logger.warning")
+    def test_invalid_event_warning(self, mock_log):
+        res = self.client.post(
+            self.url,
+            '{"event_id": "A"}\n{"type": "nothing"}',
+            content_type="application/x-sentry-envelope",
+        )
         self.assertEqual(res.status_code, 422)
+        mock_log.assert_called_once()
+
+    @mock.patch("glitchtip.api.api.logger.warning")
+    def test_invalid_issue_event_warning(self, mock_log):
+        res = self.client.post(
+            self.url,
+            '{}\n{"type": "event"}\n{"level": 1}',
+            content_type="application/x-sentry-envelope",
+        )
+        self.assertEqual(res.status_code, 422)
+        mock_log.assert_called_once()
