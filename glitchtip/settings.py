@@ -159,6 +159,7 @@ if SENTRY_DSN:
         release=release,
         environment=ENVIRONMENT,
         auto_session_tracking=False,
+        send_client_reports=False,
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         traces_sampler=traces_sampler,
     )
