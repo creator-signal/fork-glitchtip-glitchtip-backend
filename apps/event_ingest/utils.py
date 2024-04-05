@@ -49,7 +49,7 @@ def transform_parameterized_message(message: Union[str, EventMessage]) -> str:
         return message
     if not message.formatted and message.message:
         params = message.params
-        if isinstance(params, list) and len(params):
+        if isinstance(params, list) and params:
             return message.message % tuple(params)
         elif isinstance(params, dict):
             return message.message.format(**params)
