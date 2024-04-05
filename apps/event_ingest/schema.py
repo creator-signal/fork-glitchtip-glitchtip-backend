@@ -296,7 +296,7 @@ class EnvelopeHeaderSchema(Schema):
 
 SupportedItemType = Literal["transaction", "event"]
 IgnoredItemType = Literal[
-    "session", "client_report", "attachment", "user_report", "check_in"
+    "session", "sessions", "client_report", "attachment", "user_report", "check_in"
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
