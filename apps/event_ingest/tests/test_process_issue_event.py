@@ -67,6 +67,17 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ).exists()
         )
 
+    def test_message_empty_param_list(self):
+        self.process_events(
+            [
+                {"logentry": {"message": "This is a warning: %s", "params": []}},
+            ]
+        )
+        self.assertEqual(
+            IssueEvent.objects.first().data["logentry"]["message"],
+            "This is a warning: %s",
+        )
+
     def test_query_release_environment_difs(self):
         """Test efficiency of existing release/environment/dif"""
         project2 = baker.make("projects.Project", organization=self.organization)

@@ -154,7 +154,7 @@ class EventMessage(Schema):
         """
         if not self.formatted and self.message:
             params = self.params
-            if isinstance(params, list) and params is not None:
+            if isinstance(params, list) and params:
                 self.formatted = self.message % tuple(params)
             elif isinstance(params, dict):
                 self.formatted = self.message.format(**params)
