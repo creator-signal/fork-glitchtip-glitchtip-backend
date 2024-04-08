@@ -127,7 +127,10 @@ class Command(MakeSampleCommand):
         # timedelta between each new issue first_seen
         issue_delta = timedelta(seconds=over_days * 86400 / issue_quantity)
         # timedelta between each event for an issue
-        event_delta = issue_delta / 100
+        if self.events_quantity_per:
+            event_delta = issue_delta / self.events_quantity_per
+        else:
+            event_delta = issue_delta / 100
 
         # 10,000 per query is a good target
         average_events_per_issue = (
