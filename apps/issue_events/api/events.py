@@ -1,8 +1,7 @@
 import uuid
 from typing import Optional
 
-from django.db.models import OuterRef, Subquery, Window
-from django.db.models.functions import Lag
+from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
 
 from glitchtip.api.authentication import AuthHttpRequest
@@ -53,7 +52,11 @@ async def list_issue_event(
 async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     qs = get_queryset(request, issue_id).order_by("-received")
     qs = qs.annotate(
-        previous=Window(expression=Lag("id"), order_by="received"),
+        previous=Subquery(
+            qs.filter(received__lt=OuterRef("received"))
+            .order_by("-received")
+            .values("id")[:1]
+        ),
     )
     event = await qs.afirst()
     if not event:

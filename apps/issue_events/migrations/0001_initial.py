@@ -198,10 +198,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={
-                "abstract": False,
-                "base_manager_name": "objects",
-            },
+            options={},
             partitioning_options={
                 "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
                 "key": ["received"],
@@ -210,6 +207,12 @@ class Migration(migrations.Migration):
             managers=[
                 ("objects", psqlextra.manager.manager.PostgresManager()),
             ],
+        ),
+        migrations.AddIndex(
+            model_name="issueevent",
+            index=models.Index(
+                fields=["issue", "-received"], name="issue_event_issue_i_3b4e7f_idx"
+            ),
         ),
         TestDefaultPartition(
             model_name="IssueEvent",
