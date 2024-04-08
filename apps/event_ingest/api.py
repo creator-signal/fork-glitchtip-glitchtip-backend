@@ -37,7 +37,7 @@ class EventIngestOut(Schema):
 
 
 class EnvelopeIngestOut(Schema):
-    id: str
+    id: Optional[str] = None
 
 
 def get_issue_event_class(event: IngestIssueEvent):
@@ -116,12 +116,14 @@ async def event_envelope(
             else:
                 item.user = EventUser(ip_address=client_ip)
             issue_event_class = get_issue_event_class(item)
-            issue_event = InterchangeIssueEvent(
-                event_id=header.event_id,
-                project_id=project_id,
-                organization_id=request.auth.organization_id,
-                payload=issue_event_class(**item.dict()),
-            )
+            interchange_event_kwargs = {
+                "project_id": project_id,
+                "organization_id": request.auth.organization_id,
+                "payload": issue_event_class(**item.dict()),
+            }
+            if header.event_id:
+                interchange_event_kwargs["event_id"] = header.event_id
+            issue_event = InterchangeIssueEvent(**interchange_event_kwargs)
             # Faux unique uuid as GlitchTip can accept duplicate UUIDs
             # The primary key of an event is uuid, received
             if cache_set_nx("uuid" + issue_event.event_id.hex, True) is True:
@@ -148,7 +150,9 @@ async def event_envelope(
             serializer.is_valid(raise_exception=True)
             await sync_to_async(serializer.save)()
 
-    return {"id": header.event_id.hex}
+    if header.event_id:
+        return {"id": header.event_id.hex}
+    return {}
 
 
 @router.post("/{project_id}/security/")

@@ -288,19 +288,22 @@ class EventIngestSchema(IngestIssueEvent):
 
 
 class EnvelopeHeaderSchema(Schema):
-    event_id: uuid.UUID
+    event_id: Optional[uuid.UUID] = None
     dsn: Optional[str] = None
     sdk: Optional[ClientSDKInfo] = None
     sent_at: datetime = Field(default_factory=now)
 
 
 SupportedItemType = Literal["transaction", "event"]
+IgnoredItemType = Literal[
+    "session", "sessions", "client_report", "attachment", "user_report", "check_in"
+]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
 
 class ItemHeaderSchema(Schema):
     content_type: Optional[str] = None
-    type: SupportedItemType
+    type: Union[SupportedItemType, IgnoredItemType]
     length: Optional[int] = None
 
 
