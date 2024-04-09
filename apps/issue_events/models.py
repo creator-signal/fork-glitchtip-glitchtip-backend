@@ -182,6 +182,9 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
 
+    class Meta:
+        indexes = [models.Index(fields=["issue", "-received"])]
+
     class PartitioningMeta:
         method = PostgresPartitioningMethod.RANGE
         key = ["received"]
