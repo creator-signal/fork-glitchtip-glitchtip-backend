@@ -12,7 +12,7 @@ from . import router
 
 
 @router.get(
-    "/issues/{int:issue_id}/user-reports",
+    "/issues/{int:issue_id}/user-reports/",
     response=List[UserReportSchema],
     by_alias=True,
 )
