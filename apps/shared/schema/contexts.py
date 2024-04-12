@@ -1,30 +1,29 @@
 from typing import Annotated, Any, Literal, Optional, TypedDict, Union
 
-from ninja import Field, Schema
-from pydantic import RootModel, model_serializer
+from ninja import Field
+from pydantic import RootModel
 
 from .base import LaxIngestSchema
 
+# class ExcludeNoneSchema(Schema):
+#     """
+#     Implements model_dump's exclude_none on the schema itself
+#     Useful for nested schemas where more granular control is needed
+#     Related https://github.com/pydantic/pydantic/discussions/5461
+#     """
 
-class ExcludeNoneSchema(Schema):
-    """
-    Implements model_dump's exclude_none on the schema itself
-    Useful for nested schemas where more granular control is needed
-    Related https://github.com/pydantic/pydantic/discussions/5461
-    """
-
-    @model_serializer
-    def ser_model(self) -> dict[str, Any]:
-        if isinstance(self, dict):
-            return self
-        return {
-            model_field: getattr(self, model_field)
-            for model_field in self.model_fields
-            if getattr(self, model_field) is not None
-        }
+#     @model_serializer
+#     def ser_model(self) -> dict[str, Any]:
+#         if isinstance(self, dict):
+#             return self
+#         return {
+#             model_field: getattr(self, model_field)
+#             for model_field in self.model_fields
+#             if getattr(self, model_field) is not None
+#         }
 
 
-class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):
+class DeviceContext(LaxIngestSchema):
     type: Literal["device"] = "device"
     name: Optional[str] = None  # Inconsistency documented as required
     family: Optional[str] = None  # Recommended but optional
@@ -70,7 +69,7 @@ class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):
         protected_namespaces = ()
 
 
-class OSContext(LaxIngestSchema, ExcludeNoneSchema):
+class OSContext(LaxIngestSchema):
     type: Literal["os"] = "os"
     name: str
     version: Optional[str] = None
@@ -81,14 +80,14 @@ class OSContext(LaxIngestSchema, ExcludeNoneSchema):
     raw_description: Optional[str] = None  # Recommended but optional
 
 
-class RuntimeContext(LaxIngestSchema, ExcludeNoneSchema):
+class RuntimeContext(LaxIngestSchema):
     type: Literal["runtime"] = "runtime"
     name: str  # Recommended
     version: Optional[str] = None
     raw_description: Optional[str] = None
 
 
-class AppContext(LaxIngestSchema, ExcludeNoneSchema):
+class AppContext(LaxIngestSchema):
     type: Literal["app"] = "app"
     app_start_time: Optional[str] = None
     device_app_hash: Optional[str] = None
@@ -107,7 +106,7 @@ class BrowserContext(LaxIngestSchema):
     version: Optional[str] = None
 
 
-class GPUContext(LaxIngestSchema, ExcludeNoneSchema):
+class GPUContext(LaxIngestSchema):
     type: Literal["gpu"] = "gpu"
     name: str
     version: Optional[str] = None
@@ -131,7 +130,7 @@ class StateContext(LaxIngestSchema):
     state: dict
 
 
-class CultureContext(LaxIngestSchema, ExcludeNoneSchema):
+class CultureContext(LaxIngestSchema):
     type: Literal["culture"] = "culture"
     calendar: Optional[str] = None
     display_name: Optional[str] = None
@@ -146,7 +145,7 @@ class CloudResourceContext(LaxIngestSchema):
     host: dict
 
 
-class TraceContext(LaxIngestSchema, ExcludeNoneSchema):
+class TraceContext(LaxIngestSchema):
     type: Literal["trace"] = "trace"
     trace_id: str
     span_id: str
