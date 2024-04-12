@@ -215,6 +215,48 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertTrue(org_b_project.environment_set.filter(name="prod").exists())
         self.assertEqual(org_b_project.environment_set.count(), 1)
 
+    def test_multi_org_event_release_processing(self):
+        release = baker.make(
+            "releases.Release", organization=self.organization, version="v1.0"
+        )
+        baker.make(
+            "releases.ReleaseProject",
+            release=release,
+            project=self.project,
+        )
+
+        event_list = []
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["release"] = "v2.0"
+        event_list.append(
+            InterchangeIssueEvent(
+                project_id=self.project.id,
+                organization_id=self.organization.id,
+                payload=IssueEventSchema(**data),
+            )
+        )
+
+        org_b = baker.make("organizations_ext.organization")
+        org_b_project = baker.make("projects.Project", organization=org_b)
+
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["release"] = "v1.0"
+        event_list.append(
+            InterchangeIssueEvent(
+                project_id=org_b_project.id,
+                organization_id=org_b.id,
+                payload=IssueEventSchema(**data),
+            )
+        )
+
+        process_issue_events(event_list)
+
+        self.assertTrue(self.organization.release_set.filter(version="v2.0").exists())
+        self.assertEqual(self.organization.release_set.count(), 2)
+
+        self.assertTrue(org_b.release_set.filter(version="v1.0").exists())
+        self.assertEqual(org_b.release_set.count(), 1)
+
     def test_process_sourcemap(self):
         sample_event = {
             "exception": {

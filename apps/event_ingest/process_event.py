@@ -279,12 +279,10 @@ def get_and_create_releases(
     if releases_to_create:
         # Create database records for any release that doesn't exist
         Release.objects.bulk_create(releases_to_create, ignore_conflicts=True)
-        releases = Release.objects.filter(
-            version__in=[release.version for release in releases_to_create],
-            organization_id__in=[
-                release.organization_id for release in releases_to_create
-            ],
-        )
+        query = Q()
+        for release in releases_to_create:
+            query |= Q(version=release.version, organization_id=release.organization)
+        releases = Release.objects.filter(query)
         ReleaseProject = Release.projects.through
         release_projects = [
             ReleaseProject(
