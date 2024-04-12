@@ -279,7 +279,7 @@ def get_and_create_releases(
         Release.objects.bulk_create(releases_to_create, ignore_conflicts=True)
         query = Q()
         for release in releases_to_create:
-            query |= Q(version=release.version, organization_id=release.organization)
+            query |= Q(version=release.version, organization_id=release.organization_id)
         releases = Release.objects.filter(query)
         ReleaseProject = Release.projects.through
         release_projects = [
