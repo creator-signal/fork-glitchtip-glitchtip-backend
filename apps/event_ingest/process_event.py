@@ -234,7 +234,9 @@ def create_environments(
         Environment.objects.bulk_create(environments_to_create, ignore_conflicts=True)
         query = Q()
         for environment in environments_to_create:
-            query |= Q(name=environment.name, organization_id=environment.organization)
+            query |= Q(
+                name=environment.name, organization_id=environment.organization_id
+            )
         environments = Environment.objects.filter(query)
         environment_projects: list = []
         for environment in environments:
