@@ -232,12 +232,12 @@ def create_environments(
 
     if environments_to_create:
         Environment.objects.bulk_create(environments_to_create, ignore_conflicts=True)
-        environments = Environment.objects.filter(
-            name__in={name for (name, _, _) in environment_set},
-            organization_id__in={
-                organization_id for (_, _, organization_id) in environment_set
-            },
-        )
+        query = Q()
+        for environment in environments_to_create:
+            query |= Q(
+                name=environment.name, organization_id=environment.organization_id
+            )
+        environments = Environment.objects.filter(query)
         environment_projects: list = []
         for environment in environments:
             project_id = next(
@@ -279,12 +279,10 @@ def get_and_create_releases(
     if releases_to_create:
         # Create database records for any release that doesn't exist
         Release.objects.bulk_create(releases_to_create, ignore_conflicts=True)
-        releases = Release.objects.filter(
-            version__in=[release.version for release in releases_to_create],
-            organization_id__in=[
-                release.organization_id for release in releases_to_create
-            ],
-        )
+        query = Q()
+        for release in releases_to_create:
+            query |= Q(version=release.version, organization_id=release.organization_id)
+        releases = Release.objects.filter(query)
         ReleaseProject = Release.projects.through
         release_projects = [
             ReleaseProject(
