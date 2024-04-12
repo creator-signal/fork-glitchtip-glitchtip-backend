@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlparse
 
 from django.utils.timezone import now
 from ninja import Field
-from ninja import Schema as BaseSchema
 from pydantic import (
     AliasChoices,
     BeforeValidator,
@@ -20,6 +19,7 @@ from pydantic import (
 
 from apps.issue_events.constants import IssueEventType
 
+from ..shared.schema.base import LaxIngestSchema
 from ..shared.schema.contexts import ContextsSchema
 from ..shared.schema.event import (
     BaseIssueEvent,
@@ -41,45 +41,38 @@ Coerced Str that will coerce bool to str when found
 """
 
 
-class Schema(BaseSchema):
-    """Schema configuration for all event ingest schemas"""
-
-    class Config(BaseSchema.Config):
-        coerce_numbers_to_str = True  # Lax is best for ingest
-
-
-class Signal(Schema):
+class Signal(LaxIngestSchema):
     number: int
     code: Optional[int]
     name: Optional[str]
     code_name: Optional[str]
 
 
-class MachException(Schema):
+class MachException(LaxIngestSchema):
     number: int
     code: int
     subcode: int
     name: Optional[str]
 
 
-class NSError(Schema):
+class NSError(LaxIngestSchema):
     code: int
     domain: str
 
 
-class Errno(Schema):
+class Errno(LaxIngestSchema):
     number: int
     name: Optional[str]
 
 
-class MechanismMeta(Schema):
+class MechanismMeta(LaxIngestSchema):
     signal: Optional[Signal] = None
     match_exception: Optional[MachException] = None
     ns_error: Optional[NSError] = None
     errno: Optional[Errno] = None
 
 
-class ExceptionMechanism(Schema):
+class ExceptionMechanism(LaxIngestSchema):
     type: str
     description: Optional[str] = None
     help_link: Optional[str] = None
@@ -89,7 +82,7 @@ class ExceptionMechanism(Schema):
     data: Optional[dict] = None
 
 
-class StackTraceFrame(Schema):
+class StackTraceFrame(LaxIngestSchema):
     filename: Optional[str] = None
     function: Optional[str] = None
     raw_function: Optional[str] = None
@@ -123,12 +116,12 @@ class StackTraceFrame(Schema):
         return self
 
 
-class StackTrace(Schema):
+class StackTrace(LaxIngestSchema):
     frames: list[StackTraceFrame]
     registers: Optional[dict[str, str]] = None
 
 
-class EventException(Schema):
+class EventException(LaxIngestSchema):
     type: str
     value: Annotated[Optional[str], WrapValidator(invalid_to_none)]
     module: Optional[str] = None
@@ -137,11 +130,11 @@ class EventException(Schema):
     stacktrace: Optional[StackTrace] = None
 
 
-class ValueEventException(Schema):
+class ValueEventException(LaxIngestSchema):
     values: list[EventException]
 
 
-class EventMessage(Schema):
+class EventMessage(LaxIngestSchema):
     formatted: str = Field(max_length=8192, default="")
     message: Optional[str] = None
     params: Optional[Union[list[str], dict[str, str]]] = None
@@ -161,7 +154,7 @@ class EventMessage(Schema):
         return self
 
 
-class EventTemplate(Schema):
+class EventTemplate(LaxIngestSchema):
     lineno: int
     abs_path: Optional[str] = None
     filename: str
@@ -170,27 +163,27 @@ class EventTemplate(Schema):
     post_context: Optional[list[str]] = None
 
 
-class ValueEventBreadcrumb(Schema):
+class ValueEventBreadcrumb(LaxIngestSchema):
     values: list[EventBreadcrumb]
 
 
-class ClientSDKPackage(Schema):
+class ClientSDKPackage(LaxIngestSchema):
     name: Optional[str] = None
     version: Optional[str] = None
 
 
-class ClientSDKInfo(Schema):
+class ClientSDKInfo(LaxIngestSchema):
     integrations: Optional[list[Optional[str]]] = None
     name: Optional[str]
     packages: Optional[list[ClientSDKPackage]] = None
     version: Optional[str]
 
 
-class RequestHeaders(Schema):
+class RequestHeaders(LaxIngestSchema):
     content_type: Optional[str]
 
 
-class RequestEnv(Schema):
+class RequestEnv(LaxIngestSchema):
     remote_addr: Optional[str]
 
 
@@ -287,7 +280,7 @@ class EventIngestSchema(IngestIssueEvent):
     event_id: uuid.UUID
 
 
-class EnvelopeHeaderSchema(Schema):
+class EnvelopeHeaderSchema(LaxIngestSchema):
     event_id: Optional[uuid.UUID] = None
     dsn: Optional[str] = None
     sdk: Optional[ClientSDKInfo] = None
@@ -301,7 +294,7 @@ IgnoredItemType = Literal[
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
 
-class ItemHeaderSchema(Schema):
+class ItemHeaderSchema(LaxIngestSchema):
     content_type: Optional[str] = None
     type: Union[SupportedItemType, IgnoredItemType]
     length: Optional[int] = None
@@ -340,7 +333,7 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
         return self
 
 
-class CSPReportSchema(Schema):
+class CSPReportSchema(LaxIngestSchema):
     """
     https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy-Report-Only#violation_report_syntax
     """
@@ -356,7 +349,7 @@ class CSPReportSchema(Schema):
     column_number: Optional[int] = None
 
 
-class SecuritySchema(Schema):
+class SecuritySchema(LaxIngestSchema):
     csp_report: CSPReportSchema = Field(alias="csp-report")
 
 
@@ -382,7 +375,7 @@ class CSPIssueEventSchema(IngestIssueEvent):
     csp: CSPReportSchema
 
 
-class InterchangeIssueEvent(Schema):
+class InterchangeIssueEvent(LaxIngestSchema):
     """Normalized wrapper around issue event. Event should not contain repeat information."""
 
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
