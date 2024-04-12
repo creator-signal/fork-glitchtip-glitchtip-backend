@@ -94,7 +94,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
     def test_invalid_issue_event_warning(self, mock_log):
         res = self.client.post(
             self.url,
-            '{}\n{"type": "event"}\n{"level": 1}',
+            '{}\n{"type": "event"}\n{"timestamp": false}',
             content_type="application/x-sentry-envelope",
         )
         self.assertEqual(res.status_code, 422)

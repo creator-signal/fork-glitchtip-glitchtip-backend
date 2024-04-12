@@ -1,17 +1,15 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional, Union
 
-from ninja import Schema
-from pydantic import (
-    WrapValidator,
-)
+from pydantic import WrapValidator
 
+from .base import LaxIngestSchema
 from .utils import invalid_to_none
 
 Level = Literal["fatal", "error", "warning", "info", "debug"]
 
 
-class EventBreadcrumb(Schema):
+class EventBreadcrumb(LaxIngestSchema):
     type: str = "default"
     category: Optional[str] = None
     message: Optional[str] = None
@@ -28,7 +26,7 @@ This format is often used for http needs including headers and querystrings
 """
 
 
-class BaseRequest(Schema):
+class BaseRequest(LaxIngestSchema):
     """Base Request class for event ingest and issue event API"""
 
     api_target: Optional[str] = None
@@ -44,7 +42,7 @@ class BaseRequest(Schema):
     url: Optional[str] = None
 
 
-class BaseIssueEvent(Schema):
+class BaseIssueEvent(LaxIngestSchema):
     """
     Base Issue Event for fields present from the SDK data, json event, and api event
     """

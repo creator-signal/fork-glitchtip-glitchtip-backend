@@ -1,10 +1,12 @@
 from typing import Annotated, Any, Literal, Optional, TypedDict, Union
 
-from ninja import Field, Schema
+from ninja import Field
 from pydantic import RootModel
 
+from .base import LaxIngestSchema
 
-class DeviceContext(Schema):
+
+class DeviceContext(LaxIngestSchema):
     type: Literal["device"] = "device"
     name: Optional[str] = None  # Inconsistency documented as required
     family: Optional[str] = None  # Recommended but optional
@@ -46,11 +48,11 @@ class DeviceContext(Schema):
     supports_audio: Optional[bool] = None
     supports_location_service: Optional[bool] = None
 
-    class Config(Schema.Config):
+    class Config(LaxIngestSchema.Config):
         protected_namespaces = ()
 
 
-class OSContext(Schema):
+class OSContext(LaxIngestSchema):
     type: Literal["os"] = "os"
     name: str
     version: Optional[str] = None
@@ -61,14 +63,14 @@ class OSContext(Schema):
     raw_description: Optional[str] = None  # Recommended but optional
 
 
-class RuntimeContext(Schema):
+class RuntimeContext(LaxIngestSchema):
     type: Literal["runtime"] = "runtime"
     name: str  # Recommended
     version: Optional[str] = None
     raw_description: Optional[str] = None
 
 
-class AppContext(Schema):
+class AppContext(LaxIngestSchema):
     type: Literal["app"] = "app"
     app_start_time: Optional[str] = None
     device_app_hash: Optional[str] = None
@@ -81,13 +83,13 @@ class AppContext(Schema):
     in_foreground: Optional[bool] = None
 
 
-class BrowserContext(Schema):
+class BrowserContext(LaxIngestSchema):
     type: Literal["browser"] = "browser"
     name: str
     version: Optional[str] = None
 
 
-class GPUContext(Schema):
+class GPUContext(LaxIngestSchema):
     type: Literal["gpu"] = "gpu"
     name: str
     version: Optional[str] = None
@@ -106,12 +108,12 @@ class GPUContext(Schema):
     supports_geometry_shaders: Optional[bool] = None
 
 
-class StateContext(Schema):
+class StateContext(LaxIngestSchema):
     type: Literal["state"] = "state"
     state: dict
 
 
-class CultureContext(Schema):
+class CultureContext(LaxIngestSchema):
     type: Literal["culture"] = "culture"
     calendar: Optional[str] = None
     display_name: Optional[str] = None
@@ -120,13 +122,13 @@ class CultureContext(Schema):
     timezone: Optional[str] = None
 
 
-class CloudResourceContext(Schema):
+class CloudResourceContext(LaxIngestSchema):
     type: Literal["cloud_resource"] = "cloud_resource"
     cloud: dict
     host: dict
 
 
-class TraceContext(Schema):
+class TraceContext(LaxIngestSchema):
     type: Literal["trace"] = "trace"
     trace_id: str
     span_id: str
@@ -140,12 +142,12 @@ class TraceContext(Schema):
     origin: Optional[str] = None
 
 
-class ReplayContext(Schema):
+class ReplayContext(LaxIngestSchema):
     type: Literal["replay"] = "replay"
     replay_id: str
 
 
-class ResponseContext(Schema):
+class ResponseContext(LaxIngestSchema):
     type: Literal["response"] = "response"
     status_code: int
 
