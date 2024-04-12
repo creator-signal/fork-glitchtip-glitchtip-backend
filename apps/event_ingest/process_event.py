@@ -1,6 +1,8 @@
+import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from functools import reduce
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
 
@@ -232,12 +234,10 @@ def create_environments(
 
     if environments_to_create:
         Environment.objects.bulk_create(environments_to_create, ignore_conflicts=True)
-        environments = Environment.objects.filter(
-            name__in={name for (name, _, _) in environment_set},
-            organization_id__in={
-                organization_id for (_, _, organization_id) in environment_set
-            },
-        )
+        query = Q()
+        for environment in environments_to_create:
+            query |= Q(name=environment.name, organization_id=environment.organization)
+        environments = Environment.objects.filter(query)
         environment_projects: list = []
         for environment in environments:
             project_id = next(

@@ -173,6 +173,48 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.process_events(data)
         self.assertEqual(event.issue.project.environment_set.count(), 2)
 
+    def test_multi_org_event_environment_processing(self):
+        environment = baker.make(
+            "environments.Environment", organization=self.organization, name="prod"
+        )
+        baker.make(
+            "environments.EnvironmentProject",
+            environment=environment,
+            project=self.project,
+        )
+
+        event_list = []
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["environment"] = "dev"
+        event_list.append(
+            InterchangeIssueEvent(
+                project_id=self.project.id,
+                organization_id=self.organization.id,
+                payload=IssueEventSchema(**data),
+            )
+        )
+
+        org_b = baker.make("organizations_ext.organization")
+        org_b_project = baker.make("projects.Project", organization=org_b)
+
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["environment"] = "prod"
+        event_list.append(
+            InterchangeIssueEvent(
+                project_id=org_b_project.id,
+                organization_id=org_b.id,
+                payload=IssueEventSchema(**data),
+            )
+        )
+
+        process_issue_events(event_list)
+
+        self.assertTrue(self.project.environment_set.filter(name="dev").exists())
+        self.assertEqual(self.project.environment_set.count(), 2)
+
+        self.assertTrue(org_b_project.environment_set.filter(name="prod").exists())
+        self.assertEqual(org_b_project.environment_set.count(), 1)
+
     def test_process_sourcemap(self):
         sample_event = {
             "exception": {
