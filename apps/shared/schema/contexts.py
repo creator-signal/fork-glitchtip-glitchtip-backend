@@ -70,7 +70,7 @@ class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):
         protected_namespaces = ()
 
 
-class OSContext(LaxIngestSchema):
+class OSContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["os"] = "os"
     name: str
     version: Optional[str] = None
@@ -81,14 +81,14 @@ class OSContext(LaxIngestSchema):
     raw_description: Optional[str] = None  # Recommended but optional
 
 
-class RuntimeContext(LaxIngestSchema):
+class RuntimeContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["runtime"] = "runtime"
     name: str  # Recommended
     version: Optional[str] = None
     raw_description: Optional[str] = None
 
 
-class AppContext(LaxIngestSchema):
+class AppContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["app"] = "app"
     app_start_time: Optional[str] = None
     device_app_hash: Optional[str] = None
@@ -101,13 +101,13 @@ class AppContext(LaxIngestSchema):
     in_foreground: Optional[bool] = None
 
 
-class BrowserContext(LaxIngestSchema):
+class BrowserContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["browser"] = "browser"
     name: str
     version: Optional[str] = None
 
 
-class GPUContext(LaxIngestSchema):
+class GPUContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["gpu"] = "gpu"
     name: str
     version: Optional[str] = None
@@ -131,7 +131,7 @@ class StateContext(LaxIngestSchema):
     state: dict
 
 
-class CultureContext(LaxIngestSchema):
+class CultureContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["culture"] = "culture"
     calendar: Optional[str] = None
     display_name: Optional[str] = None
@@ -146,7 +146,7 @@ class CloudResourceContext(LaxIngestSchema):
     host: dict
 
 
-class TraceContext(LaxIngestSchema):
+class TraceContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["trace"] = "trace"
     trace_id: str
     span_id: str
