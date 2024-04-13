@@ -1,29 +1,30 @@
-from typing import Annotated, Any, Literal, Optional, TypedDict, Union
+from typing import Annotated, Any, Callable, Literal, Optional, TypedDict, Union
 
-from ninja import Field
-from pydantic import RootModel
+from ninja import Field, Schema
+from pydantic import RootModel, model_serializer
 
 from .base import LaxIngestSchema
 
-# class ExcludeNoneSchema(Schema):
-#     """
-#     Implements model_dump's exclude_none on the schema itself
-#     Useful for nested schemas where more granular control is needed
-#     Related https://github.com/pydantic/pydantic/discussions/5461
-#     """
 
-#     @model_serializer
-#     def ser_model(self) -> dict[str, Any]:
-#         if isinstance(self, dict):
-#             return self
-#         return {
-#             model_field: getattr(self, model_field)
-#             for model_field in self.model_fields
-#             if getattr(self, model_field) is not None
-#         }
+class ExcludeNoneSchema(Schema):
+    """
+    Implements model_dump's exclude_none on the schema itself
+    Useful for nested schemas where more granular control is needed
+    Related https://github.com/pydantic/pydantic/discussions/5461
+    """
+
+    @model_serializer(mode="wrap")
+    def ser_model(self, wrap: Callable) -> dict[str, Any]:
+        if isinstance(self, Schema):
+            return {
+                model_field: getattr(self, model_field)
+                for model_field in self.model_fields
+                if getattr(self, model_field) is not None
+            }
+        return wrap(self)
 
 
-class DeviceContext(LaxIngestSchema):
+class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["device"] = "device"
     name: Optional[str] = None  # Inconsistency documented as required
     family: Optional[str] = None  # Recommended but optional
