@@ -94,6 +94,9 @@ class Issue(SoftDeleteModel):
             GinIndex(fields=["search_vector"]),
         ]
 
+    def __str__(self):
+        return self.title
+
     def get_detail_url(self):
         return f"{settings.GLITCHTIP_URL.geturl()}/{self.project.organization.slug}/issues/{self.pk}"
 

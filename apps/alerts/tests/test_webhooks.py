@@ -108,6 +108,9 @@ class WebhookTestCase(TestCase):
             1,
         )
         mock_post.assert_called_once()
+        self.assertIn(
+            issue.title, mock_post.call_args[1]["json"]["sections"][0]["activityTitle"]
+        )
 
     @mock.patch("requests.post")
     def test_send_issue_with_tags_as_discord_webhook(self, mock_post):
