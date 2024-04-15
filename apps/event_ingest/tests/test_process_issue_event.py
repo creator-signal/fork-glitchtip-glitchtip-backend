@@ -413,7 +413,7 @@ class SentryCompatTestCase(EventIngestTestCase):
     def upgrade_title(self, value: str):
         """Sentry OSS uses ... while GlitchTip uses unicode …"""
         if value[-1] == "…":
-            return value[:-4]
+            return value[:-3]
         return value.strip("...")
 
     def upgrade_metadata(self, value: dict):
