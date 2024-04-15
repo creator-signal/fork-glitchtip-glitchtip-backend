@@ -67,6 +67,12 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ).exists()
         )
 
+    def test_transaction_truncation(self):
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["culprit"] = "x" * 201
+        self.process_events(data)
+        self.assertTrue(IssueEvent.objects.first())
+
     def test_message_empty_param_list(self):
         self.process_events(
             [
