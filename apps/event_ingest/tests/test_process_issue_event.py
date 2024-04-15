@@ -68,10 +68,20 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
 
     def test_transaction_truncation(self):
+        long_string = "x" * 201
+        truncated_string = "x" * 199 + "…"
+
         data = self.get_json_data("events/test_data/py_hi_event.json")
-        data["culprit"] = "x" * 201
+        data["culprit"] = long_string
         self.process_events(data)
-        self.assertTrue(IssueEvent.objects.first())
+        first_event = IssueEvent.objects.first()
+        self.assertEqual(first_event.transaction, truncated_string)
+
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        data["transaction"] = long_string
+        self.process_events(data)
+        second_event = IssueEvent.objects.last()
+        self.assertEqual(second_event.transaction, truncated_string)
 
     def test_message_empty_param_list(self):
         self.process_events(
