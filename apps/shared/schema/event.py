@@ -10,7 +10,7 @@ Level = Literal["fatal", "error", "warning", "info", "debug"]
 
 
 class EventBreadcrumb(LaxIngestSchema):
-    type: str = "default"
+    type: Optional[str] = "default"
     category: Optional[str] = None
     message: Optional[str] = None
     data: Optional[dict[str, Any]] = None
