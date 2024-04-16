@@ -76,6 +76,40 @@ def get_search_vector(event: ProcessingEvent) -> str:
     return f"{event.title} {event.transaction}"
 
 
+Replacable = Union[str, dict, list]
+
+
+def replace(data: Replacable, match: str, repl: str) -> Replacable:
+    """A recursive replace function"""
+    if isinstance(data, dict):
+        return {k: replace(v, match, repl) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [replace(i, match, repl) for i in data]
+    elif isinstance(data, str):
+        return data.replace(match, repl)
+    return data
+
+
+def sanitize_bad_postgres_chars(data: str):
+    """
+    Remove values which are not supported by the postgres string data types
+    """
+    known_bads = ["\x00"]
+    for known_bad in known_bads:
+        data = data.replace(known_bad, " ")
+    return data
+
+
+def sanitize_bad_postgres_json(data: Replacable) -> Replacable:
+    """
+    Remove values which are not supported by the postgres JSONB data type
+    """
+    known_bads = ["\u0000"]
+    for known_bad in known_bads:
+        data = replace(data, known_bad, " ")
+    return data
+
+
 def update_issues(processing_events: list[ProcessingEvent]):
     """
     Update any existing issues based on new statistics
@@ -510,8 +544,8 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         project_id = processing_event.event.project_id
         issue_defaults = {
             "type": event_type,
-            "title": processing_event.title,
-            "metadata": processing_event.metadata,
+            "title": sanitize_bad_postgres_chars(processing_event.title),
+            "metadata": sanitize_bad_postgres_json(processing_event.metadata),
             "first_seen": processing_event.event.received,
             "last_seen": processing_event.event.received,
         }
@@ -564,7 +598,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 received=processing_event.event.received,
                 title=processing_event.title,
                 transaction=processing_event.transaction,
-                data=processing_event.event_data,
+                data=sanitize_bad_postgres_json(processing_event.event_data),
                 tags=processing_event.event_tags,
                 release_id=processing_event.release_id,
             )

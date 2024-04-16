@@ -371,6 +371,19 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertTrue(issue)
         self.assertEqual(len(issue.search_vector.split(" ")), 1)
 
+    def test_null_character_event(self):
+        """
+        Unicode null characters \u0000 are not supported by Postgres JSONB
+        NUL \x00 characters are not supported by Postgres string types
+        They should be filtered out
+        """
+        data = self.get_json_data("events/test_data/py_error.json")
+        data["exception"]["values"][0]["stacktrace"]["frames"][0][
+            "function"
+        ] = "a\u0000a"
+        data["exception"]["values"][0]["value"] = "\x00\u0000"
+        self.process_events(data)
+
 
 class SentryCompatTestCase(EventIngestTestCase):
     """
