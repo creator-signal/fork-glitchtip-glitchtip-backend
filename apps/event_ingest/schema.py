@@ -91,8 +91,9 @@ class StackTraceFrame(LaxIngestSchema):
     colno: Optional[int] = None
     abs_path: Optional[str] = None
     context_line: Optional[str] = None
-    pre_context: Optional[list[str]] = None
-    post_context: Optional[list[str]] = None
+    # Would it be better to strip the null?
+    pre_context: Optional[list[Optional[str]]] = None
+    post_context: Optional[list[Optional[str]]] = None
     source_link: Optional[str] = None
     in_app: Optional[bool] = None
     stack_start: Optional[bool] = None
