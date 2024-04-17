@@ -36,7 +36,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
             _quantity=3,
         )
         not_my_issue = baker.make("issue_events.Issue")
-        not_my_comment = baker.make(
+        baker.make(
             "issue_events.Comment", issue=not_my_issue, _fill_optional=["text"]
         )
         res = self.client.get(self.url)
