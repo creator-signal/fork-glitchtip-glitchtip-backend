@@ -105,6 +105,9 @@ class MessageEntry(Schema):
     type: Literal["message"]
     data: dict
 
+class CSPEntry(Schema):
+    type: Literal["csp"]
+    data: dict
 
 class APIEventBreadcrumb(EventBreadcrumb):
     """Slightly modified Breadcrumb for sentry api compatibility"""
@@ -155,7 +158,7 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     metadata: dict[str, str] = Field(default_factory=dict)
     tags: list[dict[str, Optional[str]]] = []
     entries: list[
-        Union[BreadcrumbsEntry, ExceptionEntry, MessageEntry, RequestEntry]
+        Union[BreadcrumbsEntry, CSPEntry, ExceptionEntry, MessageEntry, RequestEntry]
     ] = Field(discriminator="type", default_factory=list)
     contexts: Optional[Contexts] = Field(validation_alias="data.contexts", default=None)
     context: Optional[dict[str, Any]] = Field(
