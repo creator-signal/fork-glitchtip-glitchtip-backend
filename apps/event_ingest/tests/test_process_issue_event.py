@@ -16,7 +16,7 @@ from ..schema import (
     ErrorIssueEventSchema,
     InterchangeIssueEvent,
     IssueEventSchema,
-    SecuritySchema
+    SecuritySchema,
 )
 from .utils import EventIngestTestCase
 
