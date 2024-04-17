@@ -105,9 +105,11 @@ class MessageEntry(Schema):
     type: Literal["message"]
     data: dict
 
+
 class CSPEntry(Schema):
     type: Literal["csp"]
     data: dict
+
 
 class APIEventBreadcrumb(EventBreadcrumb):
     """Slightly modified Breadcrumb for sentry api compatibility"""

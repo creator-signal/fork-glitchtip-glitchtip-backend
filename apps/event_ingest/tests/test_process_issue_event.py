@@ -12,9 +12,11 @@ from apps.releases.models import Release
 
 from ..process_event import process_issue_events
 from ..schema import (
+    CSPIssueEventSchema,
     ErrorIssueEventSchema,
     InterchangeIssueEvent,
     IssueEventSchema,
+    SecuritySchema
 )
 from .utils import EventIngestTestCase
 
@@ -378,11 +380,33 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         They should be filtered out
         """
         data = self.get_json_data("events/test_data/py_error.json")
-        data["exception"]["values"][0]["stacktrace"]["frames"][0][
-            "function"
-        ] = "a\u0000a"
+        data["exception"]["values"][0]["stacktrace"]["frames"][0]["function"] = (
+            "a\u0000a"
+        )
         data["exception"]["values"][0]["value"] = "\x00\u0000"
         self.process_events(data)
+
+    def test_csp_event_processing(self):
+        self.create_logged_in_user()
+        payload = self.get_json_data(
+            "apps/event_ingest/tests/test_data/csp/mozilla_example.json"
+        )
+        data = SecuritySchema(**payload)
+        event = CSPIssueEventSchema(csp=data.csp_report.dict(by_alias=True))
+        process_issue_events(
+            [
+                InterchangeIssueEvent(
+                    project_id=self.project.id,
+                    organization_id=self.organization.id,
+                    payload=event.dict(by_alias=True),
+                )
+            ]
+        )
+        issue = Issue.objects.get()
+        url = reverse("api:get_latest_issue_event", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["culprit"], "style-src-elem")
 
 
 class SentryCompatTestCase(EventIngestTestCase):
