@@ -72,6 +72,16 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 
+    def test_malformed_sdk_packages(self):
+        event = self.django_event
+        event[2]["sdk"]["packages"] = {
+            "name": "cocoapods",
+            "version": "just_aint_right",
+        }
+        res = self.client.post(self.url, event, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(IssueEvent.objects.count(), 1)
+
     def test_nothing_event(self):
         res = self.client.post(
             self.url,
