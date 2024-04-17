@@ -278,10 +278,6 @@ class CommentSchema(CamelSchema, ModelSchema):
             "text": obj.text,
         }
 
-    @staticmethod
-    def resolve_user(obj):
-        return obj.user
-
 
 class IssueEventDetailSchema(IssueEventSchema):
     user_report: Optional[UserReportSchema]
