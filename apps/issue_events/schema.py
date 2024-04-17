@@ -6,6 +6,7 @@ from pydantic import computed_field
 
 from apps.event_ingest.schema import CSPReportSchema, EventException
 from apps.projects.models import Project
+from apps.users.models import User
 from glitchtip.schema import CamelSchema
 from sentry.interfaces.stacktrace import get_context
 
@@ -18,7 +19,7 @@ from ..shared.schema.event import (
 )
 from ..shared.schema.user import EventUser
 from .constants import IssueEventType
-from .models import Issue, IssueEvent, UserReport
+from .models import Comment, Issue, IssueEvent, UserReport
 
 
 class ProjectReference(CamelSchema, ModelSchema):
@@ -242,6 +243,44 @@ class UserReportSchema(CamelSchema, ModelSchema):
         return {
             "eventId": obj.event_id.hex,
         }
+
+
+# TODO: Sentry includes a full user object with its nested comments,
+# so we should drop this schema once we create a full user schema
+class CommentUserSchema(CamelSchema, ModelSchema):
+    id: str
+
+    class Config:
+        model = User
+        model_fields = [
+            "email",
+        ]
+        populate_by_name = True
+
+    @staticmethod
+    def resolve_id(obj: User):
+        return str(obj.id)
+
+
+class CommentSchema(CamelSchema, ModelSchema):
+    data: dict[str, str]
+    type: Optional[str] = "note"
+    date_created: datetime = Field(validation_alias="created")
+    user: CommentUserSchema
+
+    class Config:
+        model = Comment
+        model_fields = ["id"]
+
+    @staticmethod
+    def resolve_data(obj: Comment):
+        return {
+            "text": obj.text,
+        }
+
+    @staticmethod
+    def resolve_user(obj):
+        return obj.user
 
 
 class IssueEventDetailSchema(IssueEventSchema):

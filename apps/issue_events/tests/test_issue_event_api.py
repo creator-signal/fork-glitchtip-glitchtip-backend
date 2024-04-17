@@ -192,42 +192,52 @@ class CommentsAPIPermissionTests(APIPermissionTestCase):
         self.set_client_credentials(self.auth_token.token)
         self.project = baker.make("projects.Project", organization=self.organization)
         self.issue = baker.make("issue_events.Issue", project=self.project)
-        self.comment = baker.make("issue_events.Comment", issue=self.issue)
+        self.comment = baker.make(
+            "issue_events.Comment", issue=self.issue, user=self.user, text="text"
+        )
 
-    #     self.list_url = reverse(
-    #         "issue-comments-list",
-    #         kwargs={"issue_pk": self.issue.pk},
-    #     )
-    #     self.detail_url = reverse(
-    #         "issue-comments-detail",
-    #         kwargs={"issue_pk": self.issue.pk, "pk": self.comment.pk},
-    #     )
+        self.list_url = reverse(
+            "api:list_comments",
+            kwargs={"issue_id": self.issue.id},
+        )
 
-    # def test_list(self):
-    #     self.assertGetReqStatusCode(self.list_url, 403)
+    def test_list(self):
+        self.assertGetReqStatusCode(self.list_url, 403)
 
-    #     self.auth_token.add_permission("event:read")
-    #     self.assertGetReqStatusCode(self.list_url, 200)
+        self.auth_token.add_permission("event:read")
+        self.assertGetReqStatusCode(self.list_url, 200)
 
-    # def test_create(self):
-    #     self.auth_token.add_permission("event:read")
-    #     data = {"data": {"text": "Test"}}
-    #     self.assertPostReqStatusCode(self.list_url, data, 403)
+    def test_create(self):
+        self.auth_token.add_permission("event:read")
+        data = {"data": {"text": "Test"}}
+        url = reverse(
+            "api:add_comment",
+            kwargs={"issue_id": self.issue.id},
+        )
+        self.assertPostReqStatusCode(url, data, 403)
 
-    #     self.auth_token.add_permission("event:write")
-    #     self.assertPostReqStatusCode(self.list_url, data, 201)
+        self.auth_token.add_permission("event:write")
+        self.assertPostReqStatusCode(url, data, 201)
 
-    # def test_destroy(self):
-    #     self.auth_token.add_permissions(["event:read", "event:write"])
-    #     self.assertDeleteReqStatusCode(self.detail_url, 403)
+    def test_destroy(self):
+        self.auth_token.add_permissions(["event:read", "event:write"])
+        url = reverse(
+            "api:delete_comment",
+            kwargs={"issue_id": self.issue.id, "comment_id": self.comment.id},
+        )
+        self.assertDeleteReqStatusCode(url, 403)
 
-    #     self.auth_token.add_permission("event:admin")
-    #     self.assertDeleteReqStatusCode(self.detail_url, 204)
+        self.auth_token.add_permission("event:admin")
+        self.assertDeleteReqStatusCode(url, 204)
 
-    # def test_update(self):
-    #     self.auth_token.add_permission("event:read")
-    #     data = {"data": {"text": "Test"}}
-    #     self.assertPutReqStatusCode(self.detail_url, data, 403)
+    def test_update(self):
+        self.auth_token.add_permission("event:read")
+        data = {"data": {"text": "Test"}}
+        url = reverse(
+            "api:update_comment",
+            kwargs={"issue_id": self.issue.id, "comment_id": self.comment.id},
+        )
+        self.assertPutReqStatusCode(url, data, 403)
 
-    #     self.auth_token.add_permission("event:write")
-    #     self.assertPutReqStatusCode(self.detail_url, data, 200)
+        self.auth_token.add_permission("event:write")
+        self.assertPutReqStatusCode(url, data, 200)
