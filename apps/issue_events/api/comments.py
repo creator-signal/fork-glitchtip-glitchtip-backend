@@ -1,9 +1,11 @@
 from typing import List, Literal
 
+from django.http import HttpResponse
 from ninja import Schema
 from ninja.errors import HttpError
 
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from ..models import Comment, Issue
@@ -24,8 +26,9 @@ def get_queryset(request: AuthHttpRequest, issue_id: int):
     by_alias=True,
 )
 @has_permission(["event:read", "event:admin"])
-async def list_comments(request: AuthHttpRequest, issue_id: int):
-    return [comment async for comment in get_queryset(request, issue_id)]
+@paginate
+async def list_comments(request: AuthHttpRequest, response: HttpResponse, issue_id: int):
+    return get_queryset(request, issue_id)
 
 
 class PostCommentSchema(Schema):
