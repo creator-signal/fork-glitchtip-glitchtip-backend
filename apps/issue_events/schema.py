@@ -132,6 +132,9 @@ class Request(CamelSchema, BaseRequest):
             )
         return None
 
+    class Config(CamelSchema.Config, BaseRequest.Config):
+        pass
+
 
 class RequestEntry(Schema):
     type: Literal["request"]
