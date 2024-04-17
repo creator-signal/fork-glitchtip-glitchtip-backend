@@ -2,6 +2,7 @@ import json
 import uuid
 from unittest import mock
 
+from django.core.cache import cache
 from django.urls import reverse
 
 from apps.issue_events.models import IssueEvent
@@ -18,6 +19,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
     def setUp(self):
         super().setUp()
+        cache.clear()
         self.url = reverse("api:event_envelope", args=[self.project.id]) + self.params
         self.django_event = self.get_json_data(
             "apps/event_ingest/tests/test_data/envelopes/django_message.json"
@@ -71,6 +73,16 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
+
+    def test_malformed_sdk_packages(self):
+        event = self.django_event
+        event[2]["sdk"]["packages"] = {
+            "name": "cocoapods",
+            "version": "just_aint_right",
+        }
+        res = self.client.post(self.url, event, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(IssueEvent.objects.count(), 1)
 
     def test_nothing_event(self):
         res = self.client.post(

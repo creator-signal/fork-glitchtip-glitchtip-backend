@@ -41,6 +41,11 @@ Coerced Str that will coerce bool to str when found
 """
 
 
+def coerce_list(v: Any) -> Any:
+    """Wrap non-list dict into list: {"a": 1} to [{"a": 1}]"""
+    return v if not isinstance(v, dict) else [v]
+
+
 class Signal(LaxIngestSchema):
     number: int
     code: Optional[int]
@@ -178,6 +183,10 @@ class ClientSDKInfo(LaxIngestSchema):
     name: Optional[str]
     packages: Optional[list[ClientSDKPackage]] = None
     version: Optional[str]
+
+    @field_validator("packages", mode="before")
+    def name_must_contain_space(cls, v: Any) -> Any:
+        return coerce_list(v)
 
 
 class RequestHeaders(LaxIngestSchema):
