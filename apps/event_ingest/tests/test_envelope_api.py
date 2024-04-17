@@ -2,6 +2,7 @@ import json
 import uuid
 from unittest import mock
 
+from django.core.cache import cache
 from django.urls import reverse
 
 from apps.issue_events.models import IssueEvent
@@ -18,6 +19,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
     def setUp(self):
         super().setUp()
+        cache.clear()
         self.url = reverse("api:event_envelope", args=[self.project.id]) + self.params
         self.django_event = self.get_json_data(
             "apps/event_ingest/tests/test_data/envelopes/django_message.json"
