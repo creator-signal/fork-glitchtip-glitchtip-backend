@@ -6,9 +6,10 @@ from ninja.parser import Parser
 
 class EnvelopeParser(Parser):
     def parse_body(self, request: HttpRequest):
-        if request.META.get("CONTENT_TYPE") in [
+        if request.META.get("CONTENT_TYPE", None) in [
             "application/x-sentry-envelope",
             "text/plain;charset=UTF-8",
+            None,
         ]:
             result = [orjson.loads(line) for line in request.readlines()]
             if settings.EVENT_STORE_DEBUG:

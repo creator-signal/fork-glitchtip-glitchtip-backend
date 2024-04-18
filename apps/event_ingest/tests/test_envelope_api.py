@@ -1,8 +1,10 @@
 import json
 import uuid
 from unittest import mock
+from urllib.parse import urlparse
 
 from django.core.cache import cache
+from django.test.client import FakePayload
 from django.urls import reverse
 
 from apps.issue_events.models import IssueEvent
@@ -111,3 +113,21 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 422)
         mock_log.assert_called_once()
+
+    def test_no_content_type(self):
+        data = (
+            b'{"event_id": "5a337086bc1545448e29ed938729cba3"}\n{"type": "event"}\n{}'
+        )
+        parsed = urlparse(self.url)  # path can be lazy
+        r = {
+            "PATH_INFO": self.client._get_path(parsed),
+            "REQUEST_METHOD": "POST",
+            "SERVER_PORT": "80",
+            "wsgi.url_scheme": "http",
+            "CONTENT_LENGTH": str(len(data)),
+            "HTTP_X_SENTRY_AUTH": f"x=x sentry_key={self.projectkey.public_key.hex}",
+            "wsgi.input": FakePayload(data),
+        }
+        res = self.client.request(**r)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.project.issues.count(), 1)
