@@ -9,7 +9,7 @@ from symbolic import SourceMapView, SourceView
 from apps.files.models import File
 from sentry.utils.safe import get_path
 
-from .schema import StackTrace, StackTraceFrame
+from .schema import IssueEventSchema, StackTrace, StackTraceFrame
 
 UNKNOWN_MODULE = "<unknown module>"
 CLEAN_MODULE_RE = re.compile(
@@ -61,12 +61,15 @@ class JavascriptEventProcessor:
     Based partially on sentry/lang/javascript/processor.py
     """
 
-    def __init__(self, release_id, data):
+    def __init__(self, release_id: int, data: IssueEventSchema):
         self.release_id = release_id
         self.data = data
 
     def get_stacktraces(self) -> list[StackTrace]:
-        return [e.stacktrace for e in self.data.exception.values if e.stacktrace]
+        data = self.data
+        if data.exception and not isinstance(data.exception, list):
+            return [e.stacktrace for e in data.exception.values if e.stacktrace]
+        return []
 
     def get_valid_frames(self, stacktraces) -> list[StackTraceFrame]:
         frames = [stacktrace.frames for stacktrace in stacktraces]
