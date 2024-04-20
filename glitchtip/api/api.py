@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 
+import orjson
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
 from asgiref.sync import sync_to_async
@@ -48,7 +49,9 @@ api.add_router("embed", embed_router)
 def log_validation(request, exc):
     if request.resolver_match.route == "api/<project_id>/envelope/":
         set_level("warning")
-        set_context("incoming event", request.body)
+        set_context(
+            "incoming event", [orjson.loads(line) for line in request.body.splitlines()]
+        )
         capture_exception(exc)
         logger.warning(f"Validation error on {request.path}", exc_info=exc)
     return api.create_response(request, {"detail": exc.errors}, status=422)
