@@ -322,6 +322,7 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     modules: Optional[dict[str, str]] = Field(
         validation_alias="data.modules", default_factory=dict
     )
+    contexts: Optional[dict] = Field(validation_alias="data.contexts", default=None)
     sdk: Optional[dict] = Field(validation_alias="data.sdk", default_factory=dict)
     type: Optional[str] = Field(validation_alias="get_type_display")
     request: Optional[Any] = Field(validation_alias="data.request", default=None)
