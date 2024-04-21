@@ -1,9 +1,9 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from operator import itemgetter
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
-from operator import itemgetter
 
 from django.contrib.postgres.search import SearchVector
 from django.db import connection, transaction
