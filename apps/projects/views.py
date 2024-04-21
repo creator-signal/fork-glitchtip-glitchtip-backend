@@ -179,7 +179,7 @@ class ProjectKeyViewSet(viewsets.ModelViewSet):
 
 class ProjectTeamViewSet(NestedTeamViewSet):
     @action(
-        methods=["post", "delete"], detail=False, url_path=("(?P<team_slug>[-\w]+)")
+        methods=["post", "delete"], detail=False, url_path=(r"(?P<team_slug>[-\w]+)")
     )
     def add_remove_project(
         self,
