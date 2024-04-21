@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
+from operator import itemgetter
 
 from django.contrib.postgres.search import SearchVector
 from django.db import connection, transaction
@@ -694,13 +695,16 @@ def update_tags(processing_events: list[ProcessingEvent]):
     if not tag_stats:
         return
 
-    data = [
-        [date, issue_id, key_id, value_id, count]
-        for date, d1 in tag_stats.items()
-        for issue_id, d2 in d1.items()
-        for key_id, d3 in d2.items()
-        for value_id, count in d3.items()
-    ]
+    data = sorted(
+        [
+            [date, issue_id, key_id, value_id, count]
+            for date, d1 in tag_stats.items()
+            for issue_id, d2 in d1.items()
+            for key_id, d3 in d2.items()
+            for value_id, count in d3.items()
+        ],
+        key=itemgetter(0, 1, 2, 3),
+    )
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
         sql = (
