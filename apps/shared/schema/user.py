@@ -1,16 +1,16 @@
 from typing import Any, Dict, Optional
 
-from ninja import Schema
+from .base import LaxIngestSchema
 
 
-class EventGeo(Schema):
+class EventGeo(LaxIngestSchema):
     city: Optional[str] = None
     country_code: Optional[str] = None
     region: Optional[str] = None
     subdivision: Optional[str] = None
 
 
-class EventUser(Schema):
+class EventUser(LaxIngestSchema):
     id: Optional[str] = None
     username: Optional[str] = None
     email: Optional[str] = None
