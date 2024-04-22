@@ -350,7 +350,11 @@ CSP_CONNECT_SRC = env.list("CSP_CONNECT_SRC", str, default_connect_src)
 
 # Enable stripe by default only when configured
 stripe_domain = "https://js.stripe.com"
-default_script_src = ["'self'", "https://*.glitchtip.com"]
+default_script_src = [
+    "'self'",
+    "https://*.glitchtip.com",
+    "'sha256-0Mfn7rrvFFIfp4wc7eyyIWdGty6Fhc4qVG7t12eqtio='",  # Theme picker inline JS
+]
 default_frame_src = ["'self'"]
 if BILLING_ENABLED:
     default_script_src.append(stripe_domain)
