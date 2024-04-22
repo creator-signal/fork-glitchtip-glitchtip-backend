@@ -633,12 +633,15 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 def update_statistics(
     project_event_stats: defaultdict[datetime, defaultdict[int, int]],
 ):
-    # Flatten data for a sql param friendly format
-    data = [
-        [year, key, value]
-        for year, inner_dict in project_event_stats.items()
-        for key, value in inner_dict.items()
-    ]
+    # Flatten data for a sql param friendly format and sort to mitigate deadlocks
+    data = sorted(
+        [
+            [year, key, value]
+            for year, inner_dict in project_event_stats.items()
+            for key, value in inner_dict.items()
+        ],
+        key=itemgetter(0, 1),
+    )
     # Django ORM cannot support F functions in a bulk_update
     # psycopg3 does not support execute_values
     # https://github.com/psycopg/psycopg/issues/114
@@ -695,6 +698,7 @@ def update_tags(processing_events: list[ProcessingEvent]):
     if not tag_stats:
         return
 
+    # Sort to mitigate deadlocks
     data = sorted(
         [
             [date, issue_id, key_id, value_id, count]
