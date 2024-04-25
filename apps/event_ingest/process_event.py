@@ -663,8 +663,10 @@ TagStats = defaultdict[
 
 
 def update_tags(processing_events: list[ProcessingEvent]):
-    keys = {key for d in processing_events for key in d.event_tags.keys()}
-    values = {value for d in processing_events for value in d.event_tags.values()}
+    keys = sorted({key for d in processing_events for key in d.event_tags.keys()})
+    values = sorted(
+        {value for d in processing_events for value in d.event_tags.values()}
+    )
 
     TagKey.objects.bulk_create([TagKey(key=key) for key in keys], ignore_conflicts=True)
     TagValue.objects.bulk_create(
