@@ -96,7 +96,6 @@ class StackTraceFrame(LaxIngestSchema):
     colno: Optional[int] = None
     abs_path: Optional[str] = None
     context_line: Optional[str] = None
-    # Would it be better to strip the null?
     pre_context: Optional[list[Optional[str]]] = None
     post_context: Optional[list[Optional[str]]] = None
     source_link: Optional[str] = None
@@ -120,6 +119,12 @@ class StackTraceFrame(LaxIngestSchema):
         if self.filename and self.is_url(self.filename):
             self.filename = urlparse(self.filename).path
         return self
+
+    @field_validator("pre_context", "post_context")
+    @classmethod
+    def replace_null(cls, context: list[Optional[str]]) -> list[Optional[str]]:
+        if context:
+            return [line if line else "" for line in context]
 
 
 class StackTrace(LaxIngestSchema):
