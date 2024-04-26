@@ -828,6 +828,36 @@ class SentryCompatTestCase(EventIngestTestCase):
         )
         self.assertEqual(environment_tag["value"], "Development")
 
+    def test_ruby_zero_division(self):
+        sdk_error, sentry_json, sentry_data = self.get_json_test_data(
+            "ruby_zero_division"
+        )
+
+        event = self.submit_event(sdk_error)
+        event_json = self.get_event_json(event)
+        res = self.client.get(self.get_project_events_detail(event.pk))
+        res_data = res.json()
+        res_exception = next(filter(is_exception, res_data["entries"]), None)
+        sentry_exception = next(filter(is_exception, sentry_data["entries"]), None)
+        self.assertEqual(
+            res_exception["data"]["values"][0]["stacktrace"]["frames"][-1]["context"],
+            sentry_exception["data"]["values"][0]["stacktrace"]["frames"][-1]["context"],
+        )
+
+        self.assertCompareData(event_json, sentry_json, ["environment"])
+        self.assertCompareData(
+            res_data,
+            sentry_data,
+            [
+                "eventID",
+                "title",
+                "culprit",
+                "platform",
+                "type",
+                "metadata",
+            ],
+        )
+
     def test_sentry_cli_send_event_no_level(self):
         sdk_error, sentry_json, sentry_data = self.get_json_test_data(
             "sentry_cli_send_event_no_level"
