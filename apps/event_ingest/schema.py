@@ -128,16 +128,27 @@ class StackTrace(LaxIngestSchema):
 
 
 class EventException(LaxIngestSchema):
-    type: str
-    value: Annotated[Optional[str], WrapValidator(invalid_to_none)]
+    type: Optional[str] = None
+    value: Annotated[Optional[str], WrapValidator(invalid_to_none)] = None
     module: Optional[str] = None
     thread_id: Optional[str] = None
     mechanism: Optional[ExceptionMechanism] = None
-    stacktrace: Optional[StackTrace] = None
+    stacktrace: Annotated[Optional[StackTrace], WrapValidator(invalid_to_none)] = None
+
+    @model_validator(mode="after")
+    def check_type_value(self):
+        if self.type is None and self.value is None:
+            return None
+        return self
 
 
 class ValueEventException(LaxIngestSchema):
     values: list[EventException]
+
+    @field_validator("values")
+    @classmethod
+    def stripe_null(cls, v: list[EventException]) -> list[EventException]:
+        return [e for e in v if e is not None]
 
 
 class EventMessage(LaxIngestSchema):
@@ -392,6 +403,6 @@ class InterchangeIssueEvent(LaxIngestSchema):
     project_id: int
     organization_id: int
     received: datetime = Field(default_factory=now)
-    payload: Union[
-        IssueEventSchema, ErrorIssueEventSchema, CSPIssueEventSchema
-    ] = Field(discriminator="type")
+    payload: Union[IssueEventSchema, ErrorIssueEventSchema, CSPIssueEventSchema] = (
+        Field(discriminator="type")
+    )

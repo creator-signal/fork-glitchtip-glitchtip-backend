@@ -131,3 +131,19 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.request(**r)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(self.project.issues.count(), 1)
+
+    def test_discarded_exception(self):
+        event = self.django_event
+        event[2]["exception"] = {
+            "values": [
+                {"type": "fun", "value": "this is a fun error"},
+                {"module": "", "thread_id": 1, "stacktrace": {}},
+            ]
+        }
+        res = self.client.post(self.url, event, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(
+            IssueEvent.objects.filter(
+                data__exception=[{"type": "fun", "value": "this is a fun error"}]
+            ).exists()
+        )
