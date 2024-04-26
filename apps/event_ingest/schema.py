@@ -147,7 +147,7 @@ class ValueEventException(LaxIngestSchema):
 
     @field_validator("values")
     @classmethod
-    def stripe_null(cls, v: list[EventException]) -> list[EventException]:
+    def strip_null(cls, v: list[EventException]) -> list[EventException]:
         return [e for e in v if e is not None]
 
 
