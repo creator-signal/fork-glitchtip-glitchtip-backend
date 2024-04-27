@@ -114,6 +114,16 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 422)
         mock_log.assert_called_once()
 
+    @mock.patch("glitchtip.api.parsers.logger.warning")
+    def test_invalid_content_type(self, mock_log):
+        res = self.client.post(
+            self.url,
+            '{}\n{"type": "event"}\n{"timestamp": false}',
+            content_type="application/wut",
+        )
+        self.assertEqual(res.status_code, 400)
+        mock_log.assert_called_once()
+
     def test_no_content_type(self):
         data = (
             b'{"event_id": "5a337086bc1545448e29ed938729cba3"}\n{"type": "event"}\n{}'
