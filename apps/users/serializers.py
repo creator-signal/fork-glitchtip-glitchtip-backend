@@ -7,7 +7,9 @@ from allauth.account.forms import default_token_generator
 from allauth.account.models import EmailAddress
 from allauth.account.utils import filter_users_by_email
 from allauth.socialaccount.models import SocialApp
-from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
+from allauth.socialaccount.providers.openid_connect.views import (
+    OpenIDConnectOAuth2Adapter,
+)
 from dj_rest_auth.registration.serializers import (
     RegisterSerializer as BaseRegisterSerializer,
 )
@@ -63,7 +65,7 @@ class SocialAppSerializer(serializers.ModelSerializer):
     def get_authorize_url(self, obj):
         request = self.context.get("request")
         adapter_cls = SOCIAL_ADAPTER_MAP.get(obj.provider)
-        if adapter_cls == OpenIDConnectAdapter:
+        if adapter_cls == OpenIDConnectOAuth2Adapter:
             adapter = adapter_cls(request, obj.provider_id)
         else:
             adapter = adapter_cls(request)

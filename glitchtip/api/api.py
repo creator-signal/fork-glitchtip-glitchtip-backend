@@ -3,7 +3,9 @@ from typing import Optional
 
 import orjson
 from allauth.socialaccount.models import SocialApp
-from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
+from allauth.socialaccount.providers.openid_connect.views import (
+    OpenIDConnectOAuth2Adapter,
+)
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpRequest
@@ -107,7 +109,7 @@ async def get_settings(request: HttpRequest):
         social_app.scopes = provider.get_scope(request)
 
         adapter_cls = SOCIAL_ADAPTER_MAP.get(social_app.provider)
-        if adapter_cls == OpenIDConnectAdapter:
+        if adapter_cls == OpenIDConnectOAuth2Adapter:
             adapter = adapter_cls(request, social_app.provider_id)
         elif adapter_cls:
             adapter = adapter_cls(request)
