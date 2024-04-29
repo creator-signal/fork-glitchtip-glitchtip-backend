@@ -106,7 +106,7 @@ async def get_settings(request: HttpRequest):
     social_apps: list[SocialApp] = []
     async for social_app in SocialApp.objects.order_by("name"):
         provider = social_app.get_provider(request)
-        social_app.scopes = provider.get_scope(request)
+        social_app.scopes = provider.get_scope()
 
         adapter_cls = SOCIAL_ADAPTER_MAP.get(social_app.provider)
         if adapter_cls == OpenIDConnectOAuth2Adapter:
