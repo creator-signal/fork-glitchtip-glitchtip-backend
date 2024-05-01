@@ -4,9 +4,7 @@ from allauth.account.auth_backends import AuthenticationBackend
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter, get_adapter
 from allauth.socialaccount.helpers import complete_social_login
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client, OAuth2Error
-from allauth.socialaccount.providers.openid_connect.views import (
-    OpenIDConnectOAuth2Adapter,
-)
+from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
 from dj_rest_auth.registration.serializers import (
     SocialLoginSerializer as BaseSocialLoginSerializer,
 )
@@ -87,7 +85,7 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
             raise serializers.ValidationError(_("Define adapter_class in view"))
 
         # The OIDC provider has a dynamic provider id. Fetch it from the request.
-        if adapter_class == OpenIDConnectOAuth2Adapter:
+        if adapter_class == OpenIDConnectAdapter:
             provider = request.resolver_match.captured_kwargs.get("provider")
             adapter = adapter_class(request, provider)
         else:
