@@ -363,6 +363,16 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ],
             13,
         )
+        # Show that pre and post context is included
+        self.assertEqual(
+            len(IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][0]["pre_context"]),
+            5
+        )
+        self.assertEqual(
+            len(IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][0]["post_context"]),
+            1
+        )
+
         self.assertTrue(IssueEvent.objects.filter(release=release).exists())
 
     def test_search_vector(self):

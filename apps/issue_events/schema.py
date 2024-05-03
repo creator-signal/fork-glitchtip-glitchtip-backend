@@ -210,12 +210,13 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
                             frame["lineNo"] = frame.pop("lineno")
                             pre_context = frame.pop("pre_context", None)
                             post_context = frame.pop("post_context", None)
-                            frame["context"] = get_context(
-                                frame["lineNo"],
-                                frame.get("context_line"),
-                                pre_context,
-                                post_context,
-                            )
+                            if "context" not in frame:
+                                frame["context"] = get_context(
+                                    frame["lineNo"],
+                                    frame.get("context_line"),
+                                    pre_context,
+                                    post_context,
+                                )
 
             entries.append({"type": "exception", "data": exception})
 
