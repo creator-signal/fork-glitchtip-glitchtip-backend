@@ -149,6 +149,20 @@ class JavascriptEventProcessor:
         if in_app is not None:
             frame.in_app = in_app
 
+        # Extract frame context
+        source_result = next(
+            (x for x in sourcemap_view.iter_sources() if x[1] == token.src), None
+        )
+        if source_result is not None:
+            sourceview = sourcemap_view.get_sourceview(source_result[0])
+            source = sourceview.get_source().splitlines()
+            pre_lines = max(0, token.src_line - 5)
+            past_lines = min(len(source), token.src_line + 5)
+            frame.context_line = source[token.src_line]
+            frame.pre_context = source[pre_lines : token.src_line]
+            frame.post_context = source[token.src_line + 1: past_lines]
+
+
     def transform(self):
         stacktraces = self.get_stacktraces()
         frames = self.get_valid_frames(stacktraces)
