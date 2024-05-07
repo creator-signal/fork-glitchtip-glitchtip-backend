@@ -617,9 +617,9 @@ if os.getenv("EMAIL_HOST"):
 if os.getenv("EMAIL_PORT"):
     EMAIL_PORT = env.str("EMAIL_PORT")
 if os.getenv("EMAIL_USE_TLS"):
-    EMAIL_USE_TLS = env.str("EMAIL_USE_TLS")
+    EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS")
 if os.getenv("EMAIL_USE_SSL"):
-    EMAIL_USE_SSL = env.str("EMAIL_USE_SSL")
+    EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL")
 if os.getenv("EMAIL_TIMEOUT"):
     EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT")
 if os.getenv("EMAIL_FILE_PATH"):
