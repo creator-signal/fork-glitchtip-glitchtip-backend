@@ -1,16 +1,20 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
 from apps.organizations_ext.models import OrganizationUserRole
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 
-class ProjectTeamViewTestCase(GlitchTipTestCase):
+class ProjectTeamViewTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
+        super().create_logged_in_user()
         self.url = reverse(
-            "project-teams-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:list_project_teams",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+            },
         )
 
     def test_project_team_list(self):
@@ -20,11 +24,16 @@ class ProjectTeamViewTestCase(GlitchTipTestCase):
     def test_project_team_add_project(self):
         new_project = baker.make("projects.Project", organization=self.organization)
         url = reverse(
-            "project-teams-list",
-            kwargs={"project_pk": self.organization.slug + "/" + new_project.slug},
+            "api:create_project_team",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": new_project.slug,
+                "team_slug": self.team.slug,
+            },
         )
         self.assertFalse(new_project.team_set.exists())
-        res = self.client.post(url + self.team.slug + "/")
+        res = self.client.post(url, content_type="application/json")
+        print(res.json())
         self.assertContains(res, new_project.slug, status_code=201)
         self.assertTrue(new_project.team_set.exists())
 
