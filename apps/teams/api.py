@@ -24,7 +24,7 @@ async def list_project_teams(request: AuthHttpRequest):
     pass
 
 
-@router.post(PROJECT_TEAM_DETAIL, response={201: ProjectSchema})
+@router.post(PROJECT_TEAM_DETAIL, response={201: ProjectSchema}, by_alias=True)
 async def create_project_team(
     request: AuthHttpRequest, organization_slug: str, project_slug: str, team_slug: str
 ):

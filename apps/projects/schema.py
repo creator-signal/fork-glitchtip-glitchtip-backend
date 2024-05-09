@@ -2,7 +2,7 @@ from typing import Optional
 
 from ninja import ModelSchema
 
-from glitchtip.schema import CamelSchema, to_camel
+from glitchtip.schema import CamelSchema
 
 from .models import Project
 
@@ -11,16 +11,16 @@ class ProjectSchema(CamelSchema, ModelSchema):
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
     features: list = []
+    has_access: bool = True
+    is_bookmarked: bool = False
+    is_internal: bool = False
+    # is_member: bool
 
-    class Config(CamelSchema.Config):
+    class Meta:
         model = Project
-        model_fields = [
+        fields = [
             "first_event",
-            # "hasAccess",
             "id",
-            # "isBookmarked",
-            # "isInternal",
-            # "isMember",
             # "isPublic",
             # "name",
             # "scrubIPAddresses",
@@ -29,5 +29,6 @@ class ProjectSchema(CamelSchema, ModelSchema):
             # "platform",
             # "eventThrottleRate",
         ]
-        alias_generator = to_camel
-        populate_by_name = True
+
+    class Config(CamelSchema.Config):
+        pass
