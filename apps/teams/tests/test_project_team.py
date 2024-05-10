@@ -18,8 +18,10 @@ class ProjectTeamViewTestCase(GlitchTipTestCaseMixin, TestCase):
         )
 
     def test_project_team_list(self):
+        team2 = baker.make("teams.Team", organization=self.organization)
         res = self.client.get(self.url)
         self.assertContains(res, self.team.slug)
+        self.assertNotContains(res, team2.slug)
 
     def test_project_team_add_project(self):
         new_project = baker.make("projects.Project", organization=self.organization)
@@ -32,8 +34,7 @@ class ProjectTeamViewTestCase(GlitchTipTestCaseMixin, TestCase):
             },
         )
         self.assertFalse(new_project.team_set.exists())
-        res = self.client.post(url, content_type="application/json")
-        print(res.json())
+        res = self.client.post(url)
         self.assertContains(res, new_project.slug, status_code=201)
         self.assertTrue(new_project.team_set.exists())
 
@@ -44,18 +45,25 @@ class ProjectTeamViewTestCase(GlitchTipTestCaseMixin, TestCase):
         self.client.force_login(user)
         self.organization.add_user(user, OrganizationUserRole.MEMBER)
         url = reverse(
-            "project-teams-list",
-            kwargs={"project_pk": self.organization.slug + "/" + new_project.slug},
+            "api:list_project_teams",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": new_project.slug,
+            },
         )
         self.client.post(url + self.team.slug + "/")
         self.assertFalse(new_project.team_set.exists())
 
     def test_project_team_remove_project(self):
         url = reverse(
-            "project-teams-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:create_project_team",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+                "team_slug": self.team.slug,
+            },
         )
         self.assertTrue(self.project.team_set.exists())
-        res = self.client.delete(url + self.team.slug + "/")
+        res = self.client.delete(url)
         self.assertContains(res, self.project.slug)
         self.assertFalse(self.project.team_set.exists())

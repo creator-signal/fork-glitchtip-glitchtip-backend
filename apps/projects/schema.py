@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from ninja import ModelSchema
+from ninja import Field, ModelSchema
 
 from glitchtip.schema import CamelSchema
 
@@ -14,20 +15,22 @@ class ProjectSchema(CamelSchema, ModelSchema):
     has_access: bool = True
     is_bookmarked: bool = False
     is_internal: bool = False
-    # is_member: bool
+    is_member: bool
+    is_public: bool = False
+    scrub_ip_addresses: bool = Field(serialization_alias="scrubIPAddresses")
+    created: datetime = Field(serialization_alias="dateCreated")
 
     class Meta:
         model = Project
         fields = [
             "first_event",
             "id",
-            # "isPublic",
-            # "name",
-            # "scrubIPAddresses",
+            "name",
+            "scrub_ip_addresses",
             "slug",
-            # "dateCreated",
-            # "platform",
-            # "eventThrottleRate",
+            "created",
+            "platform",
+            "event_throttle_rate",  # Not in Sentry OSS
         ]
 
     class Config(CamelSchema.Config):
