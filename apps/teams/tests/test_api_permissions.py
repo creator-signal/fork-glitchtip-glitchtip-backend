@@ -17,8 +17,11 @@ class TeamAPIPermissionTests(APIPermissionTestCase):
             kwargs={"organization_slug": self.organization.slug},
         )
         self.project_list_url = reverse(
-            "project-teams-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:list_project_teams",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+            },
         )
         self.detail_url = reverse(
             "team-detail", kwargs={"pk": self.organization.slug + "/" + self.team.slug}
@@ -28,10 +31,11 @@ class TeamAPIPermissionTests(APIPermissionTestCase):
             kwargs={"organization_slug": self.organization.slug, "pk": self.team.pk},
         )
         self.project_detail_url = reverse(
-            "project-teams-detail",
+            "api:create_project_team",
             kwargs={
-                "project_pk": self.organization.slug + "/" + self.project.slug,
-                "pk": self.team.pk,
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+                "team_slug": self.team.slug,
             },
         )
 

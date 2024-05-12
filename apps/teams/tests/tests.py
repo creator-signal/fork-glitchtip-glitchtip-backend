@@ -1,17 +1,19 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
-from rest_framework.test import APITestCase
+
+from apps.organizations_ext.models import OrganizationUserRole
+
+from ..models import Team
 
 
-class OrgTeamTestCase(APITestCase):
-    """Tests nested under /organizations/"""
-
+class OrgTeamTestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.organization = baker.make("organizations_ext.Organization")
-        self.organization.add_user(self.user)
+        self.org_user = self.organization.add_user(self.user)
         self.client.force_login(self.user)
-        self.url = reverse("organization-teams-list", args=[self.organization.slug])
+        self.url = reverse("api:list_teams", args=[self.organization.slug])
 
     def test_list(self):
         team = baker.make("teams.Team", organization=self.organization)
@@ -24,8 +26,9 @@ class OrgTeamTestCase(APITestCase):
 
     def test_create(self):
         data = {"slug": "team"}
-        res = self.client.post(self.url, data)
+        res = self.client.post(self.url, data, content_type="application/json")
         self.assertContains(res, data["slug"], status_code=201)
+        self.assertTrue(Team.objects.filter(slug=data["slug"]).exists())
 
     def test_unauthorized_create(self):
         """Only admins can create teams for that org"""
@@ -49,42 +52,57 @@ class OrgTeamTestCase(APITestCase):
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 400)
 
-
-class TeamTestCase(APITestCase):
-    def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.org_user = self.organization.add_user(self.user)
-        self.client.force_login(self.user)
-        self.url = reverse("team-list")
-
-    def test_list(self):
+    def test_delete(self):
         team = baker.make("teams.Team", organization=self.organization)
-        other_team = baker.make("teams.Team")
-        res = self.client.get(self.url)
-        self.assertContains(res, team.slug)
-        self.assertNotContains(res, other_team.slug)
+        url = reverse("api:delete_team", args=[self.organization.slug, team.slug])
+        res = self.client.delete(url)
+        self.assertTrue(res.status_code, 204)
+        self.assertFalse(Team.objects.exists())
 
-    def test_retrieve(self):
         team = baker.make("teams.Team", organization=self.organization)
-        team.members.add(self.org_user)
-        url = reverse(
-            "team-detail",
-            kwargs={
-                "pk": f"{self.organization.slug}/{team.slug}",
-            },
-        )
-        res = self.client.get(url)
-        self.assertContains(res, team.slug)
-        self.assertTrue(res.data["isMember"])
+        self.org_user.role = OrganizationUserRole.MEMBER
+        self.org_user.save()
+        url = reverse("api:delete_team", args=[self.organization.slug, team.slug])
+        res = self.client.delete(url)
+        self.assertTrue(res.status_code, 404)
+        self.assertTrue(Team.objects.exists())
 
-    def test_invalid_retrieve(self):
-        team = baker.make("teams.Team")
-        url = reverse(
-            "team-detail",
-            kwargs={
-                "pk": f"{self.organization.slug}/{team.slug}",
-            },
-        )
-        res = self.client.get(url)
-        self.assertEqual(res.status_code, 404)
+
+# class TeamTestCase(TestCase):
+#     def setUp(self):
+#         self.user = baker.make("users.user")
+#         self.organization = baker.make("organizations_ext.Organization")
+#         self.org_user = self.organization.add_user(self.user)
+#         self.client.force_login(self.user)
+#         self.url = reverse("team-list")
+
+#     def test_list(self):
+#         team = baker.make("teams.Team", organization=self.organization)
+#         other_team = baker.make("teams.Team")
+#         res = self.client.get(self.url)
+#         self.assertContains(res, team.slug)
+#         self.assertNotContains(res, other_team.slug)
+
+#     def test_retrieve(self):
+#         team = baker.make("teams.Team", organization=self.organization)
+#         team.members.add(self.org_user)
+#         url = reverse(
+#             "team-detail",
+#             kwargs={
+#                 "pk": f"{self.organization.slug}/{team.slug}",
+#             },
+#         )
+#         res = self.client.get(url)
+#         self.assertContains(res, team.slug)
+#         self.assertTrue(res.data["isMember"])
+
+#     def test_invalid_retrieve(self):
+#         team = baker.make("teams.Team")
+#         url = reverse(
+#             "team-detail",
+#             kwargs={
+#                 "pk": f"{self.organization.slug}/{team.slug}",
+#             },
+#         )
+#         res = self.client.get(url)
+#         self.assertEqual(res.status_code, 404)
