@@ -46,12 +46,16 @@ class TeamAPITestCase(TestCase):
 
     def test_list(self):
         url = reverse("api:list_teams", args=[self.organization.slug])
-        team = baker.make("teams.Team", organization=self.organization)
+        project = baker.make("projects.Project", organization=self.organization)
+        team = baker.make(
+            "teams.Team", organization=self.organization, projects=[project]
+        )
         other_organization = baker.make("organizations_ext.Organization")
         other_organization.add_user(self.user)
         other_team = baker.make("teams.Team", organization=other_organization)
         res = self.client.get(url)
         self.assertContains(res, team.slug)
+        self.assertContains(res, project.slug)
         self.assertNotContains(res, other_team.slug)
 
     def test_create(self):
@@ -126,42 +130,120 @@ class TeamAPITestCase(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(team.members.count(), 0)
 
+    def test_organization_users_add_team_member_permission(self):
+        self.org_user.role = OrganizationUserRole.MEMBER
+        self.org_user.save()
+        team = baker.make("teams.Team", organization=self.organization)
 
-# class TeamTestCase(TestCase):
-#     def setUp(self):
-#         self.user = baker.make("users.user")
-#         self.organization = baker.make("organizations_ext.Organization")
-#         self.org_user = self.organization.add_user(self.user)
-#         self.client.force_login(self.user)
-#         self.url = reverse("team-list")
+        url = reverse(
+            "api:add_member_to_team",
+            args=[self.organization.slug, self.org_user.id, team.slug],
+        )
 
-#     def test_list(self):
-#         team = baker.make("teams.Team", organization=self.organization)
-#         other_team = baker.make("teams.Team")
-#         res = self.client.get(self.url)
-#         self.assertContains(res, team.slug)
-#         self.assertNotContains(res, other_team.slug)
+        # Add self with open membership
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 201)
+        res = self.client.delete(url)
 
-#     def test_retrieve(self):
-#         team = baker.make("teams.Team", organization=self.organization)
-#         team.members.add(self.org_user)
-#         url = reverse(
-#             "team-detail",
-#             kwargs={
-#                 "pk": f"{self.organization.slug}/{team.slug}",
-#             },
-#         )
-#         res = self.client.get(url)
-#         self.assertContains(res, team.slug)
-#         self.assertTrue(res.data["isMember"])
+        # Can't add self without open membership
+        self.organization.open_membership = False
+        self.organization.save()
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 403)
+        self.organization.open_membership = True
+        self.organization.save()
 
-#     def test_invalid_retrieve(self):
-#         team = baker.make("teams.Team")
-#         url = reverse(
-#             "team-detail",
-#             kwargs={
-#                 "pk": f"{self.organization.slug}/{team.slug}",
-#             },
-#         )
-#         res = self.client.get(url)
-#         self.assertEqual(res.status_code, 404)
+        # Can't add someone else with open membership when not admin
+        other_user = baker.make("users.User")
+        other_org_user = self.organization.add_user(other_user)
+        url = reverse(
+            "api:add_member_to_team",
+            args=[self.organization.slug, other_org_user.id, team.slug],
+        )
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 403)
+
+        # Can't add someone when admin and not in team
+        self.org_user.role = OrganizationUserRole.ADMIN
+        self.org_user.save()
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 403)
+
+        # Can add someone when admin and in team
+        team.members.add(self.org_user)
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 201)
+        team.members.remove(self.org_user)
+        team.members.remove(other_org_user)
+
+        # Can add someone else when manager
+        self.org_user.role = OrganizationUserRole.MANAGER
+        self.org_user.save()
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 201)
+
+    def test_list_project_teams(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        url = reverse(
+            "api:list_project_teams", args=[self.organization.slug, project.slug]
+        )
+        team = baker.make(
+            "teams.Team", organization=self.organization, projects=[project]
+        )
+        other_team = baker.make("teams.Team", organization=self.organization)
+        res = self.client.get(url)
+        self.assertContains(res, team.slug)
+        self.assertNotContains(res, other_team.slug)
+        self.assertNotContains(res, "projects")  # Should not have projects relationship
+
+    def test_add_team_to_project(self):
+        new_project = baker.make("projects.Project", organization=self.organization)
+        team = baker.make("teams.Team", organization=self.organization)
+        url = reverse(
+            "api:add_team_to_project",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": new_project.slug,
+                "team_slug": team.slug,
+            },
+        )
+        self.assertFalse(new_project.team_set.exists())
+        res = self.client.post(url, content_type="application/json")
+        self.assertContains(res, new_project.slug, status_code=201)
+        self.assertTrue(new_project.team_set.exists())
+
+    def test_team_add_project_no_perms(self):
+        """User must be manager or above to manage project teams"""
+        team = baker.make("teams.Team", organization=self.organization)
+        new_project = baker.make("projects.Project", organization=self.organization)
+        user = baker.make("users.user")
+        self.client.force_login(user)
+        self.organization.add_user(user, OrganizationUserRole.MEMBER)
+        url = reverse(
+            "api:add_team_to_project",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": new_project.slug,
+                "team_slug": team.slug,
+            },
+        )
+        self.client.post(url)
+        self.assertFalse(new_project.team_set.exists())
+
+    def test_delete_team_from_project(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        team = baker.make(
+            "teams.Team", organization=self.organization, projects=[project]
+        )
+        url = reverse(
+            "api:delete_team_from_project",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": project.slug,
+                "team_slug": team.slug,
+            },
+        )
+        self.assertTrue(project.team_set.exists())
+        res = self.client.delete(url)
+        self.assertContains(res, project.slug)
+        self.assertFalse(project.team_set.exists())

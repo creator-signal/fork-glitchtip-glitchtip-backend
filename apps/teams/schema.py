@@ -12,12 +12,13 @@ class TeamIn(Schema):
     slug: str
 
 
-class TeamSchema(CamelSchema, ModelSchema):
+class ProjectTeamSchema(CamelSchema, ModelSchema):
+    """TeamSchema but without projects"""
+
     id: str
     created: datetime = Field(serialization_alias="dateCreated")
     is_member: bool
     member_count: int
-    projects: list[ProjectSchema] = []
 
     class Meta:
         model = Team
@@ -25,3 +26,7 @@ class TeamSchema(CamelSchema, ModelSchema):
 
     class Config(CamelSchema.Config):
         coerce_numbers_to_str = True
+
+
+class TeamSchema(ProjectTeamSchema):
+    projects: list[ProjectSchema] = []
