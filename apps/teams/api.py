@@ -55,30 +55,32 @@ def get_team_queryset(
         qs = qs.filter(slug=team_slug)
     if project_slug:
         qs = qs.filter(projects__slug=project_slug)
-    if user_id:
-        qs = qs.filter(organization__users=user_id)
     if id:
         qs = qs.filter(id=id)
-    if user_id and add_details:
-        qs = qs.annotate(
-            is_member=Exists(
-                OrganizationUser.objects.filter(team=OuterRef("pk"), user_id=user_id)
-            ),
-            member_count=Count("members"),
-        )
-    if user_id and add_projects:
-        qs = qs.prefetch_related(
-            Prefetch(
-                "projects",
-                queryset=Project.objects.annotate(
-                    is_member=Exists(
-                        OrganizationUser.objects.filter(
-                            team__members=OuterRef("pk"), user_id=user_id
-                        )
-                    ),
+    if user_id:
+        qs = qs.filter(organization__users=user_id)
+        if add_details:
+            qs = qs.annotate(
+                is_member=Exists(
+                    OrganizationUser.objects.filter(
+                        team=OuterRef("pk"), user_id=user_id
+                    )
                 ),
+                member_count=Count("members"),
             )
-        )
+        if add_projects:
+            qs = qs.prefetch_related(
+                Prefetch(
+                    "projects",
+                    queryset=Project.objects.annotate(
+                        is_member=Exists(
+                            OrganizationUser.objects.filter(
+                                team__members=OuterRef("pk"), user_id=user_id
+                            )
+                        ),
+                    ),
+                )
+            )
     return qs
 
 
@@ -92,7 +94,11 @@ async def get_team(request: AuthHttpRequest, organization_slug: str, team_slug: 
     user_id = request.auth.user_id
     return await aget_object_or_404(
         get_team_queryset(
-            organization_slug, user_id=user_id, add_details=True, add_projects=True
+            organization_slug,
+            user_id=user_id,
+            team_slug=team_slug,
+            add_details=True,
+            add_projects=True,
         )
     )
 
@@ -225,6 +231,7 @@ async def modify_member_for_team(
 
     if add_member:
         await team.members.aadd(org_user)
+        team.is_member = True
     else:
         await team.members.aremove(org_user)
     return team

@@ -5,14 +5,12 @@ from apps.organizations_ext.models import Organization, OrganizationUserRole
 
 from .models import Team
 from .permissions import TeamPermission
-from .serializers import TeamSerializer
 
 
 class NestedTeamViewSet(viewsets.ModelViewSet):
     """Teams for an Organization"""
 
     queryset = Team.objects.all()
-    serializer_class = TeamSerializer
     permission_classes = [TeamPermission]
 
     def get_queryset(self):

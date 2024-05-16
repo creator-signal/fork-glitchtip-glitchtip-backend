@@ -9,7 +9,6 @@ from rest_framework.filters import OrderingFilter
 from rest_framework.response import Response
 
 from apps.organizations_ext.utils import is_organization_creation_open
-from apps.teams.serializers import TeamSerializer
 
 from .invitation_backend import InvitationTokenGenerator
 from .models import Organization, OrganizationUser, OrganizationUserRole
@@ -173,25 +172,6 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def check_team_member_permission(self, org_user, user, team):
-        """Check if user has permission to update team members"""
-        open_membership = org_user.organization.open_membership
-        is_self = org_user.user == user
-
-        if open_membership and is_self:
-            return  # Ok to modify yourself in any way with open_membership
-
-        in_team = team.members.filter(user=user).exists()
-        if in_team:
-            required_role = OrganizationUserRole.ADMIN
-        else:
-            required_role = OrganizationUserRole.MANAGER
-
-        if not self.request.user.organizations_ext_organizationuser.filter(
-            organization=org_user.organization, role__gte=required_role
-        ).exists():
-            raise exceptions.PermissionDenied("Must be admin to modify teams")
-
     @action(detail=True, methods=["post"])
     def set_owner(self, request, *args, **kwargs):
         """
@@ -210,47 +190,6 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
             raise exceptions.PermissionDenied("Only owner may set organization owner.")
         organization.change_owner(new_owner)
         return self.retrieve(request, *args, **kwargs)
-
-    @action(
-        detail=True,
-        methods=["post", "delete"],
-        url_path=r"teams/(?P<members_team_slug>[-\w]+)",
-    )
-    def teams(self, request, pk=None, organization_slug=None, members_team_slug=None):
-        """Add existing organization user to a team"""
-        if not pk or not organization_slug or not members_team_slug:
-            raise exceptions.MethodNotAllowed(request.method)
-
-        pk = self.kwargs.get("pk")
-        if pk == "me":
-            org_user = get_object_or_404(self.get_queryset(), user=self.request.user)
-        else:
-            queryset = self.filter_queryset(self.get_queryset())
-            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-            filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
-            org_user = get_object_or_404(queryset, **filter_kwargs)
-
-        team = org_user.organization.teams.filter(slug=members_team_slug).first()
-
-        # Instead of check_object_permissions
-        permission = OrganizationMemberTeamsPermission()
-        if not permission.has_permission(request, self):
-            self.permission_denied(
-                request, message=getattr(permission, "message", None)
-            )
-        self.check_team_member_permission(org_user, self.request.user, team)
-
-        if not team:
-            raise exceptions.NotFound()
-
-        if request.method == "POST":
-            team.members.add(org_user)
-            serializer = TeamSerializer(team, context={"request": request})
-            return Response(serializer.data, status=201)
-        elif request.method == "DELETE":
-            team.members.remove(org_user)
-            serializer = TeamSerializer(team, context={"request": request})
-            return Response(serializer.data, status=200)
 
 
 class OrganizationUserViewSet(OrganizationMemberViewSet):
