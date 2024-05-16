@@ -14,7 +14,6 @@ from .invitation_backend import InvitationTokenGenerator
 from .models import Organization, OrganizationUser, OrganizationUserRole
 from .permissions import (
     OrganizationMemberPermission,
-    OrganizationMemberTeamsPermission,
     OrganizationPermission,
 )
 from .serializers.serializers import (
