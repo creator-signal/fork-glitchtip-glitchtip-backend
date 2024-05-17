@@ -208,7 +208,9 @@ async def modify_member_for_team(
             add_projects=True,
         )
     )
-    org_user_qs = OrganizationUser.objects.select_related("organization")
+    org_user_qs = OrganizationUser.objects.filter(
+        organization__slug=organization_slug
+    ).select_related("organization")
     if member_id == "me":
         org_user = await org_user_qs.aget(user_id=user_id)
     else:

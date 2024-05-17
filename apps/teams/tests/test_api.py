@@ -121,6 +121,11 @@ class TeamAPITestCase(TestCase):
         team = baker.make(
             "teams.Team", organization=self.organization, members=[self.org_user]
         )
+
+        # Make sure correct org user is selected if user has more than one org
+        other_org = baker.make("organizations_ext.Organization")
+        baker.make("organizations_ext.OrganizationUser", user=self.user, organization=other_org)
+
         res = self.client.delete(
             reverse(
                 "api:delete_member_from_team",
