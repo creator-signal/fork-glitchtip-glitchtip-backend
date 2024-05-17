@@ -185,58 +185,6 @@ class OrganizationUsersAPITestCase(APITestCase):
         res = self.client.post(self.members_url, data)
         self.assertEqual(res.status_code, 409)
 
-    def test_organization_users_add_team_member_permission(self):
-        self.org_user.role = OrganizationUserRole.MEMBER
-        self.org_user.save()
-        team = baker.make("teams.Team", organization=self.organization)
-
-        url = (
-            self.get_org_member_detail_url(self.organization.slug, self.org_user.pk)
-            + f"teams/{team.slug}/"
-        )
-
-        # Add self with open membership
-        res = self.client.post(url)
-        self.assertEqual(res.status_code, 201)
-        res = self.client.delete(url)
-
-        # Can't add self without open membership
-        self.organization.open_membership = False
-        self.organization.save()
-        res = self.client.post(url)
-        self.assertEqual(res.status_code, 403)
-        self.organization.open_membership = True
-        self.organization.save()
-
-        # Can't add someone else with open membership when not admin
-        other_user = baker.make("users.User")
-        other_org_user = self.organization.add_user(other_user)
-        other_org_user_url = (
-            self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
-            + f"teams/{team.slug}/"
-        )
-        res = self.client.post(other_org_user_url)
-        self.assertEqual(res.status_code, 403)
-
-        # Can't add someone when admin and not in team
-        self.org_user.role = OrganizationUserRole.ADMIN
-        self.org_user.save()
-        res = self.client.post(other_org_user_url)
-        self.assertEqual(res.status_code, 403)
-
-        # Can add someone when admin and in team
-        team.members.add(self.org_user)
-        res = self.client.post(other_org_user_url)
-        self.assertEqual(res.status_code, 201)
-        team.members.remove(self.org_user)
-        team.members.remove(other_org_user)
-
-        # Can add someone else when manager
-        self.org_user.role = OrganizationUserRole.MANAGER
-        self.org_user.save()
-        res = self.client.post(other_org_user_url)
-        self.assertEqual(res.status_code, 201)
-
     def test_organization_users_create(self):
         team = baker.make("teams.Team", organization=self.organization)
         data = {

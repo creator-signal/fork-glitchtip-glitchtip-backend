@@ -116,18 +116,3 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.assertPutReqStatusCode(self.detail_url, data, 403)
         self.auth_token.add_permission("member:write")
         self.assertPutReqStatusCode(self.detail_url, data, 200)
-
-    def test_teams_add(self):
-        self.team = baker.make("teams.Team", organization=self.organization)
-        url = self.detail_url + "teams/" + self.team.slug + "/"
-        data = {}
-        self.assertPostReqStatusCode(url, data, 403)
-        self.auth_token.add_permissions(["org:read", "org:write"])
-        self.assertPostReqStatusCode(url, data, 201)
-
-    def test_teams_remove(self):
-        self.team = baker.make("teams.Team", organization=self.organization)
-        url = self.detail_url + "teams/" + self.team.slug + "/"
-        self.assertDeleteReqStatusCode(url, 403)
-        self.auth_token.add_permissions(["org:read", "org:write"])
-        self.assertDeleteReqStatusCode(url, 200)

@@ -5,7 +5,7 @@ from apps.alerts.views import ProjectAlertViewSet
 from apps.environments.views import EnvironmentProjectViewSet
 from apps.releases.views import ReleaseFileViewSet, ReleaseViewSet
 
-from .views import ProjectKeyViewSet, ProjectTeamViewSet, ProjectViewSet
+from .views import ProjectKeyViewSet, ProjectViewSet
 
 router = routers.SimpleRouter()
 router.register(r"projects", ProjectViewSet)
@@ -13,7 +13,6 @@ router.register(r"projects", ProjectViewSet)
 projects_router = routers.NestedSimpleRouter(router, r"projects", lookup="project")
 projects_router.register(r"keys", ProjectKeyViewSet, basename="project-keys")
 projects_router.register(r"alerts", ProjectAlertViewSet, basename="project-alerts")
-projects_router.register(r"teams", ProjectTeamViewSet, basename="project-teams")
 projects_router.register(
     r"environments", EnvironmentProjectViewSet, basename="project-environments"
 )
