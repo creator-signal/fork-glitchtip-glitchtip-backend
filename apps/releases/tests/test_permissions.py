@@ -17,24 +17,35 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
         self.release.projects.add(self.project)
 
         self.organization_list_url = reverse(
-            "organization-releases-list",
+            "api:list_releases",
             kwargs={"organization_slug": self.organization.slug},
         )
         self.project_list_url = reverse(
-            "project-releases-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:list_project_releases",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+            },
         )
         self.organization_detail_url = reverse(
-            "organization-releases-detail",
+            "api:get_release",
             kwargs={
                 "organization_slug": self.organization.slug,
                 "version": self.release.version,
             },
         )
         self.project_detail_url = reverse(
-            "project-releases-detail",
+            "api:get_project_release",
             kwargs={
-                "project_pk": self.organization.slug + "/" + self.project.slug,
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+                "version": self.release.version,
+            },
+        )
+        self.delete_url = reverse(
+            "api:delete_release",
+            kwargs={
+                "organization_slug": self.organization.slug,
                 "version": self.release.version,
             },
         )
@@ -42,14 +53,14 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
     def test_list(self):
         self.assertGetReqStatusCode(self.organization_list_url, 403)
         self.assertGetReqStatusCode(self.project_list_url, 403)
-        self.auth_token.add_permission("project:read")
+        self.auth_token.add_permission("project:releases")
         self.assertGetReqStatusCode(self.organization_list_url, 200)
         self.assertGetReqStatusCode(self.project_list_url, 200)
 
     def test_retrieve(self):
         self.assertGetReqStatusCode(self.organization_detail_url, 403)
         self.assertGetReqStatusCode(self.project_detail_url, 403)
-        self.auth_token.add_permission("project:read")
+        self.auth_token.add_permission("project:releases")
         self.assertGetReqStatusCode(self.organization_detail_url, 200)
         self.assertGetReqStatusCode(self.project_detail_url, 200)
 
@@ -83,7 +94,7 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
     def test_user_destroy(self):
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.project_detail_url, 204)
+        self.assertDeleteReqStatusCode(self.delete_url, 204)
 
     def test_update(self):
         self.auth_token.add_permission("project:read")

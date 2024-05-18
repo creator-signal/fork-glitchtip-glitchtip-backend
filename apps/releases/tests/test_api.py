@@ -1,19 +1,27 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
 from apps.organizations_ext.models import OrganizationUserRole
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..models import Release
 
 
-class ReleaseAPITestCase(GlitchTipTestCase):
+class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
+
+    def test_create(self):
+        url = reverse("api:create_release", args=[self.organization.slug])
+        data = {"version": "1.0", "projects": [self.project.slug]}
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertContains(res, data["version"], status_code=201)
+        self.assertTrue(Release.objects.filter(version=data["version"]).exists())
 
     def test_list(self):
         url = reverse(
-            "organization-releases-list",
+            "api:list_releases",
             kwargs={"organization_slug": self.organization.slug},
         )
         release1 = baker.make("releases.Release", organization=self.organization)
@@ -29,7 +37,7 @@ class ReleaseAPITestCase(GlitchTipTestCase):
     def test_retrieve(self):
         release = baker.make("releases.Release", organization=self.organization)
         url = reverse(
-            "organization-releases-detail",
+            "api:get_release",
             kwargs={
                 "organization_slug": self.organization.slug,
                 "version": release.version,
@@ -41,21 +49,20 @@ class ReleaseAPITestCase(GlitchTipTestCase):
     def test_finalize(self):
         release = baker.make("releases.Release", organization=self.organization)
         url = reverse(
-            "organization-releases-detail",
+            "api:update_release",
             kwargs={
                 "organization_slug": release.organization.slug,
                 "version": release.version,
             },
         )
-        data = {"projects": ["fun"], "dateReleased": "2021-09-04T14:08:57.388525996Z"}
-        res = self.client.put(url, data)
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["dateReleased"], "2021-09-04T14:08:57.388525Z")
+        data = {"dateReleased": "2021-09-04T14:08:57.388525996Z"}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertContains(res, data["dateReleased"][:14])
 
     def test_destroy(self):
         release1 = baker.make("releases.Release", organization=self.organization)
         url = reverse(
-            "organization-releases-detail",
+            "api:delete_release",
             kwargs={
                 "organization_slug": release1.organization.slug,
                 "version": release1.version,
@@ -67,7 +74,7 @@ class ReleaseAPITestCase(GlitchTipTestCase):
 
         release2 = baker.make("releases.Release")
         url = reverse(
-            "organization-releases-detail",
+            "api:delete_release",
             kwargs={
                 "organization_slug": release2.organization.slug,
                 "version": release2.version,
@@ -76,3 +83,23 @@ class ReleaseAPITestCase(GlitchTipTestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 404)
         self.assertEqual(Release.objects.all().count(), 1)
+
+    def test_project_list(self):
+        url = reverse(
+            "api:list_project_releases",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+            },
+        )
+        project2 = baker.make("projects.Project", organization=self.organization)
+        release1 = baker.make(
+            "releases.Release",
+            organization=self.organization,
+            projects=[self.project, project2],
+        )
+        release2 = baker.make("releases.Release", organization=self.organization)
+        res = self.client.get(url)
+        self.assertContains(res, release1.version)
+        self.assertNotContains(res, release2.version)  # User not in project
+        self.assertEqual(len(res.json()), 1)

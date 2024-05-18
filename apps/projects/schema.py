@@ -8,7 +8,16 @@ from glitchtip.schema import CamelSchema
 from .models import Project
 
 
-class ProjectSchema(CamelSchema, ModelSchema):
+class NameSlugProjectSchema(CamelSchema, ModelSchema):
+    class Meta:
+        model = Project
+        fields = [
+            "name",
+            "slug",
+        ]
+
+
+class ProjectSchema(NameSlugProjectSchema):
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
     features: list = []
