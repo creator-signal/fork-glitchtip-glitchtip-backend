@@ -35,7 +35,7 @@ api = NinjaAPI(
     parser=EnvelopeParser(),
     title="GlitchTip API",
     urls_namespace="api",
-    auth=[SessionAuth(), TokenAuth()],
+    auth=[TokenAuth(), SessionAuth()],
 )
 
 api.add_router("0", api_tokens_router)
