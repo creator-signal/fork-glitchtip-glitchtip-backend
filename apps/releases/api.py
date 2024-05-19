@@ -12,7 +12,7 @@ from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import Release
-from .schema import ReleaseIn, ReleaseSchema, ReleaseUpdate
+from .schema import ReleaseIn, ReleaseSchema, ReleaseUpdate, ReleaseBase
 
 router = Router()
 
@@ -26,6 +26,7 @@ PUT /organizations/{organization_slug}/releases/{version}/
 DELETE /organizations/{organization_slug}/releases/{version}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
+POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 """
 
 
@@ -72,6 +73,31 @@ async def create_release(
         raise ValidationError([{"projects": "Require at least one valid project"}])
     release = await Release.objects.acreate(organization=organization, **data)
     await release.projects.aadd(*projects)
+    return await get_releases_queryset(organization_slug, user_id, id=release.id).aget()
+
+
+@router.post(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/",
+    response={201: ReleaseSchema},
+    by_alias=True,
+)
+@has_permission(["project:releases"])
+async def create_project_release(
+    request: AuthHttpRequest, organization_slug: str, project_slug, payload: ReleaseBase
+):
+    user_id = request.auth.user_id
+    project = await aget_object_or_404(
+        Project.objects.select_related("organization"),
+        slug=project_slug,
+        organization__slug=organization_slug,
+        organization__users=user_id,
+    )
+    data = payload.dict()
+    version = data.pop("version")
+    release, _ = await Release.objects.aget_or_create(
+        organization=project.organization, version=version, defaults=data
+    )
+    await release.projects.aadd(project)
     return await get_releases_queryset(organization_slug, user_id, id=release.id).aget()
 
 

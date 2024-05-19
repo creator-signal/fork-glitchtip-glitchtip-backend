@@ -26,7 +26,7 @@ class ReleaseIn(ReleaseBase):
 class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
     created: datetime = Field(serialization_alias="dateCreated")
     released: Optional[datetime] = Field(serialization_alias="dateReleased")
-    version: str = Field(serialization_alias="shortVersion")
+    short_version: str = Field(validation_alias="version")
     projects: list[NameSlugProjectSchema]
 
     class Meta:

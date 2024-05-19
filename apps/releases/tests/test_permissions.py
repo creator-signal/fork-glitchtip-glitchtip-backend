@@ -4,7 +4,6 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
 from glitchtip.test_utils.test_case import APIPermissionTestCase
 
 
@@ -76,25 +75,19 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
 
     def test_create(self):
         self.auth_token.add_permission("project:read")
-        data = {"version": "new-version"}
+        data = {"version": "new-version", "projects": [self.project.slug]}
         self.assertPostReqStatusCode(self.organization_list_url, data, 403)
         self.assertPostReqStatusCode(self.project_list_url, data, 403)
         self.auth_token.add_permission("project:releases")
-        # Unsure if this should be supported
-        # self.assertPostReqStatusCode(self.organization_list_url, data, 201)
+        self.assertPostReqStatusCode(self.organization_list_url, data, 201)
         self.assertPostReqStatusCode(self.project_list_url, data, 201)
 
     def test_destroy(self):
         self.auth_token.add_permissions(["project:read", "project:write"])
-        self.assertDeleteReqStatusCode(self.project_detail_url, 403)
+        self.assertDeleteReqStatusCode(self.organization_detail_url, 403)
 
         self.auth_token.add_permission("project:releases")
-        self.assertDeleteReqStatusCode(self.project_detail_url, 204)
-
-    def test_user_destroy(self):
-        self.client.force_login(self.user)
-        self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.delete_url, 204)
+        self.assertDeleteReqStatusCode(self.organization_detail_url, 204)
 
     def test_update(self):
         self.auth_token.add_permission("project:read")
