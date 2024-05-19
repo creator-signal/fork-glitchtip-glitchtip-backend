@@ -12,7 +12,7 @@ from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import Release
-from .schema import ReleaseIn, ReleaseSchema, ReleaseUpdate, ReleaseBase
+from .schema import ReleaseBase, ReleaseIn, ReleaseSchema, ReleaseUpdate
 
 router = Router()
 

@@ -29,18 +29,6 @@ class ReleaseSerializer(serializers.ModelSerializer):
         )
         lookup_field = "version"
 
-    def create(self, validated_data):
-        version = validated_data.pop("version")
-        organization = validated_data.pop("organization")
-        instance, _ = Release.objects.get_or_create(
-            version=version, organization=organization, defaults=validated_data
-        )
-        return instance
-
-
-class ReleaseUpdateSerializer(ReleaseSerializer):
-    version = serializers.CharField(read_only=True)
-
 
 class ReleaseFileSerializer(serializers.ModelSerializer):
     file = serializers.FileField(write_only=True, allow_empty_file=True)
