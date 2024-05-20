@@ -41,7 +41,6 @@ class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
 
 
 class ReleaseFileSchema(CamelSchema, ModelSchema):
-
     id: str
     created: datetime = Field(serialization_alias="dateCreated")
     sha1: Optional[str] = Field(validation_alias="file.checksum", default=None)
