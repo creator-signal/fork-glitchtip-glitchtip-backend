@@ -59,10 +59,10 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, data["dateReleased"][:14])
 
-    def test_destroy(self):
+    def test_destroy_org_release(self):
         release1 = baker.make("releases.Release", organization=self.organization)
         url = reverse(
-            "api:delete_release",
+            "api:delete_organization_release",
             kwargs={
                 "organization_slug": release1.organization.slug,
                 "version": release1.version,
@@ -74,7 +74,7 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
         release2 = baker.make("releases.Release")
         url = reverse(
-            "api:delete_release",
+            "api:delete_organization_release",
             kwargs={
                 "organization_slug": release2.organization.slug,
                 "version": release2.version,
@@ -103,3 +103,32 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertContains(res, release1.version)
         self.assertNotContains(res, release2.version)  # User not in project
         self.assertEqual(len(res.json()), 1)
+
+    def test_destroy_project_release(self):
+        release = baker.make(
+            "releases.Release", organization=self.organization, projects=[self.project]
+        )
+        other_project= baker.make("projects.Project", organization=self.organization)
+        url = reverse(
+            "api:delete_project_release",
+            kwargs={
+                "organization_slug": release.organization.slug,
+                "project_slug": other_project.slug,
+                "version": release.version,
+            },
+        )
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(Release.objects.all().count(), 1)
+
+        url = reverse(
+            "api:delete_project_release",
+            kwargs={
+                "organization_slug": release.organization.slug,
+                "project_slug": self.project.slug,
+                "version": release.version,
+            },
+        )
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(Release.objects.all().count(), 0)

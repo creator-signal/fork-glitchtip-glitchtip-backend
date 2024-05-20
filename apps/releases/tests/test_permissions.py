@@ -41,10 +41,18 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
                 "version": self.release.version,
             },
         )
-        self.delete_url = reverse(
-            "api:delete_release",
+        self.org_delete_url = reverse(
+            "api:delete_organization_release",
             kwargs={
                 "organization_slug": self.organization.slug,
+                "version": self.release.version,
+            },
+        )
+        self.project_delete_url = reverse(
+            "api:delete_project_release",
+            kwargs={
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
                 "version": self.release.version,
             },
         )
@@ -82,12 +90,19 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
         self.assertPostReqStatusCode(self.organization_list_url, data, 201)
         self.assertPostReqStatusCode(self.project_list_url, data, 201)
 
-    def test_destroy(self):
+    def test_org_release_destroy(self):
         self.auth_token.add_permissions(["project:read", "project:write"])
-        self.assertDeleteReqStatusCode(self.organization_detail_url, 403)
+        self.assertDeleteReqStatusCode(self.org_delete_url, 403)
 
         self.auth_token.add_permission("project:releases")
-        self.assertDeleteReqStatusCode(self.organization_detail_url, 204)
+        self.assertDeleteReqStatusCode(self.org_delete_url, 204)
+
+    def test_project_release_destroy(self):
+        self.auth_token.add_permissions(["project:read", "project:write"])
+        self.assertDeleteReqStatusCode(self.project_delete_url, 403)
+
+        self.auth_token.add_permission("project:releases")
+        self.assertDeleteReqStatusCode(self.project_delete_url, 204)
 
     def test_update(self):
         self.auth_token.add_permission("project:read")

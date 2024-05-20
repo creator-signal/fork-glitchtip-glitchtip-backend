@@ -33,6 +33,7 @@ DELETE /organizations/{organization_slug}/releases/{version}/
 GET /organizations/{organization_slug}/releases/{version}/files/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
+DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 """
 
@@ -177,7 +178,7 @@ async def update_release(
     response={204: None},
 )
 @has_permission(["project:releases"])
-async def delete_release(
+async def delete_organization_release(
     request: AuthHttpRequest, organization_slug: str, version: str
 ):
     result, _ = await get_releases_queryset(
@@ -223,6 +224,25 @@ async def get_project_release(
             version=version,
         )
     )
+
+
+@router.delete(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/",
+    response={204: None},
+)
+@has_permission(["project:releases"])
+async def delete_project_release(
+    request: AuthHttpRequest, organization_slug: str, project_slug: str, version: str
+):
+    result, _ = await get_releases_queryset(
+        organization_slug,
+        request.auth.user_id,
+        version=version,
+        project_slug=project_slug,
+    ).adelete()
+    if not result:
+        raise Http404
+    return 204, None
 
 
 @router.get(
