@@ -60,7 +60,6 @@ class ReleaseViewSet(viewsets.ModelViewSet):
 
 class ReleaseFileViewSet(
     mixins.CreateModelMixin,
-    mixins.ListModelMixin,
     mixins.DestroyModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,

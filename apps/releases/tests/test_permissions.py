@@ -109,10 +109,11 @@ class ReleaseFileAPIPermissionTests(APIPermissionTestCase):
         self.release_file = baker.make("releases.ReleaseFile", release=self.release)
 
         self.list_url = reverse(
-            "files-list",
+            "api:list_project_release_files",
             kwargs={
-                "project_pk": self.organization.slug + "/" + self.project.slug,
-                "release_version": self.release.version,
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+                "version": self.release.version,
             },
         )
         self.detail_url = reverse(
@@ -126,7 +127,7 @@ class ReleaseFileAPIPermissionTests(APIPermissionTestCase):
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
-        self.auth_token.add_permission("project:read")
+        self.auth_token.add_permission("project:releases")
         self.assertGetReqStatusCode(self.list_url, 200)
 
     def test_retrieve(self):

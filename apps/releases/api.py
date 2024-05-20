@@ -11,8 +11,14 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
-from .models import Release
-from .schema import ReleaseBase, ReleaseIn, ReleaseSchema, ReleaseUpdate
+from .models import Release, ReleaseFile
+from .schema import (
+    ReleaseBase,
+    ReleaseFileSchema,
+    ReleaseIn,
+    ReleaseSchema,
+    ReleaseUpdate,
+)
 
 router = Router()
 
@@ -24,6 +30,7 @@ GET /organizations/{organization_slug}/releases/
 GET /organizations/{organization_slug}/releases/{version}/
 PUT /organizations/{organization_slug}/releases/{version}/
 DELETE /organizations/{organization_slug}/releases/{version}/
+GET /organizations/{organization_slug}/releases/{version}/files/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
@@ -47,6 +54,23 @@ def get_releases_queryset(
     if project_slug:
         qs = qs.filter(projects__slug=project_slug)
     return qs.prefetch_related("projects")
+
+
+def get_release_files_queryset(
+    organization_slug: str,
+    user_id: int,
+    version: Optional[str] = None,
+    project_slug: Optional[str] = None,
+):
+    qs = ReleaseFile.objects.filter(
+        release__organization__slug=organization_slug,
+        release__organization__users=user_id,
+    )
+    if version:
+        qs = qs.filter(release__version=version)
+    if project_slug:
+        qs = qs.filter(release__projects__slug=project_slug)
+    return qs.select_related("file")
 
 
 @router.post(
@@ -198,4 +222,46 @@ async def get_project_release(
             project_slug=project_slug,
             version=version,
         )
+    )
+
+
+@router.get(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/",
+    response=list[ReleaseFileSchema],
+    by_alias=True,
+)
+@paginate
+@has_permission(["project:releases"])
+async def list_project_release_files(
+    request: AuthHttpRequest,
+    response: HttpResponse,
+    organization_slug: str,
+    project_slug: str,
+    version: str,
+):
+    return get_release_files_queryset(
+        organization_slug,
+        request.auth.user_id,
+        project_slug=project_slug,
+        version=version,
+    )
+
+
+@router.get(
+    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/",
+    response=list[ReleaseFileSchema],
+    by_alias=True,
+)
+@paginate
+@has_permission(["project:releases"])
+async def list_release_files(
+    request: AuthHttpRequest,
+    response: HttpResponse,
+    organization_slug: str,
+    version: str,
+):
+    return get_release_files_queryset(
+        organization_slug,
+        request.auth.user_id,
+        version=version,
     )
