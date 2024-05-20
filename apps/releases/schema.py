@@ -41,6 +41,8 @@ class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
 
 
 class ReleaseFileSchema(CamelSchema, ModelSchema):
+
+    id: str
     created: datetime = Field(serialization_alias="dateCreated")
     sha1: Optional[str] = Field(validation_alias="file.checksum", default=None)
     headers: Optional[dict[str, str]] = Field(
@@ -50,4 +52,7 @@ class ReleaseFileSchema(CamelSchema, ModelSchema):
 
     class Meta:
         model = ReleaseFile
-        fields = ["id", "name"]
+        fields = ["name"]
+
+    class Config(CamelSchema.Config):
+        coerce_numbers_to_str = True
