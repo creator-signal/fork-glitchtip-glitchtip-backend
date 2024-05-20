@@ -15,6 +15,7 @@ from apps.api_tokens.api import router as api_tokens_router
 from apps.event_ingest.api import router as event_ingest_router
 from apps.event_ingest.embed_api import router as embed_router
 from apps.issue_events.api import router as issue_events_router
+from apps.releases.api import router as releases_router
 from apps.teams.api import router as teams_router
 from apps.users.utils import ais_user_registration_open
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
@@ -42,6 +43,7 @@ api.add_router("0", api_tokens_router)
 api.add_router("", event_ingest_router)
 api.add_router("0", issue_events_router)
 api.add_router("0", teams_router)
+api.add_router("0", releases_router)
 api.add_router("embed", embed_router)
 
 
