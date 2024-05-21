@@ -4,7 +4,6 @@ from rest_framework.response import Response
 
 from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
-from apps.projects.models import Project
 
 from .models import Release, ReleaseFile
 from .permissions import ReleaseFilePermission, ReleasePermission
@@ -12,7 +11,6 @@ from .serializers import (
     AssembleSerializer,
     ReleaseFileSerializer,
     ReleaseSerializer,
-    ReleaseUpdateSerializer,
 )
 
 
@@ -30,25 +28,6 @@ class ReleaseViewSet(viewsets.ModelViewSet):
     lookup_field = "version"
     lookup_value_regex = "[^/]+"
 
-    def get_serializer_class(self):
-        serializer_class = self.serializer_class
-        if self.request.method == "PUT":
-            serializer_class = ReleaseUpdateSerializer
-        return serializer_class
-
-    def get_queryset(self):
-        if not self.request.user.is_authenticated:
-            return self.queryset.none()
-
-        queryset = self.queryset.filter(organization__users=self.request.user)
-        organization_slug = self.kwargs.get("organization_slug")
-        if organization_slug:
-            queryset = queryset.filter(organization__slug=organization_slug)
-        project_slug = self.kwargs.get("project_slug")
-        if project_slug:
-            queryset = queryset.filter(projects__slug=project_slug)
-        return queryset
-
     def get_organization(self):
         try:
             return Organization.objects.get(
@@ -57,19 +36,6 @@ class ReleaseViewSet(viewsets.ModelViewSet):
             )
         except Organization.DoesNotExist:
             raise exceptions.ValidationError("Organization does not exist")
-
-    def perform_create(self, serializer):
-        organization = self.get_organization()
-        try:
-            project = Project.objects.get(
-                slug=self.kwargs.get("project_slug"),
-                organization=organization,
-            )
-        except Project.DoesNotExist:
-            raise exceptions.ValidationError("Project does not exist")
-
-        release = serializer.save(organization=organization)
-        release.projects.add(project)
 
     @action(detail=True, methods=["post"])
     def assemble(self, request, organization_slug: str, version: str):
@@ -94,7 +60,6 @@ class ReleaseViewSet(viewsets.ModelViewSet):
 
 class ReleaseFileViewSet(
     mixins.CreateModelMixin,
-    mixins.ListModelMixin,
     mixins.DestroyModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
