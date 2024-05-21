@@ -1,11 +1,13 @@
-import requests_mock
+from aioresponses import aioresponses
 from django.core.management import call_command
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
 from apps.projects.models import Project
 from apps.teams.models import Team
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils import generators  # noqa: F401
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from .importer import GlitchTipImporter
 
@@ -18,7 +20,7 @@ test_key = {
 }
 
 
-class ImporterTestCase(GlitchTipTestCase):
+class ImporterTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.url = "https://example.com"
         self.org_name = "org"
@@ -28,14 +30,14 @@ class ImporterTestCase(GlitchTipTestCase):
         )
 
     def set_mocks(self, m):
-        m.get(self.url + self.importer.api_root_url, json={"user": {"username": "foo"}})
-        m.get(self.url + self.importer.organization_url, json={"id": 1})
-        m.get(self.url + self.importer.organization_users_url, json=[])
-        m.get(self.url + self.importer.projects_url, json=[test_project])
-        m.get(self.url + "/api/0/projects/org/project/keys/", json=[test_key])
+        m.get(self.url + "/api/0/", payload={"user": {"username": "foo"}})
+        m.get(self.url + self.importer.organization_url, payload={"id": 1})
+        m.get(self.url + self.importer.organization_users_url, payload=[])
+        m.get(self.url + self.importer.projects_url, payload=[test_project])
+        m.get(self.url + "/api/0/projects/org/project/keys/", payload=[test_key])
         m.get(
             self.url + self.importer.teams_url,
-            json=[
+            payload=[
                 {
                     "id": "1",
                     "slug": "team",
@@ -43,9 +45,9 @@ class ImporterTestCase(GlitchTipTestCase):
                 }
             ],
         )
-        m.get(self.url + "/api/0/teams/org/team/members/", json=[])
+        m.get(self.url + "/api/0/teams/org/team/members/", payload=[])
 
-    @requests_mock.Mocker()
+    @aioresponses()
     def test_import_command(self, m):
         self.set_mocks(m)
 
@@ -59,26 +61,26 @@ class ImporterTestCase(GlitchTipTestCase):
             ).exists()
         )
 
-    @requests_mock.Mocker()
+    @aioresponses()
     def test_view(self, m):
-        self.create_user_and_project()
+        self.create_logged_in_user()
         self.organization.slug = self.org_name
         self.organization.save()
         self.set_mocks(m)
-        url = reverse("import")
+        url = reverse("api:importer")
         data = {
             "url": self.url,
             "authToken": self.auth_token,
             "organizationSlug": self.org_name,
         }
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(Team.objects.filter(slug="team").exists())
 
-    @requests_mock.Mocker()
+    @aioresponses()
     def test_invalid_org(self, m):
-        self.create_user_and_project()
-        url = reverse("import")
+        self.create_logged_in_user()
+        url = reverse("api:importer")
         data = {
             "url": self.url,
             "authToken": self.auth_token,
@@ -92,6 +94,6 @@ class ImporterTestCase(GlitchTipTestCase):
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 400)
         other_org.add_user(self.user)
-        m.get(self.url + self.importer.api_root_url, json={"user": {"username": "foo"}})
+        m.get(self.url + "api/0/", payload={"user": {"username": "foo"}})
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 400)
