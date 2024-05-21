@@ -175,7 +175,7 @@ class GlitchTipImporter:
             team["members"] = ",".join(
                 [
                     str(i)
-                    for i in OrganizationUser.objects.filter(
+                    async for i in OrganizationUser.objects.filter(
                         organization_id=self.organization_id
                     )
                     .filter(
