@@ -60,8 +60,6 @@ class ReleaseViewSet(viewsets.ModelViewSet):
 
 class ReleaseFileViewSet(
     mixins.CreateModelMixin,
-    mixins.DestroyModelMixin,
-    mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
     queryset = ReleaseFile.objects.all()

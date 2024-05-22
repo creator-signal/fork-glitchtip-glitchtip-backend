@@ -47,7 +47,7 @@ class ReleaseFileSchema(CamelSchema, ModelSchema):
     headers: Optional[dict[str, str]] = Field(
         validation_alias="file.headers", default=None
     )
-    size: Optional[int] = Field(validation_alias="file.size", default=None)
+    size: int = Field(validation_alias="file.size")
 
     class Meta:
         model = ReleaseFile

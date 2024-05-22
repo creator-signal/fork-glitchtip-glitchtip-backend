@@ -132,11 +132,12 @@ class ReleaseFileAPIPermissionTests(APIPermissionTestCase):
             },
         )
         self.detail_url = reverse(
-            "files-detail",
+            "api:get_project_release_file",
             kwargs={
-                "project_pk": self.organization.slug + "/" + self.project.slug,
-                "release_version": self.release.version,
-                "pk": self.release_file.pk,
+                "organization_slug": self.organization.slug,
+                "project_slug": self.project.slug,
+                "version": self.release.version,
+                "file_id": self.release_file.pk,
             },
         )
 
@@ -147,7 +148,7 @@ class ReleaseFileAPIPermissionTests(APIPermissionTestCase):
 
     def test_retrieve(self):
         self.assertGetReqStatusCode(self.detail_url, 403)
-        self.auth_token.add_permission("project:read")
+        self.auth_token.add_permission("project:releases")
         self.assertGetReqStatusCode(self.detail_url, 200)
 
     # Skip for now, requires DRF test client
