@@ -1,3 +1,4 @@
+from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
 from apps.importer.importer import GlitchTipImporter
@@ -11,12 +12,13 @@ class Command(BaseCommand):
         parser.add_argument("auth_token", type=str)
         parser.add_argument("organization_slug", type=str)
 
-    def handle(self, *args, **options):
+    @async_to_sync
+    async def handle(self, *args, **options):
         url = options["url"].rstrip("/")
         if not url.startswith("http"):
             url = "https://" + url
         importer = GlitchTipImporter(
             url, options["auth_token"], options["organization_slug"], create_users=True
         )
-        importer.check_auth()
-        importer.run()
+        await importer.check_auth()
+        await importer.run()

@@ -57,7 +57,6 @@ if "django.contrib.admin" in settings.INSTALLED_APPS:
     urlpatterns += [
         path("admin/", include("django_rest_mfa.mfa_admin.urls")),
         path("admin/", admin.site.urls),
-        path("api/0/", include("apps.importer.urls")),
     ]
 
 if settings.BILLING_ENABLED:
