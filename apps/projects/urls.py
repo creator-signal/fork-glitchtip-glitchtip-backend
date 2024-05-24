@@ -3,7 +3,7 @@ from rest_framework_nested import routers
 
 from apps.alerts.views import ProjectAlertViewSet
 from apps.environments.views import EnvironmentProjectViewSet
-from apps.releases.views import ReleaseFileViewSet, ReleaseViewSet
+from apps.releases.views import ReleaseViewSet
 
 from .views import ProjectKeyViewSet, ProjectViewSet
 
@@ -21,7 +21,6 @@ projects_router.register(r"releases", ReleaseViewSet, basename="project-releases
 releases_router = routers.NestedSimpleRouter(
     projects_router, r"releases", lookup="release"
 )
-releases_router.register(r"files", ReleaseFileViewSet, basename="files")
 
 urlpatterns = [
     path("", include(router.urls)),
