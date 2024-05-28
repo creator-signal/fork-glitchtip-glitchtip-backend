@@ -63,6 +63,9 @@ class TeamAPITestCase(TestCase):
         data = {"slug": "te$m"}
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
+        data["slug"] = "t" * 51
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
         data["slug"] = "team"
         res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, data["slug"], status_code=201)
