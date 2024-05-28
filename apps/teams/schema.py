@@ -3,13 +3,14 @@ from datetime import datetime
 from ninja import Field, ModelSchema, Schema
 
 from apps.projects.schema import ProjectSchema
+from apps.shared.schema.fields import SlugStr
 from glitchtip.schema import CamelSchema
 
 from .models import Team
 
 
 class TeamIn(Schema):
-    slug: str
+    slug: SlugStr
 
 
 class ProjectTeamSchema(CamelSchema, ModelSchema):
@@ -19,6 +20,7 @@ class ProjectTeamSchema(CamelSchema, ModelSchema):
     created: datetime = Field(serialization_alias="dateCreated")
     is_member: bool
     member_count: int
+    slug: SlugStr
 
     class Meta:
         model = Team

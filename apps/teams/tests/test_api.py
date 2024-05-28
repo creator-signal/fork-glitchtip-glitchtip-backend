@@ -60,7 +60,10 @@ class TeamAPITestCase(TestCase):
 
     def test_create(self):
         url = reverse("api:create_team", args=[self.organization.slug])
-        data = {"slug": "team"}
+        data = {"slug": "te$m"}
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+        data["slug"] = "team"
         res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, data["slug"], status_code=201)
         self.assertTrue(Team.objects.filter(slug=data["slug"]).exists())
@@ -124,7 +127,9 @@ class TeamAPITestCase(TestCase):
 
         # Make sure correct org user is selected if user has more than one org
         other_org = baker.make("organizations_ext.Organization")
-        baker.make("organizations_ext.OrganizationUser", user=self.user, organization=other_org)
+        baker.make(
+            "organizations_ext.OrganizationUser", user=self.user, organization=other_org
+        )
 
         res = self.client.delete(
             reverse(

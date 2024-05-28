@@ -13,6 +13,7 @@ from apps.organizations_ext.models import (
 )
 from apps.projects.models import Project
 from apps.projects.schema import ProjectSchema
+from apps.shared.types import MeID
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
@@ -246,7 +247,7 @@ async def modify_member_for_team(
 )
 @has_permission(["team:write", "team:admin"])
 async def add_member_to_team(
-    request: AuthHttpRequest, organization_slug: str, member_id: str, team_slug: str
+    request: AuthHttpRequest, organization_slug: str, member_id: MeID, team_slug: str
 ):
     return 201, await modify_member_for_team(
         organization_slug, member_id, team_slug, request.auth.user_id, True
@@ -259,7 +260,7 @@ async def add_member_to_team(
 )
 @has_permission(["team:write", "team:admin"])
 async def delete_member_from_team(
-    request: AuthHttpRequest, organization_slug: str, member_id: str, team_slug: str
+    request: AuthHttpRequest, organization_slug: str, member_id: MeID, team_slug: str
 ):
     return await modify_member_for_team(
         organization_slug, member_id, team_slug, request.auth.user_id, False
