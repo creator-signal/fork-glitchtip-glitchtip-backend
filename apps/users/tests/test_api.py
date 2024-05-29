@@ -62,24 +62,27 @@ class UsersTestCase(GlitchTipTestCase):
         self.create_user_and_project()
 
     def test_list(self):
-        url = reverse("user-list")
+        url = reverse("api:list_users")
         res = self.client.get(url)
         self.assertContains(res, self.user.email)
 
     def test_retrieve(self):
-        url = reverse("user-detail", args=["me"])
+        url = reverse("api:get_user", args=["me"])
+        res = self.client.get(url)
+        self.assertContains(res, self.user.email)
+        url = reverse("api:get_user", args=[self.user.id])
         res = self.client.get(url)
         self.assertContains(res, self.user.email)
 
     def test_destroy(self):
         other_user = baker.make("users.user")
-        url = reverse("user-detail", args=[other_user.pk])
+        url = reverse("api:delete_user", args=[other_user.pk])
         res = self.client.delete(url)
         self.assertEqual(
             res.status_code, 404, "User should not be able to delete other users"
         )
 
-        url = reverse("user-detail", args=[self.user.pk])
+        url = reverse("api:delete_user", args=[self.user.pk])
         res = self.client.delete(url)
         self.assertEqual(
             res.status_code, 400, "Not allowed to destroy owned organization"
@@ -90,6 +93,10 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
         self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+
+    def test_update(self):
+        # TODO
+        pass
 
     def test_organization_members_list(self):
         other_user = baker.make("users.user")
