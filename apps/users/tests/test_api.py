@@ -59,7 +59,7 @@ class UserRegistrationTestCase(APITestCase):
 
 class UsersTestCase(GlitchTipTestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
 
     def test_list(self):
         url = reverse("api:list_users")
@@ -95,8 +95,12 @@ class UsersTestCase(GlitchTipTestCase):
         self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
 
     def test_update(self):
-        # TODO
-        pass
+        url = reverse("api:update_user", args=["me"])
+        data = {"name": "new", "options": {"foo": "bar"}}
+        res = self.client.put(url, data, format="json")
+        self.assertContains(res, data["name"])
+        self.assertContains(res, data["options"]["foo"])
+        self.assertTrue(User.objects.filter(name=data["name"]).exists())
 
     def test_organization_members_list(self):
         other_user = baker.make("users.user")

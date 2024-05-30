@@ -8,7 +8,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 
 from .models import User
-from .schema import UserSchema, UserIn
+from .schema import UserIn, UserSchema
 
 router = Router()
 
@@ -64,7 +64,7 @@ async def delete_user(request: AuthHttpRequest, user_id: MeID):
 
 
 @router.put(
-    "users/{slug:user_id}/",
+    "/users/{slug:user_id}/",
     response=UserSchema,
     by_alias=True,
 )
