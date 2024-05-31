@@ -8,6 +8,9 @@ from allauth.socialaccount.providers.openid_connect.views import (
     OpenIDConnectOAuth2Adapter,
 )
 from dj_rest_auth.registration.serializers import (
+    SocialConnectMixin,
+)
+from dj_rest_auth.registration.serializers import (
     SocialLoginSerializer as BaseSocialLoginSerializer,
 )
 from dj_rest_auth.registration.views import SocialConnectView, SocialLoginView
@@ -212,8 +215,12 @@ class GenericMFAMixin:
         return adapter_class
 
 
-class GlitchTipSocialConnectView(GenericMFAMixin, SocialConnectView):
+class GlitchTipSocialConnectSerializer(SocialConnectMixin, SocialLoginSerializer):
     pass
+
+
+class GlitchTipSocialConnectView(GenericMFAMixin, SocialConnectView):
+    serializer_class = GlitchTipSocialConnectSerializer
 
 
 class MFASocialLoginView(GenericMFAMixin, SocialLoginView):
