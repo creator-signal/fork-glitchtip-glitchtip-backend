@@ -14,7 +14,7 @@ GlitchTip is an open source, Sentry API compatible error tracking platform. It i
 of Sentry's open source codebase before it went proprietary. Its goals are to be a modern, easy-to-develop error
 tracking platform that respects your freedom to use it any way you wish. Some differences include:
 
-- A modern development environment with Python 3 and Django 4.
+- A modern development environment with Python 3, Django 5, async, and types.
 - Simplicity over features. We use Postgres to store error data. Our code base is a fraction of the size of Sentry and
   looks like a typical Django app. We leverage existing open source Django ecosystem apps whenever possible.
 - Lightweight - GlitchTip runs with as little as 1GB of ram, PostgreSQL, and Redis.
@@ -84,7 +84,7 @@ UWSGI_LOG_ENCODER='json {"severity":"info","timestamp":${unix},"message":"${msg}
 
 - Thank you to the Sentry team for their ongoing open source SDK work and formerly open source backend of which this
   project is based on.
-- We use element.io for internal chat and public gitter room
+- We use element.io for our public gitter room
 - Plausible Analytics is used for analytics
 - Django - no other web framework is as feature complete
 - django-ninja/Pydantic - brings typed and async-first api design
