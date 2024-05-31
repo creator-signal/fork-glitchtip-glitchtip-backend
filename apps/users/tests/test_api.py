@@ -159,14 +159,18 @@ class UsersTestCase(GlitchTipTestCase):
 
     def test_emails_create_dupe_email(self):
         url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress", user=self.user)
+        email_address = baker.make(
+            "account.EmailAddress",
+            user=self.user,
+            email="something@example.com",
+        )
         data = {"email": email_address.email}
         res = self.client.post(url, data)
         self.assertContains(res, "this account", status_code=400)
 
     def test_emails_create_dupe_email_other_user(self):
         url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress")
+        email_address = baker.make("account.EmailAddress", email="a@example.com")
         data = {"email": email_address.email}
         res = self.client.post(url, data)
         self.assertContains(res, "another account", status_code=400)

@@ -153,6 +153,14 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
                 )
             else:
                 login = self.get_social_login(adapter, app, social_token, token)
+                # In allauth 0.53, we need this here instead
+                account_exists = (
+                    get_user_model()
+                    .objects.filter(
+                        email=login.user.email,
+                    )
+                    .exists()
+                )
             ret = complete_social_login(request, login)
         except HTTPError:
             raise serializers.ValidationError(_("Incorrect value"))
@@ -162,13 +170,6 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
 
         if not login.is_existing:
             if allauth_account_settings.UNIQUE_EMAIL:
-                account_exists = (
-                    get_user_model()
-                    .objects.filter(
-                        email=login.user.email,
-                    )
-                    .exists()
-                )
                 if account_exists:
                     raise serializers.ValidationError(
                         _("User is already registered with this e-mail address."),
