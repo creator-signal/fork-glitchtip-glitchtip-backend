@@ -195,7 +195,7 @@ async def create_team(
 
 async def modify_member_for_team(
     organization_slug: str,
-    member_id: str,
+    member_id: MeID,
     team_slug: str,
     user_id: int,
     add_member=True,

@@ -3,7 +3,9 @@ from typing import Optional
 
 import orjson
 from allauth.socialaccount.models import SocialApp
-from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
+from allauth.socialaccount.providers.openid_connect.views import (
+    OpenIDConnectOAuth2Adapter,
+)
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpRequest
@@ -18,6 +20,7 @@ from apps.importer.api import router as importer_router
 from apps.issue_events.api import router as issue_events_router
 from apps.releases.api import router as releases_router
 from apps.teams.api import router as teams_router
+from apps.users.api import router as users_router
 from apps.users.utils import ais_user_registration_open
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
 
@@ -45,6 +48,7 @@ api.add_router("", event_ingest_router)
 api.add_router("0", importer_router)
 api.add_router("0", issue_events_router)
 api.add_router("0", teams_router)
+api.add_router("0", users_router)
 api.add_router("0", releases_router)
 api.add_router("embed", embed_router)
 
@@ -110,10 +114,10 @@ async def get_settings(request: HttpRequest):
     social_apps: list[SocialApp] = []
     async for social_app in SocialApp.objects.order_by("name"):
         provider = social_app.get_provider(request)
-        social_app.scopes = provider.get_scope(request)
+        social_app.scopes = provider.get_scope()
 
         adapter_cls = SOCIAL_ADAPTER_MAP.get(social_app.provider)
-        if adapter_cls == OpenIDConnectAdapter:
+        if adapter_cls == OpenIDConnectOAuth2Adapter:
             adapter = adapter_cls(request, social_app.provider_id)
         elif adapter_cls:
             adapter = adapter_cls(request)

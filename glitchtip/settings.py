@@ -203,6 +203,7 @@ INSTALLED_APPS = [
     "django_prometheus",
     "allauth",
     "allauth.account",
+    "allauth.headless",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.digitalocean",
     "allauth.socialaccount.providers.gitea",
@@ -636,6 +637,13 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
+LOGIN_REDIRECT_URL = "/"
+# HEADLESS_ONLY = True
+# HEADLESS_FRONTEND_URLS = {
+#     "account_signup": "/login",
+#     "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
+#     "account_confirm_email": "/profile/confirm-email/{key}/",
+# }
 SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
@@ -645,16 +653,9 @@ if GITEA_URL := env.url("SOCIALACCOUNT_PROVIDERS_gitea_GITEA_URL", None):
     SOCIALACCOUNT_PROVIDERS["gitea"] = {"GITEA_URL": GITEA_URL.geturl()}
 if NEXTCLOUD_URL := env.url("SOCIALACCOUNT_PROVIDERS_nextcloud_SERVER", None):
     SOCIALACCOUNT_PROVIDERS["nextcloud"] = {"SERVER": NEXTCLOUD_URL.geturl()}
-# Removed keycloak, use oidc https://django-allauth.readthedocs.io/en/latest/socialaccount/providers/keycloak.html
 if MICROSOFT_TENANT := env.str("SOCIALACCOUNT_PROVIDERS_microsoft_TENANT", None):
     SOCIALACCOUNT_PROVIDERS["microsoft"] = {"TENANT": MICROSOFT_TENANT}
 
-# Remove in GlitchTip4.0
-if "ENABLE_OPEN_USER_REGISTRATION" in os.environ:
-    warnings.warn(
-        "ENABLE_OPEN_USER_REGISTRATION is deprecated. Set ENABLE_ORGANIZATION_CREATION instead.",
-        DeprecationWarning,
-    )
 ENABLE_USER_REGISTRATION = env.bool("ENABLE_USER_REGISTRATION", True)
 ENABLE_ORGANIZATION_CREATION = env.bool(
     "ENABLE_OPEN_USER_REGISTRATION", env.bool("ENABLE_ORGANIZATION_CREATION", False)

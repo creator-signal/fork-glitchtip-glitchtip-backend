@@ -59,27 +59,30 @@ class UserRegistrationTestCase(APITestCase):
 
 class UsersTestCase(GlitchTipTestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
 
     def test_list(self):
-        url = reverse("user-list")
+        url = reverse("api:list_users")
         res = self.client.get(url)
         self.assertContains(res, self.user.email)
 
     def test_retrieve(self):
-        url = reverse("user-detail", args=["me"])
+        url = reverse("api:get_user", args=["me"])
+        res = self.client.get(url)
+        self.assertContains(res, self.user.email)
+        url = reverse("api:get_user", args=[self.user.id])
         res = self.client.get(url)
         self.assertContains(res, self.user.email)
 
     def test_destroy(self):
         other_user = baker.make("users.user")
-        url = reverse("user-detail", args=[other_user.pk])
+        url = reverse("api:delete_user", args=[other_user.pk])
         res = self.client.delete(url)
         self.assertEqual(
             res.status_code, 404, "User should not be able to delete other users"
         )
 
-        url = reverse("user-detail", args=[self.user.pk])
+        url = reverse("api:delete_user", args=[self.user.pk])
         res = self.client.delete(url)
         self.assertEqual(
             res.status_code, 400, "Not allowed to destroy owned organization"
@@ -90,6 +93,14 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
         self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+
+    def test_update(self):
+        url = reverse("api:update_user", args=["me"])
+        data = {"name": "new", "options": {"foo": "bar"}}
+        res = self.client.put(url, data, format="json")
+        self.assertContains(res, data["name"])
+        self.assertContains(res, data["options"]["foo"])
+        self.assertTrue(User.objects.filter(name=data["name"]).exists())
 
     def test_organization_members_list(self):
         other_user = baker.make("users.user")
@@ -148,14 +159,18 @@ class UsersTestCase(GlitchTipTestCase):
 
     def test_emails_create_dupe_email(self):
         url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress", user=self.user)
+        email_address = baker.make(
+            "account.EmailAddress",
+            user=self.user,
+            email="something@example.com",
+        )
         data = {"email": email_address.email}
         res = self.client.post(url, data)
         self.assertContains(res, "this account", status_code=400)
 
     def test_emails_create_dupe_email_other_user(self):
         url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress")
+        email_address = baker.make("account.EmailAddress", email="a@example.com")
         data = {"email": email_address.email}
         res = self.client.post(url, data)
         self.assertContains(res, "another account", status_code=400)

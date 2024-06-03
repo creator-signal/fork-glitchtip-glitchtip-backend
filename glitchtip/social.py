@@ -4,13 +4,19 @@ from allauth.account.auth_backends import AuthenticationBackend
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter, get_adapter
 from allauth.socialaccount.helpers import complete_social_login
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client, OAuth2Error
-from allauth.socialaccount.providers.openid_connect.views import OpenIDConnectAdapter
+from allauth.socialaccount.providers.openid_connect.views import (
+    OpenIDConnectOAuth2Adapter,
+)
+from dj_rest_auth.registration.serializers import (
+    SocialConnectMixin,
+)
 from dj_rest_auth.registration.serializers import (
     SocialLoginSerializer as BaseSocialLoginSerializer,
 )
 from dj_rest_auth.registration.views import SocialConnectView, SocialLoginView
 from django.conf import settings
 from django.contrib.auth import get_backends, get_user_model
+from django.db import IntegrityError
 from django.http import HttpResponseBadRequest
 from django.utils.translation import gettext_lazy as _
 from django_rest_mfa.helpers import has_mfa
@@ -85,7 +91,7 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
             raise serializers.ValidationError(_("Define adapter_class in view"))
 
         # The OIDC provider has a dynamic provider id. Fetch it from the request.
-        if adapter_class == OpenIDConnectAdapter:
+        if adapter_class == OpenIDConnectOAuth2Adapter:
             provider = request.resolver_match.captured_kwargs.get("provider")
             adapter = adapter_class(request, provider)
         else:
@@ -111,7 +117,6 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
                 )
 
             provider = adapter.get_provider()
-            scope = provider.get_scope(request)
             client = self.client_class(
                 request,
                 app.client_id,
@@ -119,7 +124,6 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
                 adapter.access_token_method,
                 adapter.access_token_url,
                 self.callback_url,
-                scope,
                 scope_delimiter=adapter.scope_delimiter,
                 headers=adapter.headers,
                 basic_auth=adapter.basic_auth,
@@ -152,6 +156,14 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
                 )
             else:
                 login = self.get_social_login(adapter, app, social_token, token)
+                # In allauth 0.53, we need this here instead
+                account_exists = (
+                    get_user_model()
+                    .objects.filter(
+                        email=login.user.email,
+                    )
+                    .exists()
+                )
             ret = complete_social_login(request, login)
         except HTTPError:
             raise serializers.ValidationError(_("Incorrect value"))
@@ -161,13 +173,6 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
 
         if not login.is_existing:
             if allauth_account_settings.UNIQUE_EMAIL:
-                account_exists = (
-                    get_user_model()
-                    .objects.filter(
-                        email=login.user.email,
-                    )
-                    .exists()
-                )
                 if account_exists:
                     raise serializers.ValidationError(
                         _("User is already registered with this e-mail address."),
@@ -177,7 +182,12 @@ class SocialLoginSerializer(BaseSocialLoginSerializer):
                 raise serializers.ValidationError(_("User registration is closed."))
             else:
                 login.lookup()
-                login.save(request, connect=True)
+                try:
+                    login.save(request, connect=True)
+                except IntegrityError as ex:
+                    raise serializers.ValidationError(
+                        _("User is already registered with this e-mail address."),
+                    ) from ex
                 self.post_signup(login, attrs)
 
         attrs["user"] = login.account.user
@@ -205,8 +215,12 @@ class GenericMFAMixin:
         return adapter_class
 
 
-class GlitchTipSocialConnectView(GenericMFAMixin, SocialConnectView):
+class GlitchTipSocialConnectSerializer(SocialConnectMixin, SocialLoginSerializer):
     pass
+
+
+class GlitchTipSocialConnectView(GenericMFAMixin, SocialConnectView):
+    serializer_class = GlitchTipSocialConnectSerializer
 
 
 class MFASocialLoginView(GenericMFAMixin, SocialLoginView):

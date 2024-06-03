@@ -89,7 +89,8 @@ urlpatterns += [
         "rest-auth/<slug:provider>/connect/",
         social.GlitchTipSocialConnectView().as_view(),
     ),
-    path("accounts/", include("allauth.urls")),  # Required for allauth
+    path("accounts/", include("allauth.urls")),
+    path("_allauth/", include("allauth.headless.urls")),
     # These routes belong to the Angular single page app
     re_path(r"^$", TemplateView.as_view(template_name="index.html")),
     re_path(

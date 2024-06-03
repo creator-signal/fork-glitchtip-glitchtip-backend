@@ -9,9 +9,7 @@ from rest_framework import exceptions, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.organizations_ext.models import Organization
 from apps.projects.models import UserProjectAlert
-from apps.users.utils import is_user_registration_open
 
 from .models import User
 from .serializers import (
@@ -23,7 +21,7 @@ from .serializers import (
 )
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
@@ -48,33 +46,6 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.kwargs.get("pk") == "me":
             return CurrentUserSerializer
         return super().get_serializer_class()
-
-    def perform_create(self, serializer):
-        organization_slug = self.kwargs.get("organization_slug")
-        try:
-            Organization.objects.get(slug=organization_slug)
-        except Organization.DoesNotExist as err:
-            raise exceptions.ValidationError("Organization does not exist") from err
-        # TODO deal with organization and users who aren't set up yet
-        if not is_user_registration_open() and not self.request.user.is_superuser:
-            raise exceptions.PermissionDenied("Registration is not open")
-        user = serializer.save()
-        return user
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.organizations_ext_organizationuser.filter(
-            organizationowner__isnull=False
-        ):
-            return Response(
-                data={
-                    "message": "User is organization owner. Delete organization or transfer ownership first."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["get", "post", "put"])
     def notifications(self, request, pk=None):
