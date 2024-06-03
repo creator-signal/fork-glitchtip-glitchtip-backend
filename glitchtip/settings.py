@@ -638,11 +638,12 @@ ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
 LOGIN_REDIRECT_URL = "/"
-HEADLESS_ONLY = True
-HEADLESS_FRONTEND_URLS = {
-    "account_signup": "/login",
-    "account_reset_password": "/reset-password",
-}
+# HEADLESS_ONLY = True
+# HEADLESS_FRONTEND_URLS = {
+#     "account_signup": "/login",
+#     "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
+#     "account_confirm_email": "/profile/confirm-email/{key}/",
+# }
 SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
