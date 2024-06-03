@@ -8,7 +8,7 @@ from apps.performance.views import (
     TransactionViewSet,
 )
 from apps.projects.views import OrganizationProjectsViewSet
-from apps.releases.views import ReleaseFileViewSet, ReleaseViewSet
+from apps.releases.views import ReleaseViewSet
 from apps.teams.views import NestedTeamViewSet
 from apps.uptime.views import (
     MonitorCheckViewSet,
@@ -77,9 +77,6 @@ organizations_router.register(
 )
 organizations_releases_router = routers.NestedSimpleRouter(
     organizations_router, r"releases", lookup="release"
-)
-organizations_releases_router.register(
-    r"files", ReleaseFileViewSet, basename="organization-release-files"
 )
 
 urlpatterns = [

@@ -84,7 +84,7 @@ class File(CreatedModel):
     type = models.CharField(max_length=64)
     headers = models.JSONField(blank=True, null=True)
     blob = models.ForeignKey(FileBlob, on_delete=models.CASCADE, null=True)
-    size = models.PositiveIntegerField(null=True)
+    size = models.PositiveIntegerField(default=0)
     checksum = models.CharField(max_length=40, null=True, db_index=True)
 
     def put_django_file(self, fileobj):

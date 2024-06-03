@@ -31,10 +31,14 @@ GET /organizations/{organization_slug}/releases/{version}/
 PUT /organizations/{organization_slug}/releases/{version}/
 DELETE /organizations/{organization_slug}/releases/{version}/
 GET /organizations/{organization_slug}/releases/{version}/files/
+GET /organizations/{organization_slug}/releases/{version}/files/{file_id}/
+DELETE /organizations/{organization_slug}/releases/{version}/files/{file_id}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
+GET /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/
+DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/ (sentry undocumented)
 """
 
 
@@ -62,11 +66,14 @@ def get_release_files_queryset(
     user_id: int,
     version: Optional[str] = None,
     project_slug: Optional[str] = None,
+    id: Optional[int] = None,
 ):
     qs = ReleaseFile.objects.filter(
         release__organization__slug=organization_slug,
         release__organization__users=user_id,
     )
+    if id:
+        qs = qs.filter(id=id)
     if version:
         qs = qs.filter(release__version=version)
     if project_slug:
@@ -190,6 +197,66 @@ async def delete_organization_release(
 
 
 @router.get(
+    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/",
+    response=list[ReleaseFileSchema],
+    by_alias=True,
+)
+@paginate
+@has_permission(["project:releases"])
+async def list_release_files(
+    request: AuthHttpRequest,
+    response: HttpResponse,
+    organization_slug: str,
+    version: str,
+):
+    return get_release_files_queryset(
+        organization_slug,
+        request.auth.user_id,
+        version=version,
+    )
+
+
+@router.get(
+    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/{int:file_id}/",
+    response=ReleaseFileSchema,
+    by_alias=True,
+)
+@has_permission(["project:releases"])
+async def get_organization_release_file(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    version: str,
+    file_id: int,
+):
+    return await aget_object_or_404(
+        get_release_files_queryset(
+            organization_slug,
+            request.auth.user_id,
+            project_slug=project_slug,
+            version=version,
+            id=file_id,
+        )
+    )
+
+
+@router.delete(
+    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/{int:file_id}/",
+    response={204: None},
+)
+@has_permission(["project:releases"])
+async def delete_organization_release_file(
+    request: AuthHttpRequest, organization_slug: str, version: str, file_id: int
+):
+    result, _ = await get_release_files_queryset(
+        organization_slug, request.auth.user_id, version=version, id=file_id
+    ).adelete()
+    if not result:
+        raise Http404
+    return 204, None
+
+
+@router.get(
     "/projects/{slug:organization_slug}/{slug:project_slug}/releases/",
     response=list[ReleaseSchema],
     by_alias=True,
@@ -267,21 +334,49 @@ async def list_project_release_files(
     )
 
 
-@router.get(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/",
-    response=list[ReleaseFileSchema],
-    by_alias=True,
+@router.delete(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/{int:file_id}/",
+    response={204: None},
 )
-@paginate
 @has_permission(["project:releases"])
-async def list_release_files(
+async def delete_project_release_file(
     request: AuthHttpRequest,
-    response: HttpResponse,
     organization_slug: str,
+    project_slug: str,
     version: str,
+    file_id: int,
 ):
-    return get_release_files_queryset(
+    result, _ = await get_release_files_queryset(
         organization_slug,
         request.auth.user_id,
         version=version,
+        id=file_id,
+        project_slug=project_slug,
+    ).adelete()
+    if not result:
+        raise Http404
+    return 204, None
+
+
+@router.get(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/{int:file_id}/",
+    response=ReleaseFileSchema,
+    by_alias=True,
+)
+@has_permission(["project:releases"])
+async def get_project_release_file(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    version: str,
+    file_id: int,
+):
+    return await aget_object_or_404(
+        get_release_files_queryset(
+            organization_slug,
+            request.auth.user_id,
+            project_slug=project_slug,
+            version=version,
+            id=file_id,
+        )
     )
