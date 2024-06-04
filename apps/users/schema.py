@@ -1,8 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
+from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
 from ninja import Field, ModelSchema
+from pydantic import EmailStr
 
 from glitchtip.schema import CamelSchema
 
@@ -10,7 +12,7 @@ from .models import User
 
 
 class SocialAccountSchema(CamelSchema, ModelSchema):
-    email: Optional[str]
+    email: Optional[EmailStr]
     username: Optional[str]
 
     class Meta:
@@ -46,8 +48,9 @@ class UserIn(CamelSchema, ModelSchema):
 
 
 class UserSchema(CamelSchema, ModelSchema):
-    username: str = Field(validation_alias="email")
+    username: EmailStr = Field(validation_alias="email")
     created: datetime = Field(serialization_alias="dateJoined")
+    email: EmailStr
     has_password_auth: bool = Field(validation_alias="has_usable_password")
     identities: list[SocialAccountSchema] = Field(validation_alias="socialaccount_set")
 
@@ -62,3 +65,19 @@ class UserSchema(CamelSchema, ModelSchema):
             "email",
             "options",
         ]
+
+
+class EmailAddressIn(CamelSchema, ModelSchema):
+    email: EmailStr
+
+    class Meta:
+        model = EmailAddress
+        fields = ["email"]
+
+
+class EmailAddressSchema(CamelSchema, ModelSchema):
+    isPrimary: bool = Field(validation_alias="primary")
+    isVerified: bool = Field(validation_alias="verified")
+
+    class Meta(EmailAddressIn.Meta):
+        pass

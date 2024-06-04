@@ -1,3 +1,5 @@
+from allauth.account.models import EmailAddress
+from asgiref.sync import sync_to_async
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -8,7 +10,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 
 from .models import User
-from .schema import UserIn, UserSchema
+from .schema import EmailAddressIn, EmailAddressSchema, UserIn, UserSchema
 
 router = Router()
 
@@ -20,6 +22,10 @@ GET /users/<me_id>/
 DELETE /users/<me_id>/
 PUT /users/<me_id>/
 GET /organizations/burke-software/users/ (Not implemented)
+GET /users/<me_id>/emails/
+POST /users/<me_id>/emails/
+PUT /users/<me_id>/emails/ (Set as primary)
+DELETE /users/<me_id>/emails/
 """
 
 
@@ -28,6 +34,10 @@ def get_user_queryset(user_id: int, add_details=False):
     if add_details:
         qs = qs.prefetch_related("socialaccount_set")
     return qs
+
+
+def get_email_queryset(user_id: int):
+    return EmailAddress.objects.filter(user_id=user_id)
 
 
 @router.get("/users/", response=list[UserSchema], by_alias=True)
@@ -82,3 +92,30 @@ async def update_user(request: AuthHttpRequest, user_id: MeID, payload: UserIn):
     await user.asave()
 
     return user
+
+
+@router.get(
+    "/users/{slug:user_id}/emails/", response=list[EmailAddressSchema], by_alias=True
+)
+async def list_emails(request: AuthHttpRequest, user_id: MeID):
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+    # No pagination, thus sanity check limit
+    return [email async for email in get_email_queryset(user_id=user_id)[:200]]
+
+
+@router.post(
+    "/users/{slug:user_id}/emails/", response={201: EmailAddressSchema}, by_alias=True
+)
+async def create_email(
+    request: AuthHttpRequest, user_id: MeID, payload: EmailAddressIn
+):
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+    email_address = await EmailAddress.objects.acreate(
+        email=payload.email, user_id=user_id
+    )
+    await sync_to_async(email_address.send_confirmation)(request, signup=False)
+    return 201, email_address

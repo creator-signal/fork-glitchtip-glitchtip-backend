@@ -119,28 +119,32 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.get(url)
         self.assertNotContains(res, other_user.email)
 
-    def test_emails_retrieve(self):
+    def test_emails_list(self):
         email_address = baker.make("account.EmailAddress", user=self.user)
         another_user = baker.make("users.user")
         another_email_address = baker.make("account.EmailAddress", user=another_user)
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:list_emails", args=["me"])
         res = self.client.get(url)
         self.assertContains(res, email_address.email)
         self.assertNotContains(res, another_email_address.email)
 
     def test_emails_confirm(self):
         email_address = baker.make("account.EmailAddress", user=self.user)
-        url = reverse("user-emails-list", args=["me"]) + "confirm/"
+        url = reverse("api:list_emails", args=["me"]) + "confirm/"
         data = {"email": email_address.email}
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(len(mail.outbox), 1)
 
     def test_emails_create(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:list_emails", args=["me"])
+
+        res = self.client.post(url, {"email": "invalid"}, format="json")
+        self.assertEqual(res.status_code, 422)
+
         new_email = "new@exmaple.com"
         data = {"email": new_email}
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, format="json")
         self.assertContains(res, new_email, status_code=201)
         self.assertTrue(
             self.user.emailaddress_set.filter(email=new_email, verified=False).exists()

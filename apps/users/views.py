@@ -103,8 +103,6 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class EmailAddressViewSet(
-    mixins.CreateModelMixin,
-    mixins.ListModelMixin,
     viewsets.GenericViewSet,
 ):
     queryset = EmailAddress.objects.all()
