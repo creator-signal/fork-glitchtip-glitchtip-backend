@@ -180,12 +180,12 @@ class UsersTestCase(GlitchTipTestCase):
         self.assertContains(res, "another account", status_code=400)
 
     def test_emails_set_primary(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:set_email_as_primary", args=["me"])
         email_address = baker.make(
             "account.EmailAddress", verified=True, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.put(url, data)
+        res = self.client.put(url, data, format="json")
         self.assertContains(res, email_address.email, status_code=200)
         self.assertTrue(
             self.user.emailaddress_set.filter(
@@ -199,12 +199,12 @@ class UsersTestCase(GlitchTipTestCase):
         self.assertEqual(self.user.emailaddress_set.filter(primary=True).count(), 1)
 
     def test_emails_destroy(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:delete_email", args=["me"])
         email_address = baker.make(
             "account.EmailAddress", verified=True, primary=False, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.delete(url, data)
+        res = self.client.delete(url, data, format="json")
         self.assertEqual(res.status_code, 204)
         self.assertFalse(
             self.user.emailaddress_set.filter(email=email_address.email).exists()

@@ -121,37 +121,6 @@ class EmailAddressViewSet(
         queryset = super().get_queryset().filter(user=user)
         return queryset
 
-    def put(self, request, user_pk, format=None):
-        """
-        Set a new primary email (must be verified) this will also set the email used when a user logs in.
-        """
-        user = self.get_user(user_pk)
-        try:
-            email_address = user.emailaddress_set.get(
-                email=request.data.get("email"), verified=True
-            )
-            email_address.set_as_primary()
-        except ObjectDoesNotExist as err:
-            raise Http404 from err
-        serializer = self.serializer_class(
-            instance=email_address, data=request.data, context={"request": request}
-        )
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, user_pk, format=None):
-        user = self.get_user(user_pk)
-        try:
-            email_address = user.emailaddress_set.get(
-                email=request.data.get("email"), primary=False
-            )
-        except ObjectDoesNotExist as err:
-            raise Http404 from err
-        email_address.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
     @action(detail=False, methods=["post"])
     def confirm(self, request, user_pk):
         serializer = ConfirmEmailAddressSerializer(data=request.data)

@@ -36,8 +36,11 @@ def get_user_queryset(user_id: int, add_details=False):
     return qs
 
 
-def get_email_queryset(user_id: int):
-    return EmailAddress.objects.filter(user_id=user_id)
+def get_email_queryset(user_id: int, verified: bool = None):
+    qs = EmailAddress.objects.filter(user_id=user_id)
+    if verified:
+        qs = qs.filter(verified=verified)
+    return qs
 
 
 @router.get("/users/", response=list[UserSchema], by_alias=True)
@@ -119,3 +122,34 @@ async def create_email(
     )
     await sync_to_async(email_address.send_confirmation)(request, signup=False)
     return 201, email_address
+
+
+@router.put("/users/{slug:user_id}/emails/", response=EmailAddressSchema, by_alias=True)
+async def set_email_as_primary(
+    request: AuthHttpRequest, user_id: MeID, payload: EmailAddressIn
+):
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+
+    queryset = get_email_queryset(user_id, verified=True)
+    email_address = await aget_object_or_404(queryset, email=payload.email)
+    await queryset.aupdate(primary=False)
+    email_address.primary = True
+    await email_address.asave(update_fields=["primary"])
+    return email_address
+
+
+@router.delete("/users/{slug:user_id}/emails/", response={204: None})
+async def delete_email(
+    request: AuthHttpRequest, user_id: MeID, payload: EmailAddressIn
+):
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+
+    queryset = get_email_queryset(user_id, verified=True)
+    result, _ = await queryset.filter(email=payload.email, primary=False).adelete()
+    if result:
+        return 204, None
+    raise Http404
