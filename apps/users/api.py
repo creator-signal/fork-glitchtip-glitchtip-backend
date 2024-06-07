@@ -1,5 +1,6 @@
 from allauth.account.models import EmailAddress
 from asgiref.sync import sync_to_async
+from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -114,12 +115,27 @@ async def list_emails(request: AuthHttpRequest, user_id: MeID):
 async def create_email(
     request: AuthHttpRequest, user_id: MeID, payload: EmailAddressIn
 ):
+    """
+    Create a new unverified email address. Will return 400 if the email already exists
+    and is verified.
+    """
     if user_id != request.auth.user_id and user_id != "me":
         raise Http404
     user_id = request.auth.user_id
-    email_address = await EmailAddress.objects.acreate(
-        email=payload.email, user_id=user_id
-    )
+    if await EmailAddress.objects.filter(email=payload.email, verified=True).aexists():
+        raise HttpError(
+            400,
+            "Email already exists",
+        )
+    try:
+        email_address = await EmailAddress.objects.acreate(
+            email=payload.email, user_id=user_id
+        )
+    except IntegrityError:
+        raise HttpError(
+            400,
+            "Email already exists",
+        )
     await sync_to_async(email_address.send_confirmation)(request, signup=False)
     return 201, email_address
 

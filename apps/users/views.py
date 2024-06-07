@@ -2,10 +2,9 @@ from allauth.account.models import EmailAddress
 from dj_rest_auth.registration.views import (
     SocialAccountDisconnectView as BaseSocialAccountDisconnectView,
 )
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.http import Http404
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
-from rest_framework import exceptions, mixins, status, viewsets
+from rest_framework import exceptions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 

@@ -162,22 +162,24 @@ class UsersTestCase(GlitchTipTestCase):
         )
 
     def test_emails_create_dupe_email(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:create_email", args=["me"])
         email_address = baker.make(
             "account.EmailAddress",
             user=self.user,
             email="something@example.com",
         )
         data = {"email": email_address.email}
-        res = self.client.post(url, data)
-        self.assertContains(res, "this account", status_code=400)
+        res = self.client.post(url, data, format="json")
+        self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_create_dupe_email_other_user(self):
-        url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress", email="a@example.com")
+        url = reverse("api:create_email", args=["me"])
+        email_address = baker.make(
+            "account.EmailAddress", email="a@example.com", verified=True
+        )
         data = {"email": email_address.email}
-        res = self.client.post(url, data)
-        self.assertContains(res, "another account", status_code=400)
+        res = self.client.post(url, data, format="json")
+        self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_set_primary(self):
         url = reverse("api:set_email_as_primary", args=["me"])
