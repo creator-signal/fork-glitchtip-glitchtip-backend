@@ -1,9 +1,7 @@
-from allauth.account.models import EmailAddress
 from dj_rest_auth.registration.views import (
     SocialAccountDisconnectView as BaseSocialAccountDisconnectView,
 )
 from django.core.exceptions import ValidationError
-from django.shortcuts import get_object_or_404
 from rest_framework import exceptions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,9 +10,7 @@ from apps.projects.models import UserProjectAlert
 
 from .models import User
 from .serializers import (
-    ConfirmEmailAddressSerializer,
     CurrentUserSerializer,
-    EmailAddressSerializer,
     UserNotificationsSerializer,
     UserSerializer,
 )
@@ -98,36 +94,6 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
             UserProjectAlert.objects.update_or_create(
                 user=user, project_id=project_id, defaults={"status": alert_status}
             )
-        return Response(status=204)
-
-
-class EmailAddressViewSet(
-    viewsets.GenericViewSet,
-):
-    queryset = EmailAddress.objects.all()
-    serializer_class = EmailAddressSerializer
-    pagination_class = None
-
-    def get_user(self, user_pk):
-        if user_pk == "me":
-            return self.request.user
-        raise exceptions.ValidationError(
-            "Can only change primary email address on own account"
-        )
-
-    def get_queryset(self):
-        user = self.get_user(self.kwargs.get("user_pk"))
-        queryset = super().get_queryset().filter(user=user)
-        return queryset
-
-    @action(detail=False, methods=["post"])
-    def confirm(self, request, user_pk):
-        serializer = ConfirmEmailAddressSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        email_address = get_object_or_404(
-            self.get_queryset(), email=serializer.validated_data.get("email")
-        )
-        email_address.send_confirmation(request)
         return Response(status=204)
 
 

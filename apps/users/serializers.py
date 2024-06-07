@@ -82,10 +82,6 @@ class SocialAppSerializer(serializers.ModelSerializer):
         return obj.provider_id or obj.provider
 
 
-class ConfirmEmailAddressSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-
-
 class EmailAddressSerializer(serializers.ModelSerializer):
     isPrimary = serializers.BooleanField(source="primary", read_only=True)
     email = serializers.EmailField()  # Remove default unique validation
