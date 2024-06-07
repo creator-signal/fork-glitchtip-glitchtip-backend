@@ -1,7 +1,3 @@
-from dj_rest_auth.registration.views import (
-    SocialAccountDisconnectView as BaseSocialAccountDisconnectView,
-)
-from django.core.exceptions import ValidationError
 from rest_framework import exceptions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -95,11 +91,3 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
                 user=user, project_id=project_id, defaults={"status": alert_status}
             )
         return Response(status=204)
-
-
-class SocialAccountDisconnectView(BaseSocialAccountDisconnectView):
-    def post(self, request, *args, **kwargs):
-        try:
-            return super().post(request, *args, **kwargs)
-        except ValidationError as e:
-            raise exceptions.ValidationError(e.message)
