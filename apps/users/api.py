@@ -15,8 +15,8 @@ from .schema import (
     EmailAddressIn,
     EmailAddressSchema,
     UserIn,
-    UserSchema,
     UserNotificationsSchema,
+    UserSchema,
 )
 
 router = Router()
