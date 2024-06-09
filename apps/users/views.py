@@ -37,21 +37,6 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
             return CurrentUserSerializer
         return super().get_serializer_class()
 
-    # @action(detail=True, methods=["get", "post", "put"])
-    # def notifications(self, request, pk=None):
-    #     user = self.get_object()
-
-    #     if request.method == "GET":
-    #         serializer = UserNotificationsSerializer(user)
-    #         return Response(serializer.data)
-
-    #     serializer = UserNotificationsSerializer(user, data=request.data)
-    #     if serializer.is_valid():
-    #         serializer.save()
-    #         return Response(serializer.data)
-    #     else:
-    #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     @action(
         detail=True, methods=["get", "post", "put"], url_path="notifications/alerts"
     )
