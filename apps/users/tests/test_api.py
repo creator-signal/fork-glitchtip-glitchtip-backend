@@ -226,15 +226,15 @@ class UsersTestCase(GlitchTipTestCase):
         )
 
     def test_notifications_retrieve(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/"
+        url = reverse("api:get_notifications", args=["me"])
         res = self.client.get(url)
         self.assertContains(res, "subscribeByDefault")
 
     def test_notifications_update(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/"
+        url = reverse("api:update_notifications", args=["me"])
         data = {"subscribeByDefault": False}
-        res = self.client.put(url, data)
-        self.assertFalse(res.data.get("subscribeByDefault"))
+        res = self.client.put(url, data, format="json")
+        self.assertFalse(res.json().get("subscribeByDefault"))
         self.user.refresh_from_db()
         self.assertFalse(self.user.subscribe_by_default)
 

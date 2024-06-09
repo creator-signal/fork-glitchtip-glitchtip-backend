@@ -11,7 +11,13 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 
 from .models import User
-from .schema import EmailAddressIn, EmailAddressSchema, UserIn, UserSchema
+from .schema import (
+    EmailAddressIn,
+    EmailAddressSchema,
+    UserIn,
+    UserSchema,
+    UserNotificationsSchema,
+)
 
 router = Router()
 
@@ -27,6 +33,8 @@ GET /users/<me_id>/emails/
 POST /users/<me_id>/emails/
 PUT /users/<me_id>/emails/ (Set as primary)
 DELETE /users/<me_id>/emails/
+GET /users/<me_id>/notifications/
+PUT /users/<me_id>/notifications/
 """
 
 
@@ -171,3 +179,29 @@ async def delete_email(
     if result:
         return 204, None
     raise Http404
+
+
+@router.get(
+    "/users/{slug:user_id}/notifications/",
+    response=UserNotificationsSchema,
+    by_alias=True,
+)
+async def get_notifications(request: AuthHttpRequest, user_id: MeID):
+    user_id = request.auth.user_id
+    return await aget_object_or_404(get_user_queryset(user_id))
+
+
+@router.put(
+    "/users/{slug:user_id}/notifications/",
+    response=UserNotificationsSchema,
+    by_alias=True,
+)
+async def update_notifications(
+    request: AuthHttpRequest, user_id: MeID, payload: UserNotificationsSchema
+):
+    user_id = request.auth.user_id
+    user = await aget_object_or_404(get_user_queryset(user_id))
+    for attr, value in payload.dict().items():
+        setattr(user, attr, value)
+    await user.asave()
+    return user

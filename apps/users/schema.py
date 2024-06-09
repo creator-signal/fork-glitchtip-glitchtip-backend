@@ -81,3 +81,9 @@ class EmailAddressSchema(CamelSchema, ModelSchema):
 
     class Meta(EmailAddressIn.Meta):
         pass
+
+
+class UserNotificationsSchema(CamelSchema, ModelSchema):
+    class Meta:
+        model = User
+        fields = ("subscribe_by_default",)

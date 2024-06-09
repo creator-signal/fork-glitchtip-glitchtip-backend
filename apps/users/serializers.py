@@ -195,14 +195,6 @@ class RegisterSerializer(BaseRegisterSerializer):
             user.save(update_fields=["analytics"])
 
 
-class UserNotificationsSerializer(serializers.ModelSerializer):
-    subscribeByDefault = serializers.BooleanField(source="subscribe_by_default")
-
-    class Meta:
-        model = User
-        fields = ("subscribeByDefault",)
-
-
 class NoopTokenSerializer(serializers.Serializer):
     """dj-rest-auth requires tokens, but we don't use them."""
 
