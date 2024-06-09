@@ -148,8 +148,10 @@ async def set_email_as_primary(
         raise Http404
     user_id = request.auth.user_id
 
-    queryset = get_email_queryset(user_id, verified=True)
-    email_address = await aget_object_or_404(queryset, email=payload.email)
+    queryset = get_email_queryset(user_id)
+    email_address = await aget_object_or_404(
+        queryset, verified=True, email=payload.email
+    )
     await queryset.aupdate(primary=False)
     email_address.primary = True
     await email_address.asave(update_fields=["primary"])

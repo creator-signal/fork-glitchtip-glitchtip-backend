@@ -192,6 +192,27 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.put(url, data)
         self.assertEqual(self.user.emailaddress_set.filter(primary=True).count(), 1)
 
+    def test_emails_set_primary_unverified_primary(self):
+        """
+        Because confirmation is optional, it's possible to have an existing email that is primary and unverified
+        """
+        url = reverse("api:set_email_as_primary", args=["me"])
+        email = "test@example.com"
+        baker.make(
+            "account.EmailAddress",
+            primary=True,
+            user=self.user,
+        )
+        baker.make(
+            "account.EmailAddress",
+            email=email,
+            verified=True,
+            user=self.user,
+        )
+        data = {"email": email}
+        res = self.client.put(url, data, format="json")
+        self.assertEqual(res.status_code, 200)
+
     def test_emails_destroy(self):
         url = reverse("api:delete_email", args=["me"])
         email_address = baker.make(
