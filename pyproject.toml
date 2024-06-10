@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Django backend that powers GlitchTip, an open source reimplementation of Sentry"
 authors = ["David Burke"]
 license = "MIT"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -45,6 +46,7 @@ boto3 = "1.34.122"
 django-ninja = "^1.0.1"
 orjson = "^3.9.9"
 celery-batches = "^0.9"
+pydantic = {extras = ["email"], version = "^2.7.3"}
 
 [tool.poetry.group.dev.dependencies]
 ipdb = "^0.13.2"

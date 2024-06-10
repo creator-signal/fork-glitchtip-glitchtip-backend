@@ -12,7 +12,6 @@ from apps.organizations_ext.urls import router as organizationsRouter
 from apps.projects.urls import router as projectsRouter
 from apps.teams.urls import router as teamsRouter
 from apps.users.urls import router as usersRouter
-from apps.users.views import SocialAccountDisconnectView
 
 from . import social
 from .api import api
@@ -79,11 +78,6 @@ urlpatterns += [
     path("rest-auth/login/", MFALoginView.as_view()),
     path("rest-auth/", include("dj_rest_auth.urls")),
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
-    re_path(
-        r"^api/socialaccounts/(?P<pk>\d+)/disconnect/$",
-        SocialAccountDisconnectView.as_view(),
-        name="social_account_disconnect",
-    ),
     path("rest-auth/<slug:provider>/", social.MFASocialLoginView().as_view()),
     path(
         "rest-auth/<slug:provider>/connect/",

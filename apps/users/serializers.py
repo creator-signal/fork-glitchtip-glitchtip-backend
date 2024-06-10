@@ -82,10 +82,6 @@ class SocialAppSerializer(serializers.ModelSerializer):
         return obj.provider_id or obj.provider
 
 
-class ConfirmEmailAddressSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-
-
 class EmailAddressSerializer(serializers.ModelSerializer):
     isPrimary = serializers.BooleanField(source="primary", read_only=True)
     email = serializers.EmailField()  # Remove default unique validation
@@ -197,14 +193,6 @@ class RegisterSerializer(BaseRegisterSerializer):
         if tags:
             user.set_register_analytics_tags(tags)
             user.save(update_fields=["analytics"])
-
-
-class UserNotificationsSerializer(serializers.ModelSerializer):
-    subscribeByDefault = serializers.BooleanField(source="subscribe_by_default")
-
-    class Meta:
-        model = User
-        fields = ("subscribeByDefault",)
 
 
 class NoopTokenSerializer(serializers.Serializer):

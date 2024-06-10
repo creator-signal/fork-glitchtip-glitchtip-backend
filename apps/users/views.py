@@ -1,11 +1,4 @@
-from allauth.account.models import EmailAddress
-from dj_rest_auth.registration.views import (
-    SocialAccountDisconnectView as BaseSocialAccountDisconnectView,
-)
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.http import Http404
-from django.shortcuts import get_object_or_404
-from rest_framework import exceptions, mixins, status, viewsets
+from rest_framework import exceptions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -13,10 +6,7 @@ from apps.projects.models import UserProjectAlert
 
 from .models import User
 from .serializers import (
-    ConfirmEmailAddressSerializer,
     CurrentUserSerializer,
-    EmailAddressSerializer,
-    UserNotificationsSerializer,
     UserSerializer,
 )
 
@@ -46,21 +36,6 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         if self.kwargs.get("pk") == "me":
             return CurrentUserSerializer
         return super().get_serializer_class()
-
-    @action(detail=True, methods=["get", "post", "put"])
-    def notifications(self, request, pk=None):
-        user = self.get_object()
-
-        if request.method == "GET":
-            serializer = UserNotificationsSerializer(user)
-            return Response(serializer.data)
-
-        serializer = UserNotificationsSerializer(user, data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        else:
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(
         detail=True, methods=["get", "post", "put"], url_path="notifications/alerts"
@@ -100,74 +75,3 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
                 user=user, project_id=project_id, defaults={"status": alert_status}
             )
         return Response(status=204)
-
-
-class EmailAddressViewSet(
-    mixins.CreateModelMixin,
-    mixins.ListModelMixin,
-    viewsets.GenericViewSet,
-):
-    queryset = EmailAddress.objects.all()
-    serializer_class = EmailAddressSerializer
-    pagination_class = None
-
-    def get_user(self, user_pk):
-        if user_pk == "me":
-            return self.request.user
-        raise exceptions.ValidationError(
-            "Can only change primary email address on own account"
-        )
-
-    def get_queryset(self):
-        user = self.get_user(self.kwargs.get("user_pk"))
-        queryset = super().get_queryset().filter(user=user)
-        return queryset
-
-    def put(self, request, user_pk, format=None):
-        """
-        Set a new primary email (must be verified) this will also set the email used when a user logs in.
-        """
-        user = self.get_user(user_pk)
-        try:
-            email_address = user.emailaddress_set.get(
-                email=request.data.get("email"), verified=True
-            )
-            email_address.set_as_primary()
-        except ObjectDoesNotExist as err:
-            raise Http404 from err
-        serializer = self.serializer_class(
-            instance=email_address, data=request.data, context={"request": request}
-        )
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, user_pk, format=None):
-        user = self.get_user(user_pk)
-        try:
-            email_address = user.emailaddress_set.get(
-                email=request.data.get("email"), primary=False
-            )
-        except ObjectDoesNotExist as err:
-            raise Http404 from err
-        email_address.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @action(detail=False, methods=["post"])
-    def confirm(self, request, user_pk):
-        serializer = ConfirmEmailAddressSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        email_address = get_object_or_404(
-            self.get_queryset(), email=serializer.validated_data.get("email")
-        )
-        email_address.send_confirmation(request)
-        return Response(status=204)
-
-
-class SocialAccountDisconnectView(BaseSocialAccountDisconnectView):
-    def post(self, request, *args, **kwargs):
-        try:
-            return super().post(request, *args, **kwargs)
-        except ValidationError as e:
-            raise exceptions.ValidationError(e.message)

@@ -119,28 +119,24 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.get(url)
         self.assertNotContains(res, other_user.email)
 
-    def test_emails_retrieve(self):
+    def test_emails_list(self):
         email_address = baker.make("account.EmailAddress", user=self.user)
         another_user = baker.make("users.user")
         another_email_address = baker.make("account.EmailAddress", user=another_user)
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:list_emails", args=["me"])
         res = self.client.get(url)
         self.assertContains(res, email_address.email)
         self.assertNotContains(res, another_email_address.email)
 
-    def test_emails_confirm(self):
-        email_address = baker.make("account.EmailAddress", user=self.user)
-        url = reverse("user-emails-list", args=["me"]) + "confirm/"
-        data = {"email": email_address.email}
-        res = self.client.post(url, data)
-        self.assertEqual(res.status_code, 204)
-        self.assertEqual(len(mail.outbox), 1)
-
     def test_emails_create(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:list_emails", args=["me"])
+
+        res = self.client.post(url, {"email": "invalid"}, format="json")
+        self.assertEqual(res.status_code, 422)
+
         new_email = "new@exmaple.com"
         data = {"email": new_email}
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, format="json")
         self.assertContains(res, new_email, status_code=201)
         self.assertTrue(
             self.user.emailaddress_set.filter(email=new_email, verified=False).exists()
@@ -158,30 +154,32 @@ class UsersTestCase(GlitchTipTestCase):
         )
 
     def test_emails_create_dupe_email(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:create_email", args=["me"])
         email_address = baker.make(
             "account.EmailAddress",
             user=self.user,
             email="something@example.com",
         )
         data = {"email": email_address.email}
-        res = self.client.post(url, data)
-        self.assertContains(res, "this account", status_code=400)
+        res = self.client.post(url, data, format="json")
+        self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_create_dupe_email_other_user(self):
-        url = reverse("user-emails-list", args=["me"])
-        email_address = baker.make("account.EmailAddress", email="a@example.com")
+        url = reverse("api:create_email", args=["me"])
+        email_address = baker.make(
+            "account.EmailAddress", email="a@example.com", verified=True
+        )
         data = {"email": email_address.email}
-        res = self.client.post(url, data)
-        self.assertContains(res, "another account", status_code=400)
+        res = self.client.post(url, data, format="json")
+        self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_set_primary(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:set_email_as_primary", args=["me"])
         email_address = baker.make(
             "account.EmailAddress", verified=True, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.put(url, data)
+        res = self.client.put(url, data, format="json")
         self.assertContains(res, email_address.email, status_code=200)
         self.assertTrue(
             self.user.emailaddress_set.filter(
@@ -194,28 +192,57 @@ class UsersTestCase(GlitchTipTestCase):
         res = self.client.put(url, data)
         self.assertEqual(self.user.emailaddress_set.filter(primary=True).count(), 1)
 
+    def test_emails_set_primary_unverified_primary(self):
+        """
+        Because confirmation is optional, it's possible to have an existing email that is primary and unverified
+        """
+        url = reverse("api:set_email_as_primary", args=["me"])
+        email = "test@example.com"
+        baker.make(
+            "account.EmailAddress",
+            primary=True,
+            user=self.user,
+        )
+        baker.make(
+            "account.EmailAddress",
+            email=email,
+            verified=True,
+            user=self.user,
+        )
+        data = {"email": email}
+        res = self.client.put(url, data, format="json")
+        self.assertEqual(res.status_code, 200)
+
     def test_emails_destroy(self):
-        url = reverse("user-emails-list", args=["me"])
+        url = reverse("api:delete_email", args=["me"])
         email_address = baker.make(
             "account.EmailAddress", verified=True, primary=False, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.delete(url, data)
+        res = self.client.delete(url, data, format="json")
         self.assertEqual(res.status_code, 204)
         self.assertFalse(
             self.user.emailaddress_set.filter(email=email_address.email).exists()
         )
 
+    def test_emails_confirm(self):
+        email_address = baker.make("account.EmailAddress", user=self.user)
+        url = reverse("api:send_confirm_email", args=["me"])
+        data = {"email": email_address.email}
+        res = self.client.post(url, data, format="json")
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(len(mail.outbox), 1)
+
     def test_notifications_retrieve(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/"
+        url = reverse("api:get_notifications", args=["me"])
         res = self.client.get(url)
         self.assertContains(res, "subscribeByDefault")
 
     def test_notifications_update(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/"
+        url = reverse("api:update_notifications", args=["me"])
         data = {"subscribeByDefault": False}
-        res = self.client.put(url, data)
-        self.assertFalse(res.data.get("subscribeByDefault"))
+        res = self.client.put(url, data, format="json")
+        self.assertFalse(res.json().get("subscribeByDefault"))
         self.user.refresh_from_db()
         self.assertFalse(self.user.subscribe_by_default)
 
