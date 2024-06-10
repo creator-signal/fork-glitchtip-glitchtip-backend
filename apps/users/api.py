@@ -181,6 +181,18 @@ async def delete_email(
     raise Http404
 
 
+@router.post("/users/{slug:user_id}/emails/confirm/", response={204: None})
+async def send_confirm_email(
+    request: AuthHttpRequest, user_id: MeID, payload: EmailAddressIn
+):
+    user_id = request.auth.user_id
+    email_address = await aget_object_or_404(
+        get_email_queryset(user_id, verified=False), email=payload.email
+    )
+    await sync_to_async(email_address.send_confirmation)(request)
+    return 204, None
+
+
 @router.get(
     "/users/{slug:user_id}/notifications/",
     response=UserNotificationsSchema,
