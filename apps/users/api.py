@@ -174,7 +174,7 @@ async def delete_email(
         raise Http404
     user_id = request.auth.user_id
 
-    queryset = get_email_queryset(user_id, verified=True)
+    queryset = get_email_queryset(user_id)
     result, _ = await queryset.filter(email=payload.email, primary=False).adelete()
     if result:
         return 204, None
