@@ -43,7 +43,7 @@ class SeedDataAPIView(APIView):
             user=user, email=user_email, primary=True, verified=False
         )
         EmailAddress.objects.create(
-            user=other_user, email=other_user_email, primary=True, verified=False
+            user=other_user, email=other_user_email, primary=True, verified=True
         )
 
         Organization.objects.filter(name=organization_name).delete()
