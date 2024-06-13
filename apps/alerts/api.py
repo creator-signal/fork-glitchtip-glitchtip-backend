@@ -28,6 +28,7 @@ def get_project_alert_queryset(user_id: int, organization_slug: str, project_slu
     response=list[ProjectAlertSchema],
     by_alias=True,
 )
+@has_permission(["project:read"])
 @paginate
 async def list_project_alerts(
     request: AuthHttpRequest,
@@ -128,7 +129,7 @@ async def update_project_alert(
     "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}",
     response={204: None},
 )
-@has_permission(["project:write", "project:admin"])
+@has_permission(["project:admin"])
 async def delete_project_alert(
     request: AuthHttpRequest, organization_slug: str, project_slug: str, alert_id: int
 ):
