@@ -11,33 +11,52 @@ class AlertAPITestCase(GlitchTipTestCase):
     def setUp(self):
         self.create_user_and_project()
 
-    def test_project_alerts_retrieve(self):
+    def test_project_alerts_list(self):
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        url = reverse(
-            "project-alerts-list",
-            kwargs={
-                "project_pk": f"{self.organization.slug}/{self.project.slug}",
-            },
-        )
-        res = self.client.get(url)
-        self.assertContains(res, alert.timespan_minutes)
 
-    def test_retrieve_with_second_team(self):
-        baker.make("alerts.ProjectAlert", project=self.project, timespan_minutes=60)
-        url = reverse(
-            "project-alerts-list",
-            kwargs={
-                "project_pk": f"{self.organization.slug}/{self.project.slug}",
-            },
-        )
-
+        # Should not show up
+        baker.make("alerts.ProjectAlert", timespan_minutes=60)
+        # Second team could cause duplicates
         team2 = baker.make("teams.Team", organization=self.organization)
         team2.members.add(self.org_user)
         self.project.team_set.add(team2)
+
+        url = reverse(
+            "api:list_project_alerts", args=[self.organization.slug, self.project.slug]
+        )
         res = self.client.get(url)
+        self.assertContains(res, alert.id)
         self.assertEqual(len(res.json()), 1)
+
+    # def test_project_alerts_retrieve(self):
+    #     alert = baker.make(
+    #         "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+    #     )
+    #     url = reverse(
+    #         "project-alerts-list",
+    #         kwargs={
+    #             "project_pk": f"{self.organization.slug}/{self.project.slug}",
+    #         },
+    #     )
+    #     res = self.client.get(url)
+    #     self.assertContains(res, alert.timespan_minutes)
+
+    # def test_retrieve_with_second_team(self):
+    #     baker.make("alerts.ProjectAlert", project=self.project, timespan_minutes=60)
+    #     url = reverse(
+    #         "project-alerts-list",
+    #         kwargs={
+    #             "project_pk": f"{self.organization.slug}/{self.project.slug}",
+    #         },
+    #     )
+
+    #     team2 = baker.make("teams.Team", organization=self.organization)
+    #     team2.members.add(self.org_user)
+    #     self.project.team_set.add(team2)
+    #     res = self.client.get(url)
+    #     self.assertEqual(len(res.json()), 1)
 
     def test_project_alerts_create(self):
         url = reverse(
