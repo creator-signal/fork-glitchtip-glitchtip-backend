@@ -15,15 +15,11 @@ class AlertsAPIPermissionTests(APIPermissionTestCase):
         self.project.team_set.add(self.team)
         self.alert = baker.make("alerts.ProjectAlert", project=self.project)
         self.list_url = reverse(
-            "project-alerts-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:list_project_alerts", args=[self.organization.slug, self.project.slug]
         )
         self.detail_url = reverse(
-            "project-alerts-detail",
-            kwargs={
-                "project_pk": self.organization.slug + "/" + self.project.slug,
-                "pk": self.alert.pk,
-            },
+            "api:update_project_alert",
+            args=[self.organization.slug, self.project.slug, self.alert.id],
         )
 
     def test_list(self):
@@ -31,12 +27,6 @@ class AlertsAPIPermissionTests(APIPermissionTestCase):
 
         self.auth_token.add_permission("project:read")
         self.assertGetReqStatusCode(self.list_url, 200)
-
-    def test_retrieve(self):
-        self.assertGetReqStatusCode(self.detail_url, 403)
-
-        self.auth_token.add_permission("project:read")
-        self.assertGetReqStatusCode(self.detail_url, 200)
 
     def test_create(self):
         self.auth_token.add_permission("project:read")
