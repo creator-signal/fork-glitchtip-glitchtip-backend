@@ -39,12 +39,5 @@ class ProjectAlertSchema(CamelSchema, ModelSchema):
         validation_alias="alertrecipient_set"
     )
 
-    class Meta:
-        model = ProjectAlert
-        fields = [
-            "id",
-            "name",
-            "timespan_minutes",
-            "quantity",
-            "uptime",
-        ]
+    class Meta(ProjectAlertIn.Meta):
+        fields = ["id"] + ProjectAlertIn.Meta.fields

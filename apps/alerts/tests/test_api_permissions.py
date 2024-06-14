@@ -44,9 +44,10 @@ class AlertsAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_user_destroy(self):
+        self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 403)
+        self.assertDeleteReqStatusCode(self.detail_url, 404)
 
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)

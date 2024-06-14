@@ -89,7 +89,7 @@ async def update_project_alert(
     payload: ProjectAlertIn,
 ):
     user_id = request.auth.user_id
-    project_alert = await aget_object_or_404(
+    alert = await aget_object_or_404(
         get_project_alert_queryset(user_id, organization_slug, project_slug),
         id=alert_id,
     )
@@ -97,32 +97,25 @@ async def update_project_alert(
     data = payload.dict()
     alert_recipients = data.pop("alert_recipients")
     for attr, value in data.items():
-        setattr(project_alert, attr, value)
-    await project_alert.asave()
+        setattr(alert, attr, value)
+    await alert.asave()
 
     # Create/Delete recipients as needed
     delete_recipient_ids = set(
-        {
-            id
-            async for id in project_alert.alertrecipient_set.values_list(
-                "id", flat=True
-            )
-        }
+        {id async for id in alert.alertrecipient_set.values_list("id", flat=True)}
     )
     for recipient in alert_recipients:
         new_recipient, created = await AlertRecipient.objects.aget_or_create(
-            alert=project_alert, **recipient
+            alert=alert, **recipient
         )
         if not created:
             delete_recipient_ids.discard(new_recipient.pk)
     if delete_recipient_ids:
-        await project_alert.alertrecipient_set.filter(
-            pk__in=delete_recipient_ids
-        ).adelete()
+        await alert.alertrecipient_set.filter(pk__in=delete_recipient_ids).adelete()
 
     return await get_project_alert_queryset(
         user_id, organization_slug, project_slug
-    ).aget(id=project_alert.id)
+    ).aget(id=alert.id)
 
 
 @router.delete(
@@ -137,6 +130,10 @@ async def delete_project_alert(
     result, _ = (
         await get_project_alert_queryset(user_id, organization_slug, project_slug)
         .filter(id=alert_id)
+        .filter(
+            project__organization__users=user_id,
+            project__organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
+        )
         .adelete()
     )
     if result:
