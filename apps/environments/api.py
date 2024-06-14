@@ -50,6 +50,7 @@ async def list_environments(
 @router.get(
     "projects/{slug:organization_slug}/{slug:project_slug}/environments/",
     response=list[EnvironmentProjectSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["project:read", "project:write", "project:admin"])
@@ -73,8 +74,9 @@ async def list_environment_projects(
 
 
 @router.put(
-    "projects/{slug:organization_slug}/{slug:project_slug}/environments/{slug:name}/",
+    "projects/{slug:organization_slug}/{slug:project_slug}/environments/{str:name}/",
     response=EnvironmentProjectSchema,
+    by_alias=True,
 )
 @has_permission(["project:write", "project:admin"])
 async def update_environment_project(
