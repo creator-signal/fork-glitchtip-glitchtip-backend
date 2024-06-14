@@ -1,7 +1,6 @@
 from django.urls import include, path
 from rest_framework_nested import routers
 
-from apps.environments.views import EnvironmentViewSet
 from apps.performance.views import (
     SpanViewSet,
     TransactionGroupViewSet,
@@ -41,9 +40,6 @@ organizations_router.register(
 )
 organizations_router.register(
     r"projects", OrganizationProjectsViewSet, basename="organization-projects"
-)
-organizations_router.register(
-    r"environments", EnvironmentViewSet, basename="organization-environments"
 )
 organizations_router.register(
     r"transactions", TransactionViewSet, basename="organization-transactions"
