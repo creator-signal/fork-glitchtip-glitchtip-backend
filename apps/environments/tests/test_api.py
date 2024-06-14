@@ -1,18 +1,16 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..models import EnvironmentProject
 
 
-class EnvironmentTestCase(GlitchTipTestCase):
+class EnvironmentTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
-        self.url = reverse(
-            "organization-environments-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
+        self.create_logged_in_user()
+        self.url = reverse("api:list_environments", args=[self.organization.slug])
 
     def test_environments(self):
         environment = baker.make(
@@ -47,19 +45,19 @@ class EnvironmentTestCase(GlitchTipTestCase):
             environment__organization=self.organization,
             is_hidden=True,
         )
-        res = self.client.get(self.url)
+        res = self.client.get(self.url + "?visibility=visible")
         self.assertContains(res, environment_project1.environment.name)
         self.assertNotContains(res, environment_project2.environment.name)
 
 
-class EnvironmentProjectTestCase(GlitchTipTestCase):
+class EnvironmentProjectTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
 
     def test_environment_projects(self):
         url = reverse(
-            "project-environments-list",
-            kwargs={"project_pk": f"{self.organization.slug}/{self.project.slug}"},
+            "api:list_environment_projects",
+            args=[self.organization.slug, self.project.slug],
         )
         environment_project = baker.make(
             "environments.EnvironmentProject",
@@ -85,13 +83,14 @@ class EnvironmentProjectTestCase(GlitchTipTestCase):
             environment__organization=self.organization,
         )
         detail_url = reverse(
-            "project-environments-detail",
-            kwargs={
-                "project_pk": f"{self.organization.slug}/{self.project.slug}",
-                "environment__name": environment_project.environment.name,
-            },
+            "api:update_environment_project",
+            args=[
+                self.organization.slug,
+                self.project.slug,
+                environment_project.environment.name,
+            ],
         )
         data = {"name": environment_project.environment.name, "isHidden": True}
-        res = self.client.put(detail_url, data)
+        res = self.client.put(detail_url, data, content_type="application/json")
         self.assertContains(res, "true")
         self.assertTrue(EnvironmentProject.objects.filter(is_hidden=True).exists())

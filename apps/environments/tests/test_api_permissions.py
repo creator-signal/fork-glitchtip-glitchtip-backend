@@ -17,26 +17,14 @@ class EnvironmentAPIPermissionTests(APIPermissionTestCase):
             is_hidden=False,
         )
         self.list_url = reverse(
-            "organization-environments-list",
+            "api:list_environments",
             kwargs={"organization_slug": self.organization.slug},
-        )
-        self.detail_url = reverse(
-            "organization-environments-detail",
-            kwargs={
-                "organization_slug": self.organization.slug,
-                "pk": self.environment.pk,
-            },
         )
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
         self.auth_token.add_permission("org:read")
         self.assertGetReqStatusCode(self.list_url, 200)
-
-    def test_retrieve(self):
-        self.assertGetReqStatusCode(self.detail_url, 403)
-        self.auth_token.add_permission("org:read")
-        self.assertGetReqStatusCode(self.detail_url, 200)
 
 
 class EnvironmentProjectAPIPermissionTests(APIPermissionTestCase):
@@ -50,26 +38,22 @@ class EnvironmentProjectAPIPermissionTests(APIPermissionTestCase):
             project=self.project,
         )
         self.list_url = reverse(
-            "project-environments-list",
-            kwargs={"project_pk": f"{self.organization.slug}/{self.project.slug}"},
+            "api:list_environment_projects",
+            args=[self.organization.slug, self.project.slug],
         )
         self.detail_url = reverse(
-            "project-environments-detail",
-            kwargs={
-                "project_pk": f"{self.organization.slug}/{self.project.slug}",
-                "environment__name": self.environment_project.environment.name,
-            },
+            "api:update_environment_project",
+            args=[
+                self.organization.slug,
+                self.project.slug,
+                self.environment_project.environment.name,
+            ],
         )
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
         self.auth_token.add_permission("project:read")
         self.assertGetReqStatusCode(self.list_url, 200)
-
-    def test_retrieve(self):
-        self.assertGetReqStatusCode(self.detail_url, 403)
-        self.auth_token.add_permission("project:read")
-        self.assertGetReqStatusCode(self.detail_url, 200)
 
     def test_update(self):
         self.auth_token.add_permission("project:read")
