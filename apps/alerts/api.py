@@ -77,8 +77,9 @@ async def create_project_alert(
 
 
 @router.put(
-    "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}",
+    "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}/",
     response=ProjectAlertSchema,
+    by_alias=True,
 )
 @has_permission(["project:write", "project:admin"])
 async def update_project_alert(
@@ -119,7 +120,7 @@ async def update_project_alert(
 
 
 @router.delete(
-    "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}",
+    "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}/",
     response={204: None},
 )
 @has_permission(["project:admin"])

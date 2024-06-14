@@ -40,9 +40,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "timespanMinutes": 60,
             "quantity": 2,
             "uptime": True,
-            "alertRecipients": [
-                {"recipientType": "email", "url": "https://example.com"}
-            ],
+            "alertRecipients": [{"recipientType": "email", "url": ""}],
         }
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
@@ -63,9 +61,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "timespanMinutes": 60,
             "quantity": 2,
             "uptime": True,
-            "alertRecipients": [
-                {"recipientType": "email", "url": "https://example.com"}
-            ],
+            "alertRecipients": [{"recipientType": "email", "url": ""}],
         }
         res = self.client.post(url, data, content_type="application/json")
         # Member without project team membership cannot create alerts
@@ -100,11 +96,20 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "timespanMinutes": 500,
             "quantity": 2,
             "alertRecipients": [
-                {"recipientType": "email", "url": "https://example.com"},
+                {"recipientType": "discord", "url": "https://example.com"},
             ],
         }
         res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, data["alertRecipients"][0]["url"])
+
+        # Webhooks require url
+        data = {
+            "alertRecipients": [
+                {"recipientType": "discord", "url": ""},
+            ],
+        }
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
 
     def test_project_alerts_update_auth(self):
         """Cannot update alert on project that user does not belong to"""
