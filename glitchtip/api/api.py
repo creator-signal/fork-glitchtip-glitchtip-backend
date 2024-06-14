@@ -13,6 +13,7 @@ from ninja import Field, ModelSchema, NinjaAPI
 from ninja.errors import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
+from apps.alerts.api import router as alerts_router
 from apps.api_tokens.api import router as api_tokens_router
 from apps.event_ingest.api import router as event_ingest_router
 from apps.event_ingest.embed_api import router as embed_router
@@ -45,6 +46,7 @@ api = NinjaAPI(
 
 api.add_router("0", api_tokens_router)
 api.add_router("", event_ingest_router)
+api.add_router("0", alerts_router)
 api.add_router("0", importer_router)
 api.add_router("0", issue_events_router)
 api.add_router("0", teams_router)
