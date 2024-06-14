@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -5,7 +6,7 @@ from ninja import Field, ModelSchema
 
 from glitchtip.schema import CamelSchema
 
-from .models import Project
+from .models import Project, ProjectKey
 
 
 class NameSlugProjectSchema(CamelSchema, ModelSchema):
@@ -44,3 +45,27 @@ class ProjectSchema(NameSlugProjectSchema):
 
     class Config(CamelSchema.Config):
         pass
+
+
+class ProjectKeySchema(CamelSchema, ModelSchema):
+    date_created: datetime = Field(validation_alias="created")
+    id: uuid.UUID = Field(validation_alias="public_key")
+    dsn: dict[str, str]
+    public: uuid.UUID = Field(validation_alias="public_key")
+    project_id: int = Field(validation_alias="project_id")
+
+    class Meta:
+        model = ProjectKey
+        fields = ["label"]
+
+    @staticmethod
+    def resolve_dsn(obj):
+        return {
+            "public": obj.get_dsn(),
+            "secret": obj.get_dsn(),  # Deprecated but required for @sentry/wizard
+            "security": obj.get_dsn_security(),
+        }
+
+
+class ProjectWithKeysSchema(ProjectSchema):
+    keys: list[ProjectKeySchema]
