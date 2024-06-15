@@ -4,9 +4,9 @@ from typing import Optional
 
 from ninja import Field, ModelSchema
 
+from apps.organizations_ext.schemas import OrganizationSchema
 from glitchtip.schema import CamelSchema
 
-from apps.organizations_ext.schemas import OrganizationSchema
 from .models import Project, ProjectKey
 
 

@@ -22,10 +22,20 @@ from .constants import (
 
 
 class SetupWizardSchema(Schema):
+    """
+    A 64 char random string used to provide a shorted lived and secure
+    way to transfer sensative data.
+    """
+
     hash: str = Field(min_length=64, max_length=64)
 
 
 class SetupWizardResultSchema(CamelSchema):
+    """
+    Payload containing projects data and api key that sentry-wizard could use
+    to configure a local project for usage with GlitchTip
+    """
+
     api_keys: APITokenSchema
     projects: list[ProjectWithKeysSchema]
 
@@ -35,6 +45,10 @@ router = Router()
 
 @router.get("wizard/", response=SetupWizardSchema, auth=None)
 def setup_wizard(request):
+    """
+    First step used by sentry-wizard
+    Generates a random hash for later usage
+    """
     wizard_hash = get_random_string(
         64, allowed_chars=string.ascii_lowercase + string.digits
     )
@@ -45,6 +59,11 @@ def setup_wizard(request):
 
 @router.get("wizard/{wizard_hash}/")
 async def setup_wizard_hash(request, wizard_hash: str, auth=None):
+    """
+    Last step used by sentry-wizard
+    For a specified hash, fetch data for projects with organizations and dsn keys
+    Hash replaces user authentication
+    """
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
     wizard_data = cache.get(key)
 
@@ -58,11 +77,18 @@ async def setup_wizard_hash(request, wizard_hash: str, auth=None):
 
 @router.delete("wizard/{wizard_hash}/")
 def setup_wizard_delete(request, wizard_hash: str, auth=None):
+    """
+    Delete hash used by sentry-wizard.
+    It contains sensitive data, so it makes sense to remove when done.
+    """
     cache.delete(SETUP_WIZARD_CACHE_KEY + wizard_hash)
 
 
 @router.post("wizard-set-token/")
 async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardSchema):
+    """
+    Authenticated api for storing projects data to later be used by sentry-wizard
+    """
     wizard_hash = payload.hash
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
     wizard_data = cache.get(key)
