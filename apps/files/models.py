@@ -3,6 +3,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha1
 
+from asgiref.sync import sync_to_async
 from django.core.files.base import File as FileObj
 from django.db import models, transaction
 
@@ -37,7 +38,7 @@ class FileBlob(CreatedModel):
     checksum = models.CharField(max_length=40, unique=True)
 
     @classmethod
-    def from_files(cls, files, organization=None, logger=None):
+    async def from_files(cls, files, organization=None, logger=None):
         logger.debug("FileBlob.from_files.start")
 
         files_with_checksums = []
@@ -52,8 +53,8 @@ class FileBlob(CreatedModel):
             blob_file = file_with_checksum[0]
             blob.size = file_with_checksum[0].size
             blob.checksum = file_with_checksum[1]
-            blob.blob.save(blob_file.name, blob_file)
-            blob.save()
+            await sync_to_async(blob.blob.save)(blob_file.name, blob_file)
+            await blob.asave()
 
     @classmethod
     def from_file(cls, fileobj):
