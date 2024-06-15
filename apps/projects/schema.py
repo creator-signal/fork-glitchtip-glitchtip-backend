@@ -6,6 +6,7 @@ from ninja import Field, ModelSchema
 
 from glitchtip.schema import CamelSchema
 
+from apps.organizations_ext.schemas import OrganizationSchema
 from .models import Project, ProjectKey
 
 
@@ -67,5 +68,9 @@ class ProjectKeySchema(CamelSchema, ModelSchema):
         }
 
 
-class ProjectWithKeysSchema(ProjectSchema):
-    keys: list[ProjectKeySchema]
+class ProjectOrganizationSchema(ProjectSchema):
+    organization: OrganizationSchema
+
+
+class ProjectWithKeysSchema(ProjectOrganizationSchema):
+    keys: list[ProjectKeySchema] = Field(validation_alias="projectkey_set")

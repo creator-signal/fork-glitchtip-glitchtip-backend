@@ -34,7 +34,7 @@ router = Router()
 
 
 @router.get("wizard/", response=SetupWizardSchema, auth=None)
-def setup_wizard(request: AuthHttpRequest):
+def setup_wizard(request):
     wizard_hash = get_random_string(
         64, allowed_chars=string.ascii_lowercase + string.digits
     )
@@ -44,7 +44,7 @@ def setup_wizard(request: AuthHttpRequest):
 
 
 @router.get("wizard/{wizard_hash}/")
-async def setup_wizard_hash(request: AuthHttpRequest, wizard_hash: str, auth=None):
+async def setup_wizard_hash(request, wizard_hash: str, auth=None):
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
     wizard_data = cache.get(key)
 
@@ -52,11 +52,12 @@ async def setup_wizard_hash(request: AuthHttpRequest, wizard_hash: str, auth=Non
         raise Http404
     elif wizard_data == SETUP_WIZARD_CACHE_EMPTY:
         raise HttpError(400)
+
     return wizard_data
 
 
 @router.delete("wizard/{wizard_hash}/")
-def setup_wizard_delete(request: AuthHttpRequest, wizard_hash: str, auth=None):
+def setup_wizard_delete(request, wizard_hash: str, auth=None):
     cache.delete(SETUP_WIZARD_CACHE_KEY + wizard_hash)
 
 
@@ -71,11 +72,10 @@ async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardS
     user_id = request.auth.user_id
     projects = [
         project
-        async for project in Project.objects.filter(
-            organization__users=user_id
-        ).annotate(
-            is_member=Count("team__members", filter=Q(team__members__id=user_id))
-        )[:50]
+        async for project in Project.objects.filter(organization__users=user_id)
+        .annotate(is_member=Count("team__members", filter=Q(team__members__id=user_id)))
+        .select_related("organization")
+        .prefetch_related("projectkey_set")[:50]
     ]
 
     scope = getattr(APIToken.scopes, "project:releases")

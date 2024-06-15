@@ -4,6 +4,7 @@ from typing import Any, Literal, Optional
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import SESSION_KEY
+from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
 from ninja.security import HttpBearer
 from ninja.security import SessionAuth as BaseSessionAuth
@@ -47,6 +48,19 @@ class TokenAuth(HttpBearer):
     API Token based authentication always connects to a specific user.
     Store the token object under data for checking scopes permissions.
     """
+
+    def __call__(self, request: HttpRequest) -> Optional[Any]:
+        # Workaround https://github.com/vitalik/django-ninja/issues/989
+        if request.resolver_match and request.resolver_match.url_name in [
+            "setup_wizard_hash"
+        ]:
+            request.auth = None  # type: ignore
+            return self.get_anon()
+
+        return super().__call__(request)
+
+    async def get_anon(self):
+        return AnonymousUser()
 
     async def authenticate(self, request: HttpRequest, key: str) -> Optional[Auth]:
         try:
