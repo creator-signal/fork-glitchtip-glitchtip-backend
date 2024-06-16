@@ -10,15 +10,13 @@ from glitchtip.test_utils.test_case import GlitchTipTestCase
 
 from ..models import File, FileBlob
 from ..tasks import cleanup_old_files
-from .test_views import generate_file
+from .test_api import generate_file
 
 
 class TasksTestCase(GlitchTipTestCase):
     def setUp(self):
         self.create_user_and_project()
-        self.url = reverse(
-            "chunk-upload", kwargs={"organization_slug": self.organization}
-        )
+        self.url = reverse("api:chunk_upload", args=[self.organization.slug])
 
     def test_cleanup_old_files(self):
         file = generate_file()

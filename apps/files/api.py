@@ -45,6 +45,7 @@ router = Router()
 
 @router.get("organizations/{slug:organization_slug}/chunk-upload/")
 async def get_chunk_upload_info(request: AuthHttpRequest, organization_slug: str):
+    """Get server settings for chunk file upload"""
     url = settings.GLITCHTIP_URL.geturl() + reverse(
         "api:get_chunk_upload_info", args=[organization_slug]
     )
@@ -68,6 +69,7 @@ async def chunk_upload(
     organization_slug: str,
     file_gzip: list[UploadedFile] = File(...),
 ):
+    """Upload one more more gzipped files to save"""
     logger = logging.getLogger("glitchtip.files")
     logger.info("chunkupload.start")
 

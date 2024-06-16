@@ -28,8 +28,7 @@ class ChunkUploadAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertContains(res, self.organization.slug)
 
     def test_post(self):
-        file = generate_file()
-        data = {"file_gzip": file}
+        data = {"file_gzip": generate_file()}
         res = self.client.post(self.url, data)
         self.assertEqual(res.status_code, 200)
 
