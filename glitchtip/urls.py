@@ -15,7 +15,7 @@ from apps.users.urls import router as usersRouter
 
 from . import social
 from .api import api
-from .views import APIRootView, health
+from .views import health
 
 router = routers.DefaultRouter()
 router.registry.extend(projectsRouter.registry)
@@ -48,7 +48,6 @@ urlpatterns = [
         ),
     ),
     path("api/", api.urls),
-    path("api/0/", APIRootView.as_view(), name="api-root-view"),
     path("api/0/", include(router.urls)),
 ]
 
