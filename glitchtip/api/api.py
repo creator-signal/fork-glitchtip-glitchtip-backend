@@ -185,16 +185,18 @@ async def api_root(request: HttpRequest):
 
     # Fetch api auth header to get api token
     openapi_scheme = "bearer"
-    header = "Authorization"
+    header = "Http-Authorization"
     headers = request.headers
     auth_value = headers.get(header)
-    0 / 0
     if auth_value:
         parts = auth_value.split(" ")
         if len(parts) >= 2 and parts[0].lower() == openapi_scheme:
             token = " ".join(parts[1:])
-            api_token = await APIToken.objects.afirst(token=token, user__is_active=True)
-            auth_data = APITokenSchema(**api_token.__dict__).dict()
+            api_token = await APIToken.objects.filter(
+                token=token, user__is_active=True
+            ).afirst()
+            if api_token:
+                auth_data = api_token
 
     return {
         "version": "0",
