@@ -2,10 +2,11 @@ import os
 from io import BytesIO
 
 from django.core.files.uploadedfile import InMemoryUploadedFile, SimpleUploadedFile
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCase, GlitchTipTestCaseMixin
 
 from ..models import File, FileBlob
 
@@ -17,20 +18,17 @@ def generate_file():
     )
 
 
-class ChunkUploadAPITestCase(GlitchTipTestCase):
+class ChunkUploadAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
-        self.url = reverse(
-            "chunk-upload", kwargs={"organization_slug": self.organization}
-        )
+        self.create_logged_in_user()
+        self.url = reverse("api:get_chunk_upload_info", args=[self.organization.slug])
 
     def test_get(self):
         res = self.client.get(self.url)
-        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, self.organization.slug)
 
     def test_post(self):
-        file = generate_file()
-        data = {"file_gzip": file}
+        data = {"file_gzip": generate_file()}
         res = self.client.post(self.url, data)
         self.assertEqual(res.status_code, 200)
 

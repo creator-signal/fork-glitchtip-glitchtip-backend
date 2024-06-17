@@ -1,4 +1,5 @@
-""" Port of sentry.api.endpoints.debug_files.DifAssembleEndpoint """
+"""Port of sentry.api.endpoints.debug_files.DifAssembleEndpoint"""
+
 import io
 import re
 import tempfile
