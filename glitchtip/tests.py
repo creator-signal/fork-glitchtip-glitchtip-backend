@@ -58,6 +58,7 @@ class APIRootTestCase(TestCase):
         user = baker.make("users.user")
         auth_token = baker.make("api_tokens.APIToken", user=user)
 
-        headers = {"HTTP_AUTHORIZATION": f"Bearer {auth_token.token}"}
+        headers = {"Authorization": f"Bearer {auth_token.token}"}
         res = self.client.get(self.url, headers=headers)
         self.assertContains(res, auth_token.token)
+        self.assertContains(res, user.email)

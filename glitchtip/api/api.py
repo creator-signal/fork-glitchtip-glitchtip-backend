@@ -185,7 +185,7 @@ async def api_root(request: HttpRequest):
 
     # Fetch api auth header to get api token
     openapi_scheme = "bearer"
-    header = "Http-Authorization"
+    header = "Authorization"
     headers = request.headers
     auth_value = headers.get(header)
     if auth_value:
@@ -197,6 +197,9 @@ async def api_root(request: HttpRequest):
             ).afirst()
             if api_token:
                 auth_data = api_token
+                user_data = await User.objects.prefetch_related(
+                    "socialaccount_set"
+                ).aget(id=api_token.user_id)
 
     return {
         "version": "0",
