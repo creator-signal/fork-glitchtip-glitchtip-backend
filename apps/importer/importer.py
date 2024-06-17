@@ -48,10 +48,7 @@ class GlitchTipImporter:
             "organization-projects-list",
             kwargs={"organization_slug": self.organization_slug},
         )
-        self.teams_url = reverse(
-            "organization-teams-list",
-            kwargs={"organization_slug": self.organization_slug},
-        )
+        self.teams_url = reverse("api:list_teams", args=[self.organization_slug])
 
     async def run(self, organization_id=None):
         """Set organization_id to None to import (superuser only)"""

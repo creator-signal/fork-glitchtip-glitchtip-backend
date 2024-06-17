@@ -14,7 +14,7 @@ class ProjectsAPITestCase(APITestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
-        self.url = reverse("project-list")
+        self.url = reverse("api:list_projects")
 
     def test_projects_api_create(self):
         """This endpoint can't be used to create"""
@@ -29,20 +29,24 @@ class ProjectsAPITestCase(APITestCase):
         project = baker.make("projects.Project", organization=organization)
         res = self.client.get(self.url)
         self.assertContains(res, project.name)
+        data_keys = res.json()[0].keys()
+        self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
+        self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")
 
     def test_default_ordering(self):
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(self.user, role=OrganizationUserRole.OWNER)
         projectA = baker.make(
-            "projects.Project", organization=organization, name="A Project"
+            "projects.Project", organization=organization, name="A Proj"
         )
         projectZ = baker.make(
-            "projects.Project", organization=organization, name="Z Project"
+            "projects.Project", organization=organization, name="Z Proj"
         )
-        baker.make("projects.Project", organization=organization, name="B Project")
+        baker.make("projects.Project", organization=organization, name="B Proj")
         res = self.client.get(self.url)
-        self.assertEqual(res.data[0]["name"], projectA.name)
-        self.assertEqual(res.data[2]["name"], projectZ.name)
+        data = res.json()
+        self.assertEqual(data[0]["name"], projectA.name)
+        self.assertEqual(data[2]["name"], projectZ.name)
 
     def test_projects_api_retrieve(self):
         organization = baker.make("organizations_ext.Organization")

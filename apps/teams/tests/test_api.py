@@ -75,7 +75,7 @@ class TeamAPITestCase(TestCase):
         """Only admins can create teams for that org"""
         data = {"slug": "team"}
         organization = baker.make("organizations_ext.Organization")
-        url = reverse("organization-teams-list", args=[organization.slug])
+        url = reverse("api:list_teams", args=[organization.slug])
         res = self.client.post(url, data)
         # Not even in this org
         self.assertEqual(res.status_code, 400)
@@ -88,7 +88,7 @@ class TeamAPITestCase(TestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_invalid_create(self):
-        url = reverse("organization-teams-list", args=["haha"])
+        url = reverse("api:list_teams", args=["haha"])
         data = {"slug": "team"}
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 400)

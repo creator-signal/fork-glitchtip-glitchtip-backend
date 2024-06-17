@@ -19,7 +19,7 @@ from .serializers.serializers import (
 )
 
 
-class BaseProjectViewSet(viewsets.ReadOnlyModelViewSet):
+class BaseProjectViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     serializer_class = BaseProjectSerializer
     queryset = Project.undeleted_objects.all()
     lookup_field = "slug"
