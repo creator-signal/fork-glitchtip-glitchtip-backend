@@ -220,10 +220,10 @@ class TeamAPITestCase(TestCase):
                 "team_slug": team.slug,
             },
         )
-        self.assertFalse(new_project.team_set.exists())
+        self.assertFalse(new_project.teams.exists())
         res = self.client.post(url, content_type="application/json")
         self.assertContains(res, new_project.slug, status_code=201)
-        self.assertTrue(new_project.team_set.exists())
+        self.assertTrue(new_project.teams.exists())
 
     def test_team_add_project_no_perms(self):
         """User must be manager or above to manage project teams"""
@@ -241,7 +241,7 @@ class TeamAPITestCase(TestCase):
             },
         )
         self.client.post(url)
-        self.assertFalse(new_project.team_set.exists())
+        self.assertFalse(new_project.teams.exists())
 
     def test_delete_team_from_project(self):
         project = baker.make("projects.Project", organization=self.organization)
@@ -256,7 +256,7 @@ class TeamAPITestCase(TestCase):
                 "team_slug": team.slug,
             },
         )
-        self.assertTrue(project.team_set.exists())
+        self.assertTrue(project.teams.exists())
         res = self.client.delete(url)
         self.assertContains(res, project.slug)
-        self.assertFalse(project.team_set.exists())
+        self.assertFalse(project.teams.exists())

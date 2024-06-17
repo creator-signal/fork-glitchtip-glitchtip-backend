@@ -19,6 +19,16 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
         ]
 
 
+class ProjectIn(NameSlugProjectSchema):
+    class Meta(NameSlugProjectSchema.Meta):
+        fields = [
+            "name",
+            "slug",
+            "platform",
+            # "default_rules",
+        ]
+
+
 class ProjectSchema(NameSlugProjectSchema):
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""

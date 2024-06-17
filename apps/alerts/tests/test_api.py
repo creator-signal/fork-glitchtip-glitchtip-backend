@@ -22,7 +22,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         # Second team could cause duplicates
         team2 = baker.make("teams.Team", organization=self.organization)
         team2.members.add(self.org_user)
-        self.project.team_set.add(team2)
+        self.project.teams.add(team2)
 
         url = reverse(
             "api:list_project_alerts", args=[self.organization.slug, self.project.slug]
@@ -72,7 +72,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         # Add second team to ensure we don't get MultipleObjectsReturned
         team2 = baker.make("teams.Team", organization=self.organization)
         team2.members.add(org_user)
-        self.project.team_set.add(team2)
+        self.project.teams.add(team2)
 
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
@@ -144,7 +144,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         )
         team2 = baker.make("teams.Team", organization=self.organization)
         team2.members.add(self.org_user)
-        self.project.team_set.add(team2)
+        self.project.teams.add(team2)
         res = self.client.delete(url, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertEqual(ProjectAlert.objects.count(), 0)

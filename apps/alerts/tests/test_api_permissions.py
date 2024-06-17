@@ -12,7 +12,7 @@ class AlertsAPIPermissionTests(APIPermissionTestCase):
         self.team = baker.make("teams.Team", organization=self.organization)
         self.team.members.add(self.org_user)
         self.project = baker.make("projects.Project", organization=self.organization)
-        self.project.team_set.add(self.team)
+        self.project.teams.add(self.team)
         self.alert = baker.make("alerts.ProjectAlert", project=self.project)
         self.list_url = reverse(
             "api:list_project_alerts", args=[self.organization.slug, self.project.slug]

@@ -95,7 +95,8 @@ class OrganizationUserSerializer(serializers.ModelSerializer):
         org_user = super().create(
             {"role": role, "email": email, "organization": organization}
         )
-        org_user.team_set.add(*teams)
+        if teams:
+            org_user.teams.add(*teams)
         return org_user
 
     def update(self, instance, validated_data):
@@ -118,9 +119,7 @@ class OrganizationUserSerializer(serializers.ModelSerializer):
 
 
 class OrganizationUserDetailSerializer(OrganizationUserSerializer):
-    teams = serializers.SlugRelatedField(
-        source="team_set", slug_field="slug", read_only=True, many=True
-    )
+    teams = serializers.SlugRelatedField(slug_field="slug", read_only=True, many=True)
     roles = serializers.SerializerMethodField()
 
     class Meta(OrganizationUserSerializer.Meta):
@@ -137,7 +136,7 @@ class OrganizationUserProjectsSerializer(OrganizationUserSerializer):
         fields = OrganizationUserSerializer.Meta.fields + ("projects",)
 
     def get_projects(self, obj):
-        return obj.organization.projects.filter(team__members=obj).values_list(
+        return obj.organization.projects.filter(teams__members=obj).values_list(
             "slug", flat=True
         )
 

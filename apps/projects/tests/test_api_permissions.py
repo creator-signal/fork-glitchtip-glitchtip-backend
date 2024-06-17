@@ -11,7 +11,7 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
         self.set_client_credentials(self.auth_token.token)
         self.team = baker.make("teams.Team", organization=self.organization)
         self.project = baker.make("projects.Project", organization=self.organization)
-        self.project.team_set.add(self.team)
+        self.project.teams.add(self.team)
         self.list_url = reverse("api:list_projects")
         self.team_list_url = reverse(
             "team-projects-list",
@@ -49,7 +49,7 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
         self.auth_token.add_permission("project:read")
         data = {"name": "new project"}
         self.assertPostReqStatusCode(self.list_url, data, 405)
-        self.assertPostReqStatusCode(self.team_list_url, data, 405)
+        self.assertPostReqStatusCode(self.team_list_url, data, 403)
 
         self.auth_token.add_permission("project:write")
         self.assertPostReqStatusCode(

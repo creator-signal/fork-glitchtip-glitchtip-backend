@@ -570,7 +570,7 @@ class IssueAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def test_bulk_delete_via_search(self):
         """Bulk delete Issues via search string"""
         project2 = baker.make("projects.Project", organization=self.organization)
-        project2.team_set.add(self.team)
+        project2.teams.add(self.team)
         issue1 = baker.make(Issue, project=self.project)
         issue2 = baker.make(Issue, project=project2)
         url = f"{self.list_url}?query=is:unresolved&project={self.project.id}"
@@ -581,7 +581,7 @@ class IssueAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def test_bulk_update_query(self):
         """Bulk update only supports Issue status"""
         project2 = baker.make("projects.Project", organization=self.organization)
-        project2.team_set.add(self.team)
+        project2.teams.add(self.team)
         issue1 = baker.make(Issue, project=self.project)
         issue2 = baker.make(Issue, project=project2)
         url = f"{self.list_url}?query=is:unresolved&project={self.project.id}"

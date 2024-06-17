@@ -138,7 +138,7 @@ class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
         self.team = baker.make("teams.Team", organization=self.organization)
         self.team.members.add(self.org_user)
         self.project = baker.make("projects.Project", organization=self.organization)
-        self.project.team_set.add(self.team)
+        self.project.teams.add(self.team)
         self.event = baker.make("issue_events.IssueEvent", issue__project=self.project)
 
         self.list_url = get_list_issue_event_url(self.event.issue_id)

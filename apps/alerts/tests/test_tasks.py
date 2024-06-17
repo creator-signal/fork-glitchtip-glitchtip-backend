@@ -185,7 +185,7 @@ class AlertTestCase(GlitchTipTestCase):
 
     def test_alert_queries(self):
         project2 = baker.make("projects.Project", organization=self.organization)
-        project2.team_set.add(self.team)
+        project2.teams.add(self.team)
         project3 = baker.make("projects.Project", organization=self.organization)
         baker.make(
             "alerts.ProjectAlert",

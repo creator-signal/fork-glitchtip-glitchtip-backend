@@ -13,7 +13,15 @@ class TeamIn(Schema):
     slug: SlugStr
 
 
-class ProjectTeamSchema(CamelSchema, ModelSchema):
+class TeamSlugSchema(CamelSchema, ModelSchema):
+    """Used in relations including organization projects"""
+
+    class Meta:
+        model = Team
+        fields = ["id", "slug"]
+
+
+class ProjectTeamSchema(TeamSlugSchema):
     """TeamSchema but without projects"""
 
     id: str
@@ -22,8 +30,7 @@ class ProjectTeamSchema(CamelSchema, ModelSchema):
     member_count: int
     slug: SlugStr
 
-    class Meta:
-        model = Team
+    class Meta(TeamSlugSchema.Meta):
         fields = ["id", "slug"]
 
     class Config(CamelSchema.Config):
@@ -32,3 +39,7 @@ class ProjectTeamSchema(CamelSchema, ModelSchema):
 
 class TeamSchema(ProjectTeamSchema):
     projects: list[ProjectSchema] = []
+
+
+class ProjectTeamSchema(ProjectSchema):
+    teams: list[TeamSlugSchema]

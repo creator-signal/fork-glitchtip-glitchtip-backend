@@ -36,7 +36,7 @@ class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
         self.team = baker.make("teams.Team", organization=self.organization)
         self.team.members.add(self.org_user)
         self.project = baker.make("projects.Project", organization=self.organization)
-        self.project.team_set.add(self.team)
+        self.project.teams.add(self.team)
 
     def process_events(self, data: Union[dict, list[dict]]) -> list:
         if isinstance(data, dict):

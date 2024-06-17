@@ -64,7 +64,7 @@ def get_team_queryset(
             qs = qs.annotate(
                 is_member=Exists(
                     OrganizationUser.objects.filter(
-                        team=OuterRef("pk"), user_id=user_id
+                        teams=OuterRef("pk"), user_id=user_id
                     )
                 ),
                 member_count=Count("members"),
@@ -76,7 +76,7 @@ def get_team_queryset(
                     queryset=Project.objects.annotate(
                         is_member=Exists(
                             OrganizationUser.objects.filter(
-                                team__members=OuterRef("pk"), user_id=user_id
+                                teams__members=OuterRef("pk"), user_id=user_id
                             )
                         ),
                     ),
@@ -302,7 +302,7 @@ async def add_team_to_project(
     user_id = request.auth.user_id
     project = await aget_object_or_404(
         Project.objects.annotate(
-            is_member=Count("team__members", filter=Q(team__members__id=user_id))
+            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
         ),
         slug=project_slug,
         organization__slug=organization_slug,
@@ -312,7 +312,7 @@ async def add_team_to_project(
     team = await aget_object_or_404(
         get_team_queryset(organization_slug, team_slug=team_slug)
     )
-    await project.team_set.aadd(team)
+    await project.teams.aadd(team)
     return 201, project
 
 
@@ -332,7 +332,7 @@ async def delete_team_from_project(
         )
     )
     qs = Project.objects.annotate(
-        is_member=Count("team__members", filter=Q(team__members__id=user_id))
+        is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
     )
     project = await aget_object_or_404(
         qs,
@@ -341,5 +341,5 @@ async def delete_team_from_project(
         organization__users=request.user,
         organization__organization_users__role__gte=OrganizationUserRole.MANAGER,
     )
-    await project.team_set.aremove(team)
+    await project.teams.aremove(team)
     return project

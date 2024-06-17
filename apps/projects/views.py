@@ -43,7 +43,7 @@ class BaseProjectViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             return self.queryset.none()
         queryset = self.queryset.filter(
             organization__users=self.request.user
-        ).prefetch_related("team_set")
+        ).prefetch_related("teams")
         organization_slug = self.kwargs.get("organization_slug")
         if organization_slug:
             queryset = queryset.filter(organization__slug=organization_slug)
@@ -78,7 +78,7 @@ class ProjectViewSet(
     def get_queryset(self):
         queryset = super().get_queryset().select_related("organization")
         if self.action in ["retrieve"]:
-            queryset = queryset.prefetch_related("team_set")
+            queryset = queryset.prefetch_related("teams")
         return queryset
 
 
@@ -119,7 +119,7 @@ class TeamProjectViewSet(
 
         new_project = serializer.save(organization=organization)
         if new_project and team:
-            new_project.team_set.add(team)
+            new_project.teams.add(team)
 
 
 class OrganizationProjectsViewSet(BaseProjectViewSet):
@@ -200,8 +200,8 @@ class ProjectTeamViewSet(NestedTeamViewSet):
         )
         serializer = ProjectSerializer(instance=project, context={"request": request})
         if request.method == "POST":
-            project.team_set.add(team)
+            project.teams.add(team)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        project.team_set.remove(team)
+        project.teams.remove(team)
         return Response(serializer.data)
