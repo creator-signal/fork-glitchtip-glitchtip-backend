@@ -8,13 +8,16 @@ from allauth.socialaccount.providers.openid_connect.views import (
 )
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.contrib.auth import aget_user
 from django.http import HttpRequest
-from ninja import Field, ModelSchema, NinjaAPI
+from ninja import Field, ModelSchema, NinjaAPI, Schema
 from ninja.errors import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
 from apps.alerts.api import router as alerts_router
 from apps.api_tokens.api import router as api_tokens_router
+from apps.api_tokens.models import APIToken
+from apps.api_tokens.schema import APITokenSchema
 from apps.environments.api import router as environments_router
 from apps.event_ingest.api import router as event_ingest_router
 from apps.event_ingest.embed_api import router as embed_router
@@ -24,6 +27,8 @@ from apps.issue_events.api import router as issue_events_router
 from apps.releases.api import router as releases_router
 from apps.teams.api import router as teams_router
 from apps.users.api import router as users_router
+from apps.users.models import User
+from apps.users.schema import UserSchema
 from apps.users.utils import ais_user_registration_open
 from apps.wizard.api import router as wizard_router
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
@@ -158,4 +163,46 @@ async def get_settings(request: HttpRequest):
         "environment": settings.ENVIRONMENT,
         "version": settings.GLITCHTIP_VERSION,
         "server_time_zone": settings.TIME_ZONE,
+    }
+
+
+class APIRootSchema(Schema):
+    version: str
+    user: Optional[UserSchema]
+    auth: Optional[APITokenSchema]
+
+
+@api.get("0/", auth=None, response=APIRootSchema)
+async def api_root(request: HttpRequest):
+    """/api/0/ gives information about the server and current user"""
+    user_data = None
+    auth_data = None
+    user = await aget_user(request)
+    if user.is_authenticated:
+        user_data = await User.objects.prefetch_related("socialaccount_set").aget(
+            id=user.id
+        )
+
+    # Fetch api auth header to get api token
+    openapi_scheme = "bearer"
+    header = "Authorization"
+    headers = request.headers
+    auth_value = headers.get(header)
+    if auth_value:
+        parts = auth_value.split(" ")
+        if len(parts) >= 2 and parts[0].lower() == openapi_scheme:
+            token = " ".join(parts[1:])
+            api_token = await APIToken.objects.filter(
+                token=token, user__is_active=True
+            ).afirst()
+            if api_token:
+                auth_data = api_token
+                user_data = await User.objects.prefetch_related(
+                    "socialaccount_set"
+                ).aget(id=api_token.user_id)
+
+    return {
+        "version": "0",
+        "user": user_data,
+        "auth": auth_data,
     }

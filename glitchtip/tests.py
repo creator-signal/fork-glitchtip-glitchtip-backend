@@ -39,3 +39,26 @@ class SettingsTestCase(TestCase):
             )
             res = self.client.get(self.url)
         self.assertContains(res, social_app.name)
+
+
+class APIRootTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:api_root")
+
+    def test_anon(self):
+        self.assertContains(self.client.get(self.url), "version")
+
+    def test_user(self):
+        user = baker.make("users.user")
+        self.client.force_login(user)
+        res = self.client.get(self.url)
+        self.assertContains(res, user.email)
+
+    def test_token(self):
+        user = baker.make("users.user")
+        auth_token = baker.make("api_tokens.APIToken", user=user)
+
+        headers = {"Authorization": f"Bearer {auth_token.token}"}
+        res = self.client.get(self.url, headers=headers)
+        self.assertContains(res, auth_token.token)
+        self.assertContains(res, user.email)
