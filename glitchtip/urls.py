@@ -71,7 +71,6 @@ urlpatterns += [
     path("api/0/", include("apps.files.urls")),
     path("api/0/", include("apps.difs.urls")),
     path("api/0/", include("apps.stats.urls")),
-    path("api/0/", include("apps.wizard.urls")),
     path("api/mfa/", include("django_rest_mfa.urls")),
     path("", include("apps.uptime.urls")),
     path("api/test/", include("test_api.urls")),
