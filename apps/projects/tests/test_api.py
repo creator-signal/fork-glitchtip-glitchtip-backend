@@ -23,6 +23,7 @@ class ProjectsAPITestCase(APITestCase):
         project = baker.make("projects.Project", organization=organization)
         res = self.client.get(self.url)
         self.assertContains(res, project.name)
+        self.assertContains(res, organization.name)
         data_keys = res.json()[0].keys()
         self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
         self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")

@@ -12,7 +12,7 @@ from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import AuthHttpRequest, has_permission
 
 from .models import Project
-from .schema import ProjectIn, ProjectSchema
+from .schema import ProjectIn, ProjectOrganizationSchema, ProjectSchema
 
 router = Router()
 
@@ -40,11 +40,15 @@ def get_projects_queryset(
     return qs
 
 
-@router.get("projects/", response=list[ProjectSchema])
+@router.get("projects/", response=list[ProjectOrganizationSchema])
 @paginate
 @has_permission(["project:read"])
 async def list_projects(request: AuthHttpRequest, response: HttpResponse):
-    return get_projects_queryset(request.auth.user_id).order_by("name")
+    return (
+        get_projects_queryset(request.auth.user_id)
+        .select_related("organization")
+        .order_by("name")
+    )
 
 
 @router.get(
