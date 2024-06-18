@@ -70,11 +70,6 @@ class ProjectViewSet(
     lookup_field = "pk"
     lookup_value_regex = r"(?P<organization_slug>[^/.]+)/(?P<project_slug>[-\w]+)"
 
-    def get_serializer_class(self):
-        if self.action in ["retrieve"]:
-            return ProjectDetailSerializer
-        return super().get_serializer_class()
-
     def get_queryset(self):
         queryset = super().get_queryset().select_related("organization")
         if self.action in ["retrieve"]:

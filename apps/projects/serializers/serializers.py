@@ -3,7 +3,6 @@ from rest_framework import serializers
 from apps.organizations_ext.serializers.base_serializers import (
     OrganizationReferenceSerializer,
 )
-from apps.teams.serializers import RelatedTeamSerializer
 
 from ..models import ProjectKey
 from .base_serializers import ProjectReferenceSerializer
@@ -120,10 +119,3 @@ class OrganizationProjectSerializer(BaseProjectSerializer):
     class Meta(BaseProjectSerializer.Meta):
         fields = BaseProjectSerializer.Meta.fields + ("teams",)
         read_only_fields = ProjectSerializer.Meta.read_only_fields + ("teams",)
-
-
-class ProjectWithKeysSerializer(ProjectSerializer):
-    keys = ProjectKeySerializer(many=True, source="projectkey_set")
-
-    class Meta(ProjectSerializer.Meta):
-        fields = ProjectSerializer.Meta.fields + ("keys",)
