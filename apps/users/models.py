@@ -44,14 +44,14 @@ class UserManager(BaseUserManager):
     def alert_notification_recipients(self, notification):
         """Distinct users associated with a project notification who should receive alerts"""
         queryset = self.filter(
-            organizations_ext_organizationuser__team__projects__projectalert__notification=notification
+            organizations_ext_organizationuser__teams__projects__projectalert__notification=notification
         )
         return self._exclude_recipients(queryset, notification.project_alert.project)
 
     def uptime_monitor_recipients(self, monitor):
         """Distinct users associated with a project uptime monitor who should receive alerts"""
         queryset = self.filter(
-            organizations_ext_organizationuser__team__projects__monitor=monitor
+            organizations_ext_organizationuser__teams__projects__monitor=monitor
         )
         return self._exclude_recipients(queryset, monitor.project)
 

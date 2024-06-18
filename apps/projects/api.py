@@ -36,7 +36,7 @@ def get_projects_queryset(
     if organization_slug:
         qs = qs.filter(organization__slug=organization_slug)
     if team_slug:
-        qs = qs.filter(team__slug=team_slug)
+        qs = qs.filter(teams__slug=team_slug)
     return qs
 
 

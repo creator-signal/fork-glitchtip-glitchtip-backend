@@ -60,7 +60,7 @@ async def create_project_alert(
                 organization__users=user_id,
                 organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
             )
-            | Q(team__members__user=user_id)
+            | Q(teams__members__user=user_id)
         ).distinct(),
         organization__slug=organization_slug,
         slug=project_slug,

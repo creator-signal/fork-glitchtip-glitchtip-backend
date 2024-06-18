@@ -96,7 +96,9 @@ class ProjectsAPITestCase(APITestCase):
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(self.user, OrganizationUserRole.ADMIN)
         team = baker.make("teams.Team", organization=organization)
-        project = baker.make("projects.Project", organization=organization, team=team)
+        project = baker.make(
+            "projects.Project", organization=organization, teams=[team]
+        )
 
         url = reverse(
             "project-detail", kwargs={"pk": f"{organization.slug}/{project.slug}"}

@@ -49,7 +49,7 @@ class BaseProjectViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
             queryset = queryset.filter(organization__slug=organization_slug)
         team_slug = self.kwargs.get("team_slug")
         if team_slug:
-            queryset = queryset.filter(team__slug=team_slug)
+            queryset = queryset.filter(teams__slug=team_slug)
         return queryset
 
 
@@ -142,9 +142,9 @@ class OrganizationProjectsViewSet(BaseProjectViewSet):
                 if len(query_part) == 2:
                     query_name, query_value = query_part
                     if query_name == "team":
-                        queryset = queryset.filter(team__slug=query_value)
+                        queryset = queryset.filter(teams__slug=query_value)
                     if query_name == "!team":
-                        queryset = queryset.exclude(team__slug=query_value)
+                        queryset = queryset.exclude(teams__slug=query_value)
         return queryset
 
 

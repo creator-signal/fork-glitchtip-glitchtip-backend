@@ -21,9 +21,7 @@ class TeamSlugSchema(CamelSchema, ModelSchema):
         fields = ["id", "slug"]
 
 
-class ProjectTeamSchema(TeamSlugSchema):
-    """TeamSchema but without projects"""
-
+class TeamSchema(TeamSlugSchema):
     id: str
     created: datetime = Field(serialization_alias="dateCreated")
     is_member: bool
@@ -37,9 +35,13 @@ class ProjectTeamSchema(TeamSlugSchema):
         coerce_numbers_to_str = True
 
 
-class TeamSchema(ProjectTeamSchema):
+class TeamProjectSchema(TeamSchema):
+    """TeamSchema with related projects"""
+
     projects: list[ProjectSchema] = []
 
 
 class ProjectTeamSchema(ProjectSchema):
+    """Project Schema with related teams"""
+
     teams: list[TeamSlugSchema]

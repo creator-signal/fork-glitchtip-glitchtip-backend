@@ -113,11 +113,13 @@ class ProjectSerializer(BaseProjectSerializer):
 class ProjectDetailSerializer(ProjectSerializer):
     class Meta(ProjectSerializer.Meta):
         fields = ProjectSerializer.Meta.fields + ("teams",)
+        read_only_fields = ProjectSerializer.Meta.read_only_fields + ("teams",)
 
 
 class OrganizationProjectSerializer(BaseProjectSerializer):
     class Meta(BaseProjectSerializer.Meta):
         fields = BaseProjectSerializer.Meta.fields + ("teams",)
+        read_only_fields = ProjectSerializer.Meta.read_only_fields + ("teams",)
 
 
 class ProjectWithKeysSerializer(ProjectSerializer):
