@@ -1,12 +1,6 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import exceptions, mixins, status, viewsets
-from rest_framework.decorators import action
+from rest_framework import mixins, viewsets
 from rest_framework.filters import OrderingFilter
-from rest_framework.response import Response
-
-from apps.organizations_ext.models import Organization, OrganizationUserRole
-from apps.teams.models import Team
-from apps.teams.views import NestedTeamViewSet
 
 from .models import Project, ProjectKey
 from .permissions import ProjectKeyPermission, ProjectPermission
@@ -70,12 +64,6 @@ class ProjectViewSet(
     lookup_field = "pk"
     lookup_value_regex = r"(?P<organization_slug>[^/.]+)/(?P<project_slug>[-\w]+)"
 
-    def get_queryset(self):
-        queryset = super().get_queryset().select_related("organization")
-        if self.action in ["retrieve"]:
-            queryset = queryset.prefetch_related("teams")
-        return queryset
-
 
 class TeamProjectViewSet(
     mixins.UpdateModelMixin,
@@ -99,22 +87,6 @@ class OrganizationProjectsViewSet(BaseProjectViewSet):
     """
 
     serializer_class = OrganizationProjectSerializer
-
-    def get_queryset(self, *args, **kwargs):
-        queryset = super().get_queryset(*args, **kwargs)
-        queries = self.request.GET.get("query")
-        # Pretty simplistic filters that don't match how django-filter works
-        # If this needs used more extensively, it should be abstracted more
-        if queries:
-            for query in queries.split():
-                query_part = query.split(":", 1)
-                if len(query_part) == 2:
-                    query_name, query_value = query_part
-                    if query_name == "team":
-                        queryset = queryset.filter(teams__slug=query_value)
-                    if query_name == "!team":
-                        queryset = queryset.exclude(teams__slug=query_value)
-        return queryset
 
 
 class ProjectKeyViewSet(viewsets.ModelViewSet):
@@ -144,33 +116,3 @@ class ProjectKeyViewSet(viewsets.ModelViewSet):
             organization__users=self.request.user,
         )
         serializer.save(project=project)
-
-
-class ProjectTeamViewSet(NestedTeamViewSet):
-    @action(
-        methods=["post", "delete"], detail=False, url_path=(r"(?P<team_slug>[-\w]+)")
-    )
-    def add_remove_project(
-        self,
-        request,
-        project_pk=None,
-        project_slug=None,
-        organization_slug=None,
-        team_slug=None,
-    ):
-        """Add/remove team to a project"""
-        team = get_object_or_404(self.get_queryset(), slug=team_slug)
-        project = get_object_or_404(
-            Project,
-            slug=project_slug,
-            organization__slug=organization_slug,
-            organization__users=self.request.user,
-            organization__organization_users__role__gte=OrganizationUserRole.MANAGER,
-        )
-        serializer = ProjectSerializer(instance=project, context={"request": request})
-        if request.method == "POST":
-            project.teams.add(team)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-        project.teams.remove(team)
-        return Response(serializer.data)
