@@ -14,8 +14,7 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
         self.project.teams.add(self.team)
         self.list_url = reverse("api:list_projects")
         self.team_list_url = reverse(
-            "team-projects-list",
-            kwargs={"team_pk": self.organization.slug + "/" + self.team.slug},
+            "api:list_team_projects", args=[self.organization.slug, self.team.slug]
         )
         self.detail_url = reverse(
             "project-detail",

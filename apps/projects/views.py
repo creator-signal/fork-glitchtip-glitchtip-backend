@@ -78,7 +78,6 @@ class ProjectViewSet(
 
 
 class TeamProjectViewSet(
-    mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
     mixins.DestroyModelMixin,
     BaseProjectViewSet,
@@ -90,31 +89,6 @@ class TeamProjectViewSet(
     """
 
     serializer_class = ProjectDetailSerializer
-
-    def perform_create(self, serializer):
-        team = None
-        if self.kwargs.get("team_slug"):
-            try:
-                team = Team.objects.get(
-                    slug=self.kwargs.get("team_slug"),
-                    organization__slug=self.kwargs.get("organization_slug"),
-                    organization__users=self.request.user,
-                    organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
-                )
-            except Team.DoesNotExist as err:
-                raise exceptions.ValidationError("Team not found") from err
-        try:
-            organization = Organization.objects.get(
-                slug=self.kwargs.get("organization_slug"),
-                users=self.request.user,
-                organization_users__role__gte=OrganizationUserRole.ADMIN,
-            )
-        except Organization.DoesNotExist as err:
-            raise exceptions.ValidationError("Organization not found") from err
-
-        new_project = serializer.save(organization=organization)
-        if new_project and team:
-            new_project.teams.add(team)
 
 
 class OrganizationProjectsViewSet(BaseProjectViewSet):
