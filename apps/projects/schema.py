@@ -19,6 +19,19 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
         ]
 
 
+class ProjectIn(NameSlugProjectSchema):
+    platform: Optional[str] = None  # This shouldn't be needed, but is.
+
+    class Meta(NameSlugProjectSchema.Meta):
+        model = Project
+        fields = [
+            "name",
+            "slug",
+            "platform",
+            # "default_rules",
+        ]
+
+
 class ProjectSchema(NameSlugProjectSchema):
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
@@ -30,6 +43,7 @@ class ProjectSchema(NameSlugProjectSchema):
     is_public: bool = False
     scrub_ip_addresses: bool = Field(serialization_alias="scrubIPAddresses")
     created: datetime = Field(serialization_alias="dateCreated")
+    platform: Optional[str] = None
 
     class Meta:
         model = Project

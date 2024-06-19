@@ -56,7 +56,7 @@ class ImporterTestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertTrue(
             Project.objects.filter(
                 slug=test_project["slug"],
-                team__slug="team",
+                teams__slug="team",
                 projectkey__public_key=test_key["public"],
             ).exists()
         )

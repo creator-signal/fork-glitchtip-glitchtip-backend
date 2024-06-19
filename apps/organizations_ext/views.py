@@ -48,7 +48,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
         if self.action in ["retrieve"]:
             queryset = queryset.prefetch_related(
-                "projects__team_set__members",
+                "projects__teams__members",
                 "teams__members",
             )
         return queryset
@@ -87,7 +87,7 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(organization__slug=organization_slug)
         team_slug = self.kwargs.get("team_slug")
         if team_slug:
-            queryset = queryset.filter(team__slug=team_slug)
+            queryset = queryset.filter(teams__slug=team_slug)
         return queryset.select_related("organization", "user").prefetch_related(
             "user__socialaccount_set", "organization__owner"
         )

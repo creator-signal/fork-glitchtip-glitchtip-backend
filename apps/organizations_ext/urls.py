@@ -8,7 +8,6 @@ from apps.performance.views import (
 )
 from apps.projects.views import OrganizationProjectsViewSet
 from apps.releases.views import ReleaseViewSet
-from apps.teams.views import NestedTeamViewSet
 from apps.uptime.views import (
     MonitorCheckViewSet,
     MonitorViewSet,
@@ -28,9 +27,6 @@ router.register(r"organizations", OrganizationViewSet)
 
 organizations_router = routers.NestedSimpleRouter(
     router, r"organizations", lookup="organization"
-)
-organizations_router.register(
-    r"teams", NestedTeamViewSet, basename="organization-teams"
 )
 organizations_router.register(
     r"members", OrganizationMemberViewSet, basename="organization-members"

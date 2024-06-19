@@ -3,7 +3,6 @@ from rest_framework import serializers
 from apps.organizations_ext.serializers.base_serializers import (
     OrganizationReferenceSerializer,
 )
-from apps.teams.serializers import RelatedTeamSerializer
 
 from ..models import ProjectKey
 from .base_serializers import ProjectReferenceSerializer
@@ -91,9 +90,9 @@ class BaseProjectSerializer(ProjectReferenceSerializer):
 
     def get_isMember(self, obj):
         user_id = self.context["request"].user.id
-        teams = obj.team_set.all()
+        teams = obj.teams.all()
         # This is actually more performant than:
-        # return obj.team_set.filter(members=user).exists()
+        # return obj.teams.filter(members=user).exists()
         for team in teams:
             if user_id in team.members.all().values_list("user_id", flat=True):
                 return True
@@ -111,21 +110,12 @@ class ProjectSerializer(BaseProjectSerializer):
 
 
 class ProjectDetailSerializer(ProjectSerializer):
-    teams = RelatedTeamSerializer(source="team_set", read_only=True, many=True)
-
     class Meta(ProjectSerializer.Meta):
         fields = ProjectSerializer.Meta.fields + ("teams",)
+        read_only_fields = ProjectSerializer.Meta.read_only_fields + ("teams",)
 
 
 class OrganizationProjectSerializer(BaseProjectSerializer):
-    teams = RelatedTeamSerializer(source="team_set", read_only=True, many=True)
-
     class Meta(BaseProjectSerializer.Meta):
         fields = BaseProjectSerializer.Meta.fields + ("teams",)
-
-
-class ProjectWithKeysSerializer(ProjectSerializer):
-    keys = ProjectKeySerializer(many=True, source="projectkey_set")
-
-    class Meta(ProjectSerializer.Meta):
-        fields = ProjectSerializer.Meta.fields + ("keys",)
+        read_only_fields = ProjectSerializer.Meta.read_only_fields + ("teams",)

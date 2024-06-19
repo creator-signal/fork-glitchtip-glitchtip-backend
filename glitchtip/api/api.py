@@ -24,6 +24,7 @@ from apps.event_ingest.embed_api import router as embed_router
 from apps.files.api import router as files_router
 from apps.importer.api import router as importer_router
 from apps.issue_events.api import router as issue_events_router
+from apps.projects.api import router as projects_router
 from apps.releases.api import router as releases_router
 from apps.teams.api import router as teams_router
 from apps.users.api import router as users_router
@@ -59,6 +60,7 @@ api.add_router("0", environments_router)
 api.add_router("0", files_router)
 api.add_router("0", importer_router)
 api.add_router("0", issue_events_router)
+api.add_router("0", projects_router)
 api.add_router("0", teams_router)
 api.add_router("0", users_router)
 api.add_router("0", wizard_router)

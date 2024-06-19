@@ -13,14 +13,13 @@ class OrganizationProjectsViewTestCase(GlitchTipTestCase):
         organization.add_user(self.user, OrganizationUserRole.ADMIN)
         team = baker.make("teams.Team", organization=self.organization)
         team.members.add(self.org_user)
-        self.project.team_set.add(team)
+        self.project.teams.add(team)
         self.url = reverse(
-            "organization-projects-list",
-            kwargs={"organization_slug": self.organization.slug},
+            "api:list_organization_projects", args=[self.organization.slug]
         )
 
     def test_organization_projects_list(self):
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(2):
             res = self.client.get(self.url)
         self.assertNotContains(res, self.organization.slug)
         self.assertContains(res, self.team.slug)
@@ -29,7 +28,7 @@ class OrganizationProjectsViewTestCase(GlitchTipTestCase):
         other_team = baker.make("teams.Team", organization=self.organization)
         other_team.members.add(self.org_user)
         other_project = baker.make("projects.Project", organization=self.organization)
-        other_project.team_set.add(other_team)
+        other_project.teams.add(other_team)
 
         res = self.client.get(self.url + "?query=team:" + self.team.slug)
         self.assertContains(res, self.team.slug)

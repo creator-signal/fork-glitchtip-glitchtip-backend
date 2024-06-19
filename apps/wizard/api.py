@@ -99,7 +99,9 @@ async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardS
     projects = [
         project
         async for project in Project.objects.filter(organization__users=user_id)
-        .annotate(is_member=Count("team__members", filter=Q(team__members__id=user_id)))
+        .annotate(
+            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+        )
         .select_related("organization")
         .prefetch_related("projectkey_set")[:50]
     ]

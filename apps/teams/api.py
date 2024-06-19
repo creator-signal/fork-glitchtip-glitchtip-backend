@@ -12,14 +12,13 @@ from apps.organizations_ext.models import (
     OrganizationUserRole,
 )
 from apps.projects.models import Project
-from apps.projects.schema import ProjectSchema
 from apps.shared.types import MeID
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import Team
-from .schema import ProjectTeamSchema, TeamIn, TeamSchema
+from .schema import ProjectTeamSchema, TeamIn, TeamProjectSchema, TeamSchema
 
 router = Router()
 
@@ -36,7 +35,7 @@ GET /organizations/{org}/teams/
 POST /organizations/{org}/teams/
 POST /organizations/{org}/members/{me|member_id}/teams/{team}/ (join)
 DELETE /organizations/{org}/members/{me|member_id}/teams/{team}/ (leave)
-GET /api/0/projects/{organization_slug}/{project_slug}/teams/
+GET /api/0/projects/{organization_slug}/{project_slug}/teams/ (Not documented)
 POST /api/0/projects/{organization_slug}/{project_slug}/teams/{team_slug}/
 DELETE /api/0/projects/{organization_slug}/{project_slug}/teams/{team_slug}/
 """
@@ -64,7 +63,7 @@ def get_team_queryset(
             qs = qs.annotate(
                 is_member=Exists(
                     OrganizationUser.objects.filter(
-                        team=OuterRef("pk"), user_id=user_id
+                        teams=OuterRef("pk"), user_id=user_id
                     )
                 ),
                 member_count=Count("members"),
@@ -76,7 +75,7 @@ def get_team_queryset(
                     queryset=Project.objects.annotate(
                         is_member=Exists(
                             OrganizationUser.objects.filter(
-                                team__members=OuterRef("pk"), user_id=user_id
+                                teams__members=OuterRef("pk"), user_id=user_id
                             )
                         ),
                     ),
@@ -87,7 +86,7 @@ def get_team_queryset(
 
 @router.get(
     "teams/{slug:organization_slug}/{slug:team_slug}/",
-    response=TeamSchema,
+    response=TeamProjectSchema,
     by_alias=True,
 )
 @has_permission(["team:read", "team:write", "team:admin"])
@@ -106,7 +105,7 @@ async def get_team(request: AuthHttpRequest, organization_slug: str, team_slug: 
 
 @router.put(
     "teams/{slug:organization_slug}/{slug:team_slug}/",
-    response=TeamSchema,
+    response=TeamProjectSchema,
     by_alias=True,
 )
 @has_permission(["team:write", "team:admin"])
@@ -147,7 +146,7 @@ async def delete_team(request: AuthHttpRequest, organization_slug: str, team_slu
 
 @router.get(
     "/organizations/{slug:organization_slug}/teams/",
-    response=list[TeamSchema],
+    response=list[TeamProjectSchema],
     by_alias=True,
 )
 @paginate
@@ -167,7 +166,7 @@ async def list_teams(
 
 @router.post(
     "/organizations/{slug:organization_slug}/teams/",
-    response={201: TeamSchema},
+    response={201: TeamProjectSchema},
     by_alias=True,
 )
 @has_permission(["team:write", "team:admin", "org:admin", "org:write"])
@@ -242,7 +241,7 @@ async def modify_member_for_team(
 
 @router.post(
     "/organizations/{slug:organization_slug}/members/{slug:member_id}/teams/{slug:team_slug}/",
-    response={201: TeamSchema},
+    response={201: TeamProjectSchema},
     by_alias=True,
 )
 @has_permission(["team:write", "team:admin"])
@@ -256,7 +255,8 @@ async def add_member_to_team(
 
 @router.delete(
     "/organizations/{slug:organization_slug}/members/{slug:member_id}/teams/{slug:team_slug}/",
-    response=TeamSchema,
+    response=TeamProjectSchema,
+    by_alias=True,
 )
 @has_permission(["team:write", "team:admin"])
 async def delete_member_from_team(
@@ -269,7 +269,7 @@ async def delete_member_from_team(
 
 @router.get(
     "/projects/{slug:organization_slug}/{slug:project_slug}/teams/",
-    response=list[ProjectTeamSchema],
+    response=list[TeamSchema],
     by_alias=True,
 )
 @paginate
@@ -292,7 +292,8 @@ async def list_project_teams(
 
 @router.post(
     "/projects/{slug:organization_slug}/{slug:project_slug}/teams/{slug:team_slug}/",
-    response={201: ProjectSchema},
+    response={201: ProjectTeamSchema},
+    by_alias=True,
 )
 @has_permission(["project.write", "project:admin"])
 async def add_team_to_project(
@@ -301,9 +302,7 @@ async def add_team_to_project(
     """Add team to project"""
     user_id = request.auth.user_id
     project = await aget_object_or_404(
-        Project.objects.annotate(
-            is_member=Count("team__members", filter=Q(team__members__id=user_id))
-        ),
+        Project,
         slug=project_slug,
         organization__slug=organization_slug,
         organization__users=request.user,
@@ -312,13 +311,21 @@ async def add_team_to_project(
     team = await aget_object_or_404(
         get_team_queryset(organization_slug, team_slug=team_slug)
     )
-    await project.team_set.aadd(team)
+    await project.teams.aadd(team)
+    project = await (
+        Project.objects.annotate(
+            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+        )
+        .prefetch_related("teams")
+        .aget(id=project.id)
+    )
     return 201, project
 
 
 @router.delete(
     "/projects/{slug:organization_slug}/{slug:project_slug}/teams/{slug:team_slug}/",
-    response=ProjectSchema,
+    response=ProjectTeamSchema,
+    by_alias=True,
 )
 @has_permission(["project.write", "project:admin"])
 async def delete_team_from_project(
@@ -331,15 +338,18 @@ async def delete_team_from_project(
             organization_slug, project_slug=project_slug, team_slug=team_slug
         )
     )
-    qs = Project.objects.annotate(
-        is_member=Count("team__members", filter=Q(team__members__id=user_id))
-    )
     project = await aget_object_or_404(
-        qs,
+        Project,
         slug=project_slug,
         organization__slug=organization_slug,
         organization__users=request.user,
         organization__organization_users__role__gte=OrganizationUserRole.MANAGER,
     )
-    await project.team_set.aremove(team)
-    return project
+    await project.teams.aremove(team)
+    return await (
+        Project.objects.annotate(
+            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+        )
+        .prefetch_related("teams")
+        .aget(id=project.id)
+    )

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
@@ -14,14 +15,7 @@ class ProjectsAPITestCase(APITestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
-        self.url = reverse("project-list")
-
-    def test_projects_api_create(self):
-        """This endpoint can't be used to create"""
-        data = {"name": "test"}
-        res = self.client.post(self.url, data)
-        # Must specify organization and team
-        self.assertEqual(res.status_code, 405)
+        self.url = reverse("api:list_projects")
 
     def test_projects_api_list(self):
         organization = baker.make("organizations_ext.Organization")
@@ -29,20 +23,25 @@ class ProjectsAPITestCase(APITestCase):
         project = baker.make("projects.Project", organization=organization)
         res = self.client.get(self.url)
         self.assertContains(res, project.name)
+        self.assertContains(res, organization.name)
+        data_keys = res.json()[0].keys()
+        self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
+        self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")
 
     def test_default_ordering(self):
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(self.user, role=OrganizationUserRole.OWNER)
         projectA = baker.make(
-            "projects.Project", organization=organization, name="A Project"
+            "projects.Project", organization=organization, name="A Proj"
         )
         projectZ = baker.make(
-            "projects.Project", organization=organization, name="Z Project"
+            "projects.Project", organization=organization, name="Z Proj"
         )
-        baker.make("projects.Project", organization=organization, name="B Project")
+        baker.make("projects.Project", organization=organization, name="B Proj")
         res = self.client.get(self.url)
-        self.assertEqual(res.data[0]["name"], projectA.name)
-        self.assertEqual(res.data[2]["name"], projectZ.name)
+        data = res.json()
+        self.assertEqual(data[0]["name"], projectA.name)
+        self.assertEqual(data[2]["name"], projectZ.name)
 
     def test_projects_api_retrieve(self):
         organization = baker.make("organizations_ext.Organization")
@@ -98,7 +97,9 @@ class ProjectsAPITestCase(APITestCase):
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(self.user, OrganizationUserRole.ADMIN)
         team = baker.make("teams.Team", organization=organization)
-        project = baker.make("projects.Project", organization=organization, team=team)
+        project = baker.make(
+            "projects.Project", organization=organization, teams=[team]
+        )
 
         url = reverse(
             "project-detail", kwargs={"pk": f"{organization.slug}/{project.slug}"}
@@ -119,7 +120,7 @@ class ProjectsAPITestCase(APITestCase):
         self.assertEqual(res.status_code, 404)
 
 
-class TeamProjectsAPITestCase(APITestCase):
+class TeamProjectsAPITestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.organization = baker.make("organizations_ext.Organization")
@@ -127,13 +128,12 @@ class TeamProjectsAPITestCase(APITestCase):
         self.team = baker.make("teams.Team", organization=self.organization)
         self.client.force_login(self.user)
         self.url = reverse(
-            "team-projects-list",
-            kwargs={"team_pk": f"{self.organization.slug}/{self.team.slug}"},
+            "api:list_team_projects", args=[self.organization.slug, self.team.slug]
         )
 
     def test_list(self):
         project = baker.make("projects.Project", organization=self.organization)
-        project.team_set.add(self.team)
+        project.teams.add(self.team)
         not_my_project = baker.make("projects.Project")
         res = self.client.get(self.url)
         self.assertContains(res, project.name)
@@ -157,8 +157,8 @@ class TeamProjectsAPITestCase(APITestCase):
 
     def test_create(self):
         data = {"name": "test-team"}
-        res = self.client.post(self.url, data)
-        self.assertContains(res, data["name"], status_code=201)
+        res = self.client.post(self.url, data, content_type="application/json")
+        res = self.assertContains(res, data["name"], status_code=201)
 
         res = self.client.get(self.url)
         self.assertContains(res, data["name"])
@@ -167,9 +167,9 @@ class TeamProjectsAPITestCase(APITestCase):
     def test_projects_api_create_unique_slug(self):
         name = "test project"
         data = {"name": name}
-        res = self.client.post(self.url, data)
+        res = self.client.post(self.url, data, content_type="application/json")
         first_project = Project.objects.get()
-        res = self.client.post(self.url, data)
+        res = self.client.post(self.url, data, content_type="application/json")
         self.assertContains(res, name, status_code=201)
         projects = Project.objects.all()
         self.assertNotEqual(projects[0].slug, projects[1].slug)
@@ -187,13 +187,13 @@ class TeamProjectsAPITestCase(APITestCase):
         """
         name = "test project"
         data = {"name": name}
-        self.client.post(self.url, data)
+        self.client.post(self.url, data, content_type="application/json")
         project = Project.objects.first()
-        self.assertEqual(project.team_set.all().count(), 1)
+        self.assertEqual(project.teams.all().count(), 1)
 
     def test_project_reserved_words(self):
         data = {"name": "new"}
-        res = self.client.post(self.url, data)
+        res = self.client.post(self.url, data, content_type="application/json")
         self.assertContains(res, "new-1", status_code=201)
         self.client.post(self.url, data)
         self.assertFalse(Project.objects.filter(slug="new").exists())

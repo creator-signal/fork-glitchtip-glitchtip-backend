@@ -9,8 +9,10 @@ class Team(CreatedModel):
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="teams"
     )
-    members = models.ManyToManyField("organizations_ext.OrganizationUser", blank=True)
-    projects = models.ManyToManyField("projects.Project")
+    members = models.ManyToManyField(
+        "organizations_ext.OrganizationUser", blank=True, related_name="teams"
+    )
+    projects = models.ManyToManyField("projects.Project", related_name="teams")
 
     class Meta:
         unique_together = ("slug", "organization")

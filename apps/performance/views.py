@@ -28,7 +28,7 @@ class TransactionGroupViewSet(viewsets.ReadOnlyModelViewSet):
         if not self.request.user.is_authenticated:
             return self.queryset.none()
         # Performance optimization, force two queries
-        projects = Project.objects.filter(team__members__user=self.request.user)
+        projects = Project.objects.filter(teams__members__user=self.request.user)
         if "organization_slug" in self.kwargs:
             projects = projects.filter(
                 organization__slug=self.kwargs["organization_slug"],
@@ -58,7 +58,7 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
             return self.queryset.none()
         # Performance optimization, force two queries
         projects = list(
-            Project.objects.filter(team__members__user=self.request.user).values_list(
+            Project.objects.filter(teams__members__user=self.request.user).values_list(
                 "pk", flat=True
             )
         )
@@ -80,7 +80,7 @@ class SpanViewSet(viewsets.ReadOnlyModelViewSet):
             return self.queryset.none()
         # Performance optimization, force two queries
         projects = list(
-            Project.objects.filter(team__members__user=self.request.user).values_list(
+            Project.objects.filter(teams__members__user=self.request.user).values_list(
                 "pk", flat=True
             )
         )
