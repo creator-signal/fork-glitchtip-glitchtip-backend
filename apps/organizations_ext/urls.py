@@ -6,7 +6,6 @@ from apps.performance.views import (
     TransactionGroupViewSet,
     TransactionViewSet,
 )
-from apps.projects.views import OrganizationProjectsViewSet
 from apps.releases.views import ReleaseViewSet
 from apps.uptime.views import (
     MonitorCheckViewSet,
@@ -33,9 +32,6 @@ organizations_router.register(
 )
 organizations_router.register(
     r"users", OrganizationUserViewSet, basename="organization-users"
-)
-organizations_router.register(
-    r"projects", OrganizationProjectsViewSet, basename="organization-projects"
 )
 organizations_router.register(
     r"transactions", TransactionViewSet, basename="organization-transactions"

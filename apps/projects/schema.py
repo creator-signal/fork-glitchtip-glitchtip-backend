@@ -33,6 +33,12 @@ class ProjectIn(NameSlugProjectSchema):
 
 
 class ProjectSchema(NameSlugProjectSchema):
+    """
+    A project is an organizational unit for GlitchTip events. It may contain
+    DSN keys, be connected to exactly one organization, and provide user permissions
+    through teams.
+    """
+
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
     features: list = []
@@ -62,16 +68,42 @@ class ProjectSchema(NameSlugProjectSchema):
         pass
 
 
-class ProjectKeySchema(CamelSchema, ModelSchema):
-    date_created: datetime = Field(validation_alias="created")
-    id: uuid.UUID = Field(validation_alias="public_key")
-    dsn: dict[str, str]
-    public: uuid.UUID = Field(validation_alias="public_key")
-    project_id: int = Field(validation_alias="project_id")
+class KeyRateLimit(CamelSchema):
+    window: int
+    count: int
+
+
+class ProjectKeyIn(CamelSchema, ModelSchema):
+    name: Optional[str] = None
+    rate_limit: Optional[KeyRateLimit] = None
 
     class Meta:
         model = ProjectKey
-        fields = ["label"]
+        fields = ["name"]
+
+
+class ProjectKeyUpdate(ProjectKeyIn):
+    rate_limit: Optional[KeyRateLimit] = None
+
+    class Meta(ProjectKeyIn.Meta):
+        fields = ["name", "is_active"]
+
+
+class ProjectKeySchema(ProjectKeyUpdate):
+    """
+    A project key (DSN) provides a public authentication string used for event
+    ingestion.
+    """
+
+    date_created: datetime = Field(validation_alias="created")
+    id: uuid.UUID = Field(validation_alias="public_key")
+    dsn: dict[str, str]
+    label: Optional[str] = Field(validation_alias="name")
+    public: uuid.UUID = Field(validation_alias="public_key")
+    project_id: int = Field(validation_alias="project_id")
+
+    class Meta(ProjectKeyUpdate.Meta):
+        pass
 
     @staticmethod
     def resolve_dsn(obj):
@@ -80,6 +112,11 @@ class ProjectKeySchema(CamelSchema, ModelSchema):
             "secret": obj.get_dsn(),  # Deprecated but required for @sentry/wizard
             "security": obj.get_dsn_security(),
         }
+
+    @staticmethod
+    def resolve_rate_limit(obj):
+        if count := obj.rate_limit_count:
+            return {"window": obj.rate_limit_window, "count": count}
 
 
 class ProjectOrganizationSchema(ProjectSchema):

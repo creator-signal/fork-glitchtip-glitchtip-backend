@@ -11,8 +11,3 @@ class ProjectPermission(ScopedPermission):
 
     def get_user_scopes(self, obj, user):
         return obj.organization.get_user_scopes(user)
-
-
-class ProjectKeyPermission(ProjectPermission):
-    def get_user_scopes(self, obj, user):
-        return obj.project.organization.get_user_scopes(user)

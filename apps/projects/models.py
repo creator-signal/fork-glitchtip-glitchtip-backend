@@ -129,7 +129,8 @@ class ProjectKey(CreatedModel):
     """Authentication key for a Project"""
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
-    label = models.CharField(max_length=64, blank=True)
+    is_active = models.BooleanField(default=True)
+    name = models.CharField(max_length=64, blank=True)
     public_key = models.UUIDField(default=uuid4, unique=True, editable=False)
     rate_limit_count = models.PositiveSmallIntegerField(blank=True, null=True)
     rate_limit_window = models.PositiveSmallIntegerField(blank=True, null=True)

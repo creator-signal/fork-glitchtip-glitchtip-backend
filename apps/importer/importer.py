@@ -115,10 +115,8 @@ class GlitchTipImporter:
             keys = await self.get(
                 self.url
                 + reverse(
-                    "project-keys-list",
-                    kwargs={
-                        "project_pk": f"{self.organization_slug}/{project['slug']}",
-                    },
+                    "api:list_project_keys",
+                    args=[self.organization_slug, project["slug"]],
                 )
             )
             for key in keys:
