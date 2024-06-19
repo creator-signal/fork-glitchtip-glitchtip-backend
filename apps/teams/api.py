@@ -256,6 +256,7 @@ async def add_member_to_team(
 @router.delete(
     "/organizations/{slug:organization_slug}/members/{slug:member_id}/teams/{slug:team_slug}/",
     response=TeamProjectSchema,
+    by_alias=True,
 )
 @has_permission(["team:write", "team:admin"])
 async def delete_member_from_team(
@@ -292,6 +293,7 @@ async def list_project_teams(
 @router.post(
     "/projects/{slug:organization_slug}/{slug:project_slug}/teams/{slug:team_slug}/",
     response={201: ProjectTeamSchema},
+    by_alias=True,
 )
 @has_permission(["project.write", "project:admin"])
 async def add_team_to_project(
@@ -323,6 +325,7 @@ async def add_team_to_project(
 @router.delete(
     "/projects/{slug:organization_slug}/{slug:project_slug}/teams/{slug:team_slug}/",
     response=ProjectTeamSchema,
+    by_alias=True,
 )
 @has_permission(["project.write", "project:admin"])
 async def delete_team_from_project(

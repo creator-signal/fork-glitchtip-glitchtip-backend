@@ -40,7 +40,11 @@ def get_projects_queryset(
     return qs
 
 
-@router.get("projects/", response=list[ProjectOrganizationSchema])
+@router.get(
+    "projects/",
+    response=list[ProjectOrganizationSchema],
+    by_alias=True,
+)
 @paginate
 @has_permission(["project:read"])
 async def list_projects(request: AuthHttpRequest, response: HttpResponse):
@@ -54,6 +58,7 @@ async def list_projects(request: AuthHttpRequest, response: HttpResponse):
 @router.get(
     "teams/{slug:organization_slug}/{slug:team_slug}/projects/",
     response=list[ProjectSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["project:read"])
@@ -71,6 +76,7 @@ async def list_team_projects(
 @router.post(
     "teams/{slug:organization_slug}/{slug:team_slug}/projects/",
     response={201: ProjectSchema},
+    by_alias=True,
 )
 @has_permission(["project:write", "project:admin"])
 async def create_project(
@@ -99,6 +105,7 @@ async def create_project(
 @router.get(
     "organizations/{slug:organization_slug}/projects/",
     response=list[ProjectTeamSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["project:read"])
