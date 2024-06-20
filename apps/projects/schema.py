@@ -32,7 +32,7 @@ class ProjectIn(NameSlugProjectSchema):
         ]
 
 
-class ProjectSchema(NameSlugProjectSchema):
+class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     """
     A project is an organizational unit for GlitchTip events. It may contain
     DSN keys, be connected to exactly one organization, and provide user permissions
@@ -51,8 +51,7 @@ class ProjectSchema(NameSlugProjectSchema):
     created: datetime = Field(serialization_alias="dateCreated")
     platform: Optional[str] = None
 
-    class Meta:
-        model = Project
+    class Meta(NameSlugProjectSchema.Meta):
         fields = [
             "first_event",
             "id",
@@ -119,8 +118,11 @@ class ProjectKeySchema(ProjectKeyUpdate):
             return {"window": obj.rate_limit_window, "count": count}
 
 
-class ProjectOrganizationSchema(ProjectSchema):
+class ProjectOrganizationSchema(ProjectSchema, ModelSchema):
     organization: OrganizationSchema
+
+    class Meta(ProjectSchema.Meta):
+        pass
 
 
 class ProjectWithKeysSchema(ProjectOrganizationSchema):

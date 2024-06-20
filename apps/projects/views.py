@@ -1,15 +1,9 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, viewsets
-from rest_framework.filters import OrderingFilter
 
 from .models import Project
 from .permissions import ProjectPermission
-from .serializers.serializers import (
-    BaseProjectSerializer,
-    OrganizationProjectSerializer,
-    ProjectDetailSerializer,
-    ProjectSerializer,
-)
+from .serializers.serializers import BaseProjectSerializer, ProjectSerializer
 
 
 class BaseProjectViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -46,9 +40,7 @@ class BaseProjectViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         return queryset
 
 
-class ProjectViewSet(
-    mixins.DestroyModelMixin, mixins.UpdateModelMixin, BaseProjectViewSet
-):
+class ProjectViewSet(BaseProjectViewSet):
     """
     /api/0/projects/
 
@@ -57,8 +49,5 @@ class ProjectViewSet(
     """
 
     serializer_class = ProjectSerializer
-    filter_backends = [OrderingFilter]
-    ordering = ["name"]
-    ordering_fields = ["name"]
     lookup_field = "pk"
     lookup_value_regex = r"(?P<organization_slug>[^/.]+)/(?P<project_slug>[-\w]+)"

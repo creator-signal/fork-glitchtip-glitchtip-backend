@@ -26,6 +26,8 @@ router = Router()
 
 """
 GET /api/0/projects/
+GET /api/0/projects/{organization_slug}/{project_slug}/
+DELETE /api/0/projects/{organization_slug}/{project_slug}/
 POST /api/0/projects/{organization_slug}/{project_slug}/teams/{team_slug}/ (See teams)
 DELETE /api/0/projects/{organization_slug}/{project_slug}/teams/{team_slug}/ (See teams)
 GET /api/0/projects/{organization_slug}/{team_slug}/keys/
@@ -81,6 +83,68 @@ async def list_projects(request: AuthHttpRequest, response: HttpResponse):
         .select_related("organization")
         .order_by("name")
     )
+
+
+@router.get(
+    "projects/{slug:organization_slug}/{slug:project_slug}/",
+    response=ProjectOrganizationSchema,
+    by_alias=True,
+)
+@has_permission(["project:read", "project:write", "project:admin"])
+async def get_project(
+    request: AuthHttpRequest, organization_slug: str, project_slug: str
+):
+    return await aget_object_or_404(
+        get_projects_queryset(request.auth.user_id, organization_slug).select_related(
+            "organization"
+        ),
+        slug=project_slug,
+    )
+
+
+@router.put(
+    "projects/{slug:organization_slug}/{slug:project_slug}/",
+    response=ProjectOrganizationSchema,
+    by_alias=True,
+)
+@has_permission(["project:write", "project:admin"])
+async def update_project(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    payload: ProjectIn,
+):
+    project = await aget_object_or_404(
+        get_projects_queryset(request.auth.user_id, organization_slug).select_related(
+            "organization"
+        ),
+        slug=project_slug,
+    )
+    for attr, value in payload.dict().items():
+        setattr(project, attr, value)
+    await project.asave()
+    return project
+
+
+@router.delete(
+    "projects/{slug:organization_slug}/{slug:project_slug}/",
+    response={204: None},
+)
+@has_permission(["project:admin"])
+async def delete_project(
+    request: AuthHttpRequest, organization_slug: str, project_slug: str
+):
+    result, _ = (
+        await get_projects_queryset(request.auth.user_id, organization_slug)
+        .filter(
+            slug=project_slug,
+            organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
+        )
+        .adelete()
+    )
+    if not result:
+        raise Http404
+    return 204, None
 
 
 @router.get(
