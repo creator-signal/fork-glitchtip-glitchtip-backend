@@ -20,10 +20,6 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
             "project-detail",
             kwargs={"pk": self.organization.slug + "/" + self.project.slug},
         )
-        self.team_detail_url = reverse(
-            "api:create_project",
-            args=[self.organization.slug, self.team.slug, self.project.slug],
-        )
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
@@ -35,11 +31,9 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
 
     def test_retrieve(self):
         self.assertGetReqStatusCode(self.detail_url, 403)
-        self.assertGetReqStatusCode(self.team_detail_url, 403)
 
         self.auth_token.add_permission("project:read")
         self.assertGetReqStatusCode(self.detail_url, 200)
-        self.assertGetReqStatusCode(self.team_detail_url, 200)
 
     def test_create(self):
         self.auth_token.add_permission("project:read")
@@ -71,28 +65,13 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
-    def test_destroy_team_project(self):
-        self.assertDeleteReqStatusCode(self.team_detail_url, 403)
-        self.auth_token.add_permission("project:admin")
-        self.assertDeleteReqStatusCode(self.team_detail_url, 204)
-
-    def test_user_destroy_team_project(self):
-        self.client.force_login(self.user)
-        self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.team_detail_url, 403)
-
-        self.set_user_role(OrganizationUserRole.OWNER)
-        self.assertDeleteReqStatusCode(self.team_detail_url, 204)
-
     def test_update(self):
         self.auth_token.add_permission("project:read")
         data = {"name": "new name"}
         self.assertPutReqStatusCode(self.detail_url, data, 403)
-        self.assertPutReqStatusCode(self.team_detail_url, data, 403)
 
         self.auth_token.add_permission("project:write")
         self.assertPutReqStatusCode(self.detail_url, data, 200)
-        self.assertPutReqStatusCode(self.team_detail_url, data, 200)
 
 
 class ProjectKeyAPIPermissionTests(APIPermissionTestCase):
