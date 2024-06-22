@@ -16,8 +16,7 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
         self.release.projects.add(self.project)
 
         self.organization_list_url = reverse(
-            "api:list_releases",
-            kwargs={"organization_slug": self.organization.slug},
+            "api:list_releases", args=[self.organization.slug]
         )
         self.project_list_url = reverse(
             "api:list_project_releases",
@@ -72,7 +71,9 @@ class ReleaseAPIPermissionTests(APIPermissionTestCase):
         self.assertGetReqStatusCode(self.project_detail_url, 200)
 
     def test_assemble(self):
-        url = self.organization_detail_url + "assemble/"
+        url = reverse(
+            "api:assemble_release", args=[self.organization.slug, self.release.version]
+        )
         data = {
             "checksum": "94bc085fe32db9b4b1b82236214d65eeeeeeeeee",
             "chunks": ["94bc085fe32db9b4b1b82236214d65eeeeeeeeee"],

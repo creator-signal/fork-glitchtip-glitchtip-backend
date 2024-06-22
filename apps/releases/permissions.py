@@ -11,8 +11,3 @@ class ReleasePermission(ScopedPermission):
 
     def get_user_scopes(self, obj, user):
         return obj.organization.get_user_scopes(user)
-
-
-class ReleaseFilePermission(ReleasePermission):
-    def get_user_scopes(self, obj, user):
-        return obj.release.organization.get_user_scopes(user)

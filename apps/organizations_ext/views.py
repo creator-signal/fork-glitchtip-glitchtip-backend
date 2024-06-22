@@ -8,17 +8,11 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter
 from rest_framework.response import Response
 
-from apps.organizations_ext.utils import is_organization_creation_open
-
 from .invitation_backend import InvitationTokenGenerator
 from .models import Organization, OrganizationUser, OrganizationUserRole
-from .permissions import (
-    OrganizationMemberPermission,
-    OrganizationPermission,
-)
+from .permissions import OrganizationMemberPermission
 from .serializers.serializers import (
     AcceptInviteSerializer,
-    OrganizationDetailSerializer,
     OrganizationSerializer,
     OrganizationUserDetailSerializer,
     OrganizationUserProjectsSerializer,
@@ -27,41 +21,13 @@ from .serializers.serializers import (
 )
 
 
-class OrganizationViewSet(viewsets.ModelViewSet):
+class OrganizationViewSet(viewsets.GenericViewSet):
     filter_backends = [OrderingFilter]
     ordering = ["name"]
     ordering_fields = ["name"]
-    queryset = Organization.objects.all()
+    queryset = Organization.objects.none()
     serializer_class = OrganizationSerializer
     lookup_field = "slug"
-    permission_classes = [OrganizationPermission]
-
-    def get_serializer_class(self):
-        if self.action in ["retrieve"]:
-            return OrganizationDetailSerializer
-        return super().get_serializer_class()
-
-    def get_queryset(self):
-        if not self.request.user.is_authenticated:
-            return self.queryset.none()
-        queryset = self.queryset.filter(users=self.request.user)
-
-        if self.action in ["retrieve"]:
-            queryset = queryset.prefetch_related(
-                "projects__teams__members",
-                "teams__members",
-            )
-        return queryset
-
-    def perform_create(self, serializer):
-        """
-        Create organization with current user as owner
-        If registration is closed, only superusers can create new orgs.
-        """
-        if not is_organization_creation_open() and not self.request.user.is_superuser:
-            raise exceptions.PermissionDenied("Organization creation is not open")
-        organization = serializer.save()
-        organization.add_user(self.request.user, role=OrganizationUserRole.OWNER)
 
 
 class OrganizationMemberViewSet(viewsets.ModelViewSet):

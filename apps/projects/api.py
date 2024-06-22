@@ -43,7 +43,7 @@ GET /api/0/organizations/{organization_slug}/projects/
 def get_projects_queryset(
     user_id: int, organization_slug: str = None, team_slug: str = None
 ):
-    qs = Project.objects.filter(organization__users=user_id).annotate(
+    qs = Project.undeleted_objects.filter(organization__users=user_id).annotate(
         is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
     )
     if organization_slug:

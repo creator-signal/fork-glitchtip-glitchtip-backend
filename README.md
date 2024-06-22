@@ -30,6 +30,7 @@ GlitchTip is a stable platform used in production environments for several years
 
 We use Docker for development.
 View our [Contributing](./CONTRIBUTING.md) documentation if you'd like to help make GlitchTip better.
+See [API Documentation](https://app.glitchtip.com/api/docs)
 
 ## Run local dev environment
 

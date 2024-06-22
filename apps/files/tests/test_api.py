@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCase, GlitchTipTestCaseMixin
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..models import File, FileBlob
 
@@ -33,20 +33,16 @@ class ChunkUploadAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.status_code, 200)
 
 
-class ReleaseAssembleAPITests(GlitchTipTestCase):
+class ReleaseAssembleAPITests(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
         self.organization.slug = "whab"
         self.organization.save()
         self.release = baker.make(
             "releases.Release", version="lol", organization=self.organization
         )
         self.url = reverse(
-            "organization-releases-assemble",
-            kwargs={
-                "organization_slug": self.organization.slug,
-                "version": self.release.version,
-            },
+            "api:assemble_release", args=[self.organization.slug, self.release.version]
         )
 
     def test_post(self):
@@ -58,7 +54,11 @@ class ReleaseAssembleAPITests(GlitchTipTestCase):
             open(os.path.dirname(__file__) + "/test_zip/" + checksum, "rb").read(),
         )
         FileBlob.objects.create(blob=zip_file, size=3635, checksum=checksum)
-        res = self.client.post(self.url, {"checksum": checksum, "chunks": [checksum]})
+        res = self.client.post(
+            self.url,
+            {"checksum": checksum, "chunks": [checksum]},
+            content_type="application/json",
+        )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(File.objects.get(name=filename))
         map_file = File.objects.get(name=map_filename)

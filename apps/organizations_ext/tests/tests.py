@@ -1,9 +1,6 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
-from rest_framework.test import APITestCase
-
-from apps.organizations_ext.models import OrganizationUser
 
 
 class OrganizationModelTestCase(TestCase):
@@ -31,77 +28,24 @@ class OrganizationModelTestCase(TestCase):
         organization = baker.make("organizations_ext.Organization", name=word)
 
 
-class OrganizationRegistrationSettingQueryTestCase(APITestCase):
+class OrganizationRegistrationSettingQueryTestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
-        self.url = reverse("organization-list")
+        self.url = reverse("api:list_organizations")
 
+    @override_settings(ENABLE_ORGANIZATION_CREATION=False)
     def test_organizations_closed_registration_first_organization_create(self):
         data = {"name": "test"}
-
-        with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            res = self.client.post(self.url, data)
+        res = self.client.post(self.url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
 
 
-class OrganizationsAPITestCase(APITestCase):
-    def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.organization.add_user(self.user)
-        self.client.force_login(self.user)
-        self.url = reverse("organization-list")
-
-    def test_organizations_list(self):
-        not_my_organization = baker.make("organizations_ext.Organization")
-        res = self.client.get(self.url)
-        self.assertContains(res, self.organization.slug)
-        self.assertNotContains(res, not_my_organization.slug)
-        self.assertFalse(
-            "teams" in res.data[0].keys(), "List view shouldn't contain teams"
-        )
-
-    def test_organizations_retrieve(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        url = reverse("organization-detail", args=[self.organization.slug])
-        res = self.client.get(url)
-        self.assertContains(res, self.organization.name)
-        self.assertContains(res, project.name)
-        self.assertTrue(
-            "teams" in res.data.keys(), "Retrieve view should contain teams"
-        )
-
-    def test_organizations_create(self):
-        data = {"name": "test"}
-        with self.assertNumQueries(6):
-            res = self.client.post(self.url, data)
-        self.assertContains(res, data["name"], status_code=201)
-        self.assertEqual(
-            OrganizationUser.objects.filter(organization__name=data["name"]).count(), 1
-        )
-
-    def test_organizations_create_closed_registration_superuser(self):
-        data = {"name": "test"}
-
-        with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            res = self.client.post(self.url, data)
-        self.assertEqual(res.status_code, 403)
-
-        self.user.is_superuser = True
-        self.user.save()
-
-        with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            with self.assertNumQueries(7):
-                res = self.client.post(self.url, data)
-        self.assertEqual(res.status_code, 201)
-
-
-class OrganizationsFilterTestCase(APITestCase):
+class OrganizationsFilterTestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
-        self.url = reverse("organization-list")
+        self.url = reverse("api:list_organizations")
 
     def test_default_ordering(self):
         organizationA = baker.make(
@@ -117,5 +61,6 @@ class OrganizationsFilterTestCase(APITestCase):
         organizationB.add_user(self.user)
         organizationZ.add_user(self.user)
         res = self.client.get(self.url)
-        self.assertEqual(res.data[0]["name"], organizationA.name)
-        self.assertEqual(res.data[2]["name"], organizationZ.name)
+        data = res.json()
+        self.assertEqual(data[0]["name"], organizationA.name)
+        self.assertEqual(data[2]["name"], organizationZ.name)

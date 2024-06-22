@@ -6,7 +6,6 @@ from apps.performance.views import (
     TransactionGroupViewSet,
     TransactionViewSet,
 )
-from apps.releases.views import ReleaseViewSet
 from apps.uptime.views import (
     MonitorCheckViewSet,
     MonitorViewSet,
@@ -60,18 +59,10 @@ organizations_monitors_router.register(
     r"checks", MonitorCheckViewSet, basename="organization-monitor-checks"
 )
 
-organizations_router.register(
-    r"releases", ReleaseViewSet, basename="organization-releases"
-)
-organizations_releases_router = routers.NestedSimpleRouter(
-    organizations_router, r"releases", lookup="release"
-)
-
 urlpatterns = [
     path("", include(router.urls)),
     path("", include(organizations_router.urls)),
     path("", include(organizations_monitors_router.urls)),
-    path("", include(organizations_releases_router.urls)),
     path(
         "accept/<int:org_user_id>/<token>/",
         AcceptInviteView.as_view(),
