@@ -6,7 +6,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, Q, QuerySet
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
@@ -45,6 +45,13 @@ class Project(CreatedModel, SoftDeleteModel):
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def annotate_is_member(cls, queryset: QuerySet, user_id: int):
+        """Add is_member boolean annotate to Project queryset"""
+        return queryset.annotate(
+            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+        )
 
     def save(self, *args, **kwargs):
         first = False

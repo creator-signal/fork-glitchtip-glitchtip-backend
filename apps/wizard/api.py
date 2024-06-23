@@ -1,7 +1,6 @@
 import string
 
 from django.core.cache import cache
-from django.db.models import Count, Q
 from django.http import Http404
 from django.utils.crypto import get_random_string
 from ninja import Field, Router, Schema
@@ -93,14 +92,13 @@ async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardS
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
     wizard_data = cache.get(key)
     if wizard_data is None:
-        raise HttpError(400)
+        raise HttpError(400, "Token not found")
 
     user_id = request.auth.user_id
     projects = [
         project
-        async for project in Project.objects.filter(organization__users=user_id)
-        .annotate(
-            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+        async for project in Project.annotate_is_member(
+            Project.objects.filter(organization__users=user_id), user_id
         )
         .select_related("organization")
         .prefetch_related("projectkey_set")[:50]

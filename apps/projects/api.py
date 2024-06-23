@@ -1,7 +1,6 @@
 from typing import Optional
 from uuid import UUID
 
-from django.db.models import Count, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -43,8 +42,8 @@ GET /api/0/organizations/{organization_slug}/projects/
 def get_projects_queryset(
     user_id: int, organization_slug: str = None, team_slug: str = None
 ):
-    qs = Project.undeleted_objects.filter(organization__users=user_id).annotate(
-        is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+    qs = Project.annotate_is_member(
+        Project.undeleted_objects.filter(organization__users=user_id), user_id
     )
     if organization_slug:
         qs = qs.filter(organization__slug=organization_slug)

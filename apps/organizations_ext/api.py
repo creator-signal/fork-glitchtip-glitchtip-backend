@@ -1,6 +1,6 @@
 from typing import Optional
 
-from django.db.models import Count, Exists, OuterRef, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -42,11 +42,7 @@ def get_organizations_queryset(
         qs = qs.prefetch_related(
             Prefetch(
                 "projects",
-                queryset=Project.objects.annotate(
-                    is_member=Count(
-                        "teams__members", filter=Q(teams__members__id=user_id)
-                    )
-                ),
+                queryset=Project.annotate_is_member(Project.objects, user_id),
             ),
             "projects__teams",
             Prefetch(
