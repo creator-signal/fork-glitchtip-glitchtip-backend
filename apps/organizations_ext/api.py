@@ -9,13 +9,19 @@ from organizations.signals import user_added
 
 from apps.projects.models import Project
 from apps.teams.models import Team
+from apps.teams.schema import OrganizationDetailSchema
 from apps.users.models import User
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import Organization, OrganizationUser, OrganizationUserRole
-from .schema import OrganizationDetailSchema, OrganizationInSchema, OrganizationSchema
+from .schema import (
+    OrganizationInSchema,
+    OrganizationSchema,
+    OrganizationUserSchema,
+    OrganizationUserDetailSchema,
+)
 from .utils import is_organization_creation_open
 
 router = Router()
@@ -26,6 +32,8 @@ POST /api/0/organizations/ (Not in sentry)
 GET /api/0/organizations/{organization_slug}/
 PUT /api/0/organizations/{organization_slug}/
 DELETE /api/0/organizations/{organization_slug}/ (Not in sentry)
+GET /api/0/organizations/{organization_slug}/members/
+GET /api/0/organizations/{organization_slug}/members/{member_id}/
 """
 
 
@@ -58,6 +66,21 @@ def get_organizations_queryset(
             ),
             "teams__members",
         )
+    return qs
+
+
+def get_organization_users_queryset(
+    user_id: int, organization_slug: str, add_details=False
+):
+    qs = (
+        OrganizationUser.objects.filter(
+            organization__users=user_id, organization__slug=organization_slug
+        )
+        .select_related("user")
+        .prefetch_related("user__socialaccount_set")
+    )
+    if add_details:
+        qs = qs.prefetch_related("teams")
     return qs
 
 
@@ -154,3 +177,30 @@ async def delete_organization(request: AuthHttpRequest, organization_slug: str):
     if not result:
         raise Http404
     return 204, None
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/members/",
+    response=list[OrganizationUserSchema],
+)
+@paginate
+@has_permission(["member:read", "member:write", "member:admin"])
+async def list_organization_members(
+    request: AuthHttpRequest, response: HttpResponse, organization_slug: str
+):
+    return get_organization_users_queryset(request.auth.user_id, organization_slug)
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/members/{int:member_id}/",
+    response=OrganizationUserDetailSchema,
+)
+@has_permission(["member:read", "member:write", "member:admin"])
+async def get_organization_member(
+    request: AuthHttpRequest, organization_slug: str, member_id: int
+):
+    user_id = request.auth.user_id
+    return await aget_object_or_404(
+        get_organization_users_queryset(user_id, organization_slug, add_details=True),
+        pk=member_id,
+    )

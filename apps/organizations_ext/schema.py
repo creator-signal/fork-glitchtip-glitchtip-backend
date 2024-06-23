@@ -3,10 +3,10 @@ from typing import Optional
 
 from ninja import Field, ModelSchema
 
-from apps.teams.schema import ProjectTeamSchema, TeamSchema
+from apps.users.schema import UserSchema
 from glitchtip.schema import CamelSchema
 
-from .models import Organization
+from .models import Organization, OrganizationUser
 
 
 class OrganizationInSchema(CamelSchema, ModelSchema):
@@ -33,9 +33,26 @@ class OrganizationSchema(OrganizationInSchema, ModelSchema):
         ]
 
 
-class OrganizationDetailSchema(OrganizationSchema, ModelSchema):
-    projects: list[ProjectTeamSchema]
-    teams: list[TeamSchema]
+class OrganizationUserSchema(CamelSchema, ModelSchema):
+    id: str
+    role: str = Field(validation_alias="get_role")
+    role_name: str = Field(validation_alias="get_role_display")
+    date_created: datetime = Field(validation_alias="created")
+    email: str = Field(validation_alias="get_email")
+    user: UserSchema
+    pending: bool
 
-    class Meta(OrganizationSchema.Meta):
-        fields = OrganizationSchema.Meta.fields + ["open_membership"]
+    class Meta:
+        model = OrganizationUser
+        fields = ["id"]
+
+    class Config:
+        coerce_numbers_to_str = True
+
+
+class OrganizationUserDetailSchema(OrganizationUserSchema):
+    teams: list[str]
+
+    @staticmethod
+    def resolve_teams(obj):
+        return [team.slug for team in obj.teams.all()]

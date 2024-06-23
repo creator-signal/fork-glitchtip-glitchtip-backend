@@ -1,45 +1,39 @@
 import json
 
 from django.core import mail
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 from ..models import OrganizationUser, OrganizationUserRole
 
 
-class OrganizationUsersAPITestCase(APITestCase):
+class OrganizationUsersTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = baker.make("users.user")
+        cls.organization = baker.make("organizations_ext.Organization")
+        cls.org_user = cls.organization.add_user(
+            cls.user, role=OrganizationUserRole.MANAGER
+        )
+        cls.users_url = reverse("organization-users-list", args=[cls.organization.slug])
+        cls.members_url = reverse(
+            "api:list_organization_members", args=[cls.organization.slug]
+        )
+
     def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.org_user = self.organization.add_user(
-            self.user, role=OrganizationUserRole.MANAGER
-        )
         self.client.force_login(self.user)
-        self.users_url = reverse(
-            "organization-users-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
-        self.members_url = reverse(
-            "organization-members-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
 
     def get_org_member_detail_url(self, organization_slug, pk):
-        return reverse(
-            "organization-members-detail",
-            kwargs={
-                "organization_slug": organization_slug,
-                "pk": pk,
-            },
-        )
+        return reverse("api:get_organization_member", args=[organization_slug, pk])
 
-    def test_organization_users_list(self):
+    def test_organization_members_list(self):
         res = self.client.get(self.users_url)
         self.assertContains(res, self.user.email)
         res = self.client.get(self.members_url)
         self.assertContains(res, self.user.email)
+        data = res.json()
+        self.assertNotIn("teams", data[0].keys())
 
     def test_organization_members_email_field(self):
         """
@@ -63,7 +57,7 @@ class OrganizationUsersAPITestCase(APITestCase):
         res = self.client.get(url)
         self.assertContains(res, self.user.email)
 
-    def test_organization_users_detail(self):
+    def test_organization_members_detail(self):
         other_user = baker.make("users.user")
         other_organization = baker.make("organizations_ext.Organization")
         other_org_user = other_organization.add_user(other_user)

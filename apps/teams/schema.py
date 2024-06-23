@@ -2,6 +2,7 @@ from datetime import datetime
 
 from ninja import Field, ModelSchema, Schema
 
+from apps.organizations_ext.schema import OrganizationSchema
 from apps.projects.schema import ProjectSchema
 from apps.shared.schema.fields import SlugStr
 from glitchtip.schema import CamelSchema
@@ -45,3 +46,12 @@ class ProjectTeamSchema(ProjectSchema):
     """Project Schema with related teams"""
 
     teams: list[TeamSlugSchema]
+
+
+# Depends on teams, thus part of the teams app
+class OrganizationDetailSchema(OrganizationSchema, ModelSchema):
+    projects: list[ProjectTeamSchema]
+    teams: list[TeamSchema]
+
+    class Meta(OrganizationSchema.Meta):
+        fields = OrganizationSchema.Meta.fields + ["open_membership"]
