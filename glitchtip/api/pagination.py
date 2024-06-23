@@ -1,11 +1,10 @@
 import inspect
 from abc import abstractmethod
 from functools import partial, wraps
-from typing import Any, AsyncGenerator, Callable, List, Type, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, List, Type, Union
 from urllib import parse
 
 from asgiref.sync import sync_to_async
-from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.module_loading import import_string
 from ninja.conf import settings as ninja_settings
@@ -19,18 +18,21 @@ from ninja.utils import (
 
 from .cursor_pagination import CursorPagination, _clamp, _reverse_order
 
+if TYPE_CHECKING:
+    from django.db.models import QuerySet
+
 
 class AsyncPaginationBase(PaginationBase):
     @abstractmethod
     async def apaginate_queryset(
         self,
-        queryset: QuerySet,
+        queryset: "QuerySet",
         pagination: Any,
         **params: Any,
     ) -> Any:
         pass  # pragma: no cover
 
-    async def _aitems_count(self, queryset: QuerySet) -> int:
+    async def _aitems_count(self, queryset: "QuerySet") -> int:
         try:
             return await queryset.all().acount()
         except AttributeError:
@@ -45,7 +47,7 @@ class AsyncLinkHeaderPagination(CursorPagination):
 
     async def apaginate_queryset(
         self,
-        queryset: QuerySet,
+        queryset: "QuerySet",
         pagination: CursorPagination.Input,
         request: HttpRequest,
         response: HttpResponse,
@@ -163,7 +165,7 @@ class AsyncLinkHeaderPagination(CursorPagination):
 
         return page
 
-    async def _aitems_count(self, queryset: QuerySet) -> int:
+    async def _aitems_count(self, queryset: "QuerySet") -> int:
         return await queryset.order_by()[: self.max_hits].acount()  # type: ignore
 
 
@@ -187,7 +189,7 @@ def _inject_pagination(
                 items, pagination=pagination_params, request=request, **kwargs
             )
 
-            async def evaluate(results: Union[List, QuerySet]) -> AsyncGenerator:
+            async def evaluate(results: Union[List, "QuerySet"]) -> AsyncGenerator:
                 for result in results:
                     yield result
 
