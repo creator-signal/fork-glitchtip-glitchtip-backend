@@ -2,14 +2,13 @@ import copy
 import itertools
 import re
 from os.path import splitext
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from symbolic import SourceMapView, SourceView
 
 from apps.files.models import File
 from sentry.utils.safe import get_path
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .schema import IssueEventSchema, StackTrace, StackTraceFrame
