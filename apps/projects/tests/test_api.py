@@ -14,13 +14,22 @@ class ProjectsAPITestCase(TestCase):
     def setUpTestData(cls):
         cls.user = baker.make("users.user")
         cls.organization = baker.make("organizations_ext.Organization")
-        cls.organization.add_user(cls.user, role=OrganizationUserRole.OWNER)
+        cls.org_user = cls.organization.add_user(
+            cls.user, role=OrganizationUserRole.OWNER
+        )
         cls.project = baker.make(
             "projects.Project",
             organization=cls.organization,
             name="Alpha",
             first_event=timezone.now(),
         )
+        cls.team = baker.make(
+            "teams.Team",
+            organization=cls.organization,
+            members=[cls.org_user],
+            projects=[cls.project],
+        )
+
         cls.url = reverse("api:list_projects")
         cls.detail_url = reverse(
             "api:get_project", args=[cls.organization.slug, cls.project.slug]
@@ -30,9 +39,19 @@ class ProjectsAPITestCase(TestCase):
         self.client.force_login(self.user)
 
     def test_projects_api_list(self):
+        # Ensure project annotate_is_member works with two teams on one project
+        baker.make(
+            "teams.Team",
+            organization=self.organization,
+            members=[self.org_user],
+            projects=[self.project],
+        )
+
         res = self.client.get(self.url)
-        self.assertContains(res, self.project.name)
         self.assertContains(res, self.organization.name)
+        data = res.json()[0]
+        self.assertEqual(data["name"], self.project.name)
+        self.assertTrue(data["isMember"])
         data_keys = res.json()[0].keys()
         self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
         self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")
