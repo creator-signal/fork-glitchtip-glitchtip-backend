@@ -12,7 +12,10 @@ from ..models import OrganizationUser, OrganizationUserRole
 class OrganizationUsersAPITestCase(APITestCase):
     def setUp(self):
         self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
+        self.organization = baker.make(
+            "organizations_ext.Organization",
+            name="<a>No</a><script>HtmlInOrgName</script>",
+        )
         self.org_user = self.organization.add_user(
             self.user, role=OrganizationUserRole.MANAGER
         )
@@ -127,6 +130,11 @@ class OrganizationUsersAPITestCase(APITestCase):
         res = self.client.post(self.members_url, data)
         self.assertTrue(res.data["pending"])
         body = mail.outbox[0].body
+        html_content = mail.outbox[0].alternatives[0][0]
+        self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in body)
+        self.assertTrue("NoHtmlInOrgName" in body)
+        self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in html_content)
+        self.assertTrue("NoHtmlInOrgName" in html_content)
         body_split = body[body.find("http://localhost:8000/accept/") :].split("/")
         org_user_id = body_split[4]
         token = body_split[5]
