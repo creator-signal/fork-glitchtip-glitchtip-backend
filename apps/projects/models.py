@@ -50,7 +50,11 @@ class Project(CreatedModel, SoftDeleteModel):
     def annotate_is_member(cls, queryset: QuerySet, user_id: int):
         """Add is_member boolean annotate to Project queryset"""
         return queryset.annotate(
-            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
+            is_member=Count(
+                "teams__members",
+                filter=Q(teams__members__user_id=user_id),
+                distinct=True,
+            )
         )
 
     def save(self, *args, **kwargs):

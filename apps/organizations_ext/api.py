@@ -61,7 +61,7 @@ def get_organizations_queryset(
     return qs
 
 
-@router.get("organizations/", response=list[OrganizationSchema])
+@router.get("organizations/", response=list[OrganizationSchema], by_alias=True)
 @paginate
 @has_permission(["org:read", "org:write", "org:admin"])
 async def list_organizations(
@@ -76,7 +76,9 @@ async def list_organizations(
 
 
 @router.get(
-    "organizations/{slug:organization_slug}/", response=OrganizationDetailSchema
+    "organizations/{slug:organization_slug}/",
+    response=OrganizationDetailSchema,
+    by_alias=True,
 )
 @has_permission(["org:read", "org:write", "org:admin"])
 async def get_organization(request: AuthHttpRequest, organization_slug: str):
@@ -87,7 +89,7 @@ async def get_organization(request: AuthHttpRequest, organization_slug: str):
     )
 
 
-@router.post("organizations/", response={201: OrganizationDetailSchema})
+@router.post("organizations/", response={201: OrganizationDetailSchema}, by_alias=True)
 @has_permission(["org:write", "org:admin"])
 async def create_organization(request: AuthHttpRequest, payload: OrganizationInSchema):
     """
@@ -115,7 +117,9 @@ async def create_organization(request: AuthHttpRequest, payload: OrganizationInS
 
 
 @router.put(
-    "organizations/{slug:organization_slug}/", response=OrganizationDetailSchema
+    "organizations/{slug:organization_slug}/",
+    response=OrganizationDetailSchema,
+    by_alias=True,
 )
 @has_permission(["org:write", "org:admin"])
 async def update_organization(

@@ -10,11 +10,6 @@ from ..models import OrganizationUserRole
 class OrganizationProjectsViewTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.create_logged_in_user()
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, OrganizationUserRole.ADMIN)
-        team = baker.make("teams.Team", organization=self.organization)
-        team.members.add(self.org_user)
-        self.project.teams.add(team)
         self.url = reverse(
             "api:list_organization_projects", args=[self.organization.slug]
         )
