@@ -118,7 +118,7 @@ class ProjectKeySchema(ProjectKeyUpdate):
             return {"window": obj.rate_limit_window, "count": count}
 
 
-class ProjectOrganizationSchema(ProjectSchema, ModelSchema):
+class ProjectOrganizationSchema(ProjectSchema):
     organization: OrganizationSchema
 
     class Meta(ProjectSchema.Meta):
