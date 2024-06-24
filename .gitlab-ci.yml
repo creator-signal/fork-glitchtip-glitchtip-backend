@@ -17,7 +17,7 @@ workflow:
     - when: always
 
 test:
-  image: python:3.12
+  image: python:$VERSION
   variables:
     SECRET_KEY: testing
     ENABLE_TEST_API: "true"
@@ -25,7 +25,7 @@ test:
   services:
     - postgres:16
   cache:
-    key: ${CI_COMMIT_REF_SLUG}
+    key: ${CI_COMMIT_REF_SLUG}${VERSION}
     paths:
       - .cache/pip
   script:
@@ -34,6 +34,9 @@ test:
     - ./manage.py test
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
+  parallel:
+    matrix:
+      - VERSION: ['3.11', '3.12']
 
 lint:
   image: python:3.12
