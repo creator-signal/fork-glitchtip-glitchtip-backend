@@ -1,6 +1,6 @@
 from typing import Optional
 
-from django.db.models import Count, Exists, OuterRef, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -313,9 +313,7 @@ async def add_team_to_project(
     )
     await project.teams.aadd(team)
     project = await (
-        Project.objects.annotate(
-            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
-        )
+        Project.annotate_is_member(Project.objects, user_id)
         .prefetch_related("teams")
         .aget(id=project.id)
     )
@@ -347,9 +345,7 @@ async def delete_team_from_project(
     )
     await project.teams.aremove(team)
     return await (
-        Project.objects.annotate(
-            is_member=Count("teams__members", filter=Q(teams__members__id=user_id))
-        )
+        Project.annotate_is_member(Project.objects, user_id)
         .prefetch_related("teams")
         .aget(id=project.id)
     )

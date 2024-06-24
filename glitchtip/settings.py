@@ -793,6 +793,10 @@ elif TESTING:
 
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", False)
 if TESTING:
+    TEST_RUNNER = "glitchtip.test_runner.TimedTestRunner"
+    # Optimization
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+    DATABASES["default"]["CONN_MAX_AGE"] = None
     CELERY_TASK_ALWAYS_EAGER = True
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES

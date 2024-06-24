@@ -1,19 +1,20 @@
 import hashlib
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from django.core.cache import cache
 
-from apps.issue_events.models import IssueEventType
-
 from .schema import EventMessage
 
+if TYPE_CHECKING:
+    from apps.issue_events.models import IssueEventType
 
-def default_hash_input(title: str, culprit: str, type: IssueEventType) -> str:
+
+def default_hash_input(title: str, culprit: str, type: "IssueEventType") -> str:
     return title + culprit + str(type)
 
 
 def generate_hash(
-    title: str, culprit: str, type: IssueEventType, extra: Optional[List[str]] = None
+    title: str, culprit: str, type: "IssueEventType", extra: Optional[List[str]] = None
 ) -> str:
     """Generate insecure hash used for grouping issues"""
     if extra:

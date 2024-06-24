@@ -15,8 +15,7 @@ class ProjectKeyAPITestCase(APITestCase):
         self.organization.add_user(self.user, role=OrganizationUserRole.OWNER)
         self.project = baker.make("projects.Project", organization=self.organization)
         self.url = reverse(
-            "project-keys-list",
-            kwargs={"project_pk": self.organization.slug + "/" + self.project.slug},
+            "api:list_project_keys", args=[self.organization.slug, self.project.slug]
         )
 
     def test_key_dsn(self):

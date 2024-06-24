@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 import aiohttp
 import tablib
 from asgiref.sync import sync_to_async
@@ -8,12 +10,14 @@ from apps.organizations_ext.admin import OrganizationResource, OrganizationUserR
 from apps.organizations_ext.models import OrganizationUser, OrganizationUserRole
 from apps.projects.admin import ProjectKeyResource, ProjectResource
 from apps.projects.models import Project
-from apps.shared.types import TypeJson
 from apps.teams.admin import TeamResource
 from apps.users.admin import UserResource
 from apps.users.models import User
 
 from .exceptions import ImporterException
+
+if TYPE_CHECKING:
+    from apps.shared.types import TypeJson
 
 
 class GlitchTipImporter:
@@ -38,7 +42,7 @@ class GlitchTipImporter:
         self.organization_slug = organization_slug
         self.organization_id = None
         self.organization_url = reverse(
-            "organization-detail", kwargs={"slug": self.organization_slug}
+            "api:get_organization", args=[self.organization_slug]
         )
         self.organization_users_url = reverse(
             "organization-users-list",
@@ -59,7 +63,7 @@ class GlitchTipImporter:
         await self.import_projects()
         await self.import_teams()
 
-    async def get(self, url: str) -> TypeJson:
+    async def get(self, url: str) -> "TypeJson":
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=self.headers) as res:
                 return await res.json()
@@ -115,10 +119,8 @@ class GlitchTipImporter:
             keys = await self.get(
                 self.url
                 + reverse(
-                    "project-keys-list",
-                    kwargs={
-                        "project_pk": f"{self.organization_slug}/{project['slug']}",
-                    },
+                    "api:list_project_keys",
+                    args=[self.organization_slug, project["slug"]],
                 )
             )
             for key in keys:

@@ -9,8 +9,8 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
     def setUp(self):
         self.create_user_org()
         self.set_client_credentials(self.auth_token.token)
-        self.list_url = reverse("organization-list")
-        self.detail_url = reverse("organization-detail", args=[self.organization.slug])
+        self.list_url = reverse("api:list_organizations")
+        self.detail_url = reverse("api:get_organization", args=[self.organization.slug])
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
@@ -36,9 +36,10 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_user_destroy(self):
+        self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 403)
+        self.assertDeleteReqStatusCode(self.detail_url, 404)
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
@@ -50,10 +51,13 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
         self.assertPutReqStatusCode(self.detail_url, data, 200)
 
     def test_user_update(self):
+        user2 = baker.make("users.user")
+        self.organization.add_user(user2, OrganizationUserRole.MANAGER)
+        self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
         data = {"name": "new name"}
-        self.assertPutReqStatusCode(self.detail_url, data, 403)
+        self.assertPutReqStatusCode(self.detail_url, data, 404)
         self.set_user_role(OrganizationUserRole.MANAGER)
         self.assertPutReqStatusCode(self.detail_url, data, 200)
 

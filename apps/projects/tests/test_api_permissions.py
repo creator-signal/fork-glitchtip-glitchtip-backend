@@ -17,15 +17,7 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
             "api:list_team_projects", args=[self.organization.slug, self.team.slug]
         )
         self.detail_url = reverse(
-            "project-detail",
-            kwargs={"pk": self.organization.slug + "/" + self.project.slug},
-        )
-        self.team_detail_url = reverse(
-            "team-projects-detail",
-            kwargs={
-                "team_pk": self.organization.slug + "/" + self.team.slug,
-                "slug": self.project.slug,
-            },
+            "api:get_project", args=[self.organization.slug, self.project.slug]
         )
 
     def test_list(self):
@@ -38,11 +30,9 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
 
     def test_retrieve(self):
         self.assertGetReqStatusCode(self.detail_url, 403)
-        self.assertGetReqStatusCode(self.team_detail_url, 403)
 
         self.auth_token.add_permission("project:read")
         self.assertGetReqStatusCode(self.detail_url, 200)
-        self.assertGetReqStatusCode(self.team_detail_url, 200)
 
     def test_create(self):
         self.auth_token.add_permission("project:read")
@@ -67,35 +57,21 @@ class ProjectAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_user_destroy(self):
+        self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 403)
+        self.assertDeleteReqStatusCode(self.detail_url, 404)
 
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
-
-    def test_destory_team_project(self):
-        self.assertDeleteReqStatusCode(self.team_detail_url, 403)
-        self.auth_token.add_permission("project:admin")
-        self.assertDeleteReqStatusCode(self.team_detail_url, 204)
-
-    def test_user_destroy_team_project(self):
-        self.client.force_login(self.user)
-        self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.team_detail_url, 403)
-
-        self.set_user_role(OrganizationUserRole.OWNER)
-        self.assertDeleteReqStatusCode(self.team_detail_url, 204)
 
     def test_update(self):
         self.auth_token.add_permission("project:read")
         data = {"name": "new name"}
         self.assertPutReqStatusCode(self.detail_url, data, 403)
-        self.assertPutReqStatusCode(self.team_detail_url, data, 403)
 
         self.auth_token.add_permission("project:write")
         self.assertPutReqStatusCode(self.detail_url, data, 200)
-        self.assertPutReqStatusCode(self.team_detail_url, data, 200)
 
 
 class ProjectKeyAPIPermissionTests(APIPermissionTestCase):
@@ -106,15 +82,15 @@ class ProjectKeyAPIPermissionTests(APIPermissionTestCase):
         self.project = baker.make("projects.Project", organization=self.organization)
         self.project_key = baker.make("projects.ProjectKey", project=self.project)
         self.list_url = reverse(
-            "project-keys-list",
-            kwargs={"project_pk": f"{self.organization.slug}/{self.project.slug}"},
+            "api:list_project_keys", args=[self.organization.slug, self.project.slug]
         )
         self.detail_url = reverse(
-            "project-keys-detail",
-            kwargs={
-                "project_pk": f"{self.organization.slug}/{self.project.slug}",
-                "public_key": self.project_key.public_key,
-            },
+            "api:get_project_key",
+            args=[
+                self.organization.slug,
+                self.project.slug,
+                self.project_key.public_key,
+            ],
         )
 
     def test_list(self):
@@ -129,7 +105,7 @@ class ProjectKeyAPIPermissionTests(APIPermissionTestCase):
 
     def test_create(self):
         self.auth_token.add_permission("project:read")
-        data = {"label": "new project key"}
+        data = {"name": "new project key"}
         self.assertPostReqStatusCode(self.list_url, data, 403)
         self.auth_token.add_permission("project:write")
         self.assertPostReqStatusCode(self.list_url, data, 201)
@@ -142,7 +118,7 @@ class ProjectKeyAPIPermissionTests(APIPermissionTestCase):
 
     def test_update(self):
         self.auth_token.add_permission("project:read")
-        data = {"label": "new label"}
+        data = {"name": "new label"}
         self.assertPutReqStatusCode(self.detail_url, data, 403)
         self.auth_token.add_permission("project:write")
         self.assertPutReqStatusCode(self.detail_url, data, 200)

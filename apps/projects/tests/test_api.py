@@ -1,9 +1,7 @@
-from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 from apps.organizations_ext.models import OrganizationUserRole
 
@@ -11,66 +9,84 @@ from ..models import Project, ProjectKey
 from ..views import ProjectViewSet
 
 
-class ProjectsAPITestCase(APITestCase):
+class ProjectsAPITestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = baker.make("users.user")
+        cls.organization = baker.make("organizations_ext.Organization")
+        cls.org_user = cls.organization.add_user(
+            cls.user, role=OrganizationUserRole.OWNER
+        )
+        cls.project = baker.make(
+            "projects.Project",
+            organization=cls.organization,
+            name="Alpha",
+            first_event=timezone.now(),
+        )
+        cls.team = baker.make(
+            "teams.Team",
+            organization=cls.organization,
+            members=[cls.org_user],
+            projects=[cls.project],
+        )
+
+        cls.url = reverse("api:list_projects")
+        cls.detail_url = reverse(
+            "api:get_project", args=[cls.organization.slug, cls.project.slug]
+        )
+
     def setUp(self):
-        self.user = baker.make("users.user")
         self.client.force_login(self.user)
-        self.url = reverse("api:list_projects")
 
     def test_projects_api_list(self):
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
-        project = baker.make("projects.Project", organization=organization)
+        # Ensure project annotate_is_member works with two teams on one project
+        baker.make(
+            "teams.Team",
+            organization=self.organization,
+            members=[self.org_user],
+            projects=[self.project],
+        )
+
         res = self.client.get(self.url)
-        self.assertContains(res, project.name)
-        self.assertContains(res, organization.name)
+        self.assertContains(res, self.organization.name)
+        data = res.json()[0]
+        self.assertEqual(data["name"], self.project.name)
+        self.assertTrue(data["isMember"])
         data_keys = res.json()[0].keys()
         self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
         self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")
 
     def test_default_ordering(self):
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
-        projectA = baker.make(
-            "projects.Project", organization=organization, name="A Proj"
-        )
+        projectA = self.project
         projectZ = baker.make(
-            "projects.Project", organization=organization, name="Z Proj"
+            "projects.Project", organization=self.organization, name="Z Proj"
         )
-        baker.make("projects.Project", organization=organization, name="B Proj")
+        baker.make("projects.Project", organization=self.organization, name="B Proj")
         res = self.client.get(self.url)
         data = res.json()
         self.assertEqual(data[0]["name"], projectA.name)
         self.assertEqual(data[2]["name"], projectZ.name)
 
     def test_projects_api_retrieve(self):
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
-        project = baker.make(
-            "projects.Project", organization=organization, first_event=timezone.now()
-        )
-        res = self.client.get(
-            reverse(
-                "project-detail", kwargs={"pk": organization.slug + "/" + project.slug}
-            )
-        )
-        self.assertTrue(res.data["firstEvent"])
+        res = self.client.get(self.detail_url)
+        self.assertTrue(res.json()["firstEvent"])
 
     def test_projects_pagination(self):
         """
         Test link header pagination
         """
-        page_size = settings.REST_FRAMEWORK.get("PAGE_SIZE")
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, role=OrganizationUserRole.OWNER)
-        firstProject = baker.make(
-            "projects.Project", organization=organization, name="Alphabetically First"
-        )
+        page_size = 50
+        firstProject = self.project
         baker.make(
-            "projects.Project", organization=organization, name="B", _quantity=page_size
+            "projects.Project",
+            organization=self.organization,
+            name="B",
+            _quantity=page_size,
         )
         lastProject = baker.make(
-            "projects.Project", organization=organization, name="Last Alphabetically"
+            "projects.Project",
+            organization=self.organization,
+            name="Last Alphabetically",
         )
         res = self.client.get(self.url)
         self.assertNotContains(res, lastProject.name)
@@ -80,13 +96,10 @@ class ProjectsAPITestCase(APITestCase):
 
     def test_project_isolation(self):
         """Users should only access projects in their organization"""
-        user1 = self.user
         user2 = baker.make("users.user")
-        org1 = baker.make("organizations_ext.Organization")
         org2 = baker.make("organizations_ext.Organization")
-        org1.add_user(user1)
         org2.add_user(user2)
-        project1 = baker.make("projects.Project", organization=org1)
+        project1 = self.project
         project2 = baker.make("projects.Project", organization=org2)
 
         res = self.client.get(self.url)
@@ -94,17 +107,10 @@ class ProjectsAPITestCase(APITestCase):
         self.assertNotContains(res, project2.name)
 
     def test_project_delete(self):
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, OrganizationUserRole.ADMIN)
-        team = baker.make("teams.Team", organization=organization)
-        project = baker.make(
-            "projects.Project", organization=organization, teams=[team]
-        )
+        team = baker.make("teams.Team", organization=self.organization)
+        self.project.teams.add(team)
 
-        url = reverse(
-            "project-detail", kwargs={"pk": f"{organization.slug}/{project.slug}"}
-        )
-        res = self.client.delete(url)
+        res = self.client.delete(self.detail_url)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(ProjectViewSet.queryset.count(), 0)
 
@@ -113,9 +119,7 @@ class ProjectsAPITestCase(APITestCase):
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(self.user, OrganizationUserRole.ADMIN)
         project = baker.make("projects.Project")
-        url = reverse(
-            "project-detail", kwargs={"pk": f"{organization.slug}/{project.slug}"}
-        )
+        url = reverse("api:delete_project", args=[organization.slug, project.slug])
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 404)
 

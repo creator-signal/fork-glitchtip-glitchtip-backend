@@ -55,3 +55,8 @@ class ReleaseFileSchema(CamelSchema, ModelSchema):
 
     class Config(CamelSchema.Config):
         coerce_numbers_to_str = True
+
+
+class AssembleSchema(Schema):
+    checksum: str
+    chunks: list[str]

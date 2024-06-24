@@ -6,7 +6,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, Q, QuerySet
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
@@ -45,6 +45,17 @@ class Project(CreatedModel, SoftDeleteModel):
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def annotate_is_member(cls, queryset: QuerySet, user_id: int):
+        """Add is_member boolean annotate to Project queryset"""
+        return queryset.annotate(
+            is_member=Count(
+                "teams__members",
+                filter=Q(teams__members__user_id=user_id),
+                distinct=True,
+            )
+        )
 
     def save(self, *args, **kwargs):
         first = False
@@ -129,7 +140,8 @@ class ProjectKey(CreatedModel):
     """Authentication key for a Project"""
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
-    label = models.CharField(max_length=64, blank=True)
+    is_active = models.BooleanField(default=True)
+    name = models.CharField(max_length=64, blank=True)
     public_key = models.UUIDField(default=uuid4, unique=True, editable=False)
     rate_limit_count = models.PositiveSmallIntegerField(blank=True, null=True)
     rate_limit_window = models.PositiveSmallIntegerField(blank=True, null=True)

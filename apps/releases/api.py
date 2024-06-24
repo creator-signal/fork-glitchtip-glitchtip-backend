@@ -5,14 +5,17 @@ from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import ValidationError
 
+from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
+from glitchtip.utils import async_call_celery_task
 
 from .models import Release, ReleaseFile
 from .schema import (
+    AssembleSchema,
     ReleaseBase,
     ReleaseFileSchema,
     ReleaseIn,
@@ -32,6 +35,7 @@ PUT /organizations/{organization_slug}/releases/{version}/
 DELETE /organizations/{organization_slug}/releases/{version}/
 GET /organizations/{organization_slug}/releases/{version}/files/
 GET /organizations/{organization_slug}/releases/{version}/files/{file_id}/
+POST /organizations/{organization_slug}/releases/{version}/assemble/ (sentry undocumented)
 DELETE /organizations/{organization_slug}/releases/{version}/files/{file_id}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
@@ -380,3 +384,30 @@ async def get_project_release_file(
             id=file_id,
         )
     )
+
+
+@router.post(
+    "/organizations/{slug:organization_slug}/releases/{slug:version}/assemble/"
+)
+@has_permission(["project:releases", "project:write", "project:admin"])
+async def assemble_release(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    version: str,
+    payload: AssembleSchema,
+):
+    user_id = request.auth.user_id
+    organization = await aget_object_or_404(
+        Organization, slug=organization_slug, users=user_id
+    )
+
+    await async_call_celery_task(
+        assemble_artifacts_task,
+        organization.id,
+        version,
+        payload.checksum,
+        payload.chunks,
+    )
+
+    # TODO should return more state's
+    return {"state": "ok", "missingChunks": []}

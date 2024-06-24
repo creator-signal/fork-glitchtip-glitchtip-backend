@@ -1,19 +1,13 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCase
-
-from ..models import OrganizationUserRole
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 
-class OrganizationProjectsViewTestCase(GlitchTipTestCase):
+class OrganizationProjectsViewTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, OrganizationUserRole.ADMIN)
-        team = baker.make("teams.Team", organization=self.organization)
-        team.members.add(self.org_user)
-        self.project.teams.add(team)
+        self.create_logged_in_user()
         self.url = reverse(
             "api:list_organization_projects", args=[self.organization.slug]
         )
