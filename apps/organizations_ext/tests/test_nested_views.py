@@ -4,8 +4,6 @@ from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
-from ..models import OrganizationUserRole
-
 
 class OrganizationProjectsViewTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
