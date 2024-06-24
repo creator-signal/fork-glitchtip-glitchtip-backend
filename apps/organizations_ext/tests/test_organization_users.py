@@ -12,7 +12,10 @@ class OrganizationUsersTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = baker.make("users.user")
-        cls.organization = baker.make("organizations_ext.Organization")
+        cls.organization = baker.make(
+            "organizations_ext.Organization",
+            name="<a>No</a><script>HtmlInOrgName</script>",
+        )
         cls.org_user = cls.organization.add_user(
             cls.user, role=OrganizationUserRole.MANAGER
         )
@@ -121,6 +124,11 @@ class OrganizationUsersTestCase(TestCase):
         res = self.client.post(self.members_url, data)
         self.assertTrue(res.data["pending"])
         body = mail.outbox[0].body
+        html_content = mail.outbox[0].alternatives[0][0]
+        self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in body)
+        self.assertTrue("NoHtmlInOrgName" in body)
+        self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in html_content)
+        self.assertTrue("NoHtmlInOrgName" in html_content)
         body_split = body[body.find("http://localhost:8000/accept/") :].split("/")
         org_user_id = body_split[4]
         token = body_split[5]
