@@ -15,12 +15,18 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
-from .models import Organization, OrganizationUser, OrganizationUserRole
+from .models import (
+    Organization,
+    OrganizationOwner,
+    OrganizationUser,
+    OrganizationUserRole,
+)
 from .schema import (
     OrganizationInSchema,
     OrganizationSchema,
     OrganizationUserDetailSchema,
     OrganizationUserSchema,
+    OrganizationUserUpdateSchema,
 )
 from .utils import is_organization_creation_open
 
@@ -34,6 +40,7 @@ PUT /api/0/organizations/{organization_slug}/
 DELETE /api/0/organizations/{organization_slug}/ (Not in sentry)
 GET /api/0/organizations/{organization_slug}/members/
 GET /api/0/organizations/{organization_slug}/members/{member_id}/
+DELETE /api/0/organizations/{organization_slug}/members/{member_id}/
 """
 
 
@@ -70,7 +77,10 @@ def get_organizations_queryset(
 
 
 def get_organization_users_queryset(
-    user_id: int, organization_slug: str, add_details=False
+    user_id: int,
+    organization_slug: str,
+    role_required: OrganizationUserRole = None,
+    add_details=False,
 ):
     qs = (
         OrganizationUser.objects.filter(
@@ -79,6 +89,10 @@ def get_organization_users_queryset(
         .select_related("user")
         .prefetch_related("user__socialaccount_set")
     )
+    if role_required:
+        qs = qs.filter(
+            organization__users__organizations_ext_organizationuser__role__gte=role_required
+        )
     if add_details:
         qs = qs.prefetch_related("teams")
     return qs
@@ -208,3 +222,57 @@ async def get_organization_member(
         get_organization_users_queryset(user_id, organization_slug, add_details=True),
         pk=member_id,
     )
+
+
+@router.delete(
+    "organizations/{slug:organization_slug}/members/{int:member_id}/",
+    response={204: None},
+)
+@has_permission(["member:admin"])
+async def delete_organization_member(
+    request: AuthHttpRequest, organization_slug: str, member_id: int
+):
+    """Remove member (user) from organization"""
+    user_id = request.auth.user_id
+    if await OrganizationOwner.objects.filter(
+        organization_user__user_id=user_id,
+        organization__slug=organization_slug,
+        organization_user__id=member_id,
+    ).aexists():
+        raise HttpError(400, "User is organization owner. Transfer ownership first.")
+    result, _ = (
+        await get_organization_users_queryset(
+            user_id, organization_slug, role_required=OrganizationUserRole.MANAGER
+        )
+        .filter(id=member_id)
+        .adelete()
+    )
+    if not result:
+        raise Http404
+    return 204, None
+
+
+@router.put(
+    "organizations/{slug:organization_slug}/members/{int:member_id}/",
+    response=OrganizationUserDetailSchema,
+)
+@has_permission(["member:write", "member:admin"])
+async def update_organization_member(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    member_id: int,
+    payload: OrganizationUserUpdateSchema,
+):
+    """Update member role within organization"""
+    member = await aget_object_or_404(
+        get_organization_users_queryset(
+            request.auth.user_id,
+            organization_slug,
+            role_required=OrganizationUserRole.MANAGER,
+            add_details=True,
+        ),
+        id=member_id,
+    )
+    member.role = OrganizationUserRole.from_string(payload.org_role)
+    await member.asave()
+    return member

@@ -125,18 +125,6 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         invitation_backend().send_invitation(org_user)
         return org_user
 
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if hasattr(instance, "organizationowner"):
-            return Response(
-                data={
-                    "message": "User is organization owner. Transfer ownership first."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
     @action(detail=True, methods=["post"])
     def set_owner(self, request, *args, **kwargs):
         """

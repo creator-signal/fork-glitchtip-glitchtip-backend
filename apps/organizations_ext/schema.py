@@ -1,12 +1,16 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from ninja import Field, ModelSchema
+from pydantic import EmailStr
 
 from apps.users.schema import UserSchema
 from glitchtip.schema import CamelSchema
 
-from .models import Organization, OrganizationUser
+from .models import (
+    Organization,
+    OrganizationUser,
+)
 
 
 class OrganizationInSchema(CamelSchema, ModelSchema):
@@ -31,6 +35,25 @@ class OrganizationSchema(OrganizationInSchema, ModelSchema):
             "slug",
             "is_accepting_events",
         ]
+
+
+OrgRole = Literal["member", "admin", "manager", "owner"]
+
+
+class TeamRole(CamelSchema):
+    team_slug: str
+    role: str
+
+
+class OrganizationUserUpdateSchema(CamelSchema):
+    org_role: OrgRole
+    team_roles: list[TeamRole] = Field(default_factory=list)
+
+
+class OrganizationUserIn(OrganizationUserUpdateSchema):
+    email: EmailStr
+    send_invite: bool = True
+    reinvite: bool = True
 
 
 class OrganizationUserSchema(CamelSchema, ModelSchema):

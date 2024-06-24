@@ -248,8 +248,8 @@ class OrganizationUsersTestCase(TestCase):
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
         new_role = OrganizationUserRole.ADMIN
-        data = {"role": new_role.label.lower(), "teams": []}
-        res = self.client.put(url, data)
+        data = {"orgRole": new_role.label.lower(), "teamRoles": []}
+        res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, other_user.email)
         self.assertTrue(
             OrganizationUser.objects.filter(
@@ -266,9 +266,9 @@ class OrganizationUsersTestCase(TestCase):
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
         new_role = OrganizationUserRole.ADMIN
-        data = {"role": new_role.label.lower(), "teams": []}
-        res = self.client.put(url, data)
-        self.assertEqual(res.status_code, 403)
+        data = {"orgRole": new_role.label.lower(), "teamRoles": []}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 404)
 
     def test_organization_users_delete(self):
         other_user = baker.make("users.user")
@@ -312,7 +312,7 @@ class OrganizationUsersTestCase(TestCase):
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
         res = self.client.delete(url)
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 404)
         self.assertEqual(other_user.organizations_ext_organizationuser.count(), 1)
 
     def test_organization_members_set_owner(self):
