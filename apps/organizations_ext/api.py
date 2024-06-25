@@ -1,7 +1,7 @@
 from typing import Optional
 
+from asgiref.sync import sync_to_async
 from django.db.models import Count, Exists, OuterRef, Prefetch
-from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -9,15 +9,14 @@ from ninja.errors import HttpError
 from organizations.backends import invitation_backend
 from organizations.signals import user_added
 
-from asgiref.sync import sync_to_async
 from apps.projects.models import Project
 from apps.teams.models import Team
 from apps.teams.schema import OrganizationDetailSchema
 from apps.users.models import User
+from apps.users.utils import ais_user_registration_open
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
-from apps.users.utils import ais_user_registration_open
 
 from .models import (
     Organization,
