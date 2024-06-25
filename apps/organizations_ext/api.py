@@ -1,12 +1,15 @@
 from typing import Optional
 
 from django.db.models import Count, Exists, OuterRef, Prefetch
+from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
+from organizations.backends import invitation_backend
 from organizations.signals import user_added
 
+from asgiref.sync import sync_to_async
 from apps.projects.models import Project
 from apps.teams.models import Team
 from apps.teams.schema import OrganizationDetailSchema
@@ -14,6 +17,7 @@ from apps.users.models import User
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
+from apps.users.utils import ais_user_registration_open
 
 from .models import (
     Organization,
@@ -25,6 +29,7 @@ from .schema import (
     OrganizationInSchema,
     OrganizationSchema,
     OrganizationUserDetailSchema,
+    OrganizationUserIn,
     OrganizationUserSchema,
     OrganizationUserUpdateSchema,
 )
@@ -40,6 +45,7 @@ PUT /api/0/organizations/{organization_slug}/
 DELETE /api/0/organizations/{organization_slug}/ (Not in sentry)
 GET /api/0/organizations/{organization_slug}/members/
 GET /api/0/organizations/{organization_slug}/members/{member_id}/
+POST /api/0/organizations/{organization_slug}/members/{member_id}/
 DELETE /api/0/organizations/{organization_slug}/members/{member_id}/
 """
 
@@ -222,6 +228,58 @@ async def get_organization_member(
         get_organization_users_queryset(user_id, organization_slug, add_details=True),
         pk=member_id,
     )
+
+
+@router.post(
+    "organizations/{slug:organization_slug}/members/",
+    response={201: OrganizationUserSchema},
+)
+@has_permission(["member:write", "member:admin"])
+async def create_organization_member(
+    request: AuthHttpRequest, organization_slug: str, payload: OrganizationUserIn
+):
+    user_id = request.auth.user_id
+    organization = await aget_object_or_404(
+        get_organizations_queryset(user_id)
+        .filter(organization_users__user=user_id)
+        .prefetch_related("organization_users"),
+        slug=organization_slug,
+    )
+    if organization.organization_users.all()[0].role < OrganizationUserRole.MANAGER:
+        raise HttpError(403, "forbidden")
+    email = payload.email
+    if (
+        not await ais_user_registration_open()
+        and not await User.objects.filter(email=email).aexists()
+    ):
+        raise HttpError(403, "Only existing users may be invited")
+    if await organization.organization_users.filter(user__email=email).aexists():
+        raise HttpError(
+            409,
+            f"The user {email} is already a member",
+        )
+    member, created = await OrganizationUser.objects.aget_or_create(
+        email=email,
+        organization=organization,
+        defaults={"role": OrganizationUserRole.from_string(payload.org_role)},
+    )
+    if not created and not payload.reinvite:
+        raise HttpError(
+            409,
+            f"The user {email} is already invited",
+        )
+    teams = [
+        team
+        async for team in Team.objects.filter(
+            slug__in=[role.team_slug for role in payload.team_roles],
+            organization=organization,
+        ).values_list("pk", flat=True)
+    ]
+    if teams:
+        await member.teams.aadd(*teams)
+
+    await sync_to_async(invitation_backend().send_invitation)(member)
+    return 201, member
 
 
 @router.delete(

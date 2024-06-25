@@ -1,6 +1,7 @@
 import json
 
 from django.core import mail
+from django.db import transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
@@ -45,7 +46,7 @@ class OrganizationUsersTestCase(TestCase):
         """
         url = self.get_org_member_detail_url(self.organization.slug, self.org_user.pk)
         res = self.client.get(url)
-        self.assertEqual(res.data["email"], self.user.email)
+        self.assertEqual(res.json()["email"], self.user.email)
 
     def test_organization_team_members_list(self):
         team = baker.make("teams.Team", organization=self.organization)
@@ -73,11 +74,6 @@ class OrganizationUsersTestCase(TestCase):
         self.assertContains(res, team.slug)
         self.assertNotContains(res, other_user.email)
 
-        url = self.get_org_member_detail_url(self.organization.slug, "me")
-        res = self.client.get(url)
-        self.assertContains(res, self.user.email)
-        self.assertNotContains(res, other_user.email)
-
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
         res = self.client.get(url)
         self.assertEqual(res.status_code, 404)
@@ -100,9 +96,8 @@ class OrganizationUsersTestCase(TestCase):
 
     def test_organization_users_add_self_team_member(self):
         team = baker.make("teams.Team", organization=self.organization)
-        url = (
-            self.get_org_member_detail_url(self.organization.slug, "me")
-            + f"teams/{team.slug}/"
+        url = reverse(
+            "api:add_member_to_team", args=[self.organization.slug, "me", team.slug]
         )
 
         self.assertEqual(team.members.count(), 0)
@@ -117,12 +112,11 @@ class OrganizationUsersTestCase(TestCase):
     def test_organization_users_create_and_accept_invite(self):
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
         }
-        res = self.client.post(self.members_url, data)
-        self.assertTrue(res.data["pending"])
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertTrue(res.json()["pending"])
         body = mail.outbox[0].body
         html_content = mail.outbox[0].alternatives[0][0]
         self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in body)
@@ -156,50 +150,55 @@ class OrganizationUsersTestCase(TestCase):
     def test_closed_user_registration(self):
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
         }
 
         with override_settings(ENABLE_USER_REGISTRATION=False):
             # Non-existing user cannot be invited
-            res = self.client.post(self.members_url, data)
+            res = self.client.post(
+                self.members_url, data, content_type="application/json"
+            )
             self.assertEqual(res.status_code, 403)
 
             # Existing user can be invited
             self.user = baker.make("users.user", email="new@example.com")
-            res = self.client.post(self.members_url, data)
+            res = self.client.post(
+                self.members_url, data, content_type="application/json"
+            )
             self.assertEqual(res.status_code, 201)
 
     def test_organization_users_invite_twice(self):
         """Don't allow inviting user who is already in the group"""
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
+            "reinvite": False,
         }
-        res = self.client.post(self.members_url, data)
+        res = self.client.post(self.members_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
-        res = self.client.post(self.members_url, data)
+        with transaction.atomic():
+            res = self.client.post(
+                self.members_url, data, content_type="application/json"
+            )
         self.assertEqual(res.status_code, 409)
         data["email"] = self.user.email
-        res = self.client.post(self.members_url, data)
+        res = self.client.post(self.members_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 409)
 
     def test_organization_users_create(self):
         team = baker.make("teams.Team", organization=self.organization)
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [team.slug],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [{"teamSlug": team.slug}],
         }
         res = self.client.post(
             self.members_url, json.dumps(data), content_type="application/json"
         )
         self.assertContains(res, data["email"], status_code=201)
-        self.assertEqual(res.data["role"], "manager")
+        self.assertEqual(res.json()["role"], "manager")
         self.assertTrue(
             OrganizationUser.objects.filter(
                 organization=self.organization,
@@ -214,11 +213,10 @@ class OrganizationUsersTestCase(TestCase):
     def test_organization_users_create_and_accept(self):
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
         }
-        self.client.post(self.members_url, data)
+        self.client.post(self.members_url, data, content_type="application/json")
         body = mail.outbox[0].body
         body[body.find("http://localhost:8000/accept/") :].split("/")[4]
 
@@ -228,25 +226,27 @@ class OrganizationUsersTestCase(TestCase):
         self.org_user.save()
         data = {
             "email": "new@example.com",
-            "role": OrganizationUserRole.MANAGER.label.lower(),
-            "teams": [],
-            "user": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
         }
-        res = self.client.post(self.members_url, data)
+        res = self.client.post(self.members_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 403)
 
     def test_organization_users_reinvite(self):
         other_user = baker.make("users.user")
-        other_org_user = baker.make(
+        baker.make(
             "organizations_ext.OrganizationUser",
             email=other_user.email,
             organization=self.organization,
         )
 
-        url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
-        data = {"reinvite": 1}
-        res = self.client.put(url, data)
-        self.assertContains(res, other_user.email)
+        data = {
+            "email": other_user.email,
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
+        }
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertContains(res, other_user.email, status_code=201)
         self.assertTrue(len(mail.outbox))
 
     def test_organization_users_update(self):

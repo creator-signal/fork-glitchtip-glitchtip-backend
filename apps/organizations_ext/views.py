@@ -2,7 +2,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from organizations.backends import invitation_backend
-from rest_framework import exceptions, permissions, status, views, viewsets
+from rest_framework import exceptions, permissions, views, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter

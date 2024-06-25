@@ -42,7 +42,8 @@ OrgRole = Literal["member", "admin", "manager", "owner"]
 
 class TeamRole(CamelSchema):
     team_slug: str
-    role: str
+    role: str = ""
+    """Does nothing at this time"""
 
 
 class OrganizationUserUpdateSchema(CamelSchema):
@@ -62,7 +63,7 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
     role_name: str = Field(validation_alias="get_role_display")
     date_created: datetime = Field(validation_alias="created")
     email: str = Field(validation_alias="get_email")
-    user: UserSchema
+    user: Optional[UserSchema] = None
     pending: bool
 
     class Meta:

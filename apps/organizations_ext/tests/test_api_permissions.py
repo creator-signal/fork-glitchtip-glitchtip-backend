@@ -63,26 +63,24 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
 
 
 class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
-    def setUp(self):
-        self.create_user_org()
-
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user_org(cls)
         # Change owner to avoid restrictions on org owners
         # deleting their own organization
         new_user = baker.make("users.User")
-        new_owner = self.organization.add_user(new_user)
-        self.organization.change_owner(new_owner)
+        new_owner = cls.organization.add_user(new_user)
+        cls.organization.change_owner(new_owner)
+        cls.list_url = reverse(
+            "api:list_organization_members", args=[cls.organization.slug]
+        )
+        cls.detail_url = reverse(
+            "api:get_organization_member",
+            args=[cls.organization.slug, cls.org_user.pk],
+        )
+
+    def setUp(self):
         self.set_client_credentials(self.auth_token.token)
-        self.list_url = reverse(
-            "organization-members-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
-        self.detail_url = reverse(
-            "organization-members-detail",
-            kwargs={
-                "organization_slug": self.organization.slug,
-                "pk": self.org_user.pk,
-            },
-        )
 
     def test_list(self):
         self.assertGetReqStatusCode(self.list_url, 403)
@@ -96,7 +94,7 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
 
     def test_create(self):
         self.auth_token.add_permission("member:read")
-        data = {"email": "lol@example.com", "role": "member", "teams": []}
+        data = {"email": "lol@example.com", "orgRole": "member", "teams": []}
         self.assertPostReqStatusCode(self.list_url, data, 403)
         self.auth_token.add_permission("member:write")
         self.assertPostReqStatusCode(self.list_url, data, 201)
@@ -108,15 +106,16 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_user_destroy(self):
+        self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 403)
+        self.assertDeleteReqStatusCode(self.detail_url, 404)
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_update(self):
         self.auth_token.add_permission("member:read")
-        data = {"email": "lol@example.com", "role": "member"}
+        data = {"email": "lol@example.com", "orgRole": "member"}
         self.assertPutReqStatusCode(self.detail_url, data, 403)
         self.auth_token.add_permission("member:write")
         self.assertPutReqStatusCode(self.detail_url, data, 200)
