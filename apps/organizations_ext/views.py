@@ -1,5 +1,4 @@
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import Http404
 from django.shortcuts import get_object_or_404
 from organizations.backends import invitation_backend
 from rest_framework import exceptions, permissions, views, viewsets
@@ -30,7 +29,7 @@ class OrganizationViewSet(viewsets.GenericViewSet):
     lookup_field = "slug"
 
 
-class OrganizationMemberViewSet(viewsets.ModelViewSet):
+class OrganizationMemberViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API compatible with undocumented Sentry endpoint `/api/organizations/<slug>/members/`
     """
@@ -88,18 +87,6 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
                 )
         return super().check_permissions(request)
 
-    def update(self, request, *args, **kwargs):
-        """
-        Update can both reinvite a user or change the org user which require different request data
-        However it always returns OrganizationUserSerializer regardless
-
-        Updates are always partial. Only teams and role may be edited.
-        """
-        if self.action in ["update"] and self.request.data.get("reinvite"):
-            return self.reinvite(request)
-        kwargs["partial"] = True
-        return super().update(request, *args, **kwargs)
-
     def reinvite(self, request):
         """
         Send additional invitation to user
@@ -112,18 +99,6 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         invitation_backend().send_invitation(instance)
         serializer = self.serializer_class(instance)
         return Response(serializer.data)
-
-    def perform_create(self, serializer):
-        try:
-            organization = self.request.user.organizations_ext_organization.get(
-                slug=self.kwargs.get("organization_slug")
-            )
-        except ObjectDoesNotExist:
-            raise Http404
-
-        org_user = serializer.save(organization=organization)
-        invitation_backend().send_invitation(org_user)
-        return org_user
 
     @action(detail=True, methods=["post"])
     def set_owner(self, request, *args, **kwargs):
