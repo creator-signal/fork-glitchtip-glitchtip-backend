@@ -6,13 +6,16 @@ from asgiref.sync import sync_to_async
 from django.db.models import Q
 from django.urls import reverse
 
-from apps.organizations_ext.admin import OrganizationResource, OrganizationUserResource
 from apps.organizations_ext.models import OrganizationUser, OrganizationUserRole
-from apps.projects.admin import ProjectKeyResource, ProjectResource
+from apps.organizations_ext.resources import (
+    OrganizationResource,
+    OrganizationUserResource,
+)
 from apps.projects.models import Project
-from apps.teams.admin import TeamResource
-from apps.users.admin import UserResource
+from apps.projects.resources import ProjectKeyResource, ProjectResource
+from apps.teams.resources import TeamResource
 from apps.users.models import User
+from apps.users.resources import UserResource
 
 from .exceptions import ImporterException
 
