@@ -4,7 +4,6 @@ from django.db.models import F, PositiveIntegerField
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast
 from django.utils.html import format_html
-from import_export import resources
 from import_export.admin import ImportExportModelAdmin
 from organizations.base_admin import (
     BaseOrganizationAdmin,
@@ -13,6 +12,7 @@ from organizations.base_admin import (
 )
 
 from .models import Organization, OrganizationOwner, OrganizationUser
+from .resources import OrganizationResource, OrganizationUserResource
 
 ORGANIZATION_LIST_FILTER = (
     "is_active",
@@ -30,13 +30,6 @@ class OrganizationUserInline(admin.StackedInline):
     raw_id_fields = ("user",)
     model = OrganizationUser
     extra = 0
-
-
-class OrganizationResource(resources.ModelResource):
-    class Meta:
-        model = Organization
-        skip_unchanged = True
-        fields = ("id", "slug", "name", "created", "organization")
 
 
 class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
@@ -161,20 +154,6 @@ class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
         return qs
 
     list_filter = GlitchTipBaseOrganizationAdmin.list_filter + (IsOverListFilter,)
-
-
-class OrganizationUserResource(resources.ModelResource):
-    class Meta:
-        model = OrganizationUser
-        skip_unchanged = True
-        fields = (
-            "id",
-            "user",
-            "organization",
-            "role",
-            "email",
-        )
-        import_id_fields = ("user", "email", "organization")
 
 
 class OrganizationUserAdmin(BaseOrganizationUserAdmin, ImportExportModelAdmin):
