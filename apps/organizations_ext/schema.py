@@ -80,3 +80,17 @@ class OrganizationUserDetailSchema(OrganizationUserSchema):
     @staticmethod
     def resolve_teams(obj):
         return [team.slug for team in obj.teams.all()]
+
+
+class AcceptInviteIn(CamelSchema):
+    accept_invite: bool
+
+
+class OrganizationUserOrganizationSchema(OrganizationUserSchema):
+    """Organization User Serializer with Organization info"""
+
+    organization: OrganizationSchema
+
+
+class AcceptInviteSchema(AcceptInviteIn):
+    org_user: OrganizationUserOrganizationSchema

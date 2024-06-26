@@ -1,8 +1,9 @@
 from typing import Optional
 
 from asgiref.sync import sync_to_async
+from django.contrib.auth import aget_user
 from django.db.models import Count, Exists, OuterRef, Prefetch
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
@@ -18,6 +19,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
+from .invitation_backend import InvitationTokenGenerator
 from .models import (
     Organization,
     OrganizationOwner,
@@ -25,6 +27,8 @@ from .models import (
     OrganizationUserRole,
 )
 from .schema import (
+    AcceptInviteIn,
+    AcceptInviteSchema,
     OrganizationInSchema,
     OrganizationSchema,
     OrganizationUserDetailSchema,
@@ -335,3 +339,44 @@ async def update_organization_member(
     member.role = OrganizationUserRole.from_string(payload.org_role)
     await member.asave()
     return member
+
+
+async def validate_token(org_user_id: int, token: str) -> OrganizationUser:
+    """Validate invite token and return org user"""
+    org_user = await aget_object_or_404(
+        OrganizationUser.objects.all()
+        .select_related("organization", "user")
+        .prefetch_related("user__socialaccount_set"),
+        pk=org_user_id,
+    )
+    if not InvitationTokenGenerator().check_token(org_user, token):
+        raise HttpError(403, "Invalid invite token")
+    return org_user
+
+
+@router.get(
+    "accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema, auth=None
+)
+async def get_accept_invite(request: HttpRequest, org_user_id: int, token: str):
+    """Return relevant organization data around an invite"""
+    org_user = await validate_token(org_user_id, token)
+    return {"accept_invite": False, "org_user": org_user}
+
+
+@router.post("accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema)
+async def accept_invite(
+    request: AuthHttpRequest, org_user_id: int, token: str, payload: AcceptInviteIn
+):
+    """Accepts invite to organization"""
+    org_user = await validate_token(org_user_id, token)
+    if payload.accept_invite:
+        org_user.user = await aget_user(request)
+        org_user.email = None
+        await org_user.asave()
+    org_user = (
+        await OrganizationUser.objects.filter(pk=org_user.pk)
+        .select_related("organization", "user")
+        .prefetch_related("user__socialaccount_set")
+        .aget()
+    )
+    return {"accept_invite": payload.accept_invite, "org_user": org_user}

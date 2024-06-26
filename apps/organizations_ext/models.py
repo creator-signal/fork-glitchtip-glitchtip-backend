@@ -352,11 +352,6 @@ class OrganizationUser(SharedBaseModel, OrganizationUserBase):
         role = OrganizationUserRole.get_role(self.role)
         return role["scopes"]
 
-    def accept_invite(self, user):
-        self.user = user
-        self.email = None
-        self.save()
-
     @property
     def pending(self):
         return self.user_id is None

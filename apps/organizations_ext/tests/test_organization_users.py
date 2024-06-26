@@ -127,9 +127,7 @@ class OrganizationUsersTestCase(TestCase):
         body_split = body[body.find("http://localhost:8000/accept/") :].split("/")
         org_user_id = body_split[4]
         token = body_split[5]
-        url = reverse(
-            "accept-invite", kwargs={"org_user_id": org_user_id, "token": token}
-        )
+        url = reverse("api:get_accept_invite", args=[org_user_id, token])
 
         # Check that we can determine organization name from GET request to accept invite endpoint
         self.client.logout()
@@ -138,10 +136,10 @@ class OrganizationUsersTestCase(TestCase):
 
         user = baker.make("users.user")
         self.client.force_login(user)
-        data = {"accept_invite": True}
-        res = self.client.post(url, data)
+        data = {"acceptInvite": True}
+        res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, self.organization.name)
-        self.assertFalse(res.data["org_user"]["pending"])
+        self.assertFalse(res.json()["org_user"]["pending"])
         self.assertTrue(
             OrganizationUser.objects.filter(
                 user=user, organization=self.organization

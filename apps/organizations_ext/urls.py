@@ -14,7 +14,6 @@ from apps.uptime.views import (
 from glitchtip.routers import BulkSimpleRouter
 
 from .views import (
-    AcceptInviteView,
     OrganizationMemberViewSet,
     OrganizationUserViewSet,
     OrganizationViewSet,
@@ -63,9 +62,4 @@ urlpatterns = [
     path("", include(router.urls)),
     path("", include(organizations_router.urls)),
     path("", include(organizations_monitors_router.urls)),
-    path(
-        "accept/<int:org_user_id>/<token>/",
-        AcceptInviteView.as_view(),
-        name="accept-invite",
-    ),
 ]

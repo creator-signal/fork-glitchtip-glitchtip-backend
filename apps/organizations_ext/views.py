@@ -1,17 +1,15 @@
 from django.core.exceptions import ObjectDoesNotExist
 from django.shortcuts import get_object_or_404
 from organizations.backends import invitation_backend
-from rest_framework import exceptions, permissions, views, viewsets
+from rest_framework import exceptions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter
 from rest_framework.response import Response
 
-from .invitation_backend import InvitationTokenGenerator
 from .models import Organization, OrganizationUser, OrganizationUserRole
 from .permissions import OrganizationMemberPermission
 from .serializers.serializers import (
-    AcceptInviteSerializer,
     OrganizationSerializer,
     OrganizationUserDetailSerializer,
     OrganizationUserProjectsSerializer,
@@ -128,37 +126,3 @@ class OrganizationUserViewSet(OrganizationMemberViewSet):
     """
 
     serializer_class = OrganizationUserProjectsSerializer
-
-
-class AcceptInviteView(views.APIView):
-    """Accept invite to organization"""
-
-    serializer_class = AcceptInviteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-
-    def validate_token(self, org_user, token):
-        if not InvitationTokenGenerator().check_token(org_user, token):
-            raise exceptions.PermissionDenied("Invalid invite token")
-
-    def get(self, request, org_user_id=None, token=None):
-        org_user = get_object_or_404(OrganizationUser, pk=org_user_id)
-        self.validate_token(org_user, token)
-        serializer = self.serializer_class(
-            {"accept_invite": False, "org_user": org_user}
-        )
-        return Response(serializer.data)
-
-    def post(self, request, org_user_id=None, token=None):
-        org_user = get_object_or_404(OrganizationUser, pk=org_user_id)
-        self.validate_token(org_user, token)
-        serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        if serializer.validated_data["accept_invite"]:
-            org_user.accept_invite(request.user)
-        serializer = self.serializer_class(
-            {
-                "accept_invite": serializer.validated_data["accept_invite"],
-                "org_user": org_user,
-            }
-        )
-        return Response(serializer.data)
