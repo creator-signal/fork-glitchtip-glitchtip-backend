@@ -20,6 +20,7 @@ class OrganizationUsersTestCase(TestCase):
         cls.org_user = cls.organization.add_user(
             cls.user, role=OrganizationUserRole.MANAGER
         )
+        baker.make("organizations_ext.OrganizationUser", user=cls.user, role=5)
         cls.users_url = reverse("organization-users-list", args=[cls.organization.slug])
         cls.members_url = reverse(
             "api:list_organization_members", args=[cls.organization.slug]

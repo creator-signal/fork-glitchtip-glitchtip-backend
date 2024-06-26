@@ -96,7 +96,9 @@ def get_organization_users_queryset(
     )
     if role_required:
         qs = qs.filter(
-            organization__users__organizations_ext_organizationuser__role__gte=role_required
+            organization__users__organizations_ext_organizationuser__user=user_id,
+            organization__users__organizations_ext_organizationuser__organization__slug=organization_slug,
+            organization__users__organizations_ext_organizationuser__role__gte=role_required,
         )
     if add_details:
         qs = qs.prefetch_related("teams")
