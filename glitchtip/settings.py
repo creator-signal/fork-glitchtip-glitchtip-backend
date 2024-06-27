@@ -205,7 +205,6 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.headless",
-    "allauth.usersessions",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.digitalocean",
     "allauth.socialaccount.providers.gitea",
