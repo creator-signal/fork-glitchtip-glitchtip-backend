@@ -8,7 +8,7 @@ from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
 from organizations.backends import invitation_backend
-from organizations.signals import user_added
+from organizations.signals import owner_changed, user_added
 
 from apps.projects.models import Project
 from apps.teams.models import Team
@@ -105,7 +105,7 @@ def get_organization_users_queryset(
             organization__users__organizations_ext_organizationuser__role__gte=role_required,
         )
     if add_details:
-        qs = qs.prefetch_related("teams")
+        qs = qs.select_related("organization__owner").prefetch_related("teams")
     return qs
 
 
@@ -333,12 +333,48 @@ async def update_organization_member(
             organization_slug,
             role_required=OrganizationUserRole.MANAGER,
             add_details=True,
-        ),
+        ).select_related("organization"),
         id=member_id,
     )
     member.role = OrganizationUserRole.from_string(payload.org_role)
     await member.asave()
     return member
+
+
+@router.post(
+    "organizations/{slug:organization_slug}/members/{int:member_id}/set_owner/",
+    response=OrganizationUserDetailSchema,
+)
+@has_permission(["member:admin"])
+async def set_organization_owner(
+    request: AuthHttpRequest, organization_slug: str, member_id: int
+):
+    """
+    Set this team member as the one and only one Organization owner
+    Only an existing Owner or user with the "org:admin" scope is able to perform this.
+    GlitchTip specific API, no sentry api compatibility
+    """
+    user_id = request.auth.user_id
+    new_owner = await aget_object_or_404(
+        get_organization_users_queryset(
+            user_id, organization_slug, add_details=True
+        ).select_related("organization__owner__organization_user"),
+        id=member_id,
+    )
+    organization = new_owner.organization
+    old_owner = organization.owner.organization_user
+    if not (
+        old_owner.pk is user_id
+        or await organization.organization_users.filter(
+            user=user_id, role=OrganizationUserRole.OWNER
+        ).aexists()
+    ):
+        raise HttpError(403, "Only owner may set organization owner.")
+
+    organization.owner.organization_user = new_owner
+    await organization.owner.asave()
+    owner_changed.send(sender=organization, old=old_owner, new=new_owner)
+    return new_owner
 
 
 async def validate_token(org_user_id: int, token: str) -> OrganizationUser:

@@ -70,16 +70,23 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
         model = OrganizationUser
         fields = ["id"]
 
-    class Config:
+    class Config(CamelSchema.Config):
         coerce_numbers_to_str = True
 
 
 class OrganizationUserDetailSchema(OrganizationUserSchema):
     teams: list[str]
+    isOwner: bool
 
     @staticmethod
     def resolve_teams(obj):
         return [team.slug for team in obj.teams.all()]
+
+    @staticmethod
+    def resolve_isOwner(obj):
+        if owner := obj.organization.owner:
+            return owner.organization_user_id == obj.id
+        return False
 
 
 class AcceptInviteIn(CamelSchema):

@@ -327,9 +327,9 @@ class OrganizationUsersTestCase(TestCase):
         other_org_user = self.organization.add_user(other_user)
         random_org_user = baker.make("organizations_ext.OrganizationUser")
 
-        url = (
-            self.get_org_member_detail_url(self.organization.slug, random_org_user.pk)
-            + "set_owner/"
+        url = reverse(
+            "api:set_organization_owner",
+            args=[self.organization.slug, random_org_user.pk],
         )
         res = self.client.post(url)
         self.assertEqual(
@@ -342,9 +342,13 @@ class OrganizationUsersTestCase(TestCase):
         )
         res = self.client.post(url)
         self.assertTrue(
-            res.data["isOwner"], "Current owner may set another org member as owner"
+            res.json()["isOwner"], "Current owner may set another org member as owner"
         )
 
+        url = reverse(
+            "api:set_organization_owner",
+            args=[self.organization.slug, self.org_user.pk],
+        )
         url = (
             self.get_org_member_detail_url(self.organization.slug, self.org_user.pk)
             + "set_owner/"
@@ -359,5 +363,5 @@ class OrganizationUsersTestCase(TestCase):
         self.org_user.role = OrganizationUserRole.OWNER
         self.org_user.save()
         res = self.client.post(url)
-        self.assertTrue(res.data["isOwner"], "Owner role may set org member as owner")
+        self.assertTrue(res.json()["isOwner"], "Owner role may set org member as owner")
         self.assertEqual(self.organization.owners.count(), 1)

@@ -1,11 +1,9 @@
 from django.core.exceptions import ObjectDoesNotExist
 from django.shortcuts import get_object_or_404
-from organizations.backends import invitation_backend
 from rest_framework import exceptions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter
-from rest_framework.response import Response
 
 from .models import Organization, OrganizationUser, OrganizationUserRole
 from .permissions import OrganizationMemberPermission
@@ -14,7 +12,6 @@ from .serializers.serializers import (
     OrganizationUserDetailSerializer,
     OrganizationUserProjectsSerializer,
     OrganizationUserSerializer,
-    ReinviteSerializer,
 )
 
 
@@ -84,38 +81,6 @@ class OrganizationMemberViewSet(viewsets.ReadOnlyModelViewSet):
                     "Must be manager or higher to add/remove organization members"
                 )
         return super().check_permissions(request)
-
-    def reinvite(self, request):
-        """
-        Send additional invitation to user
-        This works more like a rest action, but is embedded within the update view for compatibility
-        """
-        instance = self.get_object()
-        serializer = ReinviteSerializer(instance, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        invitation_backend().send_invitation(instance)
-        serializer = self.serializer_class(instance)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def set_owner(self, request, *args, **kwargs):
-        """
-        Set this team member as the one and only one Organization owner
-        Only an existing Owner or user with the "org:admin" scope is able to perform this.
-        """
-        new_owner = self.get_object()
-        organization = new_owner.organization
-        user = request.user
-        if not (
-            organization.is_owner(user)
-            or organization.organization_users.filter(
-                user=user, role=OrganizationUserRole.OWNER
-            ).exists()
-        ):
-            raise exceptions.PermissionDenied("Only owner may set organization owner.")
-        organization.change_owner(new_owner)
-        return self.retrieve(request, *args, **kwargs)
 
 
 class OrganizationUserViewSet(OrganizationMemberViewSet):
