@@ -21,7 +21,6 @@ class OrganizationUsersTestCase(TestCase):
             cls.user, role=OrganizationUserRole.MANAGER
         )
         baker.make("organizations_ext.OrganizationUser", user=cls.user, role=5)
-        cls.users_url = reverse("organization-users-list", args=[cls.organization.slug])
         cls.members_url = reverse(
             "api:list_organization_members", args=[cls.organization.slug]
         )
@@ -33,8 +32,6 @@ class OrganizationUsersTestCase(TestCase):
         return reverse("api:get_organization_member", args=[organization_slug, pk])
 
     def test_organization_members_list(self):
-        res = self.client.get(self.users_url)
-        self.assertContains(res, self.user.email)
         res = self.client.get(self.members_url)
         self.assertContains(res, self.user.email)
         data = res.json()

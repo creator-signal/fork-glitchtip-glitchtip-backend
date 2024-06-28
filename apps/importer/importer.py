@@ -48,7 +48,7 @@ class GlitchTipImporter:
             "api:get_organization", args=[self.organization_slug]
         )
         self.organization_users_url = reverse(
-            "organization-users-list",
+            "api:list_organization_members",
             kwargs={"organization_slug": self.organization_slug},
         )
         self.projects_url = reverse(

@@ -5,7 +5,6 @@ from .models import Organization, OrganizationUser
 from .permissions import OrganizationMemberPermission
 from .serializers.serializers import (
     OrganizationSerializer,
-    OrganizationUserProjectsSerializer,
     OrganizationUserSerializer,
 )
 
@@ -41,13 +40,3 @@ class OrganizationMemberViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset.select_related("organization", "user").prefetch_related(
             "user__socialaccount_set", "organization__owner"
         )
-
-
-class OrganizationUserViewSet(OrganizationMemberViewSet):
-    """
-    Extension of OrganizationMemberViewSet that adds projects the user has access to
-
-    API compatible with [get-organization-users](https://docs.sentry.io/api/organizations/get-organization-users/)
-    """
-
-    serializer_class = OrganizationUserProjectsSerializer
