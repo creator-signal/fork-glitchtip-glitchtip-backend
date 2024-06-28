@@ -49,8 +49,8 @@ class OrganizationUsersTestCase(TestCase):
     def test_organization_team_members_list(self):
         team = baker.make("teams.Team", organization=self.organization)
         url = reverse(
-            "team-members-list",
-            kwargs={"team_pk": f"{self.organization.slug}/{team.slug}"},
+            "api:list_team_organization_members",
+            args=[self.organization.slug, team.slug],
         )
         res = self.client.get(url)
         self.assertNotContains(res, self.user.email)

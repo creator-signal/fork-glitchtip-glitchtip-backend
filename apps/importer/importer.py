@@ -168,8 +168,8 @@ class GlitchTipImporter:
             team_members = await self.get(
                 self.url
                 + reverse(
-                    "team-members-list",
-                    kwargs={"team_pk": f"{self.organization_slug}/{team['slug']}"},
+                    "api:list_team_organization_members",
+                    args=[self.organization_slug, team["slug"]],
                 )
             )
             team_member_emails = [d["email"] for d in team_members]

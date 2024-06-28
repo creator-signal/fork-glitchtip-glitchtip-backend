@@ -50,6 +50,7 @@ GET /api/0/organizations/{organization_slug}/members/
 GET /api/0/organizations/{organization_slug}/members/{member_id}/
 POST /api/0/organizations/{organization_slug}/members/{member_id}/
 DELETE /api/0/organizations/{organization_slug}/members/{member_id}/
+GET /api/0/teams/{organization_slug}/{team_slug}/members/ (Not documented in sentry)
 """
 
 
@@ -88,6 +89,7 @@ def get_organizations_queryset(
 def get_organization_users_queryset(
     user_id: int,
     organization_slug: str,
+    team_slug: str = None,
     role_required: OrganizationUserRole = None,
     add_details=False,
 ):
@@ -98,6 +100,8 @@ def get_organization_users_queryset(
         .select_related("user")
         .prefetch_related("user__socialaccount_set")
     )
+    if team_slug:
+        qs = qs.filter(teams__slug=team_slug)
     if role_required:
         qs = qs.filter(
             organization__users__organizations_ext_organizationuser__user=user_id,
@@ -218,6 +222,23 @@ async def list_organization_members(
     request: AuthHttpRequest, response: HttpResponse, organization_slug: str
 ):
     return get_organization_users_queryset(request.auth.user_id, organization_slug)
+
+
+@router.get(
+    "teams/{slug:organization_slug}/{slug:team_slug}/members/",
+    response=list[OrganizationUserSchema],
+)
+@paginate
+@has_permission(["member:read", "member:write", "member:admin"])
+async def list_team_organization_members(
+    request: AuthHttpRequest,
+    response: HttpResponse,
+    organization_slug: str,
+    team_slug: str,
+):
+    return get_organization_users_queryset(
+        request.auth.user_id, organization_slug, team_slug=team_slug
+    )
 
 
 @router.get(
