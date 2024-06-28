@@ -13,16 +13,13 @@ from apps.uptime.views import (
 )
 from glitchtip.routers import BulkSimpleRouter
 
-from .views import OrganizationMemberViewSet, OrganizationViewSet
+from .views import OrganizationViewSet
 
 router = BulkSimpleRouter()
 router.register(r"organizations", OrganizationViewSet)
 
 organizations_router = routers.NestedSimpleRouter(
     router, r"organizations", lookup="organization"
-)
-organizations_router.register(
-    r"members", OrganizationMemberViewSet, basename="organization-members"
 )
 organizations_router.register(
     r"transactions", TransactionViewSet, basename="organization-transactions"
