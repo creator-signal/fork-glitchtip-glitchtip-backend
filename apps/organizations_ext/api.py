@@ -1,5 +1,3 @@
-from typing import Optional
-
 from asgiref.sync import sync_to_async
 from django.contrib.auth import aget_user
 from django.db.models import Count, Exists, OuterRef, Prefetch
@@ -55,7 +53,7 @@ GET /api/0/teams/{organization_slug}/{team_slug}/members/ (Not documented in sen
 
 
 def get_organizations_queryset(
-    user_id, role_required: OrganizationUserRole = None, add_details=False
+    user_id, role_required: OrganizationUserRole | None = None, add_details=False
 ):
     qs = Organization.objects.filter(users=user_id)
     if role_required:
@@ -89,8 +87,8 @@ def get_organizations_queryset(
 def get_organization_users_queryset(
     user_id: int,
     organization_slug: str,
-    team_slug: str = None,
-    role_required: OrganizationUserRole = None,
+    team_slug: str | None = None,
+    role_required: OrganizationUserRole | None = None,
     add_details=False,
 ):
     qs = (
@@ -119,9 +117,9 @@ def get_organization_users_queryset(
 async def list_organizations(
     request: AuthHttpRequest,
     response: HttpResponse,
-    owner: Optional[bool] = None,
-    query: Optional[str] = None,
-    sortBy: Optional[str] = None,
+    owner: bool | None = None,
+    query: str | None = None,
+    sortBy: str | None = None,
 ):
     """Return list of all organizations the user has access to."""
     return get_organizations_queryset(request.auth.user_id).order_by("name")

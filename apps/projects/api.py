@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from django.http import Http404, HttpResponse
@@ -53,10 +52,7 @@ def get_projects_queryset(
 
 
 def get_project_keys_queryset(
-    user_id: int,
-    organization_slug: str,
-    project_slug: str,
-    key_id: Optional[UUID] = None,
+    user_id: int, organization_slug: str, project_slug: str, key_id: UUID | None = None
 ):
     qs = ProjectKey.objects.filter(
         project__organization__users=user_id,
@@ -206,7 +202,7 @@ async def list_organization_projects(
     request: AuthHttpRequest,
     response: HttpResponse,
     organization_slug: str,
-    query: Optional[str] = None,
+    query: str | None = None,
 ):
     """
     Fetch list of organizations for a project
@@ -244,7 +240,7 @@ async def list_project_keys(
     response: HttpResponse,
     organization_slug: str,
     project_slug: str,
-    status: Optional[str] = None,
+    status: str | None = None,
 ):
     """List all DSN keys for a given project"""
     return get_project_keys_queryset(

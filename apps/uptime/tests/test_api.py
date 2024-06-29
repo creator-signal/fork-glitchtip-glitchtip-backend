@@ -38,8 +38,9 @@ class UptimeAPITestCase(GlitchTipTestCase):
         )
         res = self.client.get(self.list_url)
         self.assertContains(res, monitor.name)
-        self.assertEqual(res.data[0]["isUp"], True)
-        self.assertEqual(res.data[0]["lastChange"], "2021-09-19T15:40:31Z")
+        data = res.json()
+        self.assertEqual(data[0]["isUp"], True)
+        self.assertEqual(data[0]["lastChange"], "2021-09-19T15:40:31Z")
 
     def test_list_aggregation(self):
         """Test up and down event aggregations"""

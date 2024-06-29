@@ -1,47 +1,20 @@
 from django.db.models import F, Prefetch, Q, Window
 from django.db.models.functions import RowNumber
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.generic import DetailView
-from rest_framework import exceptions, permissions, viewsets
-from rest_framework.generics import CreateAPIView
+from rest_framework import exceptions, viewsets
 
 from apps.organizations_ext.models import Organization
 from glitchtip.pagination import LinkHeaderPagination
 
 from .models import Monitor, MonitorCheck, StatusPage
 from .serializers import (
-    HeartBeatCheckSerializer,
     MonitorCheckSerializer,
     MonitorDetailSerializer,
     MonitorSerializer,
     MonitorUpdateSerializer,
     StatusPageSerializer,
 )
-from .tasks import send_monitor_notification
-
-
-class HeartBeatCheckView(CreateAPIView):
-    permission_classes = [permissions.AllowAny]
-    authentication_classes = []
-    serializer_class = HeartBeatCheckSerializer
-
-    def perform_create(self, serializer):
-        monitor = get_object_or_404(
-            Monitor.objects.with_check_annotations(),
-            organization__slug=self.kwargs.get("organization_slug"),
-            endpoint_id=self.kwargs.get("endpoint_id"),
-        )
-        monitor_check = serializer.save(
-            monitor=monitor,
-            is_up=True,
-            reason=None,
-            is_change=monitor.latest_is_up is not True,
-        )
-        if monitor.latest_is_up is False:
-            send_monitor_notification.delay(
-                monitor_check.pk, False, monitor.last_change
-            )
 
 
 class MonitorViewSet(viewsets.ModelViewSet):

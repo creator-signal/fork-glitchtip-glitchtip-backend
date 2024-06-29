@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from ninja import Field, ModelSchema
 from pydantic import EmailStr
@@ -24,7 +24,7 @@ class OrganizationInSchema(CamelSchema, ModelSchema):
 class OrganizationSchema(OrganizationInSchema, ModelSchema):
     date_created: datetime = Field(validation_alias="created")
     status: dict[str, str] = {"id": "active", "name": "active"}
-    avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
+    avatar: dict[str, str | None] = {"avatarType": "", "avatarUuid": None}
     is_early_adopter: bool = False
     require2fa: bool = False
 
@@ -63,7 +63,7 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
     role_name: str = Field(validation_alias="get_role_display")
     date_created: datetime = Field(validation_alias="created")
     email: str = Field(validation_alias="get_email")
-    user: Optional[UserSchema] = None
+    user: UserSchema | None = None
     pending: bool
 
     class Meta:
