@@ -1,5 +1,6 @@
 from unittest import mock
 
+from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -7,15 +8,15 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.uptime.models import Monitor
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 
-class UptimeAPITestCase(GlitchTipTestCase):
+class UptimeAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
-        self.create_user_and_project()
+        self.create_logged_in_user()
         self.list_url = reverse(
-            "organization-monitors-list",
-            kwargs={"organization_slug": self.organization.slug},
+            "api:list_monitors",
+            args=[self.organization.slug],
         )
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
@@ -63,7 +64,7 @@ class UptimeAPITestCase(GlitchTipTestCase):
                 )
         with freeze_time(current_time):
             res = self.client.get(self.list_url)
-        self.assertEqual(len(res.data[0]["checks"]), 60)
+        self.assertEqual(len(res.json()[0]["checks"]), 60)
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_create_http_monitor(self, mocked):
@@ -76,7 +77,8 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "project": self.project.pk,
             "timeout": 25,
         }
-        res = self.client.post(self.list_url, data)
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        print(res.json())
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.name, data["name"])

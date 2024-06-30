@@ -15,28 +15,44 @@ class MonitorCheckSchema(CamelSchema, ModelSchema):
         fields = ["is_up", "start_check", "reason"]
 
 
-class MonitorSchema(CamelSchema, ModelSchema):
-    is_up: bool = Field(validation_alias="latest_is_up")
-    last_change: datetime
-    heartbeat_endpoint: str | None
-    project_name: str | None = None
-    env_name: str | None = None
+class MonitorIn(CamelSchema, ModelSchema):
+    # project: int | None
 
     class Meta:
         model = Monitor
+        fields = [
+            "monitor_type",
+            "name",
+            "url",
+            "expected_status",
+            "expected_body",
+            "project",
+            "interval",
+            "timeout",
+        ]
+
+
+class MonitorSchema(MonitorIn):
+    project: int | None = Field(validation_alias="project_id")
+    is_up: bool | None = Field(validation_alias="latest_is_up")
+    last_change: datetime | None
+    heartbeat_endpoint: str | None
+    project_name: str | None = None
+    env_name: str | None = None
+    checks: list[MonitorCheckSchema]
+    organization: int = Field(validation_alias="organization_id")
+
+    class Meta(MonitorIn.Meta):
         fields = [
             "id",
             "monitor_type",
             "endpoint_id",
             "created",
-            # "checks",
             "name",
             "url",
             "expected_status",
             "expected_body",
             # "environment",
-            # "project",
-            # "organization",
             "interval",
             "timeout",
         ]
