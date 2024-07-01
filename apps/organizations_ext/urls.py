@@ -7,8 +7,6 @@ from apps.performance.views import (
     TransactionViewSet,
 )
 from apps.uptime.views import (
-    MonitorCheckViewSet,
-    MonitorViewSet,
     StatusPageViewSet,
 )
 from glitchtip.routers import BulkSimpleRouter
@@ -35,21 +33,10 @@ organizations_router.register(
     basename="organization-spans",
 )
 organizations_router.register(
-    r"monitors", MonitorViewSet, basename="organization-monitors"
-)
-organizations_router.register(
     r"status-pages", StatusPageViewSet, basename="organization-status-pages"
-)
-
-organizations_monitors_router = routers.NestedSimpleRouter(
-    organizations_router, r"monitors", lookup="monitor"
-)
-organizations_monitors_router.register(
-    r"checks", MonitorCheckViewSet, basename="organization-monitor-checks"
 )
 
 urlpatterns = [
     path("", include(router.urls)),
     path("", include(organizations_router.urls)),
-    path("", include(organizations_monitors_router.urls)),
 ]

@@ -14,7 +14,13 @@ from glitchtip.api.pagination import paginate
 from glitchtip.utils import async_call_celery_task
 
 from .models import Monitor, MonitorCheck
-from .schema import MonitorCheckSchema, MonitorDetailSchema, MonitorIn, MonitorSchema
+from .schema import (
+    MonitorCheckSchema,
+    MonitorCheckResponseTimeSchema,
+    MonitorDetailSchema,
+    MonitorIn,
+    MonitorSchema,
+)
 from .tasks import send_monitor_notification
 
 router = Router()
@@ -134,3 +140,30 @@ async def update_monitor(
         setattr(monitor, attr, value)
     await monitor.asave()
     return monitor
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/checks/",
+    response=list[MonitorCheckResponseTimeSchema],
+    by_alias=True,
+)
+@paginate
+async def list_monitor_checks(
+    request: AuthHttpRequest,
+    response: HttpResponse,
+    organization_slug: str,
+    monitor_id: int,
+    is_change: bool | None = None,
+):
+    checks = (
+        MonitorCheck.objects.filter(
+            monitor_id=monitor_id,
+            monitor__organization__slug=organization_slug,
+            monitor__organization__users=request.auth.user_id,
+        )
+        .only("is_up", "start_check", "reason", "response_time")
+        .order_by("start_check")
+    )
+    if is_change is not None:
+        checks = checks.filter(is_change=is_change)
+    return checks

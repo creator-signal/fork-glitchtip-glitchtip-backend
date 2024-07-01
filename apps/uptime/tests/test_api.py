@@ -43,7 +43,8 @@ class UptimeAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(data[0]["isUp"], True)
         self.assertEqual(data[0]["lastChange"], "2021-09-19T15:40:31Z")
 
-    def test_list_aggregation(self):
+    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    def test_list_aggregation(self, _):
         """Test up and down event aggregations"""
         monitor = baker.make(
             "uptime.Monitor", organization=self.organization, url="http://example.com"
@@ -207,11 +208,7 @@ class UptimeAPITestCase(GlitchTipTestCaseMixin, TestCase):
         )
 
         url = reverse(
-            "organization-monitor-checks-list",
-            kwargs={
-                "organization_slug": self.organization.slug,
-                "monitor_pk": monitor.pk,
-            },
+            "api:list_monitor_checks", args=[self.organization.slug, monitor.pk]
         )
 
         res = self.client.get(url)

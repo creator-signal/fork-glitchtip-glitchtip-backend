@@ -20,6 +20,8 @@ class MonitorCheckSchema(CamelSchema, ModelSchema):
 
 
 class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
+    """Monitor check with response time. Used in Monitors detail api and monitor checks list"""
+
     class Meta(MonitorCheckSchema.Meta):
         fields = MonitorCheckSchema.Meta.fields + ["response_time"]
 

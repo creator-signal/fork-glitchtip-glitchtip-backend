@@ -3,52 +3,13 @@ from django.views.generic import DetailView
 from rest_framework import exceptions, viewsets
 
 from apps.organizations_ext.models import Organization
-from glitchtip.pagination import LinkHeaderPagination
 
-from .models import Monitor, MonitorCheck, StatusPage
-from .serializers import (
-    MonitorCheckSerializer,
-    MonitorDetailSerializer,
-    MonitorSerializer,
-    MonitorUpdateSerializer,
-    StatusPageSerializer,
-)
+from .models import Monitor, StatusPage
+from .serializers import StatusPageSerializer
 
 
-class MonitorViewSet(viewsets.ModelViewSet):
-    queryset = Monitor.objects.with_check_annotations()
-    serializer_class = MonitorSerializer
-
-    def get_serializer_class(self):
-        if self.action in ["retrieve"]:
-            return MonitorDetailSerializer
-        elif self.action in ["update"]:
-            return MonitorUpdateSerializer
-        return super().get_serializer_class()
-
-
-class MonitorCheckPagination(LinkHeaderPagination):
-    ordering = "-start_check"
-
-
-class MonitorCheckViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = MonitorCheck.objects.all()
-    serializer_class = MonitorCheckSerializer
-    pagination_class = MonitorCheckPagination
-    filterset_fields = ["is_change"]
-
-    def get_queryset(self):
-        if not self.request.user.is_authenticated:
-            return self.queryset.none()
-
-        queryset = self.queryset.filter(monitor__organization__users=self.request.user)
-        organization_slug = self.kwargs.get("organization_slug")
-        if organization_slug:
-            queryset = queryset.filter(monitor__organization__slug=organization_slug)
-        monitor_pk = self.kwargs.get("monitor_pk")
-        if monitor_pk:
-            queryset = queryset.filter(monitor__pk=monitor_pk)
-        return queryset.only("is_up", "start_check", "reason", "response_time")
+class MonitorViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Monitor.objects.none()
 
 
 class StatusPageViewSet(viewsets.ModelViewSet):
