@@ -1,6 +1,4 @@
-from django.db.models import F, Prefetch, Q, Window
-from django.db.models.functions import RowNumber
-from django.utils import timezone
+from django.db.models import Q
 from django.views.generic import DetailView
 from rest_framework import exceptions, viewsets
 
@@ -27,44 +25,6 @@ class MonitorViewSet(viewsets.ModelViewSet):
         elif self.action in ["update"]:
             return MonitorUpdateSerializer
         return super().get_serializer_class()
-
-    def get_queryset(self):
-        if not self.request.user.is_authenticated:
-            return self.queryset.none()
-
-        queryset = self.queryset.filter(organization__users=self.request.user)
-        organization_slug = self.kwargs.get("organization_slug")
-        if organization_slug:
-            queryset = queryset.filter(organization__slug=organization_slug)
-
-        # Fetch latest 60 checks for each monitor
-        queryset = queryset.prefetch_related(
-            Prefetch(
-                "checks",
-                queryset=MonitorCheck.objects.filter(  # Optimization
-                    start_check__gt=timezone.now() - timezone.timedelta(hours=12)
-                )
-                .annotate(
-                    row_number=Window(
-                        expression=RowNumber(),
-                        order_by="-start_check",
-                        partition_by=F("monitor"),
-                    ),
-                )
-                .filter(row_number__lte=60)
-                .distinct(),
-            )
-        ).select_related("project")
-        return queryset
-
-    def perform_create(self, serializer):
-        try:
-            organization = Organization.objects.get(
-                slug=self.kwargs.get("organization_slug"), users=self.request.user
-            )
-        except Organization.DoesNotExist as exc:
-            raise exceptions.ValidationError("Organization not found") from exc
-        serializer.save(organization=organization)
 
 
 class MonitorCheckPagination(LinkHeaderPagination):

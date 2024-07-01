@@ -14,7 +14,7 @@ from glitchtip.api.pagination import paginate
 from glitchtip.utils import async_call_celery_task
 
 from .models import Monitor, MonitorCheck
-from .schema import MonitorCheckSchema, MonitorIn, MonitorSchema
+from .schema import MonitorCheckSchema, MonitorDetailSchema, MonitorIn, MonitorSchema
 from .tasks import send_monitor_notification
 
 router = Router()
@@ -80,6 +80,20 @@ async def list_monitors(
     return get_monitor_queryset(request.auth.user_id, organization_slug)
 
 
+@router.get(
+    "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/",
+    response=MonitorDetailSchema,
+    by_alias=True,
+)
+async def get_monitor(
+    request: AuthHttpRequest, organization_slug: str, monitor_id: int
+):
+    return await aget_object_or_404(
+        get_monitor_queryset(request.auth.user_id, organization_slug),
+        id=monitor_id,
+    )
+
+
 @router.post(
     "organizations/{slug:organization_slug}/monitors/",
     response={201: MonitorSchema},
@@ -92,10 +106,31 @@ async def create_monitor(
     organization = await aget_object_or_404(
         Organization, slug=organization_slug, users=user_id
     )
-    data = payload.dict(exclude_none=True)
-    if project_id := data.pop("project"):
+    data = payload.dict(exclude_defaults=True)
+    if project_id := data.pop("project", None):
         data["project"] = await organization.projects.filter(id=project_id).afirst()
     monitor = await Monitor.objects.acreate(organization=organization, **data)
     return 201, await get_monitor_queryset(user_id, organization_slug).aget(
         id=monitor.id
     )
+
+
+@router.put(
+    "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/",
+    response=MonitorSchema,
+    by_alias=True,
+)
+async def update_monitor(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    monitor_id: int,
+    payload: MonitorIn,
+):
+    monitor = await aget_object_or_404(
+        get_monitor_queryset(request.auth.user_id, organization_slug),
+        id=monitor_id,
+    )
+    for attr, value in payload.dict(exclude_none=True).items():
+        setattr(monitor, attr, value)
+    await monitor.asave()
+    return monitor
