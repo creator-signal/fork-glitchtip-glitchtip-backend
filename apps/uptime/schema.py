@@ -10,7 +10,7 @@ from pydantic import model_validator
 from glitchtip.schema import CamelSchema
 
 from .constants import HTTP_MONITOR_TYPES, MonitorType
-from .models import Monitor, MonitorCheck
+from .models import Monitor, MonitorCheck, StatusPage
 
 
 class MonitorCheckSchema(CamelSchema, ModelSchema):
@@ -117,3 +117,18 @@ class MonitorSchema(MonitorIn):
 
 class MonitorDetailSchema(MonitorSchema):
     checks: list[MonitorCheckResponseTimeSchema]
+
+
+class StatusPageIn(CamelSchema, ModelSchema):
+    is_public: bool = False
+
+    class Meta:
+        model = StatusPage
+        fields = ["name", "is_public"]
+
+
+class StatusPageSchema(StatusPageIn, ModelSchema):
+    monitors: list[MonitorSchema]
+
+    class Meta(StatusPageIn.Meta):
+        fields = ["name", "slug", "is_public"]

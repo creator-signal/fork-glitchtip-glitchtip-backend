@@ -1,40 +1,7 @@
 from django.db.models import Q
 from django.views.generic import DetailView
-from rest_framework import exceptions, viewsets
-
-from apps.organizations_ext.models import Organization
 
 from .models import Monitor, StatusPage
-from .serializers import StatusPageSerializer
-
-
-class MonitorViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Monitor.objects.none()
-
-
-class StatusPageViewSet(viewsets.ModelViewSet):
-    queryset = StatusPage.objects.all()
-    serializer_class = StatusPageSerializer
-    lookup_field = "slug"
-
-    def get_queryset(self):
-        if not self.request.user.is_authenticated:
-            return self.queryset.none()
-
-        queryset = self.queryset.filter(organization__users=self.request.user)
-        organization_slug = self.kwargs.get("organization_slug")
-        if organization_slug:
-            queryset = queryset.filter(organization__slug=organization_slug)
-        return queryset
-
-    def perform_create(self, serializer):
-        try:
-            organization = Organization.objects.get(
-                slug=self.kwargs.get("organization_slug"), users=self.request.user
-            )
-        except Organization.DoesNotExist as exc:
-            raise exceptions.ValidationError("Organization not found") from exc
-        serializer.save(organization=organization)
 
 
 class StatusPageDetailView(DetailView):

@@ -6,9 +6,6 @@ from apps.performance.views import (
     TransactionGroupViewSet,
     TransactionViewSet,
 )
-from apps.uptime.views import (
-    StatusPageViewSet,
-)
 from glitchtip.routers import BulkSimpleRouter
 
 from .views import OrganizationViewSet
@@ -31,9 +28,6 @@ organizations_router.register(
     r"spans",
     SpanViewSet,
     basename="organization-spans",
-)
-organizations_router.register(
-    r"status-pages", StatusPageViewSet, basename="organization-status-pages"
 )
 
 urlpatterns = [
