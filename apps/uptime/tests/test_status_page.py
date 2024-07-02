@@ -1,13 +1,16 @@
-from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 
-class StatusPageTestCase(GlitchTipTestCaseMixin, TestCase):
+class StatusPageTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
     def setUp(self):
-        self.create_logged_in_user()
+        self.client.force_login(self.user)
 
     def test_status_page(self):
         status_page = baker.make(

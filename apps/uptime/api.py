@@ -181,7 +181,7 @@ async def list_monitor_checks(
 
 
 @router.get(
-    "organizations/{slug:organization_slug}/status-pages/",
+    "/organizations/{slug:organization_slug}/status-pages/",
     response=list[StatusPageSchema],
     by_alias=True,
 )
@@ -196,7 +196,7 @@ async def list_status_pages(
 
 
 @router.post(
-    "organizations/{slug:organization_slug}/status-pages/",
+    "/organizations/{slug:organization_slug}/status-pages/",
     response={201: StatusPageSchema},
     by_alias=True,
 )

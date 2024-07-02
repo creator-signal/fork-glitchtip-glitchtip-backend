@@ -1,6 +1,5 @@
 from unittest import mock
 
-from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -8,16 +7,20 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.uptime.models import Monitor
-from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 
-class UptimeAPITestCase(GlitchTipTestCaseMixin, TestCase):
-    def setUp(self):
-        self.create_logged_in_user()
-        self.list_url = reverse(
+class UptimeAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.list_url = reverse(
             "api:list_monitors",
-            args=[self.organization.slug],
+            args=[cls.organization.slug],
         )
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_list(self, mocked):

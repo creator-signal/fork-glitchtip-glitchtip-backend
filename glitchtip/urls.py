@@ -13,7 +13,7 @@ from apps.projects.urls import router as projectsRouter
 from apps.users.urls import router as usersRouter
 
 from . import social
-from .api import api
+from .api.api import api
 from .views import health
 
 router = routers.DefaultRouter()

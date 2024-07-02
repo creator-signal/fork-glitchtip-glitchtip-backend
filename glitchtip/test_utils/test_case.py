@@ -8,6 +8,34 @@ from rest_framework.test import APITestCase
 from apps.organizations_ext.models import Organization, OrganizationUserRole
 
 
+class GlitchTestCase(TestCase):
+    organization: Optional[Organization] = None
+
+    @classmethod
+    def create_project(cls):
+        """Create project, dsn, and organization"""
+        cls.project = baker.make(
+            "projects.Project", organization__scrub_ip_addresses=False
+        )
+        cls.projectkey = cls.project.projectkey_set.first()
+        cls.organization = cls.project.organization
+
+    @classmethod
+    def create_user(cls):
+        """
+        Create user and joins them to organization with a team
+        If organization does not exist, create it
+        """
+        if not cls.organization:
+            cls.create_project()
+        cls.user = baker.make("users.user")
+        cls.org_user = cls.organization.add_user(cls.user, OrganizationUserRole.ADMIN)
+        cls.team = baker.make("teams.Team", organization=cls.organization)
+        cls.team.members.add(cls.org_user)
+        cls.project = baker.make("projects.Project", organization=cls.organization)
+        cls.project.teams.add(cls.team)
+
+
 class GlitchTipTestCaseMixin:
     organization: Optional[Organization] = None
 
