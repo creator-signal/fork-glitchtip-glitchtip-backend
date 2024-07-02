@@ -4,12 +4,12 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import ValidationError
+from ninja.pagination import paginate
 
 from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 

@@ -2,11 +2,11 @@ from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
+from ninja.pagination import paginate
 
 from apps.organizations_ext.models import OrganizationUserRole
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import AlertRecipient, ProjectAlert

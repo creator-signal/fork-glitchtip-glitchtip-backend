@@ -1,8 +1,8 @@
 from django.http import Http404, HttpResponse
 from ninja import Router
+from ninja.pagination import paginate
 
 from glitchtip.api.authentication import AuthHttpRequest, SessionAuth
-from glitchtip.api.pagination import paginate
 
 from .models import APIToken
 from .schema import APITokenIn, APITokenSchema

@@ -5,13 +5,13 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import paginate
 from organizations.signals import user_added
 
 from apps.projects.models import Project
 from apps.teams.models import Team
 from apps.users.models import User
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .models import Organization, OrganizationUser, OrganizationUserRole

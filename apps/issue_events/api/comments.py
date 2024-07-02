@@ -3,9 +3,9 @@ from typing import List, Literal
 from django.http import HttpResponse
 from ninja import Schema
 from ninja.errors import HttpError
+from ninja.pagination import paginate
 
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from ..models import Comment, Issue
