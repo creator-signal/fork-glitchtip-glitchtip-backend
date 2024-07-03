@@ -187,7 +187,6 @@ DEBUG_TOOLBAR_PANELS = [
 WEB_INSTALLED_APPS = [
     "django_rest_mfa.mfa_admin",
     "django.contrib.admin",
-    "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django_filters",
@@ -528,10 +527,7 @@ if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
     }
 
 
-if os.environ.get("SESSION_ENGINE"):
-    SESSION_ENGINE = env.str("SESSION_ENGINE")
-if os.environ.get("SESSION_CACHE_ALIAS"):
-    SESSION_CACHE_ALIAS = env.str("SESSION_CACHE_ALIAS")
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 if os.environ.get("SESSION_COOKIE_AGE"):
     SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE")
 
