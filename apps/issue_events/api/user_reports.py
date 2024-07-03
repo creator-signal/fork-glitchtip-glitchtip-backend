@@ -1,9 +1,9 @@
 from typing import List
 
 from django.http import HttpResponse
+from ninja.pagination import paginate
 
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from ..models import UserReport

@@ -3,9 +3,9 @@ from typing import Optional
 
 from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
+from ninja.pagination import paginate
 
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from ..models import IssueEvent, UserReport

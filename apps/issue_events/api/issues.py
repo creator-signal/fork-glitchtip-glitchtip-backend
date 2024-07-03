@@ -11,12 +11,12 @@ from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from ninja import Field, Query, Schema
+from ninja.pagination import paginate
 from pydantic.functional_validators import BeforeValidator
 from typing_extensions import Annotated
 
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 

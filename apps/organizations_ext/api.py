@@ -7,6 +7,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
 
@@ -16,7 +17,6 @@ from apps.teams.schema import OrganizationDetailSchema
 from apps.users.models import User
 from apps.users.utils import ais_user_registration_open
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import has_permission
 
 from .invitation_backend import InvitationTokenGenerator
