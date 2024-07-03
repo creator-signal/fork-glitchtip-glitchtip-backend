@@ -215,6 +215,7 @@ async def delete_organization(request: AuthHttpRequest, organization_slug: str):
 @router.get(
     "organizations/{slug:organization_slug}/members/",
     response=list[OrganizationUserSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["member:read", "member:write", "member:admin"])
@@ -227,6 +228,7 @@ async def list_organization_members(
 @router.get(
     "teams/{slug:organization_slug}/{slug:team_slug}/members/",
     response=list[OrganizationUserSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["member:read", "member:write", "member:admin"])
@@ -244,6 +246,7 @@ async def list_team_organization_members(
 @router.get(
     "organizations/{slug:organization_slug}/members/{int:member_id}/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:read", "member:write", "member:admin"])
 async def get_organization_member(
@@ -259,6 +262,7 @@ async def get_organization_member(
 @router.post(
     "organizations/{slug:organization_slug}/members/",
     response={201: OrganizationUserSchema},
+    by_alias=True,
 )
 @has_permission(["member:write", "member:admin"])
 async def create_organization_member(
@@ -339,6 +343,7 @@ async def delete_organization_member(
 @router.put(
     "organizations/{slug:organization_slug}/members/{int:member_id}/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:write", "member:admin"])
 async def update_organization_member(
@@ -365,6 +370,7 @@ async def update_organization_member(
 @router.post(
     "organizations/{slug:organization_slug}/members/{int:member_id}/set_owner/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:admin"])
 async def set_organization_owner(
