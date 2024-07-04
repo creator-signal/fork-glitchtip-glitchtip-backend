@@ -5,10 +5,10 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
+from ninja.pagination import paginate
 
 from apps.shared.types import MeID
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 
 from .models import User
 from .schema import (

@@ -3,11 +3,11 @@ from uuid import UUID
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
+from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization, OrganizationUserRole
 from apps.teams.models import Team
 from apps.teams.schema import ProjectTeamSchema
-from glitchtip.api.pagination import paginate
 from glitchtip.api.permissions import AuthHttpRequest, has_permission
 
 from .models import Project, ProjectKey
