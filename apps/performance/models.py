@@ -1,35 +1,12 @@
 import uuid
 
-from django.contrib.postgres.fields import HStoreField
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 
 from apps.projects.tasks import update_transaction_event_project_hourly_statistic
 from glitchtip.base_models import CreatedModel
-
-
-class AbstractEvent(CreatedModel):
-    event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    data = models.JSONField(help_text="General event data that is searchable")
-    timestamp = models.DateTimeField(
-        blank=True,
-        null=True,
-        help_text="Date created as claimed by client it came from",
-    )
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return self.event_id_hex
-
-    @property
-    def event_id_hex(self):
-        """The public key without dashes"""
-        if self.event_id:
-            if isinstance(self.event_id, str):
-                return self.event_id
-            return self.event_id.hex
+from psqlextra.models import PostgresPartitionedModel
+from psqlextra.types import PostgresPartitioningMethod
 
 
 class TransactionGroup(CreatedModel):
@@ -47,15 +24,31 @@ class TransactionGroup(CreatedModel):
         return self.transaction
 
 
-class TransactionEvent(AbstractEvent):
+class TransactionEvent(PostgresPartitionedModel, models.Model):
+    event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
     trace_id = models.UUIDField(db_index=True)
-    start_timestamp = models.DateTimeField()
+    start_timestamp = models.DateTimeField(
+        db_index=True,
+        help_text="Datetime reported by client as the time the measurement started",
+    )
+    timestamp = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Datetime reported by client as the time the measurement finished",
+    )
     duration = models.PositiveIntegerField(db_index=True, help_text="Milliseconds")
-    tags = HStoreField(default=dict)
+    data = models.JSONField(help_text="General event data that is searchable")
+    # This could be HStore, but jsonb is just as good and removes need for
+    # 'django.contrib.postgres' which makes several unnecessary SQL calls
+    tags = models.JSONField(default=dict)
 
     class Meta:
-        ordering = ["-created"]
+        ordering = ["-start_timestamp"]
+
+    class PartitioningMeta:
+        method = PostgresPartitioningMethod.RANGE
+        key = ["received"]
 
     def __str__(self):
         return str(self.trace_id)
@@ -67,19 +60,3 @@ class TransactionEvent(AbstractEvent):
             update_transaction_event_project_hourly_statistic(
                 args=[self.group.project_id, self.created], countdown=60
             )
-
-
-class Span(CreatedModel):
-    transaction = models.ForeignKey(TransactionEvent, on_delete=models.CASCADE)
-    span_id = models.CharField(max_length=16)
-    parent_span_id = models.CharField(max_length=16, null=True, blank=True)
-    # same_process_as_parent bool - we don't use this currently
-    op = models.CharField(max_length=255, blank=True)
-    description = models.CharField(max_length=2000, null=True, blank=True)
-    start_timestamp = models.DateTimeField()
-    timestamp = models.DateTimeField()
-    tags = HStoreField(default=dict)
-    data = models.JSONField(default=dict)
-
-    def __str__(self):
-        return self.span_id
