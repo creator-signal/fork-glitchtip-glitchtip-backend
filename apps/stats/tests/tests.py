@@ -8,9 +8,7 @@ from glitchtip.test_utils.test_case import GlitchTipTestCase
 class StatsV2APITestCase(GlitchTipTestCase):
     def setUp(self):
         self.create_user_and_project()
-        self.url = reverse(
-            "stats-v2", kwargs={"organization_slug": self.organization.slug}
-        )
+        self.url = reverse("api:stats_v2", args=[self.organization.slug])
 
     def test_get(self):
         baker.make("issue_events.IssueEvent", issue__project=self.project)
