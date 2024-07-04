@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Avg, F
 
-from .models import Span, TransactionEvent, TransactionGroup
+from .models import TransactionEvent, TransactionGroup
 
 
 class TransactionGroupAdmin(admin.ModelAdmin):
@@ -21,22 +21,22 @@ class TransactionGroupAdmin(admin.ModelAdmin):
         )
 
 
-class SpanInline(admin.TabularInline):
-    model = Span
-    extra = 0
-    readonly_fields = [
-        "span_id",
-        "parent_span_id",
-        "op",
-        "description",
-        "start_timestamp",
-        "timestamp",
-        "tags",
-        "data",
-    ]
+# class SpanInline(admin.TabularInline):
+#     model = Span
+#     extra = 0
+#     readonly_fields = [
+#         "span_id",
+#         "parent_span_id",
+#         "op",
+#         "description",
+#         "start_timestamp",
+#         "timestamp",
+#         "tags",
+#         "data",
+#     ]
 
-    def has_add_permission(self, request, *args, **kwargs):
-        return False
+#     def has_add_permission(self, request, *args, **kwargs):
+#         return False
 
 
 class TransactionEventAdmin(admin.ModelAdmin):
@@ -46,31 +46,9 @@ class TransactionEventAdmin(admin.ModelAdmin):
         "group__project__organization__name",
     ]
     list_display = ["trace_id", "group", "timestamp", "duration"]
-    list_filter = ["created"]
-    inlines = [SpanInline]
+    # inlines = [SpanInline]
     can_delete = False
-
-
-class SpanAdmin(admin.ModelAdmin):
-    search_fields = [
-        "span_id",
-        "op",
-        "description",
-        "transaction__trace_id",
-        "transaction__group__project__organization__name",
-    ]
-    list_display = ["span_id", "transaction", "op", "description", "duration"]
-    list_filter = ["created", "op"]
-
-    def duration(self, obj):
-        return obj.duration
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        qs = qs.annotate(duration=F("timestamp") - F("start_timestamp"))
-        return qs
 
 
 admin.site.register(TransactionGroup, TransactionGroupAdmin)
 admin.site.register(TransactionEvent, TransactionEventAdmin)
-admin.site.register(Span, SpanAdmin)

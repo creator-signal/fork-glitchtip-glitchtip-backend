@@ -16,24 +16,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    replaces = [
-        ("performance", "0001_initial"),
-        ("performance", "0002_auto_20210124_1745"),
-        ("performance", "0003_transactionevent"),
-        ("performance", "0004_remove_transactionevent_project_and_more"),
-        ("performance", "0005_alter_span_data"),
-        ("performance", "0006_rename_title_transactiongroup_transaction_and_more"),
-        (
-            "performance",
-            "0007_transactionevent_tags_transactiongroup_search_vector_and_more",
-        ),
-        ("performance", "0008_transactionevent_duration"),
-        ("performance", "0009_alter_span_description"),
-        ("performance", "0010_alter_span_id_alter_transactiongroup_id"),
-        ("performance", "0011_alter_transactionevent_duration"),
-        ("performance", "0012_alter_span_op"),
-    ]
-
     initial = True
 
     dependencies = [

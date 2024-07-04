@@ -14,7 +14,7 @@ from rest_framework.exceptions import ErrorDetail, ValidationError
 from apps.environments.models import Environment
 from apps.releases.models import Release
 
-from .models import Span, TransactionEvent, TransactionGroup
+from .models import TransactionEvent, TransactionGroup
 
 logger = logging.getLogger(__name__)
 
@@ -210,58 +210,10 @@ class TransactionGroupSerializer(serializers.ModelSerializer):
         ]
 
 
-class SpanSerializer(serializers.ModelSerializer):
-    spanId = serializers.CharField(source="span_id", read_only=True)
-    parentSpanId = serializers.CharField(source="parent_span_id", read_only=True)
-    startTimestamp = serializers.DateTimeField(source="start_timestamp", read_only=True)
-    start_timestamp = FlexibleDateTimeField(write_only=True)
-    timestamp = FlexibleDateTimeField(write_only=True)
-    description = serializers.CharField(required=False)
-
-    class Meta:
-        model = Span
-        fields = [
-            "spanId",
-            "span_id",
-            "parent_span_id",
-            "parentSpanId",
-            "op",
-            "description",
-            "startTimestamp",
-            "start_timestamp",
-            "timestamp",
-            "tags",
-            "data",
-        ]
-        extra_kwargs = {
-            "start_timestamp": {"write_only": True},
-            "span_id": {"write_only": True},
-            "parent_span_id": {"write_only": True},
-        }
-
-    def to_internal_value(self, data):
-        # Coerce tags to strings
-        # Must be done here to avoid failing child CharField validation
-        if tags := data.get("tags"):
-            data["tags"] = {key: str(value) for key, value in tags.items()}
-        return super().to_internal_value(data)
-
-    def validate_description(self, value):
-        # No documented max length here, so we truncate
-        max_length = self.Meta.model._meta.get_field("description").max_length
-        if value and len(value) > max_length:
-            logger.warning("Span description truncation %s", value)
-            return value[:max_length]
-        return value
-
-
 class TransactionEventSerializer(SentrySDKEventSerializer):
     type = serializers.CharField(required=False)
     contexts = serializers.JSONField()
     measurements = serializers.JSONField(required=False)
-    spans = serializers.ListField(
-        child=SpanSerializer(), required=False, allow_empty=True
-    )
     start_timestamp = FlexibleDateTimeField()
     timestamp = FlexibleDateTimeField()
     transaction = serializers.CharField()
@@ -327,30 +279,6 @@ class TransactionEventSerializer(SentrySDKEventSerializer):
             tags={tag[0]: tag[1] for tag in tags},
         )
 
-        first_span = SpanSerializer(
-            data=contexts["trace"]
-            | {
-                "start_timestamp": data["start_timestamp"],
-                "timestamp": data["timestamp"],
-            }
-        )
-        if settings.ENABLE_PERFORMANCE_SPANS:
-            is_valid = first_span.is_valid()
-            if is_valid:
-                spans = data.get("spans", []) + [first_span.validated_data]
-            else:
-                spans = data.get("spans")
-            if spans:
-                Span.objects.bulk_create(
-                    [
-                        Span(
-                            transaction=transaction,
-                            **span,
-                        )
-                        for span in spans
-                    ]
-                )
-
         return transaction
 
 
@@ -383,7 +311,4 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 
 class TransactionDetailSerializer(TransactionSerializer):
-    spans = SpanSerializer(source="span_set", many=True)
-
-    class Meta(TransactionSerializer.Meta):
-        fields = TransactionSerializer.Meta.fields + ("spans",)
+    pass

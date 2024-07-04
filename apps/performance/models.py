@@ -3,7 +3,6 @@ import uuid
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 
-from apps.projects.tasks import update_transaction_event_project_hourly_statistic
 from glitchtip.base_models import CreatedModel
 from psqlextra.models import PostgresPartitionedModel
 from psqlextra.types import PostgresPartitioningMethod
@@ -52,11 +51,3 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
 
     def __str__(self):
         return str(self.trace_id)
-
-    def save(self, *args, **kwargs):
-        is_new = self._state.adding
-        super().save(*args, **kwargs)
-        if is_new:
-            update_transaction_event_project_hourly_statistic(
-                args=[self.group.project_id, self.created], countdown=60
-            )
