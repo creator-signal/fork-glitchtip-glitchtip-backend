@@ -5,13 +5,9 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
-<<<<<<< HEAD
+from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
-=======
-from ninja.pagination import paginate
-from organizations.signals import user_added
->>>>>>> 6903192ea69b67ae2b8d5137e42965c9aef40514
 
 from apps.projects.models import Project
 from apps.teams.models import Team

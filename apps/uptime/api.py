@@ -7,10 +7,10 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
+from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.api.pagination import paginate
 from glitchtip.utils import async_call_celery_task
 
 from .models import Monitor, MonitorCheck, StatusPage
