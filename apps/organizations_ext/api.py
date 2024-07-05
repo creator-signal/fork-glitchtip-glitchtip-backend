@@ -418,7 +418,10 @@ async def validate_token(org_user_id: int, token: str) -> OrganizationUser:
 
 
 @router.get(
-    "accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema, auth=None
+    "accept/{int:org_user_id}/{str:token}/",
+    response=AcceptInviteSchema,
+    by_alias=True,
+    auth=None,
 )
 async def get_accept_invite(request: HttpRequest, org_user_id: int, token: str):
     """Return relevant organization data around an invite"""
@@ -426,7 +429,11 @@ async def get_accept_invite(request: HttpRequest, org_user_id: int, token: str):
     return {"accept_invite": False, "org_user": org_user}
 
 
-@router.post("accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema)
+@router.post(
+    "accept/{int:org_user_id}/{str:token}/",
+    response=AcceptInviteSchema,
+    by_alias=True,
+)
 async def accept_invite(
     request: AuthHttpRequest, org_user_id: int, token: str, payload: AcceptInviteIn
 ):
