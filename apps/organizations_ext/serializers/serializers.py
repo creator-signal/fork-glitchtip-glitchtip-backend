@@ -3,7 +3,6 @@ from rest_framework.exceptions import PermissionDenied
 
 from apps.projects.serializers.serializers import OrganizationProjectSerializer
 from apps.teams.models import Team
-from apps.teams.serializers import TeamSerializer
 from apps.users.models import User
 from apps.users.serializers import UserSerializer
 from apps.users.utils import is_user_registration_open
@@ -19,7 +18,6 @@ class OrganizationSerializer(OrganizationReferenceSerializer):
 
 class OrganizationDetailSerializer(OrganizationSerializer):
     projects = OrganizationProjectSerializer(many=True)
-    teams = TeamSerializer(many=True)
     openMembership = serializers.BooleanField(source="open_membership")
     scrubIPAddresses = serializers.BooleanField(source="scrub_ip_addresses")
 
@@ -28,7 +26,6 @@ class OrganizationDetailSerializer(OrganizationSerializer):
             "projects",
             "openMembership",
             "scrubIPAddresses",
-            "teams",
         )
 
 
@@ -149,17 +146,3 @@ class ReinviteSerializer(serializers.Serializer):
             pass
             # Send email
         return instance
-
-
-class OrganizationUserOrganizationSerializer(OrganizationUserSerializer):
-    """Organization User Serializer with Organization info"""
-
-    organization = OrganizationSerializer()
-
-    class Meta(OrganizationUserSerializer.Meta):
-        fields = OrganizationUserSerializer.Meta.fields + ("organization",)
-
-
-class AcceptInviteSerializer(serializers.Serializer):
-    accept_invite = serializers.BooleanField()
-    org_user = OrganizationUserOrganizationSerializer(read_only=True)

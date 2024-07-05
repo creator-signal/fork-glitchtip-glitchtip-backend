@@ -109,13 +109,13 @@ class UsersTestCase(GlitchTipTestCase):
 
         user2 = baker.make("users.User")
         self.organization.add_user(user2, OrganizationUserRole.MEMBER)
-        url = reverse("organization-members-list", args=[self.organization.slug])
+        url = reverse("api:list_organization_members", args=[self.organization.slug])
         res = self.client.get(url)
         self.assertContains(res, user2.email)
         self.assertNotContains(res, other_user.email)
 
         # Can't view members of groups you don't belong to
-        url = reverse("organization-members-list", args=[other_organization.slug])
+        url = reverse("api:list_organization_members", args=[other_organization.slug])
         res = self.client.get(url)
         self.assertNotContains(res, other_user.email)
 

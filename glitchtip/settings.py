@@ -191,6 +191,7 @@ WEB_INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django_filters",
     "rest_framework",
+    "ninja",
 ]
 
 
@@ -227,7 +228,6 @@ INSTALLED_APPS += [
     "storages",
     "glitchtip",
     "apps.alerts",
-    "ninja",
     "apps.environments",
     "apps.organizations_ext",
     "events",

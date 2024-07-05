@@ -10,7 +10,6 @@ from rest_framework_nested import routers
 
 from apps.organizations_ext.urls import router as organizationsRouter
 from apps.projects.urls import router as projectsRouter
-from apps.teams.urls import router as teamsRouter
 from apps.users.urls import router as usersRouter
 
 from . import social
@@ -20,7 +19,6 @@ from .views import health
 router = routers.DefaultRouter()
 router.registry.extend(projectsRouter.registry)
 router.registry.extend(organizationsRouter.registry)
-router.registry.extend(teamsRouter.registry)
 router.registry.extend(usersRouter.registry)
 
 if settings.BILLING_ENABLED:
@@ -66,7 +64,6 @@ urlpatterns += [
     path("api/0/", include("apps.projects.urls")),
     path("api/0/", include("apps.users.urls")),
     path("api/0/", include("apps.organizations_ext.urls")),
-    path("api/0/", include("apps.teams.urls")),
     path("api/0/", include("apps.difs.urls")),
     path("api/0/", include("apps.stats.urls")),
     path("api/mfa/", include("django_rest_mfa.urls")),

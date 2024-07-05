@@ -13,24 +13,13 @@ from apps.uptime.views import (
 )
 from glitchtip.routers import BulkSimpleRouter
 
-from .views import (
-    AcceptInviteView,
-    OrganizationMemberViewSet,
-    OrganizationUserViewSet,
-    OrganizationViewSet,
-)
+from .views import OrganizationViewSet
 
 router = BulkSimpleRouter()
 router.register(r"organizations", OrganizationViewSet)
 
 organizations_router = routers.NestedSimpleRouter(
     router, r"organizations", lookup="organization"
-)
-organizations_router.register(
-    r"members", OrganizationMemberViewSet, basename="organization-members"
-)
-organizations_router.register(
-    r"users", OrganizationUserViewSet, basename="organization-users"
 )
 organizations_router.register(
     r"transactions", TransactionViewSet, basename="organization-transactions"
@@ -63,9 +52,4 @@ urlpatterns = [
     path("", include(router.urls)),
     path("", include(organizations_router.urls)),
     path("", include(organizations_monitors_router.urls)),
-    path(
-        "accept/<int:org_user_id>/<token>/",
-        AcceptInviteView.as_view(),
-        name="accept-invite",
-    ),
 ]
