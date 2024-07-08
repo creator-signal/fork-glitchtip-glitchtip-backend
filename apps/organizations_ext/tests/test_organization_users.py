@@ -136,7 +136,7 @@ class OrganizationUsersTestCase(TestCase):
         data = {"acceptInvite": True}
         res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, self.organization.name)
-        self.assertFalse(res.json()["org_user"]["pending"])
+        self.assertFalse(res.json()["orgUser"]["pending"])
         self.assertTrue(
             OrganizationUser.objects.filter(
                 user=user, organization=self.organization

@@ -213,6 +213,7 @@ async def delete_organization(request: AuthHttpRequest, organization_slug: str):
 @router.get(
     "organizations/{slug:organization_slug}/members/",
     response=list[OrganizationUserSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["member:read", "member:write", "member:admin"])
@@ -225,6 +226,7 @@ async def list_organization_members(
 @router.get(
     "teams/{slug:organization_slug}/{slug:team_slug}/members/",
     response=list[OrganizationUserSchema],
+    by_alias=True,
 )
 @paginate
 @has_permission(["member:read", "member:write", "member:admin"])
@@ -242,6 +244,7 @@ async def list_team_organization_members(
 @router.get(
     "organizations/{slug:organization_slug}/members/{int:member_id}/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:read", "member:write", "member:admin"])
 async def get_organization_member(
@@ -257,6 +260,7 @@ async def get_organization_member(
 @router.post(
     "organizations/{slug:organization_slug}/members/",
     response={201: OrganizationUserSchema},
+    by_alias=True,
 )
 @has_permission(["member:write", "member:admin"])
 async def create_organization_member(
@@ -337,6 +341,7 @@ async def delete_organization_member(
 @router.put(
     "organizations/{slug:organization_slug}/members/{int:member_id}/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:write", "member:admin"])
 async def update_organization_member(
@@ -363,6 +368,7 @@ async def update_organization_member(
 @router.post(
     "organizations/{slug:organization_slug}/members/{int:member_id}/set_owner/",
     response=OrganizationUserDetailSchema,
+    by_alias=True,
 )
 @has_permission(["member:admin"])
 async def set_organization_owner(
@@ -410,7 +416,10 @@ async def validate_token(org_user_id: int, token: str) -> OrganizationUser:
 
 
 @router.get(
-    "accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema, auth=None
+    "accept/{int:org_user_id}/{str:token}/",
+    response=AcceptInviteSchema,
+    by_alias=True,
+    auth=None,
 )
 async def get_accept_invite(request: HttpRequest, org_user_id: int, token: str):
     """Return relevant organization data around an invite"""
@@ -418,7 +427,11 @@ async def get_accept_invite(request: HttpRequest, org_user_id: int, token: str):
     return {"accept_invite": False, "org_user": org_user}
 
 
-@router.post("accept/{int:org_user_id}/{str:token}/", response=AcceptInviteSchema)
+@router.post(
+    "accept/{int:org_user_id}/{str:token}/",
+    response=AcceptInviteSchema,
+    by_alias=True,
+)
 async def accept_invite(
     request: AuthHttpRequest, org_user_id: int, token: str, payload: AcceptInviteIn
 ):
