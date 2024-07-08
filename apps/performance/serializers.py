@@ -5,7 +5,6 @@ from datetime import datetime
 from urllib.parse import parse_qs
 
 from anonymizeip import anonymize_ip
-from django.conf import settings
 from django.utils.timezone import make_aware
 from ipware import get_client_ip
 from rest_framework import serializers

@@ -5,16 +5,17 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 
-class TransactionAPITestCase(GlitchTipTestCase):
+class TransactionAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.list_url = reverse("api:list_transactions", args=[cls.organization.slug])
+
     def setUp(self):
-        self.create_user_and_project()
-        self.list_url = reverse(
-            "organization-transactions-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
+        self.client.force_login(self.user)
 
     def test_list(self):
         transaction = baker.make(
@@ -24,7 +25,7 @@ class TransactionAPITestCase(GlitchTipTestCase):
         self.assertContains(res, transaction.event_id)
 
 
-class TransactionGroupAPITestCase(GlitchTipTestCase):
+class TransactionGroupAPITestCase(GlitchTestCase):
     def setUp(self):
         self.create_user_and_project()
         self.list_url = reverse(
@@ -163,17 +164,3 @@ class TransactionGroupAPITestCase(GlitchTipTestCase):
             + "Z"
         )
         self.assertEqual(res.data[0]["avgDuration"], 1000)
-
-
-class SpanAPITestCase(GlitchTipTestCase):
-    def setUp(self):
-        self.create_user_and_project()
-        self.list_url = reverse(
-            "organization-spans-list",
-            kwargs={"organization_slug": self.organization.slug},
-        )
-
-    def test_list(self):
-        span = baker.make("performance.Span", transaction__group__project=self.project)
-        res = self.client.get(self.list_url)
-        self.assertContains(res, span.op)

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.db.models import Avg, F
+from django.db.models import Avg
 
 from .models import TransactionEvent, TransactionGroup
 

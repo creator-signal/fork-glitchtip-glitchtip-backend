@@ -1,12 +1,8 @@
-from django.conf import settings
-
 from .models import TransactionGroup
 
 
 def cleanup_old_transaction_events():
     """Delete older events and associated data"""
-    days = settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS
-
     # Delete ~1k empty transaction groups at a time until less than 1k remain then delete the rest. Avoids memory overload.
     queryset = TransactionGroup.objects.filter(transactionevent=None).order_by("id")
 
