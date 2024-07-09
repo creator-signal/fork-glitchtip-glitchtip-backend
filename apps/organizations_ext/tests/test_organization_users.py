@@ -318,7 +318,7 @@ class OrganizationUsersTestCase(TestCase):
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
         res = self.client.delete(url)
-        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.status_code, 403)
         self.assertEqual(other_user.organizations_ext_organizationuser.count(), 1)
 
     def test_organization_members_set_owner(self):
