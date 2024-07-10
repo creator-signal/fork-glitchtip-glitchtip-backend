@@ -136,7 +136,7 @@ class OrganizationUsersTestCase(TestCase):
         data = {"acceptInvite": True}
         res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, self.organization.name)
-        self.assertFalse(res.json()["org_user"]["pending"])
+        self.assertFalse(res.json()["orgUser"]["pending"])
         self.assertTrue(
             OrganizationUser.objects.filter(
                 user=user, organization=self.organization
@@ -218,6 +218,8 @@ class OrganizationUsersTestCase(TestCase):
 
     def test_organization_users_create_without_permissions(self):
         """Admin cannot add users to org"""
+        other_user = baker.make("users.user")
+        self.organization.add_user(other_user, role=OrganizationUserRole.MANAGER)
         self.org_user.role = OrganizationUserRole.ADMIN
         self.org_user.save()
         data = {
