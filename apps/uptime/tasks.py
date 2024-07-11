@@ -80,7 +80,7 @@ def dispatch_checks():
     there should be 5 checks run every other second
 
     This method reduces the number of necessary celery tasks and sql queries. While keeping
-    the timing percise and allowing for any arbitrary interval (to the second).
+    the timing precise and allowing for any arbitrary interval (to the second).
     It also has no need to track state of previous checks.
 
     The check result DB writes are then batched for better performance.

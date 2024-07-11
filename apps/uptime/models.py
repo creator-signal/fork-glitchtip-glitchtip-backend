@@ -79,9 +79,9 @@ class Monitor(models.Model):
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    interval = models.DurationField(
-        default=timedelta(minutes=1),
-        validators=[MaxValueValidator(timedelta(hours=24))],
+    interval = models.PositiveSmallIntegerField(
+        default=60,
+        validators=[MaxValueValidator(86400), MinValueValidator(1)],
     )
     timeout = models.PositiveSmallIntegerField(
         blank=True,
