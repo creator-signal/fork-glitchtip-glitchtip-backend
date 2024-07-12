@@ -34,6 +34,9 @@ class Migration(migrations.Migration):
                 ],
             ),
         ),
+        migrations.RunPython(
+            migrate_interval_to_positive_int, migrations.RunPython.noop
+        ),
         migrations.RemoveField(
             model_name="monitor",
             name="interval_old",
@@ -63,4 +66,5 @@ class Migration(migrations.Migration):
                 validators=[apps.uptime.models.OptionalSchemeURLValidator()],
             ),
         ),
+        migrations.DeleteModel("MonitorCheck"),
     ]
