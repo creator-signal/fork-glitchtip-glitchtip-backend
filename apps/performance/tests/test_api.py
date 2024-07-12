@@ -26,12 +26,15 @@ class TransactionAPITestCase(GlitchTestCase):
 
 
 class TransactionGroupAPITestCase(GlitchTestCase):
-    def setUp(self):
-        self.create_user_and_project()
-        self.list_url = reverse(
-            "organization-transaction-groups-list",
-            kwargs={"organization_slug": self.organization.slug},
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.list_url = reverse(
+            "api:list_transaction_groups", args=[cls.organization.slug]
         )
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     def test_list(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
@@ -42,63 +45,60 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         group = baker.make("performance.TransactionGroup", project=self.project)
         now = timezone.now()
         last_minute = now - datetime.timedelta(minutes=1)
-        with freeze_time(last_minute):
-            baker.make(
-                "performance.TransactionEvent",
-                group=group,
-                start_timestamp=last_minute,
-                timestamp=last_minute + datetime.timedelta(seconds=5),
-                duration=5000,
-            )
+        baker.make(
+            "performance.TransactionEvent",
+            group=group,
+            start_timestamp=last_minute,
+            timestamp=last_minute + datetime.timedelta(seconds=5),
+            duration=5000,
+        )
         two_minutes_ago = now - datetime.timedelta(minutes=2)
-        with freeze_time(two_minutes_ago):
-            baker.make(
-                "performance.TransactionEvent",
-                group=group,
-                start_timestamp=two_minutes_ago,
-                timestamp=two_minutes_ago + datetime.timedelta(seconds=1),
-                duration=1000,
-            )
+        baker.make(
+            "performance.TransactionEvent",
+            group=group,
+            start_timestamp=two_minutes_ago,
+            timestamp=two_minutes_ago + datetime.timedelta(seconds=1),
+            duration=1000,
+        )
 
         yesterday = now - datetime.timedelta(days=1)
-        with freeze_time(yesterday):
-            baker.make(
-                "performance.TransactionEvent",
-                group=group,
-                start_timestamp=yesterday,
-                timestamp=yesterday + datetime.timedelta(seconds=1),
-                duration=1000,
-            )
+        baker.make(
+            "performance.TransactionEvent",
+            group=group,
+            start_timestamp=yesterday,
+            timestamp=yesterday + datetime.timedelta(seconds=1),
+            duration=1000,
+        )
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"start": last_minute})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 1)
+        self.assertEqual(res.json()[0]["transactionCount"], 1)
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"start": "now-1m", "end": "now"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 1)
+        self.assertEqual(res.json()[0]["transactionCount"], 1)
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"start": "now-2m"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 2)
+        self.assertEqual(res.json()[0]["transactionCount"], 2)
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"end": "now-1d"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 1)
+        self.assertEqual(res.json()[0]["transactionCount"], 1)
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"end": "now-24h"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 1)
+        self.assertEqual(res.json()[0]["transactionCount"], 1)
 
         with freeze_time(now):
             res = self.client.get(self.list_url, {"end": "now"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data[0]["transactionCount"], 3)
+        self.assertEqual(res.json()[0]["transactionCount"], 3)
 
     def test_list_relative_parsing(self):
         res = self.client.get(self.list_url, {"start": "now-1h "})
@@ -106,15 +106,15 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url, {"start": "now - 1h"})
         self.assertEqual(res.status_code, 200)
         res = self.client.get(self.list_url, {"start": "now-1"})
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
         res = self.client.get(self.list_url, {"start": "now-1minute"})
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
         res = self.client.get(self.list_url, {"start": "won-1m"})
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
         res = self.client.get(self.list_url, {"start": "now+1m"})
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
         res = self.client.get(self.list_url, {"start": "now 1m"})
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
 
     def test_list_environment_filter(self):
         environment_project = baker.make(
@@ -153,14 +153,14 @@ class TransactionGroupAPITestCase(GlitchTestCase):
             duration=1000,
         )
         res = self.client.get(self.list_url)
-        self.assertEqual(res.data[0]["avgDuration"], 3000)
+        self.assertEqual(res.json()[0]["avgDuration"], 3000)
 
         res = self.client.get(
             self.list_url
             + "?start="
-            + transaction2.created.replace(microsecond=0)
+            + transaction2.start_timestamp.replace(microsecond=0)
             .replace(tzinfo=None)
             .isoformat()
             + "Z"
         )
-        self.assertEqual(res.data[0]["avgDuration"], 1000)
+        self.assertEqual(res.json()[0]["avgDuration"], 1000)
