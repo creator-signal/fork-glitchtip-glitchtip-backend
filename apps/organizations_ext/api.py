@@ -300,7 +300,7 @@ async def update_organization_member(
         id=member_id,
     )
     if member.actor_role < OrganizationUserRole.MANAGER:
-        raise Http404(403, "Forbidden")
+        raise HttpError(403, "Forbidden")
     member.role = OrganizationUserRole.from_string(payload.org_role)
     await member.asave()
     return member
