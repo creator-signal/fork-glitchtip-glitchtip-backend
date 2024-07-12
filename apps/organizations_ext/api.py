@@ -2,8 +2,7 @@ from typing import Optional
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth import aget_user
-from django.db.models import Count, Exists, OuterRef, Prefetch
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
@@ -11,7 +10,6 @@ from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
 
-from apps.projects.models import Project
 from apps.teams.models import Team
 from apps.teams.schema import OrganizationDetailSchema
 from apps.users.models import User
@@ -26,6 +24,7 @@ from .models import (
     OrganizationUser,
     OrganizationUserRole,
 )
+from .queryset_utils import get_organization_users_queryset, get_organizations_queryset
 from .schema import (
     AcceptInviteIn,
     AcceptInviteSchema,
@@ -52,65 +51,6 @@ POST /api/0/organizations/{organization_slug}/members/{member_id}/
 DELETE /api/0/organizations/{organization_slug}/members/{member_id}/
 GET /api/0/teams/{organization_slug}/{team_slug}/members/ (Not documented in sentry)
 """
-
-
-def get_organizations_queryset(
-    user_id, role_required: OrganizationUserRole = None, add_details=False
-):
-    qs = Organization.objects.filter(users=user_id)
-    if role_required:
-        qs = qs.filter(
-            organization_users__user=user_id,
-            organization_users__role__gte=role_required,
-        )
-    if add_details:
-        qs = qs.prefetch_related(
-            Prefetch(
-                "projects",
-                queryset=Project.annotate_is_member(Project.objects, user_id),
-            ),
-            "projects__teams",
-            Prefetch(
-                "teams",
-                queryset=Team.objects.annotate(
-                    is_member=Exists(
-                        OrganizationUser.objects.filter(
-                            teams=OuterRef("pk"), user_id=user_id
-                        )
-                    ),
-                    member_count=Count("members"),
-                ),
-            ),
-            "teams__members",
-        )
-    return qs
-
-
-def get_organization_users_queryset(
-    user_id: int,
-    organization_slug: str,
-    team_slug: str = None,
-    role_required: OrganizationUserRole = None,
-    add_details=False,
-):
-    qs = (
-        OrganizationUser.objects.filter(
-            organization__users=user_id, organization__slug=organization_slug
-        )
-        .select_related("user")
-        .prefetch_related("user__socialaccount_set")
-    )
-    if team_slug:
-        qs = qs.filter(teams__slug=team_slug)
-    if role_required:
-        qs = qs.filter(
-            organization__users__organizations_ext_organizationuser__user=user_id,
-            organization__users__organizations_ext_organizationuser__organization__slug=organization_slug,
-            organization__users__organizations_ext_organizationuser__role__gte=role_required,
-        )
-    if add_details:
-        qs = qs.select_related("organization__owner").prefetch_related("teams")
-    return qs
 
 
 @router.get("organizations/", response=list[OrganizationSchema], by_alias=True)
@@ -181,11 +121,13 @@ async def update_organization(
     organization = await aget_object_or_404(
         get_organizations_queryset(
             request.auth.user_id,
-            role_required=OrganizationUserRole.MANAGER,
+            role_required=True,
             add_details=True,
         ),
         slug=organization_slug,
     )
+    if organization.actor_role < OrganizationUserRole.MANAGER:
+        raise HttpError(403, "forbidden")
     for attr, value in payload.dict().items():
         setattr(organization, attr, value)
     await organization.asave()
@@ -198,17 +140,13 @@ async def update_organization(
 )
 @has_permission(["org:admin"])
 async def delete_organization(request: AuthHttpRequest, organization_slug: str):
-    result, _ = (
-        await get_organizations_queryset(
-            request.auth.user_id, role_required=OrganizationUserRole.MANAGER
-        )
-        .filter(
-            slug=organization_slug,
-        )
-        .adelete()
+    organization = await aget_object_or_404(
+        get_organizations_queryset(request.auth.user_id, role_required=True),
+        slug=organization_slug,
     )
-    if not result:
-        raise Http404
+    if organization.actor_role < OrganizationUserRole.MANAGER:
+        raise HttpError(403, "forbidden")
+    await organization.adelete()
     return 204, None
 
 
@@ -270,15 +208,12 @@ async def create_organization_member(
 ):
     user_id = request.auth.user_id
     organization = await aget_object_or_404(
-        get_organizations_queryset(user_id)
+        get_organizations_queryset(user_id, role_required=True)
         .filter(organization_users__user=user_id)
         .prefetch_related("organization_users"),
         slug=organization_slug,
     )
-    if not await organization.organization_users.filter(
-        user=user_id,
-        role__gte=OrganizationUserRole.MANAGER,
-    ).aexists():
+    if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
     email = payload.email
     if (
@@ -331,15 +266,14 @@ async def delete_organization_member(
         organization_user__id=member_id,
     ).aexists():
         raise HttpError(400, "User is organization owner. Transfer ownership first.")
-    result, _ = (
-        await get_organization_users_queryset(
-            user_id, organization_slug, role_required=OrganizationUserRole.MANAGER
-        )
-        .filter(id=member_id)
-        .adelete()
+    org_user = await aget_object_or_404(
+        get_organization_users_queryset(user_id, organization_slug, role_required=True),
+        id=member_id,
     )
-    if not result:
-        raise Http404
+    if org_user.actor_role < OrganizationUserRole.MANAGER:
+        raise HttpError(403, "Forbidden")
+    await org_user.adelete()
+
     return 204, None
 
 
@@ -360,11 +294,13 @@ async def update_organization_member(
         get_organization_users_queryset(
             request.auth.user_id,
             organization_slug,
-            role_required=OrganizationUserRole.MANAGER,
+            role_required=True,
             add_details=True,
         ).select_related("organization"),
         id=member_id,
     )
+    if member.actor_role < OrganizationUserRole.MANAGER:
+        raise HttpError(403, "Forbidden")
     member.role = OrganizationUserRole.from_string(payload.org_role)
     await member.asave()
     return member
