@@ -14,8 +14,6 @@ from django.db import migrations, models
 
 from glitchtip.model_utils import TestDefaultPartition
 
-from .functions.partition import create_partitions
-
 
 class Migration(migrations.Migration):
     initial = True
@@ -395,5 +393,4 @@ class Migration(migrations.Migration):
                 fields=("project", "event_id"), name="project_event_unique"
             ),
         ),
-        migrations.RunPython(create_partitions, migrations.RunPython.noop),
     ]
