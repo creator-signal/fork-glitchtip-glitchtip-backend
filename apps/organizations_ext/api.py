@@ -273,7 +273,10 @@ async def create_organization_member(
         .prefetch_related("organization_users"),
         slug=organization_slug,
     )
-    if organization.organization_users.all()[0].role < OrganizationUserRole.MANAGER:
+    if not await organization.organization_users.filter(
+        user=user_id,
+        role__gte=OrganizationUserRole.MANAGER,
+    ).aexists():
         raise HttpError(403, "forbidden")
     email = payload.email
     if (

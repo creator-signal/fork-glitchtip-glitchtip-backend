@@ -5,10 +5,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.uptime.models import Monitor
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from apps.teams.models import Team
+from apps.uptime.models import Monitor
 from apps.users.models import User
 
 
@@ -63,7 +63,7 @@ class SeedDataAPIView(APIView):
             project=project,
             url="https://www.google.com",
             monitor_type="Ping",
-            interval="00:01:00",
+            interval=60,
         )
 
         if request.query_params.get("extras"):

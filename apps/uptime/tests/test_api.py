@@ -77,7 +77,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
             "timeout": 25,
         }
@@ -98,7 +98,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "http://example.com:80",
             "expectedStatus": None,
-            "interval": "00:01:00",
+            "interval": 60,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
@@ -113,7 +113,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "example:80:",
             "expectedStatus": "",
-            "interval": "00:01:00",
+            "interval": 60,
         }
         res = self.client.post(self.list_url, data)
         self.assertEqual(res.status_code, 400)
@@ -124,7 +124,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "foo:80:",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
         res = self.client.post(self.list_url, data)
@@ -135,7 +135,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
             "timeout": 999,
         }
@@ -149,7 +149,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "http://example.com",
             "expectedStatus": None,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
@@ -268,7 +268,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
         res = self.client.post(url, data)
