@@ -39,7 +39,7 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
         self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 404)
+        self.assertDeleteReqStatusCode(self.detail_url, 403)
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
@@ -57,7 +57,7 @@ class OrganizationAPIPermissionTests(APIPermissionTestCase):
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
         data = {"name": "new name"}
-        self.assertPutReqStatusCode(self.detail_url, data, 404)
+        self.assertPutReqStatusCode(self.detail_url, data, 403)
         self.set_user_role(OrganizationUserRole.MANAGER)
         self.assertPutReqStatusCode(self.detail_url, data, 200)
 
@@ -109,7 +109,7 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 404)
+        self.assertDeleteReqStatusCode(self.detail_url, 403)
         self.set_user_role(OrganizationUserRole.OWNER)
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
