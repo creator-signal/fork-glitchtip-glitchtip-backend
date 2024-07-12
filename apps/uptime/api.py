@@ -121,7 +121,6 @@ async def create_monitor(
     data = payload.dict(exclude_defaults=True)
     if project_id := data.pop("project", None):
         data["project"] = await organization.projects.filter(id=project_id).afirst()
-    data["interval"] = timedelta(seconds=data["interval"])
     monitor = await Monitor.objects.acreate(organization=organization, **data)
     return 201, await get_monitor_queryset(user_id, organization_slug).aget(
         id=monitor.id
