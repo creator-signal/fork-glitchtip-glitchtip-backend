@@ -2,7 +2,7 @@ from typing import Optional
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth import aget_user
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.errors import HttpError

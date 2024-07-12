@@ -274,7 +274,7 @@ class OrganizationUsersTestCase(TestCase):
         new_role = OrganizationUserRole.ADMIN
         data = {"orgRole": new_role.label.lower(), "teamRoles": []}
         res = self.client.put(url, data, content_type="application/json")
-        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.status_code, 403)
 
     def test_organization_users_delete(self):
         other_user = baker.make("users.user")
