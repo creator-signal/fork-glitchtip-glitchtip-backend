@@ -24,7 +24,7 @@ django-filter = "^22.1"
 celery = {version = "~5.4.0", extras = ["redis"]}
 django-csp = "^3.6"
 dj-stripe = "~2.8.0"
-django-anymail = "^10.2"
+django-anymail = "^11.0.0"
 dj-rest-auth = "~6.0.0"
 user-agents = "^2.1"
 django-ipware = "^7.0.0"
