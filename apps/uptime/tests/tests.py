@@ -1,5 +1,4 @@
 import asyncio
-from datetime import timedelta
 from unittest import mock
 
 from aioresponses import aioresponses
