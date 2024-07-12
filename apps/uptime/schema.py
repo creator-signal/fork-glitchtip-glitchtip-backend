@@ -27,8 +27,6 @@ class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
 
 
 class MonitorIn(CamelSchema, ModelSchema):
-    # project: int | None
-
     @model_validator(mode="after")
     def validate(self):
         monitor_type = self.monitor_type
@@ -73,7 +71,7 @@ class MonitorIn(CamelSchema, ModelSchema):
         ]
 
 
-class MonitorSchema(MonitorIn):
+class MonitorSchema(MonitorIn, ModelSchema):
     project: int | None = Field(validation_alias="project_id")
     environment: int | None = Field(validation_alias="environment_id")
     is_up: bool | None = Field(validation_alias="latest_is_up")
