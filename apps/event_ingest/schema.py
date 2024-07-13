@@ -411,3 +411,13 @@ class InterchangeIssueEvent(LaxIngestSchema):
     payload: Union[IssueEventSchema, ErrorIssueEventSchema, CSPIssueEventSchema] = (
         Field(discriminator="type")
     )
+
+
+
+class TransactionEventSchema(Schema):# SentrySDKEventSerializer):
+    type: str | None = None
+    contexts: dict | list
+    measurements: dict | list | None = None
+    start_timestamp: datetime
+    timestamp: datetime
+    transaction: str
