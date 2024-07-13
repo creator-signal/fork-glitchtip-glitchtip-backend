@@ -166,13 +166,3 @@ def send_monitor_notification(monitor_check_id: int, went_down: bool, last_chang
             ).send_users_email()
         elif recipient.is_webhook:
             send_uptime_as_webhook(recipient, monitor_check_id, went_down, last_change)
-
-
-def cleanup_old_monitor_checks():
-    """Delete older checks and associated data"""
-    days = settings.GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS
-    qs = MonitorCheck.objects.filter(
-        start_check__lt=timezone.now() - timedelta(days=days)
-    )
-    # pylint: disable=protected-access
-    qs._raw_delete(qs.db)  # noqa

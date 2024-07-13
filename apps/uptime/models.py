@@ -10,6 +10,8 @@ from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
 
 from glitchtip.base_models import CreatedModel
+from psqlextra.models import PostgresPartitionedModel
+from psqlextra.types import PostgresPartitioningMethod
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 
@@ -122,7 +124,7 @@ class Monitor(models.Model):
         return self.timeout or 20
 
 
-class MonitorCheck(models.Model):
+class MonitorCheck(PostgresPartitionedModel, models.Model):
     monitor = models.ForeignKey(
         Monitor, on_delete=models.CASCADE, related_name="checks"
     )
@@ -137,7 +139,9 @@ class MonitorCheck(models.Model):
     reason = models.PositiveSmallIntegerField(
         choices=MonitorCheckReason.choices, default=0, null=True, blank=True
     )
-    response_time = models.DurationField(blank=True, null=True)
+    response_time = models.PositiveIntegerField(
+        blank=True, null=True, help_text="Reponse time in milliseconds"
+    )
     data = models.JSONField(null=True, blank=True)
 
     class Meta:
@@ -146,6 +150,10 @@ class MonitorCheck(models.Model):
             models.Index(fields=["monitor", "is_change", "-start_check"]),
         ]
         ordering = ("-start_check",)
+
+    class PartitioningMeta:
+        method = PostgresPartitioningMethod.RANGE
+        key = ["start_check"]
 
     def __str__(self):
         return self.up_or_down
