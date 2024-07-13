@@ -13,8 +13,6 @@ from apps.files.models import File, FileBlob
 from apps.projects.models import Project
 
 
-
-
 def getLogger():
     return logging.getLogger("glitchtip.difs")
 
