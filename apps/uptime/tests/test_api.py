@@ -169,6 +169,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
+            monitor_type="Heartbeat",
             environment=environment,
         )
 
