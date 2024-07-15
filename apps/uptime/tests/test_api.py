@@ -235,6 +235,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "monitorType": "GET",
             "expectedStatus": "200",
             "interval": 60,
+            "project": self.project.id,
         }
 
         res = self.client.put(url, data, content_type="application/json")
