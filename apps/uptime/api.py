@@ -173,7 +173,7 @@ async def list_monitor_checks(
             monitor__organization__users=request.auth.user_id,
         )
         .only("is_up", "start_check", "reason", "response_time")
-        .order_by("start_check")
+        .order_by("-start_check")
     )
     if is_change is not None:
         checks = checks.filter(is_change=is_change)
