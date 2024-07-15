@@ -7,16 +7,20 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.uptime.models import Monitor
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 
-class UptimeAPITestCase(GlitchTipTestCase):
-    def setUp(self):
-        self.create_user_and_project()
-        self.list_url = reverse(
-            "organization-monitors-list",
-            kwargs={"organization_slug": self.organization.slug},
+class UptimeAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.list_url = reverse(
+            "api:list_monitors",
+            args=[cls.organization.slug],
         )
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_list(self, mocked):
@@ -38,10 +42,12 @@ class UptimeAPITestCase(GlitchTipTestCase):
         )
         res = self.client.get(self.list_url)
         self.assertContains(res, monitor.name)
-        self.assertEqual(res.data[0]["isUp"], True)
-        self.assertEqual(res.data[0]["lastChange"], "2021-09-19T15:40:31Z")
+        data = res.json()
+        self.assertEqual(data[0]["isUp"], True)
+        self.assertEqual(data[0]["lastChange"], "2021-09-19T15:40:31Z")
 
-    def test_list_aggregation(self):
+    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    def test_list_aggregation(self, _):
         """Test up and down event aggregations"""
         monitor = baker.make(
             "uptime.Monitor", organization=self.organization, url="http://example.com"
@@ -62,7 +68,7 @@ class UptimeAPITestCase(GlitchTipTestCase):
                 )
         with freeze_time(current_time):
             res = self.client.get(self.list_url)
-        self.assertEqual(len(res.data[0]["checks"]), 60)
+        self.assertEqual(len(res.json()[0]["checks"]), 60)
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_create_http_monitor(self, mocked):
@@ -71,11 +77,11 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
             "timeout": 25,
         }
-        res = self.client.post(self.list_url, data)
+        res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.name, data["name"])
@@ -91,10 +97,10 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "monitorType": "TCP Port",
             "name": "Test",
             "url": "http://example.com:80",
-            "expectedStatus": "",
-            "interval": "00:01:00",
+            "expectedStatus": None,
+            "interval": 60,
         }
-        res = self.client.post(self.list_url, data)
+        res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.url, "example.com:80")
@@ -107,7 +113,7 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "name": "Test",
             "url": "example:80:",
             "expectedStatus": "",
-            "interval": "00:01:00",
+            "interval": 60,
         }
         res = self.client.post(self.list_url, data)
         self.assertEqual(res.status_code, 400)
@@ -118,7 +124,7 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "name": "Test",
             "url": "foo:80:",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
         res = self.client.post(self.list_url, data)
@@ -129,28 +135,30 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
             "timeout": 999,
         }
         res = self.client.post(self.list_url, data)
         self.assertEqual(res.status_code, 400)
 
-    def test_create_expected_status(self):
+    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    def test_create_expected_status(self, mocked):
         data = {
             "monitorType": "Ping",
             "name": "Test",
             "url": "http://example.com",
             "expectedStatus": None,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
-        res = self.client.post(self.list_url, data, format="json")
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        mocked.assert_called_once()
         self.assertEqual(res.status_code, 201)
         self.assertTrue(Monitor.objects.filter(expected_status=None).exists())
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
-    def test_monitor_retrieve(self, mocked):
+    def test_monitor_retrieve(self, _):
         """Test monitor details endpoint. Unlike the list view,
         checks here should include response time for the frontend graph"""
         environment = baker.make(
@@ -161,6 +169,7 @@ class UptimeAPITestCase(GlitchTipTestCase):
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
+            monitor_type="Heartbeat",
             environment=environment,
         )
 
@@ -180,18 +189,16 @@ class UptimeAPITestCase(GlitchTipTestCase):
             start_check=now,
         )
 
-        url = reverse(
-            "organization-monitors-detail",
-            kwargs={"organization_slug": self.organization.slug, "pk": monitor.pk},
-        )
-
+        url = reverse("api:get_monitor", args=[self.organization.slug, monitor.pk])
         res = self.client.get(url)
-        self.assertEqual(res.data["isUp"], True)
-        self.assertEqual(parse_datetime(res.data["lastChange"]), now)
-        self.assertEqual(res.data["environment"], environment.pk)
-        self.assertIn("responseTime", res.data["checks"][0])
+        data = res.json()
+        self.assertEqual(data["isUp"], True)
+        self.assertEqual(parse_datetime(data["lastChange"]), now)
+        self.assertEqual(data["environment"], environment.pk)
+        self.assertIn("responseTime", data["checks"][0])
 
-    def test_monitor_checks_list(self):
+    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    def test_monitor_checks_list(self, _):
         monitor = baker.make(
             "uptime.Monitor",
             organization=self.organization,
@@ -205,17 +212,14 @@ class UptimeAPITestCase(GlitchTipTestCase):
         )
 
         url = reverse(
-            "organization-monitor-checks-list",
-            kwargs={
-                "organization_slug": self.organization.slug,
-                "monitor_pk": monitor.pk,
-            },
+            "api:list_monitor_checks", args=[self.organization.slug, monitor.pk]
         )
 
         res = self.client.get(url)
         self.assertContains(res, "2021-09-19T15:39:31Z")
 
-    def test_monitor_update(self):
+    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    def test_monitor_update(self, _):
         monitor = baker.make(
             "uptime.Monitor",
             organization=self.organization,
@@ -225,22 +229,20 @@ class UptimeAPITestCase(GlitchTipTestCase):
             expected_status="200",
         )
 
-        url = reverse(
-            "organization-monitors-detail",
-            kwargs={"organization_slug": self.organization.slug, "pk": monitor.pk},
-        )
-
+        url = reverse("api:update_monitor", args=[self.organization.slug, monitor.pk])
         data = {
             "name": "New name",
             "url": "https://differentexample.com",
             "monitorType": "GET",
             "expectedStatus": "200",
-            "interval": "60",
+            "interval": 60,
+            "project": self.project.id,
         }
 
-        res = self.client.put(url, data, format="json")
-        self.assertEqual(res.data["monitorType"], "GET")
-        self.assertEqual(res.data["url"], "https://differentexample.com")
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.json()["monitorType"], "GET")
+        self.assertEqual(res.json()["project"], self.project.id)
+        self.assertEqual(res.json()["url"], "https://differentexample.com")
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_list_isolation(self, _):
@@ -263,16 +265,13 @@ class UptimeAPITestCase(GlitchTipTestCase):
         """Users should only make monitors in their organization"""
         org2 = baker.make("organizations_ext.Organization")
 
-        url = reverse(
-            "organization-monitors-list",
-            kwargs={"organization_slug": org2.slug},
-        )
+        url = reverse("api:list_monitors", args=[org2.slug])
         data = {
             "monitorType": "Ping",
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
-            "interval": "00:01:00",
+            "interval": 60,
             "project": self.project.pk,
         }
         res = self.client.post(url, data)

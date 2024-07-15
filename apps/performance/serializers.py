@@ -1,21 +1,32 @@
 import logging
 import re
 import uuid
+from datetime import datetime
 from urllib.parse import parse_qs
 
 from anonymizeip import anonymize_ip
 from django.conf import settings
+from django.utils.timezone import make_aware
 from ipware import get_client_ip
 from rest_framework import serializers
 from rest_framework.exceptions import ErrorDetail, ValidationError
 
 from apps.environments.models import Environment
 from apps.releases.models import Release
-from glitchtip.serializers import FlexibleDateTimeField
 
 from .models import Span, TransactionEvent, TransactionGroup
 
 logger = logging.getLogger(__name__)
+
+
+class FlexibleDateTimeField(serializers.DateTimeField):
+    """Supports both DateTime and unix epoch timestamp"""
+
+    def to_internal_value(self, value):
+        try:
+            return make_aware(datetime.fromtimestamp(float(value)))
+        except (ValueError, TypeError):
+            return super().to_internal_value(value)
 
 
 class ErrorValueDetail(ErrorDetail):

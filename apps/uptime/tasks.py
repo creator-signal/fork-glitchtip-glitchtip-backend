@@ -5,9 +5,7 @@ from typing import List
 from celery import shared_task
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models
 from django.db.models import F, Q
-from django.db.models.expressions import Func
 from django.utils import timezone
 from django_redis import get_redis_connection
 
@@ -22,11 +20,6 @@ from .webhooks import send_uptime_as_webhook
 UPTIME_COUNTER_KEY = "uptime_counter"
 UPTIME_TICK_EXPIRE = 2147483647
 UPTIME_CHECK_INTERVAL = settings.UPTIME_CHECK_INTERVAL
-
-
-class Epoch(Func):
-    template = "EXTRACT(epoch FROM %(expressions)s)::INTEGER"
-    output_field = models.IntegerField()
 
 
 def bucket_monitors(monitors, tick: int, check_interval=UPTIME_CHECK_INTERVAL):
@@ -51,12 +44,12 @@ def bucket_monitors(monitors, tick: int, check_interval=UPTIME_CHECK_INTERVAL):
         fast_tick_monitors = [
             monitor
             for monitor in monitors
-            if i % monitor.interval.seconds == 0 and monitor.int_timeout < 30
+            if i % monitor.interval == 0 and monitor.int_timeout < 30
         ]
         slow_tick_monitors = [
             monitor
             for monitor in monitors
-            if i % monitor.interval.seconds == 0 and monitor.int_timeout >= 30
+            if i % monitor.interval == 0 and monitor.int_timeout >= 30
         ]
         if fast_tick_monitors or slow_tick_monitors:
             result[i] = {}
@@ -80,7 +73,7 @@ def dispatch_checks():
     there should be 5 checks run every other second
 
     This method reduces the number of necessary celery tasks and sql queries. While keeping
-    the timing percise and allowing for any arbitrary interval (to the second).
+    the timing precise and allowing for any arbitrary interval (to the second).
     It also has no need to track state of previous checks.
 
     The check result DB writes are then batched for better performance.
@@ -97,7 +90,7 @@ def dispatch_checks():
     tick = tick * settings.UPTIME_CHECK_INTERVAL
     monitors = (
         Monitor.objects.filter(organization__is_accepting_events=True)
-        .annotate(mod=tick % Epoch(F("interval")))
+        .annotate(mod=tick % F("interval"))
         .filter(mod__lt=UPTIME_CHECK_INTERVAL)
         .exclude(Q(url="") & ~Q(monitor_type=MonitorType.HEARTBEAT))
         .only("id", "interval", "timeout")
@@ -173,13 +166,3 @@ def send_monitor_notification(monitor_check_id: int, went_down: bool, last_chang
             ).send_users_email()
         elif recipient.is_webhook:
             send_uptime_as_webhook(recipient, monitor_check_id, went_down, last_change)
-
-
-def cleanup_old_monitor_checks():
-    """Delete older checks and associated data"""
-    days = settings.GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS
-    qs = MonitorCheck.objects.filter(
-        start_check__lt=timezone.now() - timedelta(days=days)
-    )
-    # pylint: disable=protected-access
-    qs._raw_delete(qs.db)  # noqa

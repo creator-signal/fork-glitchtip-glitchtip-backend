@@ -71,7 +71,9 @@ async def fetch(session, monitor):
             elif monitor["monitor_type"] == MonitorType.POST:
                 async with session.post(url, timeout=client_timeout) as response:
                     await process_response(monitor, response)
-        monitor["response_time"] = timedelta(seconds=time.monotonic() - start)
+        monitor["response_time"] = (
+            timedelta(seconds=time.monotonic() - start).total_seconds() * 1000
+        )
     except SSLError:
         monitor["reason"] = MonitorCheckReason.SSL
     except asyncio.TimeoutError:

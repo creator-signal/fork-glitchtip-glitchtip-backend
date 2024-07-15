@@ -6,6 +6,7 @@ from apps.projects.models import (
     IssueEventProjectHourlyStatistic,
     TransactionEventProjectHourlyStatistic,
 )
+from apps.uptime.models import MonitorCheck
 
 # from apps.performance_events import TransactionGroup
 from psqlextra.partitioning import (
@@ -30,6 +31,11 @@ project_stat_strategy = PostgresCurrentTimePartitioningStrategy(
     count=4,
     max_age=relativedelta(days=settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS * 4),
 )
+uptime_strategy = PostgresCurrentTimePartitioningStrategy(
+    size=PostgresTimePartitionSize(days=1),
+    count=4,
+    max_age=relativedelta(days=settings.GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS),
+)
 
 manager = PostgresPartitioningManager(
     [
@@ -44,5 +50,6 @@ manager = PostgresPartitioningManager(
         PostgresPartitioningConfig(
             model=TransactionEventProjectHourlyStatistic, strategy=project_stat_strategy
         ),
+        PostgresPartitioningConfig(model=MonitorCheck, strategy=uptime_strategy),
     ]
 )

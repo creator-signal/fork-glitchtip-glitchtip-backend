@@ -27,7 +27,9 @@ from apps.issue_events.api import router as issue_events_router
 from apps.organizations_ext.api import router as organizations_ext_router
 from apps.projects.api import router as projects_router
 from apps.releases.api import router as releases_router
+from apps.stats.api import router as stats_router
 from apps.teams.api import router as teams_router
+from apps.uptime.api import router as uptime_router
 from apps.users.api import router as users_router
 from apps.users.models import User
 from apps.users.schema import UserSchema
@@ -63,7 +65,9 @@ api.add_router("0", importer_router)
 api.add_router("0", issue_events_router)
 api.add_router("0", organizations_ext_router)
 api.add_router("0", projects_router)
+api.add_router("0", stats_router)
 api.add_router("0", teams_router)
+api.add_router("0", uptime_router)
 api.add_router("0", users_router)
 api.add_router("0", wizard_router)
 api.add_router("0", releases_router)

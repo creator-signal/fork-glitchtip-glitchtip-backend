@@ -1,5 +1,4 @@
 import asyncio
-from datetime import timedelta
 from unittest import mock
 
 from aioresponses import aioresponses
@@ -312,7 +311,7 @@ class UptimeTestCase(GlitchTipTestCase):
             baker.make(
                 Monitor,
                 url="http://example.com",
-                interval=timedelta(seconds=interval),
+                interval=interval,
                 timeout=timeout,
             )
         monitors = Monitor.objects.all()

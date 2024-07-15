@@ -13,7 +13,7 @@ from apps.projects.urls import router as projectsRouter
 from apps.users.urls import router as usersRouter
 
 from . import social
-from .api import api
+from .api.api import api
 from .views import health
 
 router = routers.DefaultRouter()
@@ -65,7 +65,6 @@ urlpatterns += [
     path("api/0/", include("apps.users.urls")),
     path("api/0/", include("apps.organizations_ext.urls")),
     path("api/0/", include("apps.difs.urls")),
-    path("api/0/", include("apps.stats.urls")),
     path("api/mfa/", include("django_rest_mfa.urls")),
     path("", include("apps.uptime.urls")),
     path("api/test/", include("test_api.urls")),

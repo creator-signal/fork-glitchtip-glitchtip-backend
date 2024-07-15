@@ -1,5 +1,4 @@
 import uuid
-from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -11,6 +10,8 @@ from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
 
 from glitchtip.base_models import CreatedModel
+from psqlextra.models import PostgresPartitionedModel
+from psqlextra.types import PostgresPartitioningMethod
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 
@@ -79,9 +80,9 @@ class Monitor(models.Model):
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    interval = models.DurationField(
-        default=timedelta(minutes=1),
-        validators=[MaxValueValidator(timedelta(hours=24))],
+    interval = models.PositiveSmallIntegerField(
+        default=60,
+        validators=[MaxValueValidator(86400), MinValueValidator(1)],
     )
     timeout = models.PositiveSmallIntegerField(
         blank=True,
@@ -123,7 +124,7 @@ class Monitor(models.Model):
         return self.timeout or 20
 
 
-class MonitorCheck(models.Model):
+class MonitorCheck(PostgresPartitionedModel, models.Model):
     monitor = models.ForeignKey(
         Monitor, on_delete=models.CASCADE, related_name="checks"
     )
@@ -138,7 +139,9 @@ class MonitorCheck(models.Model):
     reason = models.PositiveSmallIntegerField(
         choices=MonitorCheckReason.choices, default=0, null=True, blank=True
     )
-    response_time = models.DurationField(blank=True, null=True)
+    response_time = models.PositiveIntegerField(
+        blank=True, null=True, help_text="Reponse time in milliseconds"
+    )
     data = models.JSONField(null=True, blank=True)
 
     class Meta:
@@ -147,6 +150,10 @@ class MonitorCheck(models.Model):
             models.Index(fields=["monitor", "is_change", "-start_check"]),
         ]
         ordering = ("-start_check",)
+
+    class PartitioningMeta:
+        method = PostgresPartitioningMethod.RANGE
+        key = ["start_check"]
 
     def __str__(self):
         return self.up_or_down

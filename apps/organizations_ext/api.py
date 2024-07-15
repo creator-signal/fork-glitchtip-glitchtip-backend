@@ -1,5 +1,3 @@
-from typing import Optional
-
 from asgiref.sync import sync_to_async
 from django.contrib.auth import aget_user
 from django.http import HttpRequest, HttpResponse
@@ -59,9 +57,9 @@ GET /api/0/teams/{organization_slug}/{team_slug}/members/ (Not documented in sen
 async def list_organizations(
     request: AuthHttpRequest,
     response: HttpResponse,
-    owner: Optional[bool] = None,
-    query: Optional[str] = None,
-    sortBy: Optional[str] = None,
+    owner: bool | None = None,
+    query: str | None = None,
+    sortBy: str | None = None,
 ):
     """Return list of all organizations the user has access to."""
     return get_organizations_queryset(request.auth.user_id).order_by("name")
