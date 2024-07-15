@@ -51,7 +51,7 @@ def get_monitor_queryset(user_id: int, organization_slug: str):
                 .distinct(),
             )
         )
-        .select_related("project")
+        .select_related("project", "organization")
     )
 
 
