@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 import aiohttp
 import tablib
 from asgiref.sync import sync_to_async
@@ -18,9 +16,6 @@ from apps.users.models import User
 from apps.users.resources import UserResource
 
 from .exceptions import ImporterException
-
-if TYPE_CHECKING:
-    from apps.shared.types import TypeJson
 
 
 class GlitchTipImporter:
@@ -66,7 +61,7 @@ class GlitchTipImporter:
         await self.import_projects()
         await self.import_teams()
 
-    async def get(self, url: str) -> "TypeJson":
+    async def get(self, url: str):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=self.headers) as res:
                 return await res.json()

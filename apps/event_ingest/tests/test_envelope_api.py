@@ -73,6 +73,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, data, content_type="application/x-sentry-envelope"
         )
+        print(res.json())
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 

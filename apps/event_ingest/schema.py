@@ -2,7 +2,7 @@ import logging
 import typing
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Union
 from urllib.parse import parse_qs, urlparse
 
 from django.utils.timezone import now
@@ -10,6 +10,7 @@ from ninja import Field
 from pydantic import (
     AliasChoices,
     BeforeValidator,
+    JsonValue,
     RootModel,
     ValidationError,
     WrapValidator,
@@ -48,16 +49,16 @@ def coerce_list(v: Any) -> Any:
 
 class Signal(LaxIngestSchema):
     number: int
-    code: Optional[int]
-    name: Optional[str]
-    code_name: Optional[str]
+    code: int | None
+    name: str | None
+    code_name: str | None
 
 
 class MachException(LaxIngestSchema):
     number: int
     code: int
     subcode: int
-    name: Optional[str]
+    name: str | None
 
 
 class NSError(LaxIngestSchema):
@@ -67,47 +68,47 @@ class NSError(LaxIngestSchema):
 
 class Errno(LaxIngestSchema):
     number: int
-    name: Optional[str]
+    name: str | None
 
 
 class MechanismMeta(LaxIngestSchema):
-    signal: Optional[Signal] = None
-    match_exception: Optional[MachException] = None
-    ns_error: Optional[NSError] = None
-    errno: Optional[Errno] = None
+    signal: Signal | None = None
+    match_exception: MachException | None = None
+    ns_error: NSError | None = None
+    errno: Errno | None = None
 
 
 class ExceptionMechanism(LaxIngestSchema):
     type: str
-    description: Optional[str] = None
-    help_link: Optional[str] = None
-    handled: Optional[bool] = None
-    synthetic: Optional[bool] = None
-    meta: Optional[dict] = None
-    data: Optional[dict] = None
+    description: str | None = None
+    help_link: str | None = None
+    handled: bool | None = None
+    synthetic: bool | None = None
+    meta: dict | None = None
+    data: dict | None = None
 
 
 class StackTraceFrame(LaxIngestSchema):
-    filename: Optional[str] = None
-    function: Optional[str] = None
-    raw_function: Optional[str] = None
-    module: Optional[str] = None
-    lineno: Optional[int] = None
-    colno: Optional[int] = None
-    abs_path: Optional[str] = None
-    context_line: Optional[str] = None
-    pre_context: Optional[list[Optional[str]]] = None
-    post_context: Optional[list[Optional[str]]] = None
-    source_link: Optional[str] = None
-    in_app: Optional[bool] = None
-    stack_start: Optional[bool] = None
-    vars: Optional[dict[str, Union[str, dict, list]]] = None
-    instruction_addr: Optional[str] = None
-    addr_mode: Optional[str] = None
-    symbol_addr: Optional[str] = None
-    image_addr: Optional[str] = None
-    package: Optional[str] = None
-    platform: Optional[str] = None
+    filename: str | None = None
+    function: str | None = None
+    raw_function: str | None = None
+    module: str | None = None
+    lineno: int | None = None
+    colno: int | None = None
+    abs_path: str | None = None
+    context_line: str | None = None
+    pre_context: list[str | None] | None = None
+    post_context: list[str | None] | None = None
+    source_link: str | None = None
+    in_app: bool | None = None
+    stack_start: bool | None = None
+    vars: dict[str, Union[str, dict, list]] | None = None
+    instruction_addr: str | None = None
+    addr_mode: str | None = None
+    symbol_addr: str | None = None
+    image_addr: str | None = None
+    package: str | None = None
+    platform: str | None = None
 
     def is_url(self, filename: str) -> bool:
         return filename.startswith(("file:", "http:", "https:", "applewebdata:"))
@@ -122,23 +123,24 @@ class StackTraceFrame(LaxIngestSchema):
 
     @field_validator("pre_context", "post_context")
     @classmethod
-    def replace_null(cls, context: list[Optional[str]]) -> list[Optional[str]]:
+    def replace_null(cls, context: list[str | None]) -> list[str | None] | None:
         if context:
             return [line if line else "" for line in context]
+        return None
 
 
 class StackTrace(LaxIngestSchema):
     frames: list[StackTraceFrame]
-    registers: Optional[dict[str, str]] = None
+    registers: dict[str, str] | None = None
 
 
 class EventException(LaxIngestSchema):
-    type: Optional[str] = None
-    value: Annotated[Optional[str], WrapValidator(invalid_to_none)] = None
-    module: Optional[str] = None
-    thread_id: Optional[str] = None
-    mechanism: Optional[ExceptionMechanism] = None
-    stacktrace: Annotated[Optional[StackTrace], WrapValidator(invalid_to_none)] = None
+    type: str | None = None
+    value: Annotated[str | None, WrapValidator(invalid_to_none)] = None
+    module: str | None = None
+    thread_id: str | None = None
+    mechanism: ExceptionMechanism | None = None
+    stacktrace: Annotated[StackTrace | None, WrapValidator(invalid_to_none)] = None
 
     @model_validator(mode="after")
     def check_type_value(self):
@@ -158,8 +160,8 @@ class ValueEventException(LaxIngestSchema):
 
 class EventMessage(LaxIngestSchema):
     formatted: str = Field(max_length=8192, default="")
-    message: Optional[str] = None
-    params: Optional[Union[list[str], dict[str, str]]] = None
+    message: str | None = None
+    params: Union[list[str], dict[str, str]] | None = None
 
     @model_validator(mode="after")
     def set_formatted(self) -> "EventMessage":
@@ -178,11 +180,11 @@ class EventMessage(LaxIngestSchema):
 
 class EventTemplate(LaxIngestSchema):
     lineno: int
-    abs_path: Optional[str] = None
+    abs_path: str | None = None
     filename: str
     context_line: str
-    pre_context: Optional[list[str]] = None
-    post_context: Optional[list[str]] = None
+    pre_context: list[str] | None = None
+    post_context: list[str] | None = None
 
 
 class ValueEventBreadcrumb(LaxIngestSchema):
@@ -190,15 +192,15 @@ class ValueEventBreadcrumb(LaxIngestSchema):
 
 
 class ClientSDKPackage(LaxIngestSchema):
-    name: Optional[str] = None
-    version: Optional[str] = None
+    name: str | None = None
+    version: str | None = None
 
 
 class ClientSDKInfo(LaxIngestSchema):
-    integrations: Optional[list[Optional[str]]] = None
-    name: Optional[str]
-    packages: Optional[list[ClientSDKPackage]] = None
-    version: Optional[str]
+    integrations: list[str | None] | None = None
+    name: str | None
+    packages: list[ClientSDKPackage] | None = None
+    version: str | None
 
     @field_validator("packages", mode="before")
     def name_must_contain_space(cls, v: Any) -> Any:
@@ -206,24 +208,24 @@ class ClientSDKInfo(LaxIngestSchema):
 
 
 class RequestHeaders(LaxIngestSchema):
-    content_type: Optional[str]
+    content_type: str | None
 
 
 class RequestEnv(LaxIngestSchema):
-    remote_addr: Optional[str]
+    remote_addr: str | None
 
 
-QueryString = Union[str, ListKeyValue, dict[str, Optional[str]]]
+QueryString = Union[str, ListKeyValue, dict[str, str | None]]
 """Raw URL querystring, list, or dict"""
-KeyValueFormat = Union[list[list[Optional[str]]], dict[str, Optional[CoercedStr]]]
+KeyValueFormat = Union[list[list[str | None]], dict[str, CoercedStr | None]]
 """
 key-values in list or dict format. Example {browser: firefox} or [[browser, firefox]]
 """
 
 
 class IngestRequest(BaseRequest):
-    headers: Optional[KeyValueFormat] = None
-    query_string: Optional[QueryString] = None
+    headers: KeyValueFormat | None = None
+    query_string: QueryString | None = None
 
     @field_validator("headers", mode="before")
     @classmethod
@@ -242,10 +244,10 @@ class IngestRequest(BaseRequest):
     @field_validator("query_string", "headers")
     @classmethod
     def prefer_list_key_value(
-        cls, v: Optional[Union[QueryString, KeyValueFormat]]
-    ) -> Optional[ListKeyValue]:
+        cls, v: Union[QueryString, KeyValueFormat] | None
+    ) -> ListKeyValue | None:
         """Store all querystring, header formats in a list format"""
-        result: Optional[ListKeyValue] = None
+        result: ListKeyValue | None = None
         if isinstance(v, str) and v:  # It must be a raw querystring, parse it
             qs = parse_qs(v)
             result = [[key, value] for key, values in qs.items() for value in values]
@@ -266,37 +268,35 @@ class IngestRequest(BaseRequest):
 
 class IngestIssueEvent(BaseIssueEvent):
     timestamp: datetime = Field(default_factory=now)
-    level: Optional[str] = "error"
-    logentry: Optional[EventMessage] = None
-    logger: Optional[str] = None
-    transaction: Optional[str] = Field(
+    level: str | None = "error"
+    logentry: EventMessage | None = None
+    logger: str | None = None
+    transaction: str | None = Field(
         validation_alias=AliasChoices("transaction", "culprit"), default=None
     )
-    server_name: Optional[str] = None
-    release: Optional[str] = None
-    dist: Optional[str] = None
-    tags: Optional[KeyValueFormat] = None
-    environment: Optional[str] = None
-    modules: Optional[dict[str, Optional[str]]] = None
-    extra: Optional[dict[str, Any]] = None
-    fingerprint: Optional[list[str]] = None
-    errors: Optional[list[Any]] = None
+    server_name: str | None = None
+    release: str | None = None
+    dist: str | None = None
+    tags: KeyValueFormat | None = None
+    environment: str | None = None
+    modules: dict[str, str | None] | None = None
+    extra: dict[str, Any] | None = None
+    fingerprint: list[str] | None = None
+    errors: list[Any] | None = None
 
-    exception: Optional[Union[list[EventException], ValueEventException]] = None
-    message: Optional[Union[str, EventMessage]] = None
-    template: Optional[EventTemplate] = None
+    exception: Union[list[EventException], ValueEventException] | None = None
+    message: Union[str, EventMessage] | None = None
+    template: EventTemplate | None = None
 
-    breadcrumbs: Optional[Union[list[EventBreadcrumb], ValueEventBreadcrumb]] = None
-    sdk: Optional[ClientSDKInfo] = None
-    request: Optional[IngestRequest] = None
-    contexts: Optional[ContextsSchema] = None
-    user: Optional[EventUser] = None
+    breadcrumbs: Union[list[EventBreadcrumb], ValueEventBreadcrumb] | None = None
+    sdk: ClientSDKInfo | None = None
+    request: IngestRequest | None = None
+    contexts: ContextsSchema | None = None
+    user: EventUser | None = None
 
     @field_validator("tags")
     @classmethod
-    def prefer_dict(
-        cls, v: Optional[KeyValueFormat]
-    ) -> Optional[dict[str, Optional[str]]]:
+    def prefer_dict(cls, v: KeyValueFormat | None) -> dict[str, str | None] | None:
         if isinstance(v, list):
             return {key: value for key, value in v if key is not None}
         return v
@@ -306,10 +306,33 @@ class EventIngestSchema(IngestIssueEvent):
     event_id: uuid.UUID
 
 
+class TransactionEventSchema(LaxIngestSchema):
+    type: Literal["transaction"]
+    contexts: JsonValue
+    measurements: JsonValue | None = None
+    start_timestamp: datetime
+    timestamp: datetime
+    transaction: str
+
+    # # SentrySDKEventSerializer
+    breadcrumbs: JsonValue | None = None
+    fingerprint: list[str] | None = None
+    tags: KeyValueFormat | None = None
+    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    extra: JsonValue | None
+    request: IngestRequest | None = None
+    server_name: str | None
+    sdk: ClientSDKInfo | None = None
+    platform: str | None
+    release: str | None = None
+    environment: str | None = None
+    _meta: JsonValue | None
+
+
 class EnvelopeHeaderSchema(LaxIngestSchema):
-    event_id: Optional[uuid.UUID] = None
-    dsn: Optional[str] = None
-    sdk: Optional[ClientSDKInfo] = None
+    event_id: uuid.UUID | None = None
+    dsn: str | None = None
+    sdk: ClientSDKInfo | None = None
     sent_at: datetime = Field(default_factory=now)
 
 
@@ -321,15 +344,17 @@ SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
 
 class ItemHeaderSchema(LaxIngestSchema):
-    content_type: Optional[str] = None
+    content_type: str | None = None
     type: Union[SupportedItemType, IgnoredItemType]
-    length: Optional[int] = None
+    length: int | None = None
 
 
 class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
     root: list[dict[str, Any]]
     _header: EnvelopeHeaderSchema
-    _items: list[tuple[ItemHeaderSchema, Union[IngestIssueEvent, dict[str, Any]]]] = []
+    _items: list[
+        tuple[ItemHeaderSchema, IngestIssueEvent | TransactionEventSchema]
+    ] = []
 
     @model_validator(mode="after")
     def validate_envelope(self) -> "EnvelopeSchema":
@@ -353,7 +378,7 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
                     raise err
                 self._items.append((item_header, item))
             elif item_header.type == "transaction":
-                item = data.pop(0)
+                item = TransactionEventSchema(**data.pop(0))
                 self._items.append((item_header, item))
 
         return self
@@ -368,11 +393,11 @@ class CSPReportSchema(LaxIngestSchema):
     disposition: Literal["enforce", "report"] = Field(alias="disposition")
     document_uri: str = Field(alias="document-uri")
     effective_directive: str = Field(alias="effective-directive")
-    original_policy: Optional[str] = Field(alias="original-policy")
-    script_sample: Optional[str] = Field(alias="script-sample", default=None)
-    status_code: Optional[int] = Field(alias="status-code")
-    line_number: Optional[int] = None
-    column_number: Optional[int] = None
+    original_policy: str | None = Field(alias="original-policy")
+    script_sample: str | None = Field(alias="script-sample", default=None)
+    status_code: int | None = Field(alias="status-code")
+    line_number: int | None = None
+    column_number: int | None = None
 
 
 class SecuritySchema(LaxIngestSchema):
@@ -401,23 +426,29 @@ class CSPIssueEventSchema(IngestIssueEvent):
     csp: CSPReportSchema
 
 
-class InterchangeIssueEvent(LaxIngestSchema):
+class InterchangeEvent(LaxIngestSchema):
     """Normalized wrapper around issue event. Event should not contain repeat information."""
 
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     project_id: int
     organization_id: int
     received: datetime = Field(default_factory=now)
-    payload: Union[IssueEventSchema, ErrorIssueEventSchema, CSPIssueEventSchema] = (
-        Field(discriminator="type")
-    )
+    payload: (
+        IssueEventSchema
+        | ErrorIssueEventSchema
+        | CSPIssueEventSchema
+        | TransactionEventSchema
+    ) = Field(discriminator="type")
 
 
+class InterchangeIssueEvent(InterchangeEvent):
+    payload: (
+        IssueEventSchema
+        | ErrorIssueEventSchema
+        | CSPIssueEventSchema
+        | TransactionEventSchema
+    ) = Field(discriminator="type")
 
-class TransactionEventSchema(Schema):# SentrySDKEventSerializer):
-    type: str | None = None
-    contexts: dict | list
-    measurements: dict | list | None = None
-    start_timestamp: datetime
-    timestamp: datetime
-    transaction: str
+
+class InterchangeTransactionEvent(InterchangeEvent):
+    payload: TransactionEventSchema

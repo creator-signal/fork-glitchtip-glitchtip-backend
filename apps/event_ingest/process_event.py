@@ -33,6 +33,7 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
+from apps.performance.models import TransactionEvent, TransactionGroup
 from apps.projects.models import Project
 from apps.releases.models import Release
 from sentry.culprit import generate_culprit
@@ -47,7 +48,12 @@ from ..shared.schema.contexts import (
 )
 from .javascript_event_processor import JavascriptEventProcessor
 from .model_functions import PipeConcat
-from .schema import ErrorIssueEventSchema, IngestIssueEvent, InterchangeIssueEvent
+from .schema import (
+    ErrorIssueEventSchema,
+    IngestIssueEvent,
+    InterchangeIssueEvent,
+    InterchangeTransactionEvent,
+)
 from .utils import generate_hash, transform_parameterized_message
 
 
@@ -722,15 +728,49 @@ def update_tags(processing_events: list[ProcessingEvent]):
         cursor.execute(sql)
 
 
-
 # Transactions
-def process_transaction_events(ingest_events: list):
-    pass
+def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
+    for ingest_event in ingest_events:
+        event = ingest_event.payload
+        contexts = event.contexts
+        request = event.request
+        trace_id = contexts["trace"]["trace_id"]
+        op = ""
+        if isinstance(contexts, dict):
+            trace = contexts.get("trace", {})
+            if isinstance(trace, dict):
+                op = str(trace.get("op", ""))
+        method: str | None = None
+        if request:
+            method = request.method
+
+        # TODO tags
+
+        group, group_created = TransactionGroup.objects.get_or_create(
+            project_id=ingest_event.project_id,
+            transaction=event.transaction,
+            op=op,
+            method=method,
+        )
+
+        TransactionEvent.objects.create(
+            group=group,
+            data={
+                "request": request.dict() if request else None,
+                "sdk": event.sdk.dict() if event.sdk else None,
+                "platform": event.platform,
+            },
+            trace_id=trace_id,
+            event_id=event.event_id,
+            timestamp=event.timestamp,
+            start_timestamp=event.start_timestamp,
+            duration=(event.timestamp - event.start_timestamp).total_seconds() * 1000,
+        )
     # def create(self, validated_data):
     #     data = validated_data
     #     contexts = data["contexts"]
     #     project = self.context.get("project")
-    #     trace_id = contexts["trace"]["trace_id"]
+    #     trace_id = contexts["trace"]["trace_id
 
     #     tags = []
     #     release = self.set_release(data.get("release"), project)
