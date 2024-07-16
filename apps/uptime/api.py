@@ -10,6 +10,7 @@ from ninja import Router
 from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
+from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.utils import async_call_celery_task
 
@@ -50,7 +51,7 @@ def get_monitor_queryset(user_id: int, organization_slug: str):
                 .distinct(),
             )
         )
-        .select_related("project")
+        .select_related("project", "organization")
     )
 
 
@@ -142,7 +143,15 @@ async def update_monitor(
         get_monitor_queryset(request.auth.user_id, organization_slug),
         id=monitor_id,
     )
-    for attr, value in payload.dict(exclude_none=True).items():
+    data = payload.dict(exclude_none=True)
+    if project_id := data.pop("project", None):
+        result = await Project.objects.filter(
+            organization__slug=organization_slug,
+            organization__users=request.auth.user_id,
+            id=project_id,
+        ).afirst()
+        data["project"] = result
+    for attr, value in data.items():
         setattr(monitor, attr, value)
     await monitor.asave()
     return monitor
@@ -173,7 +182,7 @@ async def list_monitor_checks(
             monitor__organization__users=request.auth.user_id,
         )
         .only("is_up", "start_check", "reason", "response_time")
-        .order_by("start_check")
+        .order_by("-start_check")
     )
     if is_change is not None:
         checks = checks.filter(is_change=is_change)

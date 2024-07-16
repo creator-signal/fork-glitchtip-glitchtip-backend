@@ -105,7 +105,7 @@ class MonitorSchema(MonitorIn, ModelSchema):
     def resolve_heartbeat_endpoint(obj):
         if obj.endpoint_id:
             return settings.GLITCHTIP_URL.geturl() + reverse(
-                "heartbeat-check",
+                "api:heartbeat_check",
                 kwargs={
                     "organization_slug": obj.organization.slug,
                     "endpoint_id": obj.endpoint_id,

@@ -169,6 +169,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
+            monitor_type="Heartbeat",
             environment=environment,
         )
 
@@ -235,10 +236,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "monitorType": "GET",
             "expectedStatus": "200",
             "interval": 60,
+            "project": self.project.id,
         }
 
         res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.json()["monitorType"], "GET")
+        self.assertEqual(res.json()["project"], self.project.id)
         self.assertEqual(res.json()["url"], "https://differentexample.com")
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
