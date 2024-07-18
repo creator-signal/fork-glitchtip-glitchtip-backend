@@ -72,7 +72,12 @@ async def heartbeat_check(
         organization__slug=organization_slug,
         endpoint_id=endpoint_id,
     )
-    monitor_check = await MonitorCheck.objects.acreate(monitor=monitor)
+    monitor_check = await MonitorCheck.objects.acreate(
+        monitor=monitor,
+        is_up=True,
+        reason=None,
+        is_change=monitor.latest_is_up is not True,
+    )
     if monitor.latest_is_up is False:
         await async_call_celery_task(
             send_monitor_notification, monitor_check.pk, False, monitor.last_change
@@ -220,6 +225,7 @@ async def create_status_page(
     return 201, await StatusPage.objects.prefetch_related("monitors").aget(
         id=status_page.id
     )
+
 
 @router.delete(
     "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/",
