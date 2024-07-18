@@ -77,6 +77,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
+            "expectedBody": "",
             "interval": 60,
             "project": self.project.pk,
             "timeout": 25,
@@ -98,6 +99,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "http://example.com:80",
             "expectedStatus": None,
+            "expectedBody": "",
+            "timeout": None,
             "interval": 60,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
@@ -112,10 +115,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "monitorType": "TCP Port",
             "name": "Test",
             "url": "example:80:",
-            "expectedStatus": "",
+            "expectedStatus": None,
+            "expectedBody": "",
+            "timeout": None,
             "interval": 60,
         }
-        res = self.client.post(self.list_url, data)
+        res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 400)
 
     def test_create_invalid(self):
@@ -123,11 +128,13 @@ class UptimeAPITestCase(GlitchTestCase):
             "monitorType": "Ping",
             "name": "Test",
             "url": "foo:80:",
-            "expectedStatus": 200,
             "interval": 60,
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "timeout": None,
             "project": self.project.pk,
         }
-        res = self.client.post(self.list_url, data)
+        res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 400)
 
         data = {
@@ -135,6 +142,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "https://www.google.com",
             "expectedStatus": 200,
+            "expectedBody": "",
             "interval": 60,
             "project": self.project.pk,
             "timeout": 999,
@@ -149,6 +157,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "name": "Test",
             "url": "http://example.com",
             "expectedStatus": None,
+            "expectedBody": "",
+            "timeout": None,
             "interval": 60,
             "project": self.project.pk,
         }
@@ -226,23 +236,57 @@ class UptimeAPITestCase(GlitchTestCase):
             url="http://example.com",
             interval="60",
             monitor_type="Ping",
-            expected_status="200",
+            expected_status=None,
         )
 
         url = reverse("api:update_monitor", args=[self.organization.slug, monitor.pk])
         data = {
-            "name": "New name",
+            "name": monitor.name,
             "url": "https://differentexample.com",
-            "monitorType": "GET",
-            "expectedStatus": "200",
+            "monitorType": "Ping",
             "interval": 60,
+            "expectedBody": "",
+            "expected_status": None,
+            "timeout": 20,
             "project": self.project.id,
         }
 
         res = self.client.put(url, data, content_type="application/json")
-        self.assertEqual(res.json()["monitorType"], "GET")
+        self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["project"], self.project.id)
         self.assertEqual(res.json()["url"], "https://differentexample.com")
+
+        data = {
+            "name": monitor.name,
+            "url": "https://differentexample.com",
+            "monitorType": "GET",
+            "interval": 60,
+            "expectedBody": "test",
+            "expected_status": None,
+            "timeout": 20,
+            "project": self.project.id,
+        }
+
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+
+        data = {
+            "name": monitor.name,
+            "url": "https://differentexample.com",
+            "monitorType": "GET",
+            "interval": 60,
+            "expectedBody": "",
+            "expected_status": 422,
+            "timeout": None,
+            "project": self.project.id,
+        }
+
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["monitorType"], "GET")
+        self.assertEqual(res.json()["expectedBody"], "")
+        self.assertEqual(res.json()["timeout"], None)
+
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_list_isolation(self, _):

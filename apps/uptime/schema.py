@@ -27,6 +27,10 @@ class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
 
 
 class MonitorIn(CamelSchema, ModelSchema):
+    expected_body: str
+    expected_status: int | None
+    timeout: int | None
+
     @model_validator(mode="after")
     def validate(self):
         monitor_type = self.monitor_type
@@ -63,11 +67,8 @@ class MonitorIn(CamelSchema, ModelSchema):
             "monitor_type",
             "name",
             "url",
-            "expected_status",
-            "expected_body",
             "project",
             "interval",
-            "timeout",
         ]
 
 
@@ -111,6 +112,11 @@ class MonitorSchema(MonitorIn, ModelSchema):
                     "endpoint_id": obj.endpoint_id,
                 },
             )
+
+    @staticmethod
+    def resolve_project_name(obj):
+        if obj.project:
+            return obj.project.name
 
 
 class MonitorDetailSchema(MonitorSchema):

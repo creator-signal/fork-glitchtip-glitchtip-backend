@@ -143,8 +143,8 @@ async def update_monitor(
         get_monitor_queryset(request.auth.user_id, organization_slug),
         id=monitor_id,
     )
-    data = payload.dict(exclude_none=True)
-    if project_id := data.pop("project", None):
+    data = payload.dict()
+    if project_id := data["project"]:
         result = await Project.objects.filter(
             organization__slug=organization_slug,
             organization__users=request.auth.user_id,
