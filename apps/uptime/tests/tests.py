@@ -262,7 +262,7 @@ class UptimeTestCase(GlitchTipTestCase):
                 recipient_type="email",
             )
             url = reverse(
-                "heartbeat-check",
+                "api:heartbeat_check",
                 kwargs={
                     "organization_slug": monitor.organization.slug,
                     "endpoint_id": monitor.endpoint_id,

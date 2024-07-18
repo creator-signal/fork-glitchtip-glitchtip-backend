@@ -1,6 +1,9 @@
+from typing import Annotated
 from urllib.parse import urlparse
 
+from annotated_types import Ge, Le
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import URLValidator
 from django.urls import reverse
 from ninja import Field, ModelSchema
@@ -29,7 +32,7 @@ class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
 class MonitorIn(CamelSchema, ModelSchema):
     expected_body: str
     expected_status: int | None
-    timeout: int | None
+    timeout: Annotated[int, Ge(1), Le(60)] | None
 
     @model_validator(mode="after")
     def validate(self):
@@ -38,7 +41,10 @@ class MonitorIn(CamelSchema, ModelSchema):
             raise ValidationError("URL is required for " + monitor_type)
 
         if monitor_type in HTTP_MONITOR_TYPES:
-            URLValidator()(self.url)
+            try:
+                URLValidator()(self.url)
+            except DjangoValidationError as err:
+                raise ValidationError("Invalid Url") from err
 
         if self.expected_status is None and monitor_type in [
             MonitorType.GET,

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from django.db.models import F, Prefetch, Window
 from django.db.models.functions import RowNumber
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, Http404
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
@@ -220,3 +220,19 @@ async def create_status_page(
     return 201, await StatusPage.objects.prefetch_related("monitors").aget(
         id=status_page.id
     )
+
+@router.delete(
+    "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/",
+    response={204: None},
+)
+async def delete_monitor(
+    request: AuthHttpRequest, organization_slug: str, monitor_id: int
+):
+    result, _ = (
+        await get_monitor_queryset(request.auth.user_id, organization_slug)
+        .filter(id=monitor_id)
+        .adelete()
+    )
+    if result:
+        return 204, None
+    raise Http404

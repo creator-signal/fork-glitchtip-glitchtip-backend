@@ -6,7 +6,7 @@ from django.utils.dateparse import parse_datetime
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.uptime.models import Monitor
+from apps.uptime.models import Monitor, MonitorCheck
 from glitchtip.test_utils.test_case import GlitchTestCase
 
 
@@ -121,7 +121,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "interval": 60,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
 
     def test_create_invalid(self):
         data = {
@@ -135,7 +135,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": self.project.pk,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 422)
 
         data = {
             "monitorType": "Ping",
@@ -147,8 +147,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": self.project.pk,
             "timeout": 999,
         }
-        res = self.client.post(self.list_url, data)
-        self.assertEqual(res.status_code, 400)
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_create_expected_status(self, mocked):
@@ -286,6 +286,44 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(res.json()["monitorType"], "GET")
         self.assertEqual(res.json()["expectedBody"], "")
         self.assertEqual(res.json()["timeout"], None)
+
+    def test_monitor_delete(self):
+        monitor = baker.make(
+            "uptime.Monitor",
+            organization=self.organization,
+            url="http://example.com",
+            interval="60",
+            monitor_type="Ping",
+            expected_status=None,
+        )
+        baker.make(
+            "uptime.MonitorCheck",
+            monitor=monitor,
+            is_up=False,
+            start_check="2021-09-19T15:39:31Z",
+        )
+
+        url = reverse("api:delete_monitor", args=[self.organization.slug, monitor.pk])
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(Monitor.objects.count(), 0)
+        self.assertEqual(MonitorCheck.objects.count(), 0)
+
+        another_org = baker.make(
+            "organizations_ext.Organization"
+        )
+        another_monitor = baker.make(
+            "uptime.Monitor",
+            organization=another_org,
+            url="http://example.com",
+            interval="60",
+            monitor_type="Ping",
+            expected_status=None,
+        )
+
+        url = reverse("api:delete_monitor", args=[another_org.slug, another_monitor.pk])
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 404)
 
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
