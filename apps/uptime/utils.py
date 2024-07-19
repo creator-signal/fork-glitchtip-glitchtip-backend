@@ -45,9 +45,10 @@ async def process_response(monitor, response):
 async def fetch(session, monitor):
     monitor["is_up"] = False
     if monitor["monitor_type"] == MonitorType.HEARTBEAT:
+        interval = timedelta(seconds=monitor["interval"])
         if await MonitorCheck.objects.filter(
             monitor_id=monitor["id"],
-            start_check__gte=timezone.now() - monitor["interval"],
+            start_check__gte=timezone.now() - interval,
         ).aexists():
             monitor["is_up"] = True
         return monitor
