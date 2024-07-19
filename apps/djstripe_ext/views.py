@@ -12,7 +12,6 @@ from apps.organizations_ext.models import Organization
 
 from .serializers import (
     CreateSubscriptionSerializer,
-    OrganizationSelectSerializer,
     PriceForOrganizationSerializer,
     ProductSerializer,
     SubscriptionSerializer,
@@ -162,26 +161,4 @@ class CreateStripeSubscriptionCheckout(views.APIView):
 
             return Response(session)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class StripeBillingPortal(views.APIView):
-    def get_serializer(self, *args, **kwargs):
-        return OrganizationSelectSerializer(
-            data=self.request.data, context={"request": self.request}
-        )
-
-    def post(self, request):
-        """See https://stripe.com/docs/billing/subscriptions/integrating-self-serve-portal"""
-        serializer = self.get_serializer()
-        if serializer.is_valid():
-            organization = serializer.validated_data["organization"]
-            customer, _ = Customer.get_or_create(subscriber=organization)
-            domain = settings.GLITCHTIP_URL.geturl()
-            session = stripe.billing_portal.Session.create(
-                api_key=djstripe_settings.STRIPE_SECRET_KEY,
-                customer=customer.id,
-                return_url=domain + "/" + organization.slug + "/settings/subscription",
-            )
-            return Response(session)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

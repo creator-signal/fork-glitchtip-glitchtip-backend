@@ -75,6 +75,10 @@ api.add_router("0", wizard_router)
 api.add_router("0", releases_router)
 api.add_router("embed", embed_router)
 
+if settings.BILLING_ENABLED:
+    from apps.djstripe_ext.api import router as djstripe_ext_router
+    api.add_router("0", djstripe_ext_router)
+
 
 # Would be better at the router level
 # https://github.com/vitalik/django-ninja/issues/442

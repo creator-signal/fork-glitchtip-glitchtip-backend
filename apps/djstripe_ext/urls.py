@@ -4,7 +4,6 @@ from rest_framework_nested import routers
 from .views import (
     CreateStripeSubscriptionCheckout,
     ProductViewSet,
-    StripeBillingPortal,
     SubscriptionViewSet,
 )
 
@@ -18,10 +17,5 @@ urlpatterns = [
         "create-stripe-subscription-checkout/",
         CreateStripeSubscriptionCheckout.as_view(),
         name="create-stripe-subscription-checkout",
-    ),
-    path(
-        "create-billing-portal/",
-        StripeBillingPortal.as_view(),
-        name="create-billing-portal",
     ),
 ]
