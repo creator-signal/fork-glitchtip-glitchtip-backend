@@ -3,7 +3,7 @@ from uuid import UUID
 
 from django.db.models import F, Prefetch, Window
 from django.db.models.functions import RowNumber
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
@@ -72,7 +72,12 @@ async def heartbeat_check(
         organization__slug=organization_slug,
         endpoint_id=endpoint_id,
     )
-    monitor_check = await MonitorCheck.objects.acreate(monitor=monitor)
+    monitor_check = await MonitorCheck.objects.acreate(
+        monitor=monitor,
+        is_up=True,
+        reason=None,
+        is_change=monitor.latest_is_up is not True,
+    )
     if monitor.latest_is_up is False:
         await async_call_celery_task(
             send_monitor_notification, monitor_check.pk, False, monitor.last_change
@@ -143,8 +148,8 @@ async def update_monitor(
         get_monitor_queryset(request.auth.user_id, organization_slug),
         id=monitor_id,
     )
-    data = payload.dict(exclude_none=True)
-    if project_id := data.pop("project", None):
+    data = payload.dict()
+    if project_id := data["project"]:
         result = await Project.objects.filter(
             organization__slug=organization_slug,
             organization__users=request.auth.user_id,
@@ -220,3 +225,20 @@ async def create_status_page(
     return 201, await StatusPage.objects.prefetch_related("monitors").aget(
         id=status_page.id
     )
+
+
+@router.delete(
+    "organizations/{slug:organization_slug}/monitors/{int:monitor_id}/",
+    response={204: None},
+)
+async def delete_monitor(
+    request: AuthHttpRequest, organization_slug: str, monitor_id: int
+):
+    result, _ = (
+        await get_monitor_queryset(request.auth.user_id, organization_slug)
+        .filter(id=monitor_id)
+        .adelete()
+    )
+    if result:
+        return 204, None
+    raise Http404
