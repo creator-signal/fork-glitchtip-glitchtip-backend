@@ -3,7 +3,7 @@ from uuid import UUID
 
 from django.db.models import F, Prefetch, Window
 from django.db.models.functions import RowNumber
-from django.http import HttpRequest, HttpResponse, Http404
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
