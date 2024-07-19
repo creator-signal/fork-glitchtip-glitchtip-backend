@@ -98,7 +98,6 @@ urlpatterns += [
         name="password_reset_confirm",
     ),
     path("accept/", include(invitation_backend().get_urls())),
-    path("api/0/observability/", include("apps.observability.urls")),
 ]
 
 if settings.BILLING_ENABLED:

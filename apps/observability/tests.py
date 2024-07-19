@@ -1,12 +1,13 @@
 from collections.abc import Iterable, Mapping
 from typing import Optional
 
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 from prometheus_client import Metric
 from prometheus_client.parser import text_string_to_metric_families
-from rest_framework import status
-from rest_framework.test import APIClient, APITestCase
+
+from glitchtip.test_utils import generators  # noqa: F401
 
 from .metrics import clear_metrics_cache, organizations_metric, projects_metric
 
@@ -32,12 +33,14 @@ def parse_prometheus_text(text: str) -> list[Metric]:
     return list(parser)
 
 
-class ObservabilityAPITestCase(APITestCase):
+class ObservabilityAPITestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = baker.make("users.user", is_staff=True)
+        cls.url = reverse("api:django_prometheus_metrics")
+
     def setUp(self):
-        self.client = APIClient()
-        self.user = baker.make("users.user", is_staff=True)
         self.client.force_login(self.user)
-        self.url = reverse("prometheus-django-metrics")
 
     def _get_metrics(self) -> list[Metric]:
         resp = self.client.get(self.url)
@@ -47,11 +50,11 @@ class ObservabilityAPITestCase(APITestCase):
         clear_metrics_cache()
         with self.assertNumQueries(2):
             resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.status_code, 200)
 
         with self.assertNumQueries(1):
             resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.status_code, 200)
 
     def test_org_metric(self):
         before_orgs_metric = get_sample_value(
