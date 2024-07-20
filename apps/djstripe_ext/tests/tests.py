@@ -1,21 +1,24 @@
 from unittest import skipIf
 
 from django.conf import settings
+from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from djstripe.enums import BillingScheme
 from freezegun import freeze_time
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 
-class SubscriptionAPITestCase(APITestCase):
+class SubscriptionAPITestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = baker.make("users.user")
+        cls.organization = baker.make("organizations_ext.Organization")
+        cls.organization.add_user(cls.user)
+        cls.url = reverse("subscription-list")
+
     def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.organization.add_user(self.user)
         self.client.force_login(self.user)
-        self.url = reverse("subscription-list")
 
     def test_list(self):
         customer = baker.make("djstripe.Customer", subscriber=self.organization)
@@ -169,7 +172,7 @@ class SubscriptionAPITestCase(APITestCase):
         self.assertEqual(res.status_code, 400)
 
 
-class ProductAPITestCase(APITestCase):
+class ProductAPITestCase(TestCase):
     def test_product_list(self):
         price = baker.make(
             "djstripe.Price",
@@ -207,12 +210,11 @@ class ProductAPITestCase(APITestCase):
 
 
 # Price ID must be from a real price actually set up on Stripe Test account
-class StripeAPITestCase(APITestCase):
+class StripeAPITestCase(TestCase):
     @skipIf(
         settings.STRIPE_TEST_PUBLIC_KEY == "fake", "requires real Stripe test API key"
     )
     def test_create_checkout(self):
-        url = reverse("create-stripe-subscription-checkout")
         price = baker.make(
             "djstripe.Price",
             id="price_1MZhMWJ4NuO0bv3IGMoDoFFI",
@@ -220,19 +222,22 @@ class StripeAPITestCase(APITestCase):
         user = baker.make("users.user")
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(user)
+        url = reverse(
+            "api:create_stripe_subscription_checkout", args=[organization.slug]
+        )
         self.client.force_login(user)
-        data = {"price": price.id, "organization": organization.id}
+        data = {"price": price.id}
 
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
 
     @skipIf(
         settings.STRIPE_TEST_PUBLIC_KEY == "fake", "requires real Stripe test API key"
     )
     def test_manage_billing(self):
-        url = reverse("create-billing-portal")
         user = baker.make("users.user")
         organization = baker.make("organizations_ext.Organization")
+        url = reverse("api:stripe_billing_portal", args=[organization.slug])
         organization.add_user(user)
         self.client.force_login(user)
         data = {"organization": organization.id}
@@ -240,7 +245,7 @@ class StripeAPITestCase(APITestCase):
         self.assertEqual(res.status_code, 200)
 
 
-class SubscriptionIntegrationAPITestCase(APITestCase):
+class SubscriptionIntegrationAPITestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.organization = baker.make("organizations_ext.Organization")
