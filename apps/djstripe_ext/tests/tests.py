@@ -136,12 +136,12 @@ class SubscriptionAPITestCase(TestCase):
         )
         baker.make("djstripe.Product", id="prod_L4F8CtH20Oad6S", default_price=price)
         data = {"price": price.id, "organization": self.organization.id}
-        res = self.client.post(self.url, data)
-        self.assertEqual(res.data["price"], price.id)
+        res = self.client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.json()["price"], price.id)
 
         # Second attempt should fail
         res = self.client.post(self.url, data)
-        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.status_code, 400)
 
     def test_create_invalid_org(self):
         """Only owners may create subscriptions"""

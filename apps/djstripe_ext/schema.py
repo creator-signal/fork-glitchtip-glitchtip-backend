@@ -40,3 +40,7 @@ class SubscriptionSchema(CamelSchema, ModelSchema):
     class Meta:
         model = Subscription
         exclude = ["default_tax_rates"]
+
+
+class CreateSubscriptionResponse(SubscriptionIn):
+    subscription: SubscriptionSchema

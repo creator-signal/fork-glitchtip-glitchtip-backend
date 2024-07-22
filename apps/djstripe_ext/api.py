@@ -7,11 +7,17 @@ from django.shortcuts import aget_object_or_404
 from djstripe.models import Customer, Price, Subscription, SubscriptionItem
 from djstripe.settings import djstripe_settings
 from ninja import Router
+from ninja.errors import HttpError
 
 from apps.organizations_ext.models import Organization, OrganizationUserRole
 from glitchtip.api.authentication import AuthHttpRequest
 
-from .schema import PriceIDSchema, SubscriptionSchema
+from .schema import (
+    CreateSubscriptionResponse,
+    PriceIDSchema,
+    SubscriptionIn,
+    SubscriptionSchema,
+)
 
 router = Router()
 
@@ -49,9 +55,39 @@ async def get_subscription(request: AuthHttpRequest, organization_slug: str):
     return subscription
 
 
-@router.post("subscriptions/", response=SubscriptionSchema)
-async def create_subscription(request: AuthHttpRequest):
-    pass
+@router.post("subscriptions/", response=CreateSubscriptionResponse)
+async def create_subscription(request: AuthHttpRequest, payload: SubscriptionIn):
+    organization = await aget_object_or_404(
+        Organization,
+        id=payload.organization,
+        organization_users__role=OrganizationUserRole.OWNER,
+        organization_users__user=request.auth.user_id,
+    )
+    price = await aget_object_or_404(Price, id=payload.price, unit_amount=0)
+    customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
+    if (
+        await Subscription.objects.filter(customer=customer)
+        .exclude(status="canceled")
+        .aexists()
+    ):
+        raise HttpError(400, "Customer already has subscription")
+    subscription = await sync_to_async(customer.subscribe)(items=[{"price": price}])
+    subscription = (
+        await Subscription.objects.filter(id=subscription.id)
+        .select_related("customer")
+        .prefetch_related(
+            Prefetch(
+                "items",
+                queryset=SubscriptionItem.objects.select_related("price__product"),
+            )
+        )
+        .aget()
+    )
+    return {
+        "price": price.id,
+        "organization": organization.id,
+        "subscription": subscription,
+    }
 
 
 @router.get("subscriptions/{slug:organization_slug}/events_count/")
