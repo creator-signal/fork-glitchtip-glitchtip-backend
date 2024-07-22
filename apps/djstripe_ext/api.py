@@ -24,7 +24,9 @@ from .schema import (
 router = Router()
 
 
-@router.get("subscriptions/{slug:organization_slug}/", response=SubscriptionSchema)
+@router.get(
+    "subscriptions/{slug:organization_slug}/", response=SubscriptionSchema | None
+)
 async def get_subscription(request: AuthHttpRequest, organization_slug: str):
     subscription = await (
         Subscription.objects.filter(
@@ -43,7 +45,7 @@ async def get_subscription(request: AuthHttpRequest, organization_slug: str):
         .afirst()
     )
     if not subscription:
-        raise Http404()
+        return None
 
     # Check organization throttle, in case it changed recently
     await Organization.objects.filter(
