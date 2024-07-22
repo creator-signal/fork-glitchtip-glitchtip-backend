@@ -1,4 +1,4 @@
-from djstripe.models import Price, Subscription, SubscriptionItem
+from djstripe.models import Price, Product, Subscription, SubscriptionItem
 from ninja import ModelSchema
 
 from glitchtip.schema import CamelSchema
@@ -44,3 +44,11 @@ class SubscriptionSchema(CamelSchema, ModelSchema):
 
 class CreateSubscriptionResponse(SubscriptionIn):
     subscription: SubscriptionSchema
+
+
+class ProductSchema(CamelSchema, ModelSchema):
+    prices: list[PriceSchema]
+
+    class Meta:
+        model = Product
+        fields = ["id", "name", "description", "type", "metadata"]

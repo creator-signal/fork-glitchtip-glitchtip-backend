@@ -185,7 +185,7 @@ class ProductAPITestCase(TestCase):
         )
         user = baker.make("users.user")
         self.client.force_login(user)
-        res = self.client.get(reverse("product-list"))
+        res = self.client.get(reverse("api:list_products"))
         self.assertContains(res, price.id)
         self.assertNotContains(res, inactive_price.id)
         self.assertNotContains(res, hidden_price.id)
