@@ -32,6 +32,7 @@ async def get_subscription(request: AuthHttpRequest, organization_slug: str):
         Subscription.objects.filter(
             livemode=settings.STRIPE_LIVE_MODE,
             customer__subscriber__users=request.auth.user_id,
+            customer__subscriber__slug=organization_slug,
         )
         .exclude(status="canceled")
         .select_related("customer")
