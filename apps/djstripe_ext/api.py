@@ -2,7 +2,7 @@ import stripe
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db.models import Prefetch
-from django.http import Http404, HttpResponse
+from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from djstripe.models import Customer, Price, Product, Subscription, SubscriptionItem
 from djstripe.settings import djstripe_settings
@@ -16,7 +16,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from .schema import (
     CreateSubscriptionResponse,
     PriceIDSchema,
-    ProductSchema,
+    ProductPriceSchema,
     SubscriptionIn,
     SubscriptionSchema,
 )
@@ -179,7 +179,7 @@ async def create_stripe_subscription_checkout(
     return session
 
 
-@router.get("products/", response=list[ProductSchema])
+@router.get("products/", response=list[ProductPriceSchema])
 @paginate
 async def list_products(request: AuthHttpRequest, response: HttpResponse):
     return (

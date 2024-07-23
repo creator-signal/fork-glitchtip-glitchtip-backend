@@ -11,8 +11,15 @@ class PriceIDSchema(CamelSchema):
 class SubscriptionIn(PriceIDSchema):
     organization: int
 
+class ProductSchema(CamelSchema, ModelSchema):
+    class Meta:
+        model = Product
+        fields = ["id", "name", "description", "type", "metadata"]
+
 
 class PriceSchema(CamelSchema, ModelSchema):
+    product: ProductSchema
+
     class Meta:
         model = Price
         fields = [
@@ -46,7 +53,7 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: SubscriptionSchema
 
 
-class ProductSchema(CamelSchema, ModelSchema):
+class ProductPriceSchema(CamelSchema, ModelSchema):
     prices: list[PriceSchema]
 
     class Meta:
