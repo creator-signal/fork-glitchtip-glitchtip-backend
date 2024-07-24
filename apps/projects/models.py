@@ -52,7 +52,7 @@ class Project(CreatedModel, SoftDeleteModel):
         """Add is_member boolean annotate to Project queryset"""
         return queryset.annotate(
             is_member=Cast(
-                Cast(
+                Cast(  # Postgres can cast int to bool, but not bigint to bool
                     Count(
                         "teams__members",
                         filter=Q(teams__members__user_id=user_id),
