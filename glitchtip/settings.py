@@ -106,9 +106,6 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 
-# Allows saving of spans on transactions.
-ENABLE_PERFORMANCE_SPANS = env.bool("ENABLE_PERFORMANCE_SPANS", False)
-
 # For development purposes only, prints out inbound event store json
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
 
@@ -634,6 +631,8 @@ ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
 LOGIN_REDIRECT_URL = "/"
+# This config will later default to True and then be removed
+USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
 # HEADLESS_ONLY = True
 # HEADLESS_FRONTEND_URLS = {
 #     "account_signup": "/login",
