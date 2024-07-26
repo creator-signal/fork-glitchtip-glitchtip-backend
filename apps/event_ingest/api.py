@@ -1,16 +1,12 @@
 from typing import Optional
 
 from anonymizeip import anonymize_ip
-from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db.models.expressions import RawSQL
 from django.http import HttpResponse
 from ipware import get_client_ip
 from ninja import Router, Schema
 from ninja.errors import ValidationError
 
-from apps.performance.serializers import TransactionEventSerializer
-from apps.projects.models import Project
 from glitchtip.utils import async_call_celery_task
 
 from .authentication import EventAuthHttpRequest, event_auth
@@ -24,8 +20,9 @@ from .schema import (
     InterchangeIssueEvent,
     IssueEventSchema,
     SecuritySchema,
+    TransactionEventSchema,
 )
-from .tasks import ingest_event
+from .tasks import ingest_event, ingest_transaction
 from .utils import cache_set_nx
 
 router = Router(auth=event_auth)
@@ -123,32 +120,24 @@ async def event_envelope(
             }
             if header.event_id:
                 interchange_event_kwargs["event_id"] = header.event_id
-            issue_event = InterchangeIssueEvent(**interchange_event_kwargs)
+            interchange_event = InterchangeIssueEvent(**interchange_event_kwargs)
             # Faux unique uuid as GlitchTip can accept duplicate UUIDs
             # The primary key of an event is uuid, received
-            if cache_set_nx("uuid" + issue_event.event_id.hex, True) is True:
-                await async_call_celery_task(ingest_event, issue_event.dict())
-        elif item_header.type == "transaction" and isinstance(item, dict):
-            # Shim in legacy DRF handling, improve this later
-            project = (
-                await Project.objects.filter(id=project_id)
-                .annotate(
-                    release_id=RawSQL(
-                        "select releases_release.id from releases_release inner join releases_releaseproject on releases_releaseproject.release_id = releases_release.id and releases_releaseproject.project_id=%s where version=%s limit 1",
-                        [project_id, item.get("release")],
-                    ),
-                    environment_id=RawSQL(
-                        "select environments_environment.id from environments_environment inner join environments_environmentproject on environments_environmentproject.environment_id = environments_environment.id and environments_environmentproject.project_id=%s where environments_environment.name=%s limit 1",
-                        [project_id, item.get("environment")],
-                    ),
+            if cache_set_nx("uuid" + interchange_event.event_id.hex, True) is True:
+                await async_call_celery_task(ingest_event, interchange_event.dict())
+        elif item_header.type == "transaction" and isinstance(
+            item, TransactionEventSchema
+        ):
+            interchange_event_kwargs = {
+                "project_id": project_id,
+                "organization_id": request.auth.organization_id,
+                "payload": TransactionEventSchema(**item.dict()),
+            }
+            interchange_event = InterchangeIssueEvent(**interchange_event_kwargs)
+            if cache_set_nx("uuid" + interchange_event.event_id.hex, True) is True:
+                await async_call_celery_task(
+                    ingest_transaction, interchange_event.dict()
                 )
-                .aget()
-            )
-            serializer = TransactionEventSerializer(
-                data=item, context={"request": request, "project": project}
-            )
-            serializer.is_valid(raise_exception=True)
-            await sync_to_async(serializer.save)()
 
     if header.event_id:
         return {"id": header.event_id.hex}

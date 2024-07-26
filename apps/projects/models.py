@@ -264,21 +264,21 @@ class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
     ):
         # Redundant filter optimization - otherwise all rows are scanned
         return project_queryset.filter(
-            transactiongroup__transactionevent__created__gte=previous_hour,
-            transactiongroup__transactionevent__created__lt=next_hour,
+            transactiongroup__transactionevent__start_timestamp__gte=previous_hour,
+            transactiongroup__transactionevent__start_timestamp__lt=next_hour,
         ).aggregate(
             previous_hour_count=Count(
                 "transactiongroup__transactionevent",
                 filter=Q(
-                    transactiongroup__transactionevent__created__gte=previous_hour,
-                    transactiongroup__transactionevent__created__lt=current_hour,
+                    transactiongroup__transactionevent__start_timestamp__gte=previous_hour,
+                    transactiongroup__transactionevent__start_timestamp__lt=current_hour,
                 ),
             ),
             current_hour_count=Count(
                 "transactiongroup__transactionevent",
                 filter=Q(
-                    transactiongroup__transactionevent__created__gte=current_hour,
-                    transactiongroup__transactionevent__created__lt=next_hour,
+                    transactiongroup__transactionevent__start_timestamp__gte=current_hour,
+                    transactiongroup__transactionevent__start_timestamp__lt=next_hour,
                 ),
             ),
         )

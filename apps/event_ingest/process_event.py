@@ -33,6 +33,7 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
+from apps.performance.models import TransactionEvent, TransactionGroup
 from apps.projects.models import Project
 from apps.releases.models import Release
 from sentry.culprit import generate_culprit
@@ -47,7 +48,12 @@ from ..shared.schema.contexts import (
 )
 from .javascript_event_processor import JavascriptEventProcessor
 from .model_functions import PipeConcat
-from .schema import ErrorIssueEventSchema, IngestIssueEvent, InterchangeIssueEvent
+from .schema import (
+    ErrorIssueEventSchema,
+    IngestIssueEvent,
+    InterchangeIssueEvent,
+    InterchangeTransactionEvent,
+)
 from .utils import generate_hash, transform_parameterized_message
 
 
@@ -720,3 +726,105 @@ def update_tags(processing_events: list[ProcessingEvent]):
             "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
+
+
+# Transactions
+def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
+    for ingest_event in ingest_events:
+        event = ingest_event.payload
+        contexts = event.contexts
+        request = event.request
+        trace_id = contexts["trace"]["trace_id"]
+        op = ""
+        if isinstance(contexts, dict):
+            trace = contexts.get("trace", {})
+            if isinstance(trace, dict):
+                op = str(trace.get("op", ""))
+        method: str | None = None
+        if request:
+            method = request.method
+
+        # TODO tags
+
+        group, group_created = TransactionGroup.objects.get_or_create(
+            project_id=ingest_event.project_id,
+            transaction=event.transaction,
+            op=op,
+            method=method,
+        )
+
+        TransactionEvent.objects.create(
+            group=group,
+            data={
+                "request": request.dict() if request else None,
+                "sdk": event.sdk.dict() if event.sdk else None,
+                "platform": event.platform,
+            },
+            trace_id=trace_id,
+            event_id=event.event_id,
+            timestamp=event.timestamp,
+            start_timestamp=event.start_timestamp,
+            duration=(event.timestamp - event.start_timestamp).total_seconds() * 1000,
+        )
+    # def create(self, validated_data):
+    #     data = validated_data
+    #     contexts = data["contexts"]
+    #     project = self.context.get("project")
+    #     trace_id = contexts["trace"]["trace_id
+
+    #     tags = []
+    #     release = self.set_release(data.get("release"), project)
+    #     if project.release_id:
+    #         tags.append(("release", release))
+    #     environment = self.set_environment(data.get("environment"), project)
+    #     if project.environment_id:
+    #         tags.append(("environment", environment))
+
+    #     if data.get("tags"):
+    #         tags += [(k, v) for k, v in data["tags"].items()]
+
+    #     defaults = {}
+    #     defaults["tags"] = {tag[0]: [tag[1]] for tag in tags}
+
+    #     group, group_created = TransactionGroup.objects.get_or_create(
+    #         project=self.context.get("project"),
+    #         transaction=data["transaction"],
+    #         op=contexts["trace"].get("op", ""),
+    #         method=data.get("request", {}).get("method"),
+    #         defaults=defaults,
+    #     )
+
+    #     # Merge tags, only save if necessary
+    #     update_group = False
+    #     if not group_created:
+    #         for tag in tags:
+    #             if tag[0] not in group.tags:
+    #                 new_tag_value = tag[1]
+    #                 # Coerce to List[str]
+    #                 if isinstance(new_tag_value, str):
+    #                     new_tag_value = [new_tag_value]
+    #                 group.tags[tag[0]] = new_tag_value
+    #                 update_group = True
+    #             elif tag[1] not in group.tags[tag[0]]:
+    #                 group.tags[tag[0]].append(tag[1])
+    #                 update_group = True
+    #     if update_group:
+    #         group.save(update_fields=["tags"])
+
+    #     transaction = TransactionEvent.objects.create(
+    #         group=group,
+    #         data={
+    #             "request": data.get("request"),
+    #             "sdk": data.get("sdk"),
+    #             "platform": data.get("platform"),
+    #         },
+    #         trace_id=trace_id,
+    #         event_id=data["event_id"],
+    #         timestamp=data["timestamp"],
+    #         start_timestamp=data["start_timestamp"],
+    #         duration=(data["timestamp"] - data["start_timestamp"]).total_seconds()
+    #         * 1000,
+    #         tags={tag[0]: tag[1] for tag in tags},
+    #     )
+
+    #     return transaction
