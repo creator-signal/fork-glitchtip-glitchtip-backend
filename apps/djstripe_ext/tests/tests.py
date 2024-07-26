@@ -1,37 +1,24 @@
 from unittest import skipIf
 
 from django.conf import settings
+from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from djstripe.enums import BillingScheme
 from freezegun import freeze_time
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 
-class SubscriptionAPITestCase(APITestCase):
+class SubscriptionAPITestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = baker.make("users.user")
+        cls.organization = baker.make("organizations_ext.Organization")
+        cls.organization.add_user(cls.user)
+        cls.url = reverse("api:create_subscription")
+
     def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.organization.add_user(self.user)
         self.client.force_login(self.user)
-        self.url = reverse("subscription-list")
-
-    def test_list(self):
-        customer = baker.make("djstripe.Customer", subscriber=self.organization)
-        subscription = baker.make(
-            "djstripe.Subscription", customer=customer, livemode=False
-        )
-
-        subscription2 = baker.make("djstripe.Subscription", livemode=False)
-        subscription3 = baker.make(
-            "djstripe.Subscription", customer=customer, livemode=True
-        )
-
-        res = self.client.get(self.url)
-        self.assertContains(res, subscription.id)
-        self.assertNotContains(res, subscription2.id)
-        self.assertNotContains(res, subscription3.id)
 
     def test_detail(self):
         customer = baker.make("djstripe.Customer", subscriber=self.organization)
@@ -59,7 +46,7 @@ class SubscriptionAPITestCase(APITestCase):
             created=timezone.make_aware(timezone.datetime(2020, 1, 3)),
         )
         baker.make("djstripe.Subscription")
-        url = reverse("subscription-detail", args=[self.organization.slug])
+        url = reverse("api:get_subscription", args=[self.organization.slug])
         res = self.client.get(url)
         self.assertContains(res, subscription.id)
 
@@ -83,9 +70,8 @@ class SubscriptionAPITestCase(APITestCase):
             current_period_start=timezone.make_aware(timezone.datetime(2019, 1, 2)),
             current_period_end=timezone.make_aware(timezone.datetime(2019, 2, 2)),
         )
-        url = (
-            reverse("subscription-detail", args=[self.organization.slug])
-            + "events_count/"
+        url = reverse(
+            "api:get_subscription_events_count", args=[self.organization.slug]
         )
         with freeze_time(timezone.datetime(2020, 3, 1)):
             baker.make(
@@ -115,7 +101,7 @@ class SubscriptionAPITestCase(APITestCase):
             )
         res = self.client.get(url)
         self.assertEqual(
-            res.data,
+            res.json(),
             {
                 "eventCount": 1,
                 "fileSizeMB": 2,
@@ -129,12 +115,11 @@ class SubscriptionAPITestCase(APITestCase):
         Due to async nature of Stripe integration, a customer may not exist
         """
         baker.make("djstripe.Subscription", livemode=False)
-        url = (
-            reverse("subscription-detail", args=[self.organization.slug])
-            + "events_count/"
+        url = reverse(
+            "api:get_subscription_events_count", args=[self.organization.slug]
         )
         res = self.client.get(url)
-        self.assertEqual(sum(res.data.values()), 0)
+        self.assertEqual(sum(res.json().values()), 0)
 
     @skipIf(
         settings.STRIPE_TEST_PUBLIC_KEY == "fake", "requires real Stripe test API key"
@@ -151,12 +136,12 @@ class SubscriptionAPITestCase(APITestCase):
         )
         baker.make("djstripe.Product", id="prod_L4F8CtH20Oad6S", default_price=price)
         data = {"price": price.id, "organization": self.organization.id}
-        res = self.client.post(self.url, data)
-        self.assertEqual(res.data["price"], price.id)
+        res = self.client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.json()["price"], price.id)
 
         # Second attempt should fail
         res = self.client.post(self.url, data)
-        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.status_code, 400)
 
     def test_create_invalid_org(self):
         """Only owners may create subscriptions"""
@@ -169,7 +154,7 @@ class SubscriptionAPITestCase(APITestCase):
         self.assertEqual(res.status_code, 400)
 
 
-class ProductAPITestCase(APITestCase):
+class ProductAPITestCase(TestCase):
     def test_product_list(self):
         price = baker.make(
             "djstripe.Price",
@@ -200,19 +185,18 @@ class ProductAPITestCase(APITestCase):
         )
         user = baker.make("users.user")
         self.client.force_login(user)
-        res = self.client.get(reverse("product-list"))
+        res = self.client.get(reverse("api:list_products"))
         self.assertContains(res, price.id)
         self.assertNotContains(res, inactive_price.id)
         self.assertNotContains(res, hidden_price.id)
 
 
 # Price ID must be from a real price actually set up on Stripe Test account
-class StripeAPITestCase(APITestCase):
+class StripeAPITestCase(TestCase):
     @skipIf(
         settings.STRIPE_TEST_PUBLIC_KEY == "fake", "requires real Stripe test API key"
     )
     def test_create_checkout(self):
-        url = reverse("create-stripe-subscription-checkout")
         price = baker.make(
             "djstripe.Price",
             id="price_1MZhMWJ4NuO0bv3IGMoDoFFI",
@@ -220,41 +204,24 @@ class StripeAPITestCase(APITestCase):
         user = baker.make("users.user")
         organization = baker.make("organizations_ext.Organization")
         organization.add_user(user)
+        url = reverse(
+            "api:create_stripe_subscription_checkout", args=[organization.slug]
+        )
         self.client.force_login(user)
-        data = {"price": price.id, "organization": organization.id}
+        data = {"price": price.id}
 
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
 
     @skipIf(
         settings.STRIPE_TEST_PUBLIC_KEY == "fake", "requires real Stripe test API key"
     )
     def test_manage_billing(self):
-        url = reverse("create-billing-portal")
         user = baker.make("users.user")
         organization = baker.make("organizations_ext.Organization")
+        url = reverse("api:stripe_billing_portal", args=[organization.slug])
         organization.add_user(user)
         self.client.force_login(user)
         data = {"organization": organization.id}
         res = self.client.post(url, data)
         self.assertEqual(res.status_code, 200)
-
-
-class SubscriptionIntegrationAPITestCase(APITestCase):
-    def setUp(self):
-        self.user = baker.make("users.user")
-        self.organization = baker.make("organizations_ext.Organization")
-        self.organization.add_user(self.user)
-        # Make these in this manner to avoid syncing data to stripe actual
-        self.price = baker.make(
-            "djstripe.Price",
-            active=True,
-            unit_amount=0,
-            billing_scheme=BillingScheme.per_unit,
-        )
-        self.customer = baker.make(
-            "djstripe.Customer", subscriber=self.organization, livemode=False
-        )
-        self.client.force_login(self.user)
-        self.list_url = reverse("subscription-list")
-        self.detail_url = reverse("subscription-detail", args=[self.organization.slug])

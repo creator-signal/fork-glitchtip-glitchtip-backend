@@ -21,11 +21,6 @@ router.registry.extend(projectsRouter.registry)
 router.registry.extend(organizationsRouter.registry)
 router.registry.extend(usersRouter.registry)
 
-if settings.BILLING_ENABLED:
-    from apps.djstripe_ext.urls import router as djstripeRouter
-
-    router.registry.extend(djstripeRouter.registry)
-
 
 urlpatterns = [
     path("_health/", health),
@@ -53,11 +48,6 @@ if "django.contrib.admin" in settings.INSTALLED_APPS:
     urlpatterns += [
         path("admin/", include("django_rest_mfa.mfa_admin.urls")),
         path("admin/", admin.site.urls),
-    ]
-
-if settings.BILLING_ENABLED:
-    urlpatterns += [
-        path("api/0/", include("apps.djstripe_ext.urls")),
     ]
 
 urlpatterns += [
