@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from ninja import ModelSchema
+from ninja import Field, ModelSchema
 from pydantic.functional_validators import BeforeValidator
 
 from glitchtip.schema import CamelSchema
@@ -33,13 +33,13 @@ class TransactionEventSchema(CamelSchema, ModelSchema):
 class TransactionGroupSchema(CamelSchema, ModelSchema):
     avg_duration: FlexInt | None
     transaction_count: int
+    project: int = Field(validation_alias="project_id")
 
     class Meta:
         model = TransactionGroup
         fields = [
             "id",
             "transaction",
-            "project",
             "op",
             "method",
         ]
