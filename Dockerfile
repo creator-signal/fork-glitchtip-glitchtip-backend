@@ -1,4 +1,4 @@
-FROM python:3.12 as build-python
+FROM python:3.12 AS build-python
 ARG IS_CI
 ENV PYTHONUNBUFFERED=1 \
   PORT=8080 \
