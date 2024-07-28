@@ -4,7 +4,6 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
-from django_rest_mfa.rest_auth_helpers.views import MFALoginView
 from organizations.backends import invitation_backend
 from rest_framework_nested import routers
 
@@ -46,7 +45,6 @@ urlpatterns = [
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:
     urlpatterns += [
-        path("admin/", include("django_rest_mfa.mfa_admin.urls")),
         path("admin/", admin.site.urls),
     ]
 
@@ -55,10 +53,8 @@ urlpatterns += [
     path("api/0/", include("apps.users.urls")),
     path("api/0/", include("apps.organizations_ext.urls")),
     path("api/0/", include("apps.difs.urls")),
-    path("api/mfa/", include("django_rest_mfa.urls")),
     path("", include("apps.uptime.urls")),
     path("api/test/", include("test_api.urls")),
-    path("rest-auth/login/", MFALoginView.as_view()),
     path("rest-auth/", include("dj_rest_auth.urls")),
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
     path("rest-auth/<slug:provider>/", social.MFASocialLoginView().as_view()),

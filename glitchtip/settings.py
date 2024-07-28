@@ -182,7 +182,6 @@ DEBUG_TOOLBAR_PANELS = [
 # Application definition
 # Conditionally load to workaround unnecessary memory usage in celery/beat
 WEB_INSTALLED_APPS = [
-    "django_rest_mfa.mfa_admin",
     "django.contrib.admin",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -200,6 +199,7 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.headless",
+    "allauth.mfa",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.digitalocean",
     "allauth.socialaccount.providers.gitea",
@@ -628,7 +628,7 @@ ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
+# ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
 LOGIN_REDIRECT_URL = "/"
 # This config will later default to True and then be removed
 USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
