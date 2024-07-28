@@ -628,7 +628,6 @@ ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-# ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
 LOGIN_REDIRECT_URL = "/"
 # This config will later default to True and then be removed
 USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
@@ -638,6 +637,7 @@ USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
 #     "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
 #     "account_confirm_email": "/profile/confirm-email/{key}/",
 # }
+MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
@@ -802,9 +802,6 @@ if CELERY_TASK_ALWAYS_EAGER:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
-
-MFA_SERVER_NAME = GLITCHTIP_URL.hostname
-FIDO_SERVER_ID = GLITCHTIP_URL.hostname
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"
