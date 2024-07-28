@@ -186,7 +186,6 @@ WEB_INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_filters",
     "rest_framework",
     "ninja",
 ]
@@ -687,7 +686,6 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "glitchtip.pagination.LinkHeaderPagination",
     "PAGE_SIZE": 50,
     "ORDERING_PARAM": "sort",
-    "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
     "DEFAULT_RENDERER_CLASSES": DEFAULT_RENDERER_CLASSES,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
