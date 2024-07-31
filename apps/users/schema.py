@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
@@ -12,8 +11,8 @@ from .models import User
 
 
 class SocialAccountSchema(CamelSchema, ModelSchema):
-    email: Optional[EmailStr]
-    username: Optional[str]
+    email: EmailStr | None
+    username: str | None
 
     class Meta:
         model = SocialAccount
@@ -27,15 +26,16 @@ class SocialAccountSchema(CamelSchema, ModelSchema):
 
     @staticmethod
     def resolve_email(obj):
-        if obj.extra_data:
-            if "email" in obj.extra_data:
-                return obj.extra_data.get("email")
-            return obj.extra_data.get("userPrincipalName")  # MS oauth uses this
+        if data := obj.extra_data:
+            # MS oauth uses both principal name and mail
+            return (
+                data.get("email") or data.get("userPrincipalName") or data.get("mail")
+            )
 
     @staticmethod
     def resolve_username(obj):
-        if obj.extra_data:
-            return obj.extra_data.get("username")
+        if data := obj.extra_data:
+            return data.get("username")
 
 
 class UserIn(CamelSchema, ModelSchema):
