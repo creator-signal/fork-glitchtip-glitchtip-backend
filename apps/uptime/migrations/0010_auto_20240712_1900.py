@@ -10,10 +10,13 @@ import psqlextra.types
 from django.db import migrations, models
 from glitchtip.model_utils import TestDefaultPartition
 
+from .functions.partition import create_partitions
+
 
 class Migration(migrations.Migration):
     dependencies = [
         ("uptime", "0009_alter_monitor_interval_alter_monitor_monitor_type_and_more"),
+        ("performance", "0014_initial"),
     ]
 
     operations = [
@@ -101,4 +104,5 @@ class Migration(migrations.Migration):
             model_name="MonitorCheck",
             name="default",
         ),
+        migrations.RunPython(create_partitions, migrations.RunPython.noop),
     ]
