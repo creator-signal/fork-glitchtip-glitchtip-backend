@@ -213,13 +213,10 @@ INSTALLED_APPS = [
     "anymail",
     "corsheaders",
     "django_extensions",
-    "django_rest_mfa",
 ]
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
 INSTALLED_APPS += [
-    "dj_rest_auth",
-    "dj_rest_auth.registration",
     "import_export",
     "storages",
     "glitchtip",
@@ -631,13 +628,16 @@ ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 LOGIN_REDIRECT_URL = "/"
 # This config will later default to True and then be removed
 USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
-# HEADLESS_ONLY = True
+HEADLESS_ONLY = True
 # HEADLESS_FRONTEND_URLS = {
 #     "account_signup": "/login",
 #     "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
 #     "account_confirm_email": "/profile/confirm-email/{key}/",
 # }
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
+MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
 SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
@@ -655,19 +655,6 @@ ENABLE_ORGANIZATION_CREATION = env.bool(
     "ENABLE_OPEN_USER_REGISTRATION", env.bool("ENABLE_ORGANIZATION_CREATION", False)
 )
 
-REST_AUTH = {
-    "TOKEN_MODEL": None,
-    "TOKEN_CREATOR": "apps.users.utils.noop_token_creator",
-    "REGISTER_PERMISSION_CLASSES": (
-        "glitchtip.permissions.UserRegistrationPermission",
-    ),
-    "REGISTER_SERIALIZER": "apps.users.serializers.RegisterSerializer",
-    "USER_DETAILS_SERIALIZER": "apps.users.serializers.UserSerializer",
-    "TOKEN_SERIALIZER": "apps.users.serializers.NoopTokenSerializer",
-    "PASSWORD_RESET_SERIALIZER": "apps.users.serializers.PasswordSetResetSerializer",
-    "OLD_PASSWORD_FIELD_ENABLED": True,
-}
-
 AUTHENTICATION_BACKENDS = (
     # Needed to login by username in Django admin, regardless of `allauth`
     "django.contrib.auth.backends.ModelBackend",
@@ -676,22 +663,15 @@ AUTHENTICATION_BACKENDS = (
 )
 
 DEFAULT_RENDERER_CLASSES = ("rest_framework.renderers.JSONRenderer",)
-if DEBUG:
-    DEFAULT_RENDERER_CLASSES = DEFAULT_RENDERER_CLASSES + (
-        "rest_framework.renderers.BrowsableAPIRenderer",
-    )
-
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "glitchtip.pagination.LinkHeaderPagination",
-    "PAGE_SIZE": 50,
     "ORDERING_PARAM": "sort",
     "DEFAULT_RENDERER_CLASSES": DEFAULT_RENDERER_CLASSES,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
         "glitchtip.authentication.BearerTokenAuthentication",
     ],
-    "DEFAULT_THROTTLE_RATES": {"anon": "100/minute"},
 }
 
 NINJA_PAGINATION_CLASS = "glitchtip.api.pagination.AsyncLinkHeaderPagination"
