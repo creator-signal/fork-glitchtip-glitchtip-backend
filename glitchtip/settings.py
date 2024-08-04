@@ -632,8 +632,9 @@ USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
 HEADLESS_ONLY = True
 HEADLESS_FRONTEND_URLS = {
     "account_signup": "/login",
-    "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
+    "account_reset_password": "/reset-password",
     "account_confirm_email": "/profile/confirm-email/{key}/",
+    "account_reset_password_from_key": "/reset-password/set-new-password/{key}"
 }
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
