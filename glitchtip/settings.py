@@ -627,6 +627,7 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 LOGIN_REDIRECT_URL = "/"
+LOGIN_URL = "/login"
 # This config will later default to True and then be removed
 USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
 HEADLESS_ONLY = True
