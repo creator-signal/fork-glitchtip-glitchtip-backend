@@ -1,4 +1,6 @@
 from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from asgiref.sync import sync_to_async
 from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
@@ -217,3 +219,16 @@ async def update_notifications(
         setattr(user, attr, value)
     await user.asave()
     return user
+
+
+@router.get("/generate-recovery-codes/")
+async def generate_recovery_codes(request: AuthHttpRequest):
+    """
+    Extention of django-allauth headless API to pre-generate recovery codes before saving
+    """
+    authenticator = Authenticator(data={"seed": RecoveryCodes.generate_seed()})
+    codes = RecoveryCodes(authenticator).generate_codes()
+    return {
+        "seed": authenticator.data["seed"],
+        "codes": codes,
+    }

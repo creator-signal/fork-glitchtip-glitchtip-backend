@@ -6,7 +6,6 @@ from model_bakery import baker
 from apps.organizations_ext.models import OrganizationUserRole
 
 from ..models import Project, ProjectKey
-from ..views import ProjectViewSet
 
 
 class ProjectsAPITestCase(TestCase):
@@ -112,7 +111,7 @@ class ProjectsAPITestCase(TestCase):
 
         res = self.client.delete(self.detail_url)
         self.assertEqual(res.status_code, 204)
-        self.assertEqual(ProjectViewSet.queryset.count(), 0)
+        self.assertEqual(Project.objects.all().count(), 0)
 
     def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
