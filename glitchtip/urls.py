@@ -5,13 +5,9 @@ from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
-from rest_framework_nested import routers
 
 from .api.api import api
 from .views import health
-
-router = routers.DefaultRouter()
-
 
 urlpatterns = [
     path("_health/", health),
@@ -32,7 +28,6 @@ urlpatterns = [
         ),
     ),
     path("api/", api.urls),
-    path("api/0/", include(router.urls)),
 ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:
