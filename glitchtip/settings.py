@@ -621,6 +621,7 @@ if os.getenv(
     vars().update(EMAIL_CONFIG)
 
 AUTH_USER_MODEL = "users.User"
+ACCOUNT_ADAPTER = "glitchtip.adapters.CustomDefaultAccountAdapter"
 ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
@@ -641,7 +642,7 @@ MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
 MFA_PASSKEY_LOGIN_ENABLED = True
 MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
-SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
+SOCIALACCOUNT_ADAPTER = "glitchtip.adapters.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
 if GITLAB_URL := env.url("SOCIALACCOUNT_PROVIDERS_gitlab_GITLAB_URL", None):
