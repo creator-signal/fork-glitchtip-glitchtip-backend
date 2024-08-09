@@ -47,19 +47,6 @@ urlpatterns += [
         r"^(auth|login|register|(.*)/issues|(.*)/settings|(.*)/performance|(.*)/projects|(.*)/releases|organizations|profile|(.*)/uptime-monitors|accept|reset-password).*$",
         TemplateView.as_view(template_name="index.html"),
     ),
-    # These URLS are for generating reverse urls in django, but are not really present
-    # Change the activate_url in the confirm emails
-    re_path(
-        r"^profile/confirm-email/(?P<key>[-:\w]+)/$",
-        TemplateView.as_view(),
-        name="account_confirm_email",
-    ),
-    # Change the password_reset_confirm in the reset password emails
-    re_path(
-        r"^reset-password/set-new-password/(?P<uidb64>[0-9A-Za-z_\-]+)/(?P<token>[0-9A-Za-z]{1,93}-[0-9A-Za-z]{1,90})/$",
-        TemplateView.as_view(),
-        name="password_reset_confirm",
-    ),
     path("accept/", include(invitation_backend().get_urls())),
 ]
 
