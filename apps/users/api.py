@@ -257,6 +257,9 @@ async def set_recovery_codes(request: AuthHttpRequest, payload: RecoveryCodeSche
     )
     for code in RecoveryCodes(authenticator).generate_codes():
         if code == payload.code:
+            await Authenticator.objects.filter(
+                type=Authenticator.Type.RECOVERY_CODES, user_id=user_id
+            ).adelete()
             await authenticator.asave()
             return 204, None
     raise HttpError(400, "Invalid code")

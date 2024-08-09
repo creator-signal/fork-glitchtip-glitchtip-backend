@@ -1,9 +1,9 @@
 from urllib.parse import unquote
 
+from allauth.mfa.models import Authenticator
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from allauth.mfa.models import Authenticator
 from model_bakery import baker
 
 from apps.organizations_ext.models import OrganizationUserRole
@@ -296,8 +296,13 @@ class UsersTestCase(GlitchTestCase):
         url = reverse("api:generate_recovery_codes")
         res = self.client.get(url)
         self.assertContains(res, "codes")
+        code = res.json()["codes"][0]
+        res = self.client.post(url, {"code": "0"}, content_type="application/json")
+        self.assertEqual(res.status_code, 400)
         res = self.client.post(
-            url, {"code": res.json()["codes"][0]}, content_type="application/json"
+            url,
+            {"code": code},
+            content_type="application/json",
         )
         self.assertEqual(res.status_code, 204)
         self.assertTrue(Authenticator.objects.filter(user=self.user).exists())

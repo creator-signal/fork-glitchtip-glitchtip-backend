@@ -522,8 +522,7 @@ if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
 
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-if os.environ.get("SESSION_COOKIE_AGE"):
-    SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE")
+SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
 # Password validation
 # https://docs.djangoproject.com/en/dev/ref/settings/#auth-password-validators
@@ -626,6 +625,7 @@ ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_REAUTHENTICATION_TIMEOUT = SESSION_COOKIE_AGE  # Disabled for now
 LOGIN_REDIRECT_URL = "/"
 LOGIN_URL = "/login"
 # This config will later default to True and then be removed
@@ -635,7 +635,7 @@ HEADLESS_FRONTEND_URLS = {
     "account_signup": "/login",
     "account_reset_password": "/reset-password",
     "account_confirm_email": "/profile/confirm-email/{key}/",
-    "account_reset_password_from_key": "/reset-password/set-new-password/{key}"
+    "account_reset_password_from_key": "/reset-password/set-new-password/{key}",
 }
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
