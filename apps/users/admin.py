@@ -1,3 +1,4 @@
+from allauth.account.decorators import secure_admin_login
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
@@ -67,3 +68,5 @@ class UserAdmin(BaseUserAdmin, ImportExportModelAdmin):
 
 
 admin.site.register(User, UserAdmin)
+
+admin.site.login = secure_admin_login(admin.site.login)

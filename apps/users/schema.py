@@ -87,3 +87,11 @@ class UserNotificationsSchema(CamelSchema, ModelSchema):
     class Meta:
         model = User
         fields = ("subscribe_by_default",)
+
+
+class RecoveryCodesSchema(CamelSchema):
+    codes: list[str]
+
+
+class RecoveryCodeSchema(CamelSchema):
+    code: str

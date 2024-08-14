@@ -182,7 +182,6 @@ DEBUG_TOOLBAR_PANELS = [
 # Application definition
 # Conditionally load to workaround unnecessary memory usage in celery/beat
 WEB_INSTALLED_APPS = [
-    "django_rest_mfa.mfa_admin",
     "django.contrib.admin",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -200,6 +199,7 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.headless",
+    "allauth.mfa",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.digitalocean",
     "allauth.socialaccount.providers.gitea",
@@ -211,15 +211,13 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.openid_connect",
     "allauth.socialaccount.providers.okta",
     "anymail",
+    "django_rest_mfa",
     "corsheaders",
     "django_extensions",
-    "django_rest_mfa",
 ]
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
 INSTALLED_APPS += [
-    "dj_rest_auth",
-    "dj_rest_auth.registration",
     "import_export",
     "storages",
     "glitchtip",
@@ -524,8 +522,7 @@ if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
 
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-if os.environ.get("SESSION_COOKIE_AGE"):
-    SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE")
+SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
 # Password validation
 # https://docs.djangoproject.com/en/dev/ref/settings/#auth-password-validators
@@ -624,21 +621,28 @@ if os.getenv(
     vars().update(EMAIL_CONFIG)
 
 AUTH_USER_MODEL = "users.User"
+ACCOUNT_ADAPTER = "glitchtip.adapters.CustomDefaultAccountAdapter"
 ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-ACCOUNT_ADAPTER = "glitchtip.social.MFAAccountAdapter"
+ACCOUNT_REAUTHENTICATION_TIMEOUT = SESSION_COOKIE_AGE  # Disabled for now
 LOGIN_REDIRECT_URL = "/"
+LOGIN_URL = "/login"
 # This config will later default to True and then be removed
 USE_NEW_SOCIAL_CALLBACKS = env.bool("USE_NEW_SOCIAL_CALLBACKS", False)
-# HEADLESS_ONLY = True
-# HEADLESS_FRONTEND_URLS = {
-#     "account_signup": "/login",
-#     "account_reset_password": f"{GLITCHTIP_URL.geturl()}/reset-password",
-#     "account_confirm_email": "/profile/confirm-email/{key}/",
-# }
-SOCIALACCOUNT_ADAPTER = "glitchtip.social.CustomSocialAccountAdapter"
+HEADLESS_ONLY = True
+HEADLESS_FRONTEND_URLS = {
+    "account_signup": "/login",
+    "account_reset_password": "/reset-password",
+    "account_confirm_email": "/profile/confirm-email/{key}/",
+    "account_reset_password_from_key": "/reset-password/set-new-password/{key}",
+}
+MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
+MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
+SOCIALACCOUNT_ADAPTER = "glitchtip.adapters.CustomSocialAccountAdapter"
 INVITATION_BACKEND = "apps.organizations_ext.invitation_backend.InvitationBackend"
 SOCIALACCOUNT_PROVIDERS = {}
 if GITLAB_URL := env.url("SOCIALACCOUNT_PROVIDERS_gitlab_GITLAB_URL", None):
@@ -655,19 +659,6 @@ ENABLE_ORGANIZATION_CREATION = env.bool(
     "ENABLE_OPEN_USER_REGISTRATION", env.bool("ENABLE_ORGANIZATION_CREATION", False)
 )
 
-REST_AUTH = {
-    "TOKEN_MODEL": None,
-    "TOKEN_CREATOR": "apps.users.utils.noop_token_creator",
-    "REGISTER_PERMISSION_CLASSES": (
-        "glitchtip.permissions.UserRegistrationPermission",
-    ),
-    "REGISTER_SERIALIZER": "apps.users.serializers.RegisterSerializer",
-    "USER_DETAILS_SERIALIZER": "apps.users.serializers.UserSerializer",
-    "TOKEN_SERIALIZER": "apps.users.serializers.NoopTokenSerializer",
-    "PASSWORD_RESET_SERIALIZER": "apps.users.serializers.PasswordSetResetSerializer",
-    "OLD_PASSWORD_FIELD_ENABLED": True,
-}
-
 AUTHENTICATION_BACKENDS = (
     # Needed to login by username in Django admin, regardless of `allauth`
     "django.contrib.auth.backends.ModelBackend",
@@ -676,22 +667,15 @@ AUTHENTICATION_BACKENDS = (
 )
 
 DEFAULT_RENDERER_CLASSES = ("rest_framework.renderers.JSONRenderer",)
-if DEBUG:
-    DEFAULT_RENDERER_CLASSES = DEFAULT_RENDERER_CLASSES + (
-        "rest_framework.renderers.BrowsableAPIRenderer",
-    )
-
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "glitchtip.pagination.LinkHeaderPagination",
-    "PAGE_SIZE": 50,
     "ORDERING_PARAM": "sort",
     "DEFAULT_RENDERER_CLASSES": DEFAULT_RENDERER_CLASSES,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
         "glitchtip.authentication.BearerTokenAuthentication",
     ],
-    "DEFAULT_THROTTLE_RATES": {"anon": "100/minute"},
 }
 
 NINJA_PAGINATION_CLASS = "glitchtip.api.pagination.AsyncLinkHeaderPagination"
@@ -802,9 +786,6 @@ if CELERY_TASK_ALWAYS_EAGER:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
-
-MFA_SERVER_NAME = GLITCHTIP_URL.hostname
-FIDO_SERVER_ID = GLITCHTIP_URL.hostname
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"

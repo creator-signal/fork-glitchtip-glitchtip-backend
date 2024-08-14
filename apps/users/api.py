@@ -1,5 +1,8 @@
 from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from asgiref.sync import sync_to_async
+from django.core.cache import cache
 from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -14,6 +17,8 @@ from .models import User
 from .schema import (
     EmailAddressIn,
     EmailAddressSchema,
+    RecoveryCodeSchema,
+    RecoveryCodesSchema,
     UserIn,
     UserNotificationsSchema,
     UserSchema,
@@ -36,6 +41,10 @@ DELETE /users/<me_id>/emails/
 GET /users/<me_id>/notifications/
 PUT /users/<me_id>/notifications/
 """
+
+
+def generate_user_seed_key(user_id: int):
+    return f"seed{user_id}"
 
 
 def get_user_queryset(user_id: int, add_details=False):
@@ -217,3 +226,40 @@ async def update_notifications(
         setattr(user, attr, value)
     await user.asave()
     return user
+
+
+@router.get("/generate-recovery-codes/", response=RecoveryCodesSchema)
+async def generate_recovery_codes(request: AuthHttpRequest):
+    """
+    Extension of django-allauth headless API to pre-generate recovery codes before saving
+    """
+    authenticator = Authenticator(data={"seed": RecoveryCodes.generate_seed()})
+    codes = RecoveryCodes(authenticator).generate_codes()
+    cache.set(generate_user_seed_key(request.auth.user_id), authenticator.data["seed"])
+    return {
+        "codes": codes,
+    }
+
+
+@router.post("/generate-recovery-codes/", response={204: None})
+async def set_recovery_codes(request: AuthHttpRequest, payload: RecoveryCodeSchema):
+    """
+    Extension of django-allauth headless API to set recovery codes
+    """
+    user_id = request.auth.user_id
+    seed = cache.get(generate_user_seed_key(user_id))
+    if not seed:
+        raise HttpError(400, "No recovery codes set, use GET first")
+    authenticator = Authenticator(
+        type=Authenticator.Type.RECOVERY_CODES,
+        user_id=user_id,
+        data={"seed": seed, "used_mask": 0},
+    )
+    for code in RecoveryCodes(authenticator).generate_codes():
+        if code == payload.code:
+            await Authenticator.objects.filter(
+                type=Authenticator.Type.RECOVERY_CODES, user_id=user_id
+            ).adelete()
+            await authenticator.asave()
+            return 204, None
+    raise HttpError(400, "Invalid code")

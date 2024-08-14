@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from ninja import Field, ModelSchema
+from pydantic import RootModel
 
 from apps.organizations_ext.schema import OrganizationSchema
 from glitchtip.schema import CamelSchema
@@ -127,3 +128,7 @@ class ProjectOrganizationSchema(ProjectSchema):
 
 class ProjectWithKeysSchema(ProjectOrganizationSchema):
     keys: list[ProjectKeySchema] = Field(validation_alias="projectkey_set")
+
+
+class StrKeyIntValue(RootModel):
+    root: dict[str, int]

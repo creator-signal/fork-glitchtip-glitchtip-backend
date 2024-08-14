@@ -1,65 +1,54 @@
+from urllib.parse import unquote
+
+from allauth.mfa.models import Authenticator
 from django.core import mail
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 from apps.organizations_ext.models import OrganizationUserRole
 from apps.projects.models import UserProjectAlert
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 from ..models import User
 
 
-class UserRegistrationTestCase(APITestCase):
+class UserRegistrationTestCase(TestCase):
     def test_create_user(self):
-        url = reverse("rest_register")
+        url = "/_allauth/browser/v1/auth/signup"
         data = {
             "email": "test@example.com",
-            "password1": "hunter222",
-            "password2": "hunter222",
+            "password": "hunter222",
         }
-        res = self.client.post(url, data)
-        self.assertEqual(res.status_code, 204)
-
-    def test_create_user_with_tags(self):
-        url = reverse("rest_register")
-        data = {
-            "email": "test@example.com",
-            "password1": "hunter222",
-            "password2": "hunter222",
-            "tags": "?utm_campaign=test&utm_source=test&utm_medium=test&utm_medium=test",
-        }
-        res = self.client.post(url, data)
-        self.assertEqual(res.status_code, 204)
-        self.assertTrue(
-            User.objects.filter(analytics__register__utm_campaign="test").exists()
-        )
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
 
     def test_closed_registration(self):
         """Only first user may register"""
-        url = reverse("rest_register")
+        url = "/_allauth/browser/v1/auth/signup"
         user1_data = {
             "email": "test1@example.com",
-            "password1": "hunter222",
-            "password2": "hunter222",
+            "password": "hunter222",
         }
         user2_data = {
             "email": "test2@example.com",
-            "password1": "hunter222",
-            "password2": "hunter222",
+            "password": "hunter222",
         }
         with override_settings(ENABLE_USER_REGISTRATION=False):
-            res = self.client.post(url, user1_data)
-            self.assertEqual(res.status_code, 204)
+            res = self.client.post(url, user1_data, content_type="application/json")
+            self.assertEqual(res.status_code, 200)
 
-            res = self.client.post(url, user2_data)
-            self.assertEqual(res.status_code, 403)
+            res = self.client.post(url, user2_data, content_type="application/json")
+            self.assertEqual(res.status_code, 409)
 
 
-class UsersTestCase(GlitchTipTestCase):
+class UsersTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
     def setUp(self):
-        self.create_logged_in_user()
+        self.client.force_login(self.user)
 
     def test_list(self):
         url = reverse("api:list_users")
@@ -97,7 +86,7 @@ class UsersTestCase(GlitchTipTestCase):
     def test_update(self):
         url = reverse("api:update_user", args=["me"])
         data = {"name": "new", "options": {"foo": "bar"}}
-        res = self.client.put(url, data, format="json")
+        res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, data["name"])
         self.assertContains(res, data["options"]["foo"])
         self.assertTrue(User.objects.filter(name=data["name"]).exists())
@@ -131,12 +120,14 @@ class UsersTestCase(GlitchTipTestCase):
     def test_emails_create(self):
         url = reverse("api:list_emails", args=["me"])
 
-        res = self.client.post(url, {"email": "invalid"}, format="json")
+        res = self.client.post(
+            url, {"email": "invalid"}, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 422)
 
         new_email = "new@exmaple.com"
         data = {"email": new_email}
-        res = self.client.post(url, data, format="json")
+        res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, new_email, status_code=201)
         self.assertTrue(
             self.user.emailaddress_set.filter(email=new_email, verified=False).exists()
@@ -145,10 +136,10 @@ class UsersTestCase(GlitchTipTestCase):
 
         # Ensure token is valid and can verify email
         body = mail.outbox[0].body
-        key = body[body.find("confirm-email") :].split("/")[1]
-        url = reverse("rest_verify_email")
+        key = unquote(body[body.find("confirm-email") :].split("/")[1])
+        url = "/_allauth/browser/v1/auth/email/verify"
         data = {"key": key}
-        res = self.client.post(url, data)
+        res = self.client.post(url, data, content_type="application/json")
         self.assertTrue(
             self.user.emailaddress_set.filter(email=new_email, verified=True).exists()
         )
@@ -161,7 +152,7 @@ class UsersTestCase(GlitchTipTestCase):
             email="something@example.com",
         )
         data = {"email": email_address.email}
-        res = self.client.post(url, data, format="json")
+        res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_create_dupe_email_other_user(self):
@@ -170,7 +161,7 @@ class UsersTestCase(GlitchTipTestCase):
             "account.EmailAddress", email="a@example.com", verified=True
         )
         data = {"email": email_address.email}
-        res = self.client.post(url, data, format="json")
+        res = self.client.post(url, data, content_type="application/json")
         self.assertContains(res, "already exists", status_code=400)
 
     def test_emails_set_primary(self):
@@ -179,7 +170,7 @@ class UsersTestCase(GlitchTipTestCase):
             "account.EmailAddress", verified=True, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.put(url, data, format="json")
+        res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, email_address.email, status_code=200)
         self.assertTrue(
             self.user.emailaddress_set.filter(
@@ -210,7 +201,7 @@ class UsersTestCase(GlitchTipTestCase):
             user=self.user,
         )
         data = {"email": email}
-        res = self.client.put(url, data, format="json")
+        res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
 
     def test_emails_destroy(self):
@@ -219,7 +210,7 @@ class UsersTestCase(GlitchTipTestCase):
             "account.EmailAddress", verified=True, primary=False, user=self.user
         )
         data = {"email": email_address.email}
-        res = self.client.delete(url, data, format="json")
+        res = self.client.delete(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertFalse(
             self.user.emailaddress_set.filter(email=email_address.email).exists()
@@ -229,7 +220,7 @@ class UsersTestCase(GlitchTipTestCase):
         email_address = baker.make("account.EmailAddress", user=self.user)
         url = reverse("api:send_confirm_email", args=["me"])
         data = {"email": email_address.email}
-        res = self.client.post(url, data, format="json")
+        res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertEqual(len(mail.outbox), 1)
 
@@ -241,25 +232,25 @@ class UsersTestCase(GlitchTipTestCase):
     def test_notifications_update(self):
         url = reverse("api:update_notifications", args=["me"])
         data = {"subscribeByDefault": False}
-        res = self.client.put(url, data, format="json")
+        res = self.client.put(url, data, content_type="application/json")
         self.assertFalse(res.json().get("subscribeByDefault"))
         self.user.refresh_from_db()
         self.assertFalse(self.user.subscribe_by_default)
 
     def test_alerts_retrieve(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/alerts/"
+        url = reverse("api:user_notification_alerts", args=["me"])
         alert = baker.make(
             "projects.UserProjectAlert", user=self.user, project=self.project
         )
         res = self.client.get(url)
         self.assertContains(res, self.project.id)
-        self.assertEqual(res.data[self.project.id], alert.status)
+        self.assertEqual(res.json()[str(self.project.id)], alert.status)
 
     def test_alerts_update(self):
-        url = reverse("user-detail", args=["me"]) + "notifications/alerts/"
+        url = reverse("api:update_user_notification_alerts", args=["me"])
 
         # Set to alert to On
-        data = '{"' + str(self.project.id) + '":1}'
+        data = {str(self.project.id): 1}
         res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertEqual(UserProjectAlert.objects.all().count(), 1)
@@ -284,15 +275,34 @@ class UsersTestCase(GlitchTipTestCase):
         approximates the issue by testing an account that has an
         unusable password.
         """
-        url = reverse("rest_password_reset")
+        url = "/_allauth/browser/v1/auth/password/request"
 
         # Normal behavior
-        self.client.post(url, {"email": self.user.email})
+        self.client.post(
+            url, {"email": self.user.email}, content_type="application/json"
+        )
         self.assertEqual(len(mail.outbox), 1)
 
         user_without_password = baker.make("users.User")
         user_without_password.set_unusable_password()
         user_without_password.save()
         self.assertFalse(user_without_password.has_usable_password())
-        self.client.post(url, {"email": user_without_password.email})
+        self.client.post(
+            url, {"email": user_without_password.email}, content_type="application/json"
+        )
         self.assertEqual(len(mail.outbox), 2)
+
+    def test_generate_recovery_codes(self):
+        url = reverse("api:generate_recovery_codes")
+        res = self.client.get(url)
+        self.assertContains(res, "codes")
+        code = res.json()["codes"][0]
+        res = self.client.post(url, {"code": "0"}, content_type="application/json")
+        self.assertEqual(res.status_code, 400)
+        res = self.client.post(
+            url,
+            {"code": code},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 204)
+        self.assertTrue(Authenticator.objects.filter(user=self.user).exists())

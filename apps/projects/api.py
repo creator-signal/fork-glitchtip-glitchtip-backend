@@ -3,20 +3,23 @@ from uuid import UUID
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
+from ninja.errors import ValidationError
 from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization, OrganizationUserRole
+from apps.shared.types import MeID
 from apps.teams.models import Team
 from apps.teams.schema import ProjectTeamSchema
 from glitchtip.api.permissions import AuthHttpRequest, has_permission
 
-from .models import Project, ProjectKey
+from .models import Project, ProjectKey, UserProjectAlert
 from .schema import (
     ProjectIn,
     ProjectKeyIn,
     ProjectKeySchema,
     ProjectOrganizationSchema,
     ProjectSchema,
+    StrKeyIntValue,
 )
 
 router = Router()
@@ -331,4 +334,49 @@ async def delete_project_key(
     )
     if not result:
         raise Http404
+    return 204, None
+
+
+@router.get("/users/{slug:user_id}/notifications/alerts/", response=StrKeyIntValue)
+async def user_notification_alerts(request: AuthHttpRequest, user_id: MeID):
+    """
+    Returns dictionary of project_id: status. Now project_id status means it's "default"
+
+    To update, submit `{project_id: status}` where status is -1 (default), 0, or 1
+    """
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+
+    data = {}
+    async for alert in UserProjectAlert.objects.filter(user_id=user_id):
+        data[str(alert.project_id)] = alert.status
+    return data
+
+
+@router.put("/users/{slug:user_id}/notifications/alerts/", response={204: None})
+async def update_user_notification_alerts(
+    request: AuthHttpRequest, user_id: MeID, payload: StrKeyIntValue
+):
+    if user_id != request.auth.user_id and user_id != "me":
+        raise Http404
+    user_id = request.auth.user_id
+    items = [x for x in payload.root.items()]
+    if len(items) != 1:
+        raise ValidationError("Invalid alert format, expected one value")
+
+    project_id, alert_status = items[0]
+    if alert_status not in [1, 0, -1]:
+        raise ValidationError("Invalid status, must be -1, 0, or 1")
+
+    alert = await UserProjectAlert.objects.filter(
+        user_id=user_id, project_id=project_id
+    ).afirst()
+    if alert and alert_status == -1:
+        await alert.adelete()
+    else:
+        await UserProjectAlert.objects.aupdate_or_create(
+            user_id=user_id, project_id=project_id, defaults={"status": alert_status}
+        )
+
     return 204, None
