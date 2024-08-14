@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
 from django.db.models import Count, Q, QuerySet
+from django.db.models.functions import Cast
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
@@ -50,11 +51,17 @@ class Project(CreatedModel, SoftDeleteModel):
     def annotate_is_member(cls, queryset: QuerySet, user_id: int):
         """Add is_member boolean annotate to Project queryset"""
         return queryset.annotate(
-            is_member=Count(
-                "teams__members",
-                filter=Q(teams__members__user_id=user_id),
-                distinct=True,
-            )
+            is_member=Cast(
+                Cast(  # Postgres can cast int to bool, but not bigint to bool
+                    Count(
+                        "teams__members",
+                        filter=Q(teams__members__user_id=user_id),
+                        distinct=True,
+                    ),
+                    output_field=models.IntegerField(),
+                ),
+                output_field=models.BooleanField(),
+            ),
         )
 
     def save(self, *args, **kwargs):
