@@ -1,6 +1,7 @@
 from allauth.account.decorators import secure_admin_login
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.db.models.functions import Collate
 from django.utils.translation import gettext_lazy as _
 from import_export.admin import ImportExportModelAdmin
 
@@ -52,7 +53,7 @@ class UserAdmin(BaseUserAdmin, ImportExportModelAdmin):
             },
         ),
     )
-    search_fields = ("email", "name")
+    search_fields = ("email_deterministic", "name")
     readonly_fields = ("analytics",)
     resource_class = UserResource
 
@@ -60,6 +61,7 @@ class UserAdmin(BaseUserAdmin, ImportExportModelAdmin):
         return (
             super()
             .get_queryset(request)
+            .annotate(email_deterministic=Collate("email", "und-x-icu"))
             .prefetch_related("organizations_ext_organization")
         )
 
