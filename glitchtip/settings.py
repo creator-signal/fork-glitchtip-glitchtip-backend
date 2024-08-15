@@ -61,6 +61,7 @@ DEBUG = env("DEBUG")
 ENABLE_TEST_API = env.bool("ENABLE_TEST_API", False)
 if DEBUG is False:
     ENABLE_TEST_API = False
+    ACCOUNT_RATE_LIMITS = False  # Disable for e2e tests
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Necessary for kubernetes health checks
