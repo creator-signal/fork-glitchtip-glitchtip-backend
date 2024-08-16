@@ -46,7 +46,7 @@ def migrate_mfa(apps, schema_editor):
 
     authenticators = []
     for user_key in UserKey.objects.filter(key_type="FIDO2").iterator():
-        device = user_key.data["device"]
+        device = user_key.properties["device"]
         decoded_credential = websafe_decode(device)
         attested_credential = AttestedCredentialData(decoded_credential)
         aaguid = attested_credential.aaguid

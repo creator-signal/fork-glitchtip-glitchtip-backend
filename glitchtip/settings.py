@@ -194,7 +194,6 @@ WEB_INSTALLED_APPS = [
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.postgres",
     "psqlextra",
     "django_prometheus",
     "allauth",
