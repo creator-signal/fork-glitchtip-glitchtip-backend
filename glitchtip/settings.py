@@ -424,16 +424,19 @@ if DATABASE_HOST and DATABASE_PASSWORD:
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
 DATABASES["default"]["OPTIONS"] = {}
 if env.bool("DATABASE_POOL", False):
-    DATABASES["default"]["OPTIONS"]["pool"] = True
-min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
-max_size = env.int("DATABASE_POOL_MAX_SIZE", None)
-if min_size or max_size:
-    DATABASES["default"]["OPTIONS"]["pool"] = {}
-    if min_size:
-        DATABASES["default"]["OPTIONS"]["pool"]["min_size"] = min_size
-    if max_size:
-        DATABASES["default"]["OPTIONS"]["pool"]["max_size"] = max_size
+    pool_options = {}
+    min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
+    max_size = env.int("DATABASE_POOL_MAX_SIZE", None)
 
+    if min_size:
+        pool_options["min_size"] = min_size
+    if max_size:
+        pool_options["max_size"] = max_size
+
+    if pool_options:
+        DATABASES["default"]["OPTIONS"]["pool"] = pool_options
+    else:
+        DATABASES["default"]["OPTIONS"]["pool"] = True
 
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
