@@ -653,6 +653,7 @@ HEADLESS_FRONTEND_URLS = {
     "account_reset_password": "/reset-password",
     "account_confirm_email": "/profile/confirm-email/{key}/",
     "account_reset_password_from_key": "/reset-password/set-new-password/{key}",
+    "socialaccount_login_error": "/login?socialLoginError=true",
 }
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
