@@ -3140,6 +3140,7 @@ files = [
 
 [package.dependencies]
 psycopg-c = {version = "3.2.1", optional = true, markers = "implementation_name != \"pypy\" and extra == \"c\""}
+psycopg-pool = {version = "*", optional = true, markers = "extra == \"pool\""}
 typing-extensions = ">=4.4"
 tzdata = {version = "*", markers = "sys_platform == \"win32\""}
 
@@ -3160,6 +3161,20 @@ python-versions = ">=3.8"
 files = [
     {file = "psycopg_c-3.2.1.tar.gz", hash = "sha256:2d09943cc8a855c42c1e23b4298957b7ce8f27bf3683258c52fd139f601f7cda"},
 ]
+
+[[package]]
+name = "psycopg-pool"
+version = "3.2.2"
+description = "Connection Pool for Psycopg"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "psycopg_pool-3.2.2-py3-none-any.whl", hash = "sha256:273081d0fbfaced4f35e69200c89cb8fbddfe277c38cc86c235b90a2ec2c8153"},
+    {file = "psycopg_pool-3.2.2.tar.gz", hash = "sha256:9e22c370045f6d7f2666a5ad1b0caf345f9f1912195b0b25d0d3bcc4f3a7389c"},
+]
+
+[package.dependencies]
+typing-extensions = ">=4.4"
 
 [[package]]
 name = "ptyprocess"
@@ -4451,4 +4466,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "28c64e50d6e9a00e812f762e021b19c4d14cf36b2896345ca7f58656c77f315b"
+content-hash = "80eed6f4317f91594490bc286e1deeee36239311506bec1480af29a438e9cfef"

@@ -422,6 +422,19 @@ if DATABASE_HOST and DATABASE_PASSWORD:
         "CONN_HEALTH_CHECKS": env.bool("DATABASE_CONN_HEALTH_CHECKS", False),
     }
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
+DATABASES["default"]["OPTIONS"] = {}
+if env.bool("DATABASE_POOL", False):
+    DATABASES["default"]["OPTIONS"]["pool"] = True
+min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
+max_size = env.int("DATABASE_POOL_MAX_SIZE", None)
+if min_size or max_size:
+    DATABASES["default"]["OPTIONS"]["pool"] = {}
+    if min_size:
+        DATABASES["default"]["OPTIONS"]["pool"]["min_size"] = min_size
+    if max_size:
+        DATABASES["default"]["OPTIONS"]["pool"]["max_size"] = max_size
+
+
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
