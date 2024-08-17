@@ -19,6 +19,7 @@ class EnvelopeParser(Parser):
                 "application/x-sentry-envelope",
                 "application/octet-stream",
                 "text/plain;charset=UTF-8",
+                "text/plain",
                 None,
             ]:
                 result = [orjson.loads(line) for line in request.readlines()]
