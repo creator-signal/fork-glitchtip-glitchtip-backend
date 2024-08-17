@@ -2643,13 +2643,13 @@ cffi = ">=1.6.0"
 
 [[package]]
 name = "model-bakery"
-version = "1.19.1"
+version = "1.19.2"
 description = "Smart object creation facility for Django."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "model_bakery-1.19.1-py3-none-any.whl", hash = "sha256:39b06d4ebad6972dd448f3c38ac938164a1b1b13d56bf98837ba011cb6622ddc"},
-    {file = "model_bakery-1.19.1.tar.gz", hash = "sha256:9e9abe2ea8434e8cdb68b95be08df4f999bc7b4bc19c27fa4166283a947e14bd"},
+    {file = "model_bakery-1.19.2-py3-none-any.whl", hash = "sha256:a55c0c286da302748c4483db7b2f58fa32c79ccc530b68a7498a4d6675abd62b"},
+    {file = "model_bakery-1.19.2.tar.gz", hash = "sha256:30bd89514bdca2eebd93f0596cacc7ac5c4f95a54a03befac6a90a70acfa8df3"},
 ]
 
 [package.dependencies]
