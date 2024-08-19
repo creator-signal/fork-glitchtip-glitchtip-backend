@@ -197,7 +197,8 @@ INSTALLED_APPS = [
     "psqlextra",
     "django_prometheus",
     "allauth",
-    "allauth.account",
+    "apps.account.apps.AccountConfig",
+    # "allauth.account",
     "allauth.headless",
     "allauth.mfa",
     "allauth.socialaccount",
@@ -276,7 +277,8 @@ MIDDLEWARE += [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "sentry.middleware.proxy.DecompressBodyMiddleware",
     "django.middleware.locale.LocaleMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
+    "glitchtip.middleware.AccountMiddleware",
+    # "allauth.account.middleware.AccountMiddleware",
 ]
 
 if ENABLE_OBSERVABILITY_API:
