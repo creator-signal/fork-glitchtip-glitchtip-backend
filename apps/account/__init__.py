@@ -1,1 +1,1 @@
-from allauth.account import *
+from allauth.account import *  # noqa
