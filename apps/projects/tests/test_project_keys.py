@@ -1,13 +1,13 @@
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 from apps.organizations_ext.models import OrganizationUserRole
 
 from ..models import ProjectKey
 
 
-class ProjectKeyAPITestCase(APITestCase):
+class ProjectKeyAPITestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
