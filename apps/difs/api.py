@@ -6,10 +6,12 @@ import tempfile
 import zipfile
 from hashlib import sha1
 
+from asgiref.sync import sync_to_async
 from django.core.files import File as DjangoFile
-from django.db import transaction
-from django.shortcuts import aget_object_or_404, get_object_or_404
+from django.shortcuts import aget_object_or_404
+from ninja import File as NinjaFile
 from ninja import Router
+from ninja.errors import HttpError
 from ninja.files import UploadedFile
 from symbolic import ProguardMapper
 
@@ -17,8 +19,10 @@ from apps.files.models import File, FileBlob
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.utils import async_call_celery_task
 
 from .models import DebugInformationFile
+from .schema import AssemblePayload
 from .tasks import DIF_STATE_CREATED, DIF_STATE_NOT_FOUND, DIF_STATE_OK, difs_assemble
 
 MAX_UPLOAD_BLOB_SIZE = 32 * 1024 * 1024  # 32MB
@@ -34,7 +38,7 @@ async def difs_assemble_api(
     request: AuthHttpRequest,
     organization_slug: str,
     project_slug: str,
-    files: list[UploadedFile] | None = File(...),
+    payload: AssemblePayload,
 ):
     organization = await aget_object_or_404(
         Organization, slug=organization_slug.lower(), users=request.auth.user_id
@@ -46,13 +50,13 @@ async def difs_assemble_api(
 
     responses = {}
 
-    files = request.data.items()
+    files = payload.root.items()
 
     for checksum, file in files:
-        chunks = file.get("chunks", [])
-        name = file.get("name", None)
-        debug_id = file.get("debug_id", None)
-        file = await (
+        chunks = file.chunks
+        name = file.name
+        debug_id = file.debug_id
+        debug_file = await (
             DebugInformationFile.objects.filter(
                 project__slug=project_slug, file__checksum=checksum
             )
@@ -60,16 +64,19 @@ async def difs_assemble_api(
             .afirst()
         )
 
-        if file is not None:
+        if debug_file is not None:
             responses[checksum] = {
                 "state": DIF_STATE_OK,
                 "missingChunks": [],
             }
             continue
 
-        existed_chunks = FileBlob.objects.filter(checksum__in=chunks).values_list(
-            "checksum", flat=True
-        )
+        existed_chunks = [
+            file_blob
+            async for file_blob in FileBlob.objects.filter(
+                checksum__in=chunks
+            ).values_list("checksum", flat=True)
+        ]
 
         missing_chunks = list(set(chunks) - set(existed_chunks))
 
@@ -81,179 +88,153 @@ async def difs_assemble_api(
             continue
 
         responses[checksum] = {"state": DIF_STATE_CREATED, "missingChunks": []}
-        difs_assemble.delay(project_slug, name, checksum, chunks, debug_id)
+        await async_call_celery_task(
+            difs_assemble, project_slug, name, checksum, chunks, debug_id
+        )
 
     return responses
 
 
-# class ProjectReprocessingAPIView(views.APIView):
-#     """
-#     Not implemented. It is a dummy API to keep `sentry-cli upload-dif` happy
-#     """
-
-#     permission_classes = [ProjectReprocessingPermission]
-
-#     def post(self, request, organization_slug, project_slug):
-#         return Response()
-
-
-# def extract_proguard_id(name):
-#     match = re.search("proguard/([-a-fA-F0-9]+).txt", name)
-#     if match is None:
-#         return
-#     return match.group(1)
+@router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/")
+async def project_reprocessing(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+):
+    """
+    Not implemented. It is a dummy API to keep `sentry-cli upload-dif` happy
+    """
+    return None
 
 
-# def extract_proguard_metadata(proguard_file):
-#     try:
-#         mapper = ProguardMapper.open(proguard_file)
-
-#         if mapper is None:
-#             return
-
-#         metadata = {"arch": "any", "feature": "mapping"}
-
-#         return metadata
-
-#     except Exception:
-#         pass
+def extract_proguard_id(name: str):
+    match = re.search("proguard/([-a-fA-F0-9]+).txt", name)
+    if match is None:
+        return
+    return match.group(1)
 
 
-# class DsymsAPIView(views.APIView):
-#     """
-#     Implementation of /files/dsyms API View
-#     """
+def extract_proguard_metadata(proguard_file):
+    try:
+        mapper = ProguardMapper.open(proguard_file)
 
-#     permission_classes = [DymsPermission]
+        if mapper is None:
+            return
 
-#     def post(self, request, organization_slug, project_slug):
-#         organization = get_object_or_404(
-#             Organization, slug=organization_slug.lower(), users=self.request.user
-#         )
+        metadata = {"arch": "any", "feature": "mapping"}
 
-#         self.check_object_permissions(request, organization)
+        return metadata
 
-#         project = get_object_or_404(Project, slug=project_slug.lower())
+    except Exception:
+        pass
 
-#         if project.organization.id != organization.id:
-#             raise exceptions.PermissionDenied(
-#                 "The project is not under this organization"
-#             )
 
-#         if "file" not in request.data:
-#             return Response(
-#                 {"error": "No file uploaded"},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
+async def create_dif_from_read_only_file(proguard_file, project, proguard_id, filename):
+    with tempfile.NamedTemporaryFile("br+") as tmp:
+        content = proguard_file.read()
+        tmp.write(content)
+        tmp.flush()
+        metadata = extract_proguard_metadata(tmp.name)
+        if metadata is None:
+            return None
+        checksum = sha1(content).hexdigest()
+        size = len(content)
 
-#         try:
-#             file = request.data["file"]
-#             if file.size > MAX_UPLOAD_BLOB_SIZE:
-#                 return Response(
-#                     {"error": "File size too large"},
-#                     status=status.HTTP_400_BAD_REQUEST,
-#                 )
+        blob = await FileBlob.objects.filter(checksum=checksum).afirst()
 
-#             content = file.read()
+        if blob is None:
+            blob = FileBlob(checksum=checksum, size=size)  # noqa
+            await sync_to_async(blob.blob.save)(filename, DjangoFile(tmp))
+            await blob.asave()
 
-#             buffer = io.BytesIO(content)
+        fileobj = await File.objects.filter(checksum=checksum).afirst()
 
-#             if zipfile.is_zipfile(buffer) is False:
-#                 return Response(
-#                     {"error": "Invalid file type uploaded"},
-#                     status=status.HTTP_400_BAD_REQUEST,
-#                 )
+        if fileobj is None:
+            fileobj = File()
+            fileobj.name = filename
+            fileobj.headers = {}
+            fileobj.checksum = checksum
+            fileobj.size = size
+            fileobj.blob = blob
+            await fileobj.asave()
 
-#             results = []
+        dif = await DebugInformationFile.objects.filter(
+            file__checksum=checksum, project=project
+        ).afirst()
 
-#             with zipfile.ZipFile(buffer) as uploaded_zip_file:
-#                 for filename in uploaded_zip_file.namelist():
-#                     proguard_id = extract_proguard_id(filename)
-#                     if proguard_id is None:
-#                         return Response(
-#                             {"error": "Invalid proguard mapping file uploaded"},  # noqa
-#                             status=status.HTTP_400_BAD_REQUEST,
-#                         )
+        if dif is None:
+            dif = DebugInformationFile()
+            dif.name = filename
+            dif.project = project
+            dif.file = fileobj
+            dif.data = {
+                "arch": metadata["arch"],
+                "debug_id": proguard_id,
+                "symbol_type": "proguard",
+                "features": ["mapping"],
+            }
+            await dif.asave()
 
-#                     with uploaded_zip_file.open(filename) as proguard_file:
-#                         result = self.create_dif_from_read_only_file(
-#                             proguard_file, project, proguard_id, filename
-#                         )
-#                         if result is None:
-#                             return Response(
-#                                 {"error": "Invalid proguard mapping file uploaded"},  # noqa
-#                                 status=status.HTTP_400_BAD_REQUEST,
-#                             )
-#                         results.append(result)
+        result = {
+            "id": dif.id,
+            "debugId": proguard_id,
+            "cpuName": "any",
+            "objectName": "proguard-mapping",
+            "symbolType": "proguard",
+            "size": size,
+            "sha1": checksum,
+            "data": {"features": ["mapping"]},
+            "headers": {"Content-Type": "text/x-proguard+plain"},
+            "dateCreated": fileobj.created,
+        }
 
-#             return Response(results)
+        return result
 
-#         except Exception as err:
-#             return Response(
-#                 {"error": str(err)},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
 
-#     def create_dif_from_read_only_file(
-#         self, proguard_file, project, proguard_id, filename
-#     ):
-#         with tempfile.NamedTemporaryFile("br+") as tmp:
-#             content = proguard_file.read()
-#             tmp.write(content)
-#             tmp.flush()
-#             metadata = extract_proguard_metadata(tmp.name)
-#             if metadata is None:
-#                 return None
-#             checksum = sha1(content).hexdigest()
-#             with transaction.atomic():
-#                 size = len(content)
+@router.post("projects/{slug:organization_slug}/{slug:project_slug}/files/dsyms/")
+async def dsyms(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    file: UploadedFile = NinjaFile(...),
+):
+    organization = await aget_object_or_404(
+        Organization, slug=organization_slug.lower(), users=request.auth.user_id
+    )
+    # self.check_object_permissions(request, organization)
+    project = await aget_object_or_404(
+        Project, slug=project_slug.lower(), organization=organization
+    )
+    if file.size > MAX_UPLOAD_BLOB_SIZE:
+        raise HttpError(
+            400,
+            "File size too large",
+        )
 
-#                 blob = FileBlob.objects.filter(checksum=checksum).first()
+    content = file.read()
 
-#                 if blob is None:
-#                     blob = FileBlob(checksum=checksum, size=size)  # noqa
-#                     blob.blob.save(filename, DjangoFile(tmp))
-#                     blob.save()
+    buffer = io.BytesIO(content)
 
-#                 fileobj = File.objects.filter(checksum=checksum).first()
+    if zipfile.is_zipfile(buffer) is False:
+        raise HttpError(400, "Invalid file type uploaded")
 
-#                 if fileobj is None:
-#                     fileobj = File()
-#                     fileobj.name = filename
-#                     fileobj.headers = {}
-#                     fileobj.checksum = checksum
-#                     fileobj.size = size
-#                     fileobj.blob = blob
-#                     fileobj.save()
+    results = []
 
-#                 dif = DebugInformationFile.objects.filter(
-#                     file__checksum=checksum, project=project
-#                 ).first()
+    with zipfile.ZipFile(buffer) as uploaded_zip_file:
+        for filename in uploaded_zip_file.namelist():
+            proguard_id = extract_proguard_id(filename)
+            if proguard_id is None:
+                raise HttpError(400, "")
 
-#                 if dif is None:
-#                     dif = DebugInformationFile()
-#                     dif.name = filename
-#                     dif.project = project
-#                     dif.file = fileobj
-#                     dif.data = {
-#                         "arch": metadata["arch"],
-#                         "debug_id": proguard_id,
-#                         "symbol_type": "proguard",
-#                         "features": ["mapping"],
-#                     }
-#                     dif.save()
+            with uploaded_zip_file.open(filename) as proguard_file:
+                result = await create_dif_from_read_only_file(
+                    proguard_file, project, proguard_id, filename
+                )
+                if result is None:
+                    raise HttpError(
+                        400,
+                        "Invalid proguard mapping file uploaded",
+                    )
+                results.append(result)
 
-#                 result = {
-#                     "id": dif.id,
-#                     "debugId": proguard_id,
-#                     "cpuName": "any",
-#                     "objectName": "proguard-mapping",
-#                     "symbolType": "proguard",
-#                     "size": size,
-#                     "sha1": checksum,
-#                     "data": {"features": ["mapping"]},
-#                     "headers": {"Content-Type": "text/x-proguard+plain"},
-#                     "dateCreated": fileobj.created,
-#                 }
-
-#                 return result
+    return results

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from django.core.files import File as DjangoFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 from model_bakery import baker
 
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
@@ -27,7 +28,9 @@ class DifsAssembleAPITestCase(GlitchTestCase):
     @classmethod
     def setUpTestData(cls):
         cls.create_user()
-        cls.url = f"/api/0/projects/{cls.organization.slug}/{cls.project.slug}/files/difs/assemble/"  # noqa
+        cls.url = reverse(
+            "api:difs_assemble_api", args=[cls.organization.slug, cls.project.slug]
+        )
         cls.checksum = "0892b6a9469438d9e5ffbf2807759cd689996271"
         cls.chunks = [
             "efa73a85c44d64e995ade0cc3286ea47cfc49c36",
@@ -195,7 +198,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         data = {"file": upload_file}
         response = self.client.post(self.url, data)
 
-        expected_response = {"error": "Invalid file type uploaded"}
+        expected_response = {"detail": "Invalid file type uploaded"}
 
         self.assertEqual(response.json(), expected_response)
         self.assertEqual(response.status_code, 400)
