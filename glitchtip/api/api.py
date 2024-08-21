@@ -79,6 +79,7 @@ api.add_router("embed", embed_router)
 
 if settings.BILLING_ENABLED:
     from apps.djstripe_ext.api import router as djstripe_ext_router
+
     api.add_router("0", djstripe_ext_router)
 
 
@@ -190,7 +191,7 @@ class APIRootSchema(Schema):
     auth: Optional[APITokenSchema]
 
 
-@api.get("0/", auth=None, response=APIRootSchema)
+@api.get("0/", auth=None, response=APIRootSchema, by_alias=True)
 async def api_root(request: HttpRequest):
     """/api/0/ gives information about the server and current user"""
     user_data = None
