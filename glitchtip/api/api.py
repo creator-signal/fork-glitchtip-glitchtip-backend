@@ -193,7 +193,7 @@ class APIRootSchema(Schema):
     auth: Optional[APITokenSchema]
 
 
-@api.get("0/", auth=None, response=APIRootSchema)
+@api.get("0/", auth=None, response=APIRootSchema, by_alias=True)
 async def api_root(request: HttpRequest):
     """/api/0/ gives information about the server and current user"""
     user_data = None

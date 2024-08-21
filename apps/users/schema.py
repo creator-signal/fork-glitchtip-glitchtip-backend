@@ -48,6 +48,7 @@ class UserIn(CamelSchema, ModelSchema):
 
 
 class UserSchema(CamelSchema, ModelSchema):
+    id: str
     username: EmailStr = Field(validation_alias="email")
     created: datetime = Field(serialization_alias="dateJoined")
     email: EmailStr
@@ -65,6 +66,10 @@ class UserSchema(CamelSchema, ModelSchema):
             "email",
             "options",
         ]
+
+    @staticmethod
+    def resolve_id(obj):
+        return str(obj.id)
 
 
 class EmailAddressIn(CamelSchema, ModelSchema):
