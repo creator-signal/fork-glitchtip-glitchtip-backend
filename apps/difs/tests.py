@@ -5,15 +5,16 @@ from unittest.mock import MagicMock, patch
 
 from django.core.files import File as DjangoFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 from model_bakery import baker
 
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
 from apps.files.models import File
 from glitchtip.test_utils import generators  # noqa: F401
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 
-class DebugInformationFileModelTestCase(GlitchTipTestCase):
+class DebugInformationFileModelTestCase(GlitchTestCase):
     def test_is_proguard(self):
         dif = baker.make("difs.DebugInformationFile")
 
@@ -23,22 +24,28 @@ class DebugInformationFileModelTestCase(GlitchTipTestCase):
         self.assertEqual(dif.is_proguard_mapping(), True)
 
 
-class DifsAssembleAPITestCase(GlitchTipTestCase):
-    def setUp(self):
-        self.create_user_and_project()
-        self.url = f"/api/0/projects/{self.organization.slug}/{self.project.slug}/files/difs/assemble/"  # noqa
-        self.checksum = "0892b6a9469438d9e5ffbf2807759cd689996271"
-        self.chunks = [
+class DifsAssembleAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.url = reverse(
+            "api:difs_assemble_api", args=[cls.organization.slug, cls.project.slug]
+        )
+        cls.checksum = "0892b6a9469438d9e5ffbf2807759cd689996271"
+        cls.chunks = [
             "efa73a85c44d64e995ade0cc3286ea47cfc49c36",
             "966e44663054d6c1f38d04c6ff4af83467659bd7",
         ]
-        self.data = {
-            self.checksum: {
+        cls.data = {
+            cls.checksum: {
                 "name": "test",
                 "debug_id": "a959d2e6-e4e5-303e-b508-670eb84b392c",
-                "chunks": self.chunks,
+                "chunks": cls.chunks,
             }
         }
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     def test_difs_assemble_with_dif_existed(self):
         file = baker.make("files.File", checksum=self.checksum)
@@ -50,8 +57,10 @@ class DifsAssembleAPITestCase(GlitchTipTestCase):
 
         expected_response = {self.checksum: {"state": "ok", "missingChunks": []}}
 
-        response = self.client.post(self.url, self.data, format="json")
-        self.assertEqual(response.data, expected_response)
+        response = self.client.post(
+            self.url, self.data, content_type="application/json"
+        )
+        self.assertEqual(response.json(), expected_response)
 
     def test_difs_assemble_with_missing_chunks(self):
         baker.make("files.FileBlob", checksum=self.chunks[0])
@@ -68,8 +77,8 @@ class DifsAssembleAPITestCase(GlitchTipTestCase):
             self.checksum: {"state": "not_found", "missingChunks": [self.chunks[1]]}
         }
 
-        response = self.client.post(self.url, data, format="json")
-        self.assertEqual(response.data, expected_response)
+        response = self.client.post(self.url, data, content_type="application/json")
+        self.assertEqual(response.json(), expected_response)
 
     def test_difs_assemble_without_missing_chunks(self):
         for chunk in self.chunks:
@@ -77,18 +86,24 @@ class DifsAssembleAPITestCase(GlitchTipTestCase):
 
         expected_response = {self.checksum: {"state": "created", "missingChunks": []}}
 
-        response = self.client.post(self.url, self.data, format="json")
-        self.assertEqual(response.data, expected_response)
-
-
-class DsymsAPIViewTestCase(GlitchTipTestCase):
-    def setUp(self):
-        self.create_user_and_project()
-        self.url = (
-            f"/api/0/projects/{self.organization.slug}/{self.project.slug}/files/dsyms/"  # noqa
+        response = self.client.post(
+            self.url, self.data, content_type="application/json"
         )
-        self.uuid = "afb116cf-efec-49af-a7fe-281ac680d8a0"
-        self.checksum = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        self.assertEqual(response.json(), expected_response)
+
+
+class DsymsAPIViewTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.url = (
+            f"/api/0/projects/{cls.organization.slug}/{cls.project.slug}/files/dsyms/"  # noqa
+        )
+        cls.uuid = "afb116cf-efec-49af-a7fe-281ac680d8a0"
+        cls.checksum = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     @contextlib.contextmanager
     def patch(self):
@@ -119,7 +134,7 @@ class DsymsAPIViewTestCase(GlitchTipTestCase):
 
         expected_response = [
             {
-                "id": response.data[0]["id"],
+                "id": response.json()[0]["id"],
                 "debugId": self.uuid,
                 "cpuName": "any",
                 "objectName": "proguard-mapping",
@@ -127,14 +142,14 @@ class DsymsAPIViewTestCase(GlitchTipTestCase):
                 "headers": {"Content-Type": "text/x-proguard+plain"},
                 "size": 0,
                 "sha1": self.checksum,
-                "dateCreated": response.data[0]["dateCreated"],
+                "dateCreated": response.json()[0]["dateCreated"],
                 "data": {"features": ["mapping"]},
             }
         ]
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data, expected_response)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json(), expected_response)
 
     def test_post_existing_file(self):
         """
@@ -167,14 +182,14 @@ class DsymsAPIViewTestCase(GlitchTipTestCase):
                 "headers": {"Content-Type": "text/x-proguard+plain"},
                 "size": 0,
                 "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
-                "dateCreated": response.data[0]["dateCreated"],
+                "dateCreated": response.json()[0]["dateCreated"],
                 "data": {"features": ["mapping"]},
             }
         ]
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data, expected_response)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json(), expected_response)
 
     def test_post_invalid_zip_file(self):
         upload_file = SimpleUploadedFile(
@@ -183,15 +198,19 @@ class DsymsAPIViewTestCase(GlitchTipTestCase):
         data = {"file": upload_file}
         response = self.client.post(self.url, data)
 
-        expected_response = {"error": "Invalid file type uploaded"}
+        expected_response = {"detail": "Invalid file type uploaded"}
 
-        self.assertEqual(response.data, expected_response)
+        self.assertEqual(response.json(), expected_response)
         self.assertEqual(response.status_code, 400)
 
 
-class DifsTasksTestCase(GlitchTipTestCase):
+class DifsTasksTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
     def setUp(self):
-        self.create_user_and_project()
+        self.client.force_login(self.user)
 
     def create_file_blob(self, name, content):
         bin = content.encode("utf-8")

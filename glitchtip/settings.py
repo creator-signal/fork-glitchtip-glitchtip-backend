@@ -186,7 +186,6 @@ WEB_INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "rest_framework",
     "ninja",
 ]
 
@@ -684,18 +683,6 @@ AUTHENTICATION_BACKENDS = (
     # `allauth` specific authentication methods, such as login by e-mail
     "allauth.account.auth_backends.AuthenticationBackend",
 )
-
-DEFAULT_RENDERER_CLASSES = ("rest_framework.renderers.JSONRenderer",)
-REST_FRAMEWORK = {
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "DEFAULT_PAGINATION_CLASS": "glitchtip.pagination.LinkHeaderPagination",
-    "ORDERING_PARAM": "sort",
-    "DEFAULT_RENDERER_CLASSES": DEFAULT_RENDERER_CLASSES,
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
-        "glitchtip.authentication.BearerTokenAuthentication",
-    ],
-}
 
 NINJA_PAGINATION_CLASS = "glitchtip.api.pagination.AsyncLinkHeaderPagination"
 

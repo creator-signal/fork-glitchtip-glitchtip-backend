@@ -18,6 +18,7 @@ from apps.alerts.api import router as alerts_router
 from apps.api_tokens.api import router as api_tokens_router
 from apps.api_tokens.models import APIToken
 from apps.api_tokens.schema import APITokenSchema
+from apps.difs.api import router as difs_router
 from apps.environments.api import router as environments_router
 from apps.event_ingest.api import router as event_ingest_router
 from apps.event_ingest.embed_api import router as embed_router
@@ -61,6 +62,7 @@ api = NinjaAPI(
 api.add_router("0", api_tokens_router)
 api.add_router("", event_ingest_router)
 api.add_router("0", alerts_router)
+api.add_router("0", difs_router)
 api.add_router("0", environments_router)
 api.add_router("0", files_router)
 api.add_router("0", importer_router)

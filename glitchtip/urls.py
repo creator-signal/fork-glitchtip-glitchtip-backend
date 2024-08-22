@@ -36,7 +36,6 @@ if "django.contrib.admin" in settings.INSTALLED_APPS:
     ]
 
 urlpatterns += [
-    path("api/0/", include("apps.difs.urls")),
     path("", include("apps.uptime.urls")),
     path("api/test/", include("test_api.urls")),
     path("accounts/", include("allauth.urls")),
