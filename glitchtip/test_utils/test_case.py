@@ -3,12 +3,23 @@ from typing import Optional
 
 from django.test import TestCase
 from model_bakery import baker
-from rest_framework.test import APITestCase
 
 from apps.organizations_ext.models import Organization, OrganizationUserRole
 
 
 class GlitchTestCase(TestCase):
+    """
+    Usage:
+
+    class FooTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.url = "something that doesn't change between tests"
+    def setUp(self):
+        self.client.force_login(self.user)  # Must run every test
+    """
+
     organization: Optional[Organization] = None
 
     @classmethod
@@ -65,7 +76,9 @@ class GlitchTipTestCaseMixin:
         self.project.teams.add(self.team)
 
 
-class GlitchTipTestCase(GlitchTipTestCaseMixin, APITestCase):
+class GlitchTipTestCase(GlitchTipTestCaseMixin, TestCase):
+    """Use GlitchTestCase instead."""
+
     def create_user_and_project(self):
         self.create_logged_in_user()
 
