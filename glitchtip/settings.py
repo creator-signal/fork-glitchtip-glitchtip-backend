@@ -424,10 +424,10 @@ if DATABASE_HOST and DATABASE_PASSWORD:
     }
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
 DATABASES["default"]["OPTIONS"] = {}
-if env.bool("DATABASE_POOL", False):
+if env.bool("DATABASE_POOL", True):
     pool_options = {}
-    min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
-    max_size = env.int("DATABASE_POOL_MAX_SIZE", None)
+    min_size = env.int("DATABASE_POOL_MIN_SIZE", 2)
+    max_size = env.int("DATABASE_POOL_MAX_SIZE", 6)
 
     if min_size:
         pool_options["min_size"] = min_size
