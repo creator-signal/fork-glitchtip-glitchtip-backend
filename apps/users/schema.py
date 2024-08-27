@@ -1,7 +1,10 @@
+import hashlib
+import hmac
 from datetime import datetime
 
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
+from django.conf import settings
 from ninja import Field, ModelSchema
 from pydantic import EmailStr
 
@@ -70,6 +73,20 @@ class UserSchema(CamelSchema, ModelSchema):
     @staticmethod
     def resolve_id(obj):
         return str(obj.id)
+
+
+class UserDetailSchema(UserSchema):
+    chatwoot_identifier_hash: str | None = None
+
+    @staticmethod
+    def resolve_chatwoot_identifier_hash(obj):
+        if settings.CHATWOOT_WEBSITE_TOKEN and settings.CHATWOOT_IDENTITY_TOKEN:
+            secret = bytes(settings.CHATWOOT_IDENTITY_TOKEN, "utf-8")
+            message = bytes(str(obj.id), "utf-8")
+
+            hash = hmac.new(secret, message, hashlib.sha256)
+            return hash.hexdigest()
+
 
 
 class EmailAddressIn(CamelSchema, ModelSchema):

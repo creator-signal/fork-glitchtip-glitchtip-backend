@@ -19,6 +19,7 @@ from .schema import (
     EmailAddressSchema,
     RecoveryCodeSchema,
     RecoveryCodesSchema,
+    UserDetailSchema,
     UserIn,
     UserNotificationsSchema,
     UserSchema,
@@ -54,7 +55,7 @@ def get_user_queryset(user_id: int, add_details=False):
     return qs
 
 
-def get_email_queryset(user_id: int, verified: bool = None):
+def get_email_queryset(user_id: int, verified: bool = False):
     qs = EmailAddress.objects.filter(user_id=user_id)
     if verified:
         qs = qs.filter(verified=verified)
@@ -71,7 +72,7 @@ async def list_users(request: AuthHttpRequest, response: HttpResponse):
     return get_user_queryset(user_id=request.auth.user_id, add_details=True)
 
 
-@router.get("/users/{slug:user_id}/", response=UserSchema, by_alias=True)
+@router.get("/users/{slug:user_id}/", response=UserDetailSchema, by_alias=True)
 async def get_user(request: AuthHttpRequest, user_id: MeID):
     user_id = request.auth.user_id
     return await aget_object_or_404(get_user_queryset(user_id, add_details=True))
