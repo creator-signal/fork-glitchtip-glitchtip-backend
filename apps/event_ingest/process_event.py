@@ -818,11 +818,10 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
     data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )
-    for processing_event in processing_events:
-        hour_received = processing_event.event.received.replace(
-            minute=0, second=0, microsecond=0
-        )
-        data_stats[hour_received][processing_event.event.project_id] += 1
+
+    for perf_transaction in transactions:
+        hour_received = perf_transaction.start_timestamp.replace(minute=0, second=0, microsecond=0)
+        data_stats[hour_received][perf_transaction.group.project_id] += 1
     update_statistics(data_stats)
     # def create(self, validated_data):
     #     data = validated_data
