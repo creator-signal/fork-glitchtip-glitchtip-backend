@@ -88,6 +88,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 group__project__organization=organization,
                 _quantity=1,
             )
+            baker.make(
+                "projects.TransactionEventProjectHourlyStatistic",
+                project__organization=organization,
+                count=1,
+            )
             set_organization_throttle()
             organization.refresh_from_db()
             self.assertFalse(organization.is_accepting_events)
@@ -119,6 +124,11 @@ class OrganizationThrottlingTestCase(TestCase):
                 "performance.TransactionEvent",
                 group__project=project,
                 _quantity=2,
+            )
+            baker.make(
+                "projects.TransactionEventProjectHourlyStatistic",
+                project=project,
+                count=2,
             )
             free_org = get_free_tier_organizations_with_event_count().first()
         self.assertEqual(free_org.total_event_count, 5)
