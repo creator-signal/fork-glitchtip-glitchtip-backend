@@ -50,7 +50,10 @@ def migrate_mfa(apps, schema_editor):
         decoded_credential = websafe_decode(device)
         attested_credential = AttestedCredentialData(decoded_credential)
         aaguid = attested_credential.aaguid
-        aaguid_bytes = aaguid.decode().encode()
+        try:
+            aaguid_bytes = aaguid.decode().encode()
+        except Exception:
+            continue
         credential_id = attested_credential.credential_id
         public_key = attested_credential.public_key
         rp_id = settings.GLITCHTIP_URL.hostname
