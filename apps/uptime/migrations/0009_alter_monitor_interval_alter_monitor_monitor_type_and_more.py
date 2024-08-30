@@ -8,7 +8,8 @@ from django.db import migrations, models
 def migrate_interval_to_positive_int(apps, schema_editor):
     Monitor = apps.get_model("uptime", "Monitor")
     for monitor in Monitor.objects.all():
-        monitor.interval = monitor.interval_old.seconds
+        max_interval = 32767
+        monitor.interval = min(monitor.interval_old.seconds, max_interval)
         monitor.save()
 
 
