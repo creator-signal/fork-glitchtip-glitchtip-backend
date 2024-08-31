@@ -94,6 +94,11 @@ class SubscriptionAPITestCase(TestCase):
                 group__project__organization=self.organization,
             )
             baker.make(
+                "projects.TransactionEventProjectHourlyStatistic",
+                project__organization=self.organization,
+                count=1,
+            )
+            baker.make(
                 "releases.ReleaseFile",
                 file__blob__size=1000000,
                 release__organization=self.organization,

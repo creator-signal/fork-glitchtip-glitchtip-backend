@@ -637,7 +637,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
 
 def update_statistics(
-    project_event_stats: defaultdict[datetime, defaultdict[int, int]],
+    project_event_stats: defaultdict[datetime, defaultdict[int, int]], is_issue=True
 ):
     # Flatten data for a sql param friendly format and sort to mitigate deadlocks
     data = sorted(
@@ -648,16 +648,21 @@ def update_statistics(
         ],
         key=itemgetter(0, 1),
     )
+    table = (
+        "projects_issueeventprojecthourlystatistic"
+        if is_issue
+        else "projects_transactioneventprojecthourlystatistic"
+    )
     # Django ORM cannot support F functions in a bulk_update
-    # psycopg3 does not support execute_values
+    # psycopg does not support execute_values
     # https://github.com/psycopg/psycopg/issues/114
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO projects_issueeventprojecthourlystatistic (date, project_id, count)\n"
+            f"INSERT INTO {table} (date, project_id, count)\n"
             f"VALUES {args_str}\n"
             "ON CONFLICT (project_id, date)\n"
-            "DO UPDATE SET count = projects_issueeventprojecthourlystatistic.count + EXCLUDED.count;"
+            f"DO UPDATE SET count = {table}.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
 
@@ -730,6 +735,46 @@ def update_tags(processing_events: list[ProcessingEvent]):
 
 # Transactions
 def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
+    release_set = {
+        (event.payload.release, event.project_id, event.organization_id)
+        for event in ingest_events
+        if event.payload.release
+    }
+    environment_set = {
+        (event.payload.environment[:255], event.project_id, event.organization_id)
+        for event in ingest_events
+        if event.payload.environment
+    }
+    project_set = {project_id for _, project_id, _ in release_set}.union(
+        {project_id for _, project_id, _ in environment_set}
+    )
+    release_version_set = {version for version, _, _ in release_set}
+    environment_name_set = {name for name, _, _ in environment_set}
+
+    projects_with_data = (
+        Project.objects.filter(id__in=project_set)
+        .annotate(
+            release_id=Coalesce("releases__id", Value(None)),
+            release_name=Coalesce("releases__version", Value(None)),
+            environment_id=Coalesce("environment__id", Value(None)),
+            environment_name=Coalesce("environment__name", Value(None)),
+        )
+        .filter(release_name__in=release_version_set.union({None}))
+        .filter(environment_name__in=environment_name_set.union({None}))
+        .values(
+            "id",
+            "release_id",
+            "release_name",
+            "environment_id",
+            "environment_name",
+        )
+    )
+
+    get_and_create_releases(release_set, projects_with_data)
+    create_environments(environment_set, projects_with_data)
+
+    transactions = []
+
     for ingest_event in ingest_events:
         event = ingest_event.payload
         contexts = event.contexts
@@ -753,78 +798,30 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             method=method,
         )
 
-        TransactionEvent.objects.create(
-            group=group,
-            data={
-                "request": request.dict() if request else None,
-                "sdk": event.sdk.dict() if event.sdk else None,
-                "platform": event.platform,
-            },
-            trace_id=trace_id,
-            event_id=event.event_id,
-            timestamp=event.timestamp,
-            start_timestamp=event.start_timestamp,
-            duration=(event.timestamp - event.start_timestamp).total_seconds() * 1000,
+        transactions.append(
+            TransactionEvent(
+                group=group,
+                data={
+                    "request": request.dict() if request else None,
+                    "sdk": event.sdk.dict() if event.sdk else None,
+                    "platform": event.platform,
+                },
+                trace_id=trace_id,
+                event_id=event.event_id,
+                timestamp=event.timestamp,
+                start_timestamp=event.start_timestamp,
+                duration=(event.timestamp - event.start_timestamp).total_seconds()
+                * 1000,
+            )
         )
-    # def create(self, validated_data):
-    #     data = validated_data
-    #     contexts = data["contexts"]
-    #     project = self.context.get("project")
-    #     trace_id = contexts["trace"]["trace_id
+    TransactionEvent.objects.bulk_create(transactions, ignore_conflicts=True)
+    data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
 
-    #     tags = []
-    #     release = self.set_release(data.get("release"), project)
-    #     if project.release_id:
-    #         tags.append(("release", release))
-    #     environment = self.set_environment(data.get("environment"), project)
-    #     if project.environment_id:
-    #         tags.append(("environment", environment))
-
-    #     if data.get("tags"):
-    #         tags += [(k, v) for k, v in data["tags"].items()]
-
-    #     defaults = {}
-    #     defaults["tags"] = {tag[0]: [tag[1]] for tag in tags}
-
-    #     group, group_created = TransactionGroup.objects.get_or_create(
-    #         project=self.context.get("project"),
-    #         transaction=data["transaction"],
-    #         op=contexts["trace"].get("op", ""),
-    #         method=data.get("request", {}).get("method"),
-    #         defaults=defaults,
-    #     )
-
-    #     # Merge tags, only save if necessary
-    #     update_group = False
-    #     if not group_created:
-    #         for tag in tags:
-    #             if tag[0] not in group.tags:
-    #                 new_tag_value = tag[1]
-    #                 # Coerce to List[str]
-    #                 if isinstance(new_tag_value, str):
-    #                     new_tag_value = [new_tag_value]
-    #                 group.tags[tag[0]] = new_tag_value
-    #                 update_group = True
-    #             elif tag[1] not in group.tags[tag[0]]:
-    #                 group.tags[tag[0]].append(tag[1])
-    #                 update_group = True
-    #     if update_group:
-    #         group.save(update_fields=["tags"])
-
-    #     transaction = TransactionEvent.objects.create(
-    #         group=group,
-    #         data={
-    #             "request": data.get("request"),
-    #             "sdk": data.get("sdk"),
-    #             "platform": data.get("platform"),
-    #         },
-    #         trace_id=trace_id,
-    #         event_id=data["event_id"],
-    #         timestamp=data["timestamp"],
-    #         start_timestamp=data["start_timestamp"],
-    #         duration=(data["timestamp"] - data["start_timestamp"]).total_seconds()
-    #         * 1000,
-    #         tags={tag[0]: tag[1] for tag in tags},
-    #     )
-
-    #     return transaction
+    for perf_transaction in transactions:
+        hour_received = perf_transaction.start_timestamp.replace(
+            minute=0, second=0, microsecond=0
+        )
+        data_stats[hour_received][perf_transaction.group.project_id] += 1
+    update_statistics(data_stats, False)

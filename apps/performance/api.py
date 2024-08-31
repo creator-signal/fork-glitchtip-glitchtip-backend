@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from django.db.models import Avg, Count
 from django.http import HttpResponse
@@ -17,10 +17,10 @@ router = Router()
 
 
 def get_transaction_group_queryset(
-    organization_slug: str, start: datetime = None, end: datetime = None
+    organization_slug: str, start: datetime | None = None, end: datetime | None = None
 ):
     qs = TransactionGroup.objects.filter(project__organization__slug=organization_slug)
-    filter_kwargs: dict[str] = {}
+    filter_kwargs: dict[str, Any] = {}
     if start:
         filter_kwargs["transactionevent__start_timestamp__gte"] = start
     if end:
@@ -48,8 +48,8 @@ async def list_transactions(
 
 
 class TransactionGroupFilters(Schema):
-    start: RelativeDateTime = None
-    end: RelativeDateTime = None
+    start: RelativeDateTime | None = None
+    end: RelativeDateTime | None = None
     sort: Literal[
         "created",
         "-created",
@@ -59,7 +59,7 @@ class TransactionGroupFilters(Schema):
         "-transaction_count",
     ] = "-avg_duration"
     environment: list[str] = []
-    query: str = None
+    query: str | None = None
 
 
 @router.get(
