@@ -1,5 +1,5 @@
 from allauth.account.adapter import DefaultAccountAdapter
-from allauth.account.authentication import record_authentication
+from allauth.account.internal.flows.login import record_authentication
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 
 from apps.users.utils import is_user_registration_open
