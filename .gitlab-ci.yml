@@ -23,7 +23,7 @@ test:
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
   services:
-    - postgres:16
+    - postgres:$POSTGRES_VERSION
   cache:
     key: ${CI_COMMIT_REF_SLUG}${VERSION}
     paths:
@@ -34,9 +34,12 @@ test:
     - ./manage.py test
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
+    - if: '$VERSION == "3.11" && $POSTGRES_VERSION == "13"'
+    - if: '$VERSION == "3.12" && $POSTGRES_VERSION == "16"'
   parallel:
     matrix:
       - VERSION: ['3.11', '3.12']
+      - POSTGRES_VERSION: ['13', '16']
 
 lint:
   image: python:3.12
