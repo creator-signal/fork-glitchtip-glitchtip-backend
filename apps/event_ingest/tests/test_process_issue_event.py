@@ -403,20 +403,33 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         data = SecuritySchema(**payload)
         event = CSPIssueEventSchema(csp=data.csp_report.dict(by_alias=True))
-        process_issue_events(
-            [
-                InterchangeIssueEvent(
-                    project_id=self.project.id,
-                    organization_id=self.organization.id,
-                    payload=event.dict(by_alias=True),
-                )
-            ]
-        )
+        process_issue_events([
+            InterchangeIssueEvent(
+                project_id=self.project.id,
+                organization_id=self.organization.id,
+                payload=event.dict(by_alias=True),
+            )
+        ])
         issue = Issue.objects.get()
         url = reverse("api:get_latest_issue_event", kwargs={"issue_id": issue.id})
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["culprit"], "style-src-elem")
+
+    def test_project_throttle_rate(self):
+        self.project.event_throttle_rate = 100
+        self.project.save()
+        event_store_url = (
+            reverse("api:event_store", args=[self.project.id])
+            + "?sentry_key="
+            + self.project.projectkey_set.first().public_key.hex
+        )
+        res = self.client.post(
+            event_store_url,
+            {"fake": "data"},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 429)
 
 
 class SentryCompatTestCase(EventIngestTestCase):
