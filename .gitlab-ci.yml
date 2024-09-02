@@ -34,8 +34,6 @@ test:
     - ./manage.py test
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
-    - if: '$VERSION == "3.11" && $POSTGRES_VERSION == "13"'
-    - if: '$VERSION == "3.12" && $POSTGRES_VERSION == "16"'
   parallel:
     matrix:
       - VERSION: ['3.11', '3.12']
