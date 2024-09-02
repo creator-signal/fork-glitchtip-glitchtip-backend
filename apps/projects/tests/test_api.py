@@ -33,6 +33,9 @@ class ProjectsAPITestCase(TestCase):
         cls.detail_url = reverse(
             "api:get_project", args=[cls.organization.slug, cls.project.slug]
         )
+        cls.update_url = reverse(
+            "api:update_project", args=[cls.organization.slug, cls.project.slug]
+        )
 
     def setUp(self):
         self.client.force_login(self.user)
@@ -69,6 +72,24 @@ class ProjectsAPITestCase(TestCase):
     def test_projects_api_retrieve(self):
         res = self.client.get(self.detail_url)
         self.assertTrue(res.json()["firstEvent"])
+
+    def test_projects_api_update(self):
+        self.assertEqual(self.project.event_throttle_rate, 0)
+        self.assertEqual(self.project.platform, None)
+        res = self.client.put(
+            self.update_url,
+            {
+                "name": "New Name",
+                "eventThrottleRate": 50,
+                "platform": "python",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "New Name")
+        self.assertEqual(self.project.event_throttle_rate, 50)
+        self.assertEqual(self.project.platform, "python")
 
     def test_projects_pagination(self):
         """
