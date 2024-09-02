@@ -36,8 +36,10 @@ test:
     - if: $CI_PIPELINE_SOURCE != "schedule"
   parallel:
     matrix:
-      - VERSION: ['3.11', '3.12']
-      - POSTGRES_VERSION: ['13', '16']
+      - VERSION: '3.11'
+        POSTGRES_VERSION: '13'
+      - VERSION: '3.12'
+        POSTGRES_VERSION: '16'
 
 lint:
   image: python:3.12
