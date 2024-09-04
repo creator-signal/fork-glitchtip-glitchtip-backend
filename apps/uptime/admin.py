@@ -61,7 +61,7 @@ class MonitorAdmin(admin.ModelAdmin):
     def heartbeat_endpoint(self, obj):
         if obj.endpoint_id:
             return settings.GLITCHTIP_URL.geturl() + reverse(
-                "heartbeat-check",
+                "api:heartbeat_check",
                 kwargs={
                     "organization_slug": obj.organization.slug,
                     "endpoint_id": obj.endpoint_id,
