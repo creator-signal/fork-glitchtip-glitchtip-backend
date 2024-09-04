@@ -319,9 +319,9 @@ class TransactionEventSchema(LaxIngestSchema):
     fingerprint: list[str] | None = None
     tags: KeyValueFormat | None = None
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    extra: JsonValue | None
+    extra: JsonValue | None = None
     request: IngestRequest | None = None
-    server_name: str | None
+    server_name: str | None = None
     sdk: ClientSDKInfo | None = None
     platform: str | None
     release: str | None = None
