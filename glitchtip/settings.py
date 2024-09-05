@@ -796,6 +796,7 @@ if CELERY_TASK_ALWAYS_EAGER:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
+CACHE_IS_REDIS = CACHES["default"]["BACKEND"] == "django_redis.cache.RedisCache"
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"
