@@ -307,7 +307,7 @@ class EventIngestSchema(IngestIssueEvent):
 
 
 class TransactionEventSchema(LaxIngestSchema):
-    type: Literal["transaction"]
+    type: Literal["transaction"] = "transaction"
     contexts: JsonValue
     measurements: JsonValue | None = None
     start_timestamp: datetime

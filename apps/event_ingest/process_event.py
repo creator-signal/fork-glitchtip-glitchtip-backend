@@ -5,6 +5,7 @@ from operator import itemgetter
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.db import connection, transaction
 from django.db.models import (
@@ -17,9 +18,11 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Greatest
 from django.db.utils import IntegrityError
+from django_redis import get_redis_connection
 from ninja import Schema
 from user_agents import parse
 
+from apps.alerts.constants import ISSUE_IDS_KEY
 from apps.alerts.models import Notification
 from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
@@ -612,6 +615,12 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         )
 
     update_issues(processing_events)
+
+    if settings.CACHE_IS_REDIS:
+        # Add set of issue_ids for alerts to process later
+        get_redis_connection("default").sadd(
+            ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
+        )
 
     if issues_to_reopen:
         Issue.objects.filter(id__in=issues_to_reopen).update(

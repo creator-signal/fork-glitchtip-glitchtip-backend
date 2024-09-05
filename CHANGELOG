@@ -1,5 +1,7 @@
 # Unreleased
 
+- Optimize alert sending logic to only consider recently ingested issues
+
 # 4.1.2
 
 - Save performance transaction data in bulk, instead of one at a time
