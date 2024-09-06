@@ -1,16 +1,19 @@
-from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
 from apps.organizations_ext.models import OrganizationUserRole
-from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 from ..models import Release
 
 
-class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
+class ReleaseAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
     def setUp(self):
-        self.create_logged_in_user()
+        self.client.force_login(self.user)
 
     def test_create(self):
         url = reverse("api:create_release", args=[self.organization.slug])
@@ -108,7 +111,7 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         release = baker.make(
             "releases.Release", organization=self.organization, projects=[self.project]
         )
-        other_project= baker.make("projects.Project", organization=self.organization)
+        other_project = baker.make("projects.Project", organization=self.organization)
         url = reverse(
             "api:delete_project_release",
             kwargs={
@@ -132,3 +135,14 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(Release.objects.all().count(), 0)
+
+    def test_assemble(self):
+        version = "app@v1"
+        baker.make("releases.Release", version=version, organization=self.organization)
+        url = reverse("api:assemble_release", args=[self.organization.slug, version])
+        data = {
+            "checksum": "94bc085fe32db9b4b1b82236214d65eeeeeeeeee",
+            "chunks": ["94bc085fe32db9b4b1b82236214d65eeeeeeeeee"],
+        }
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)

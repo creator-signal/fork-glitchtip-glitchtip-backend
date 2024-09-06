@@ -386,9 +386,7 @@ async def get_project_release_file(
     )
 
 
-@router.post(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/assemble/"
-)
+@router.post("/organizations/{slug:organization_slug}/releases/{str:version}/assemble/")
 @has_permission(["project:releases", "project:write", "project:admin"])
 async def assemble_release(
     request: AuthHttpRequest,
