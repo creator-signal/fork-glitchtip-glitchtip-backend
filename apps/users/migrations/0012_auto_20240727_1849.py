@@ -107,6 +107,7 @@ def migrate_mfa(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("users", "0011_alter_user_email"),
+        ("django_rest_mfa", "0002_alter_userkey_key_type"),
     ]
 
     operations = [migrations.RunPython(migrate_mfa, migrations.RunPython.noop)]
