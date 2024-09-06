@@ -1,5 +1,7 @@
 # Unreleased
 
+- Fix bug where release names with special chars did not allow release assemble to work
+
 # v4.1.3
 
 - Optimize alert sending logic to only consider recently ingested issues
