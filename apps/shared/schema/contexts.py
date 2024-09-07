@@ -83,9 +83,9 @@ class OSContext(LaxIngestSchema, ExcludeNoneSchema):
 
 class RuntimeContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["runtime"] = "runtime"
-    name: str  # Recommended
-    version: Optional[str] = None
-    raw_description: Optional[str] = None
+    name: str | None = None  # Recommended
+    version: str | None = None
+    raw_description: str | None = None
 
 
 class AppContext(LaxIngestSchema, ExcludeNoneSchema):
@@ -200,6 +200,7 @@ ContextsUnion = Union[
     ResponseContext,
 ]
 
+# TODO warns Failed to get discriminator value for tagged union serialization with value
 Contexts = dict[str, Union[Annotated[ContextsUnion, Field(discriminator="type")], Any]]
 
 
