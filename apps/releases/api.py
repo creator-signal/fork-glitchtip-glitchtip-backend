@@ -40,7 +40,7 @@ DELETE /organizations/{organization_slug}/releases/{version}/files/{file_id}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
-PUT /projects/organizations/{organization_slug}/releases/{version}/
+PUT /projects/organizations/{organization_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/ (sentry undocumented)

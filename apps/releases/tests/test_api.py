@@ -121,7 +121,6 @@ class ReleaseAPITestCase(GlitchTestCase):
         )
         data = {"dateReleased": "2021-09-04T14:08:57.388525996Z"}
         res = self.client.put(url, data, content_type="application/json")
-        import ipdb; ipdb.set_trace()
         self.assertContains(res, data["dateReleased"][:14])
 
     def test_destroy_project_release(self):
