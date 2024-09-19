@@ -40,6 +40,7 @@ DELETE /organizations/{organization_slug}/releases/{version}/files/{file_id}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
+PUT /projects/organizations/{organization_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/ (sentry undocumented)
@@ -295,6 +296,33 @@ async def get_project_release(
             version=version,
         )
     )
+
+
+@router.put(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/",
+    response=ReleaseSchema,
+    by_alias=True,
+)
+@has_permission(["project:releases"])
+async def update_project_release(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    version: str,
+    payload: ReleaseUpdate,
+):
+    user_id = request.auth.user_id
+    release = await aget_object_or_404(
+        get_releases_queryset(
+            organization_slug, user_id, version=version, project_slug=project_slug
+        )
+    )
+    for attr, value in payload.dict().items():
+        setattr(release, attr, value)
+    await release.asave()
+    return await get_releases_queryset(
+        organization_slug, user_id, id=release.id, project_slug=project_slug
+    ).aget()
 
 
 @router.delete(

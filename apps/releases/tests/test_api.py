@@ -107,6 +107,22 @@ class ReleaseAPITestCase(GlitchTestCase):
         self.assertNotContains(res, release2.version)  # User not in project
         self.assertEqual(len(res.json()), 1)
 
+    def test_finalize_project_release(self):
+        release = baker.make(
+            "releases.Release", organization=self.organization, projects=[self.project]
+        )
+        url = reverse(
+            "api:update_project_release",
+            kwargs={
+                "organization_slug": release.organization.slug,
+                "project_slug": self.project.slug,
+                "version": release.version,
+            },
+        )
+        data = {"dateReleased": "2021-09-04T14:08:57.388525996Z"}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertContains(res, data["dateReleased"][:14])
+
     def test_destroy_project_release(self):
         release = baker.make(
             "releases.Release", organization=self.organization, projects=[self.project], version="@1.1.1"
