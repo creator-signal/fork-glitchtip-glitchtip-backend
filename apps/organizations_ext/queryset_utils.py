@@ -6,8 +6,14 @@ from apps.teams.models import Team
 from .models import Organization, OrganizationUser
 
 
-def get_organizations_queryset(user_id, role_required=False, add_details=False):
+def get_organizations_queryset(
+    user_id, role_required=False, add_details=False, organization_slug=None
+):
     qs = Organization.objects.filter(users=user_id)
+
+    if organization_slug:
+        qs = qs.filter(slug=organization_slug)
+
     if role_required:
         qs = qs.annotate(
             actor_role=Subquery(
