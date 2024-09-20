@@ -121,6 +121,7 @@ async def update_organization(
             request.auth.user_id,
             role_required=True,
             add_details=True,
+            organization_slug=organization_slug,
         ),
         slug=organization_slug,
     )
@@ -139,8 +140,11 @@ async def update_organization(
 @has_permission(["org:admin"])
 async def delete_organization(request: AuthHttpRequest, organization_slug: str):
     organization = await aget_object_or_404(
-        get_organizations_queryset(request.auth.user_id, role_required=True),
-        slug=organization_slug,
+        get_organizations_queryset(
+            request.auth.user_id,
+            role_required=True,
+            organization_slug=organization_slug,
+        )
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
@@ -206,10 +210,11 @@ async def create_organization_member(
 ):
     user_id = request.auth.user_id
     organization = await aget_object_or_404(
-        get_organizations_queryset(user_id, role_required=True)
+        get_organizations_queryset(
+            user_id, role_required=True, organization_slug=organization_slug
+        )
         .filter(organization_users__user=user_id)
         .prefetch_related("organization_users"),
-        slug=organization_slug,
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
