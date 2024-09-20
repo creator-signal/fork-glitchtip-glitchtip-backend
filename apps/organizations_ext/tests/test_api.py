@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUser
+from apps.organizations_ext.models import OrganizationUser, OrganizationUserRole
 
 
 class OrganizationsAPITestCase(TestCase):
@@ -10,7 +10,7 @@ class OrganizationsAPITestCase(TestCase):
     def setUpTestData(cls):
         cls.user = baker.make("users.user")
         cls.organization = baker.make("organizations_ext.Organization")
-        cls.organization.add_user(cls.user)
+        cls.org_user = cls.organization.add_user(cls.user)
         cls.url = reverse("api:list_organizations")
 
     def setUp(self):
@@ -73,4 +73,27 @@ class OrganizationsAPITestCase(TestCase):
         self.assertContains(res, data["name"])
         self.assertTrue(
             OrganizationUser.objects.filter(organization__name=data["name"]).exists()
+        )
+
+    def test_organizations_delete_without_permission(self):
+        '''
+        Ensure queryset with role_required checks the correct organization user's role
+        '''
+        organization_2 = baker.make("organizations_ext.Organization")
+
+        org_2_user = organization_2.add_user(self.user)
+        org_2_user.role = OrganizationUserRole.MEMBER
+        org_2_user.save()
+
+        url = reverse("api:delete_organization", args=[organization_2.slug])
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 403)
+
+        org_2_user.role = OrganizationUserRole.OWNER
+        org_2_user.save()
+
+        res = self.client.delete(url)
+        self.assertEqual(
+            res.status_code,
+            204,
         )
