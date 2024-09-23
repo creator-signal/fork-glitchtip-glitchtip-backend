@@ -1,5 +1,9 @@
 # Unreleased
 
+- Upgrade to django-allauth 65.0.0 
+
+# v4.1.4
+
 - Fix bug where release names with special chars did not allow release assemble to work
 
 # v4.1.3
