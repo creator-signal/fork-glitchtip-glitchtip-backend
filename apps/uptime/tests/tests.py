@@ -9,7 +9,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 

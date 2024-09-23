@@ -15,13 +15,9 @@ from apps.users.utils import ais_user_registration_open
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
+from .constants import OrganizationUserRole
 from .invitation_backend import InvitationTokenGenerator
-from .models import (
-    Organization,
-    OrganizationOwner,
-    OrganizationUser,
-    OrganizationUserRole,
-)
+from .models import Organization, OrganizationOwner, OrganizationUser
 from .queryset_utils import get_organization_users_queryset, get_organizations_queryset
 from .schema import (
     AcceptInviteIn,

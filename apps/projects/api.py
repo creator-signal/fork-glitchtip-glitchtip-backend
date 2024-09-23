@@ -6,7 +6,8 @@ from ninja import Router
 from ninja.errors import ValidationError
 from ninja.pagination import paginate
 
-from apps.organizations_ext.models import Organization, OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
+from apps.organizations_ext.models import Organization
 from apps.shared.types import MeID
 from apps.teams.models import Team
 from apps.teams.schema import ProjectTeamSchema

@@ -4,7 +4,8 @@ from typing import Optional
 from django.test import TestCase
 from model_bakery import baker
 
-from apps.organizations_ext.models import Organization, OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
+from apps.organizations_ext.models import Organization
 
 
 class GlitchTestCase(TestCase):

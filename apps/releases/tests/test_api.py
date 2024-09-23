@@ -1,7 +1,7 @@
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 from glitchtip.test_utils.test_case import GlitchTestCase
 
 from ..models import Release
@@ -38,7 +38,9 @@ class ReleaseAPITestCase(GlitchTestCase):
         self.assertNotContains(res, release3.version)  # Filtered our by url
 
     def test_retrieve(self):
-        release = baker.make("releases.Release", organization=self.organization, version="@1.1.1")
+        release = baker.make(
+            "releases.Release", organization=self.organization, version="@1.1.1"
+        )
         url = reverse(
             "api:get_release",
             kwargs={
@@ -63,7 +65,9 @@ class ReleaseAPITestCase(GlitchTestCase):
         self.assertContains(res, data["dateReleased"][:14])
 
     def test_destroy_org_release(self):
-        release1 = baker.make("releases.Release", organization=self.organization, version="@1.1.1")
+        release1 = baker.make(
+            "releases.Release", organization=self.organization, version="@1.1.1"
+        )
         url = reverse(
             "api:delete_organization_release",
             kwargs={
@@ -125,7 +129,10 @@ class ReleaseAPITestCase(GlitchTestCase):
 
     def test_destroy_project_release(self):
         release = baker.make(
-            "releases.Release", organization=self.organization, projects=[self.project], version="@1.1.1"
+            "releases.Release",
+            organization=self.organization,
+            projects=[self.project],
+            version="@1.1.1",
         )
         other_project = baker.make("projects.Project", organization=self.organization)
         url = reverse(

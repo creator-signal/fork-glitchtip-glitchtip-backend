@@ -2,7 +2,8 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUser, OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
+from apps.organizations_ext.models import OrganizationUser
 
 
 class OrganizationsAPITestCase(TestCase):
@@ -76,9 +77,9 @@ class OrganizationsAPITestCase(TestCase):
         )
 
     def test_organizations_update_without_permissions(self):
-        '''
+        """
         Ensure queryset with role_required checks the correct organization user's role
-        '''
+        """
         organization_2 = baker.make("organizations_ext.Organization")
 
         org_2_user = organization_2.add_user(self.user)
@@ -100,9 +101,9 @@ class OrganizationsAPITestCase(TestCase):
         )
 
     def test_organizations_delete_without_permissions(self):
-        '''
+        """
         Ensure queryset with role_required checks the correct organization user's role
-        '''
+        """
         organization_2 = baker.make("organizations_ext.Organization")
 
         org_2_user = organization_2.add_user(self.user)

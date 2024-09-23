@@ -6,7 +6,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
-from ..models import OrganizationUser, OrganizationUserRole
+from ..constants import OrganizationUserRole
+from ..models import OrganizationUser
 
 
 class OrganizationUsersTestCase(TestCase):
@@ -243,9 +244,7 @@ class OrganizationUsersTestCase(TestCase):
             "orgRole": OrganizationUserRole.MANAGER.label.lower(),
             "teamRoles": [],
         }
-        url = reverse(
-            "api:list_organization_members", args=[organization_2.slug]
-        )
+        url = reverse("api:list_organization_members", args=[organization_2.slug])
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 403)
 
