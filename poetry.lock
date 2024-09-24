@@ -931,12 +931,12 @@ bcrypt = ["bcrypt"]
 
 [[package]]
 name = "django-allauth"
-version = "65.0.0"
+version = "65.0.1"
 description = "Integrated set of Django applications addressing authentication, registration, account management as well as 3rd party (social) account authentication."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "django_allauth-65.0.0.tar.gz", hash = "sha256:5bc344c7caa610b4ef87f529831473cb0c17184696a5f3bcd4678c8ead983e61"},
+    {file = "django_allauth-65.0.1.tar.gz", hash = "sha256:1f8281e2dc17d3b977bcd95b99538f128c5cd2fb2551346a7f8ad31aa76f17cc"},
 ]
 
 [package.dependencies]
