@@ -50,7 +50,7 @@ def send_uptime_as_webhook(
         return send_googlechat_webhook(recipient.url, [card])
     elif recipient.recipient_type == RecipientType.DISCORD:
         embed = DiscordEmbed(
-            title=monitor,
+            title=monitor.name,
             description=message,
             color=None,
             fields=[],
