@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.db.models import F, OuterRef, Q
 from django.db.models.functions import Coalesce
@@ -106,6 +107,11 @@ class Organization(SharedBaseModel, OrganizationBase):
     )
     is_accepting_events = models.BooleanField(
         default=True, help_text="Used for throttling at org level"
+    )
+    event_throttle_rate = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(100)],
+        help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
     )
     open_membership = models.BooleanField(
         default=True, help_text="Allow any organization member to join any team"
