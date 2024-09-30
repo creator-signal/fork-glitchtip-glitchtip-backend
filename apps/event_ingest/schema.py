@@ -215,7 +215,7 @@ class RequestEnv(LaxIngestSchema):
     remote_addr: str | None
 
 
-QueryString = Union[str, ListKeyValue, dict[str, str | None]]
+QueryString = str | ListKeyValue | dict[str, str | dict[str, Any] | None]
 """Raw URL querystring, list, or dict"""
 KeyValueFormat = Union[list[list[str | None]], dict[str, CoercedStr | None]]
 """
