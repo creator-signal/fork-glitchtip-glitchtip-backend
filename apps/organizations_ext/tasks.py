@@ -2,7 +2,6 @@ from celery import shared_task
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Q
-from djstripe.models import Product
 
 from .email import InvitationEmail, MetQuotaEmail
 from .models import Organization
@@ -30,6 +29,8 @@ def get_free_tier_organizations_with_event_count():
 
 @shared_task
 def check_organization_throttle(organization_id: int):
+    from djstripe.models import Product
+
     # Pretty fast: random.random() < 1/5000
     if not cache.add(f"org-throttle-{organization_id}", True):
         return  # Recent check already performed
