@@ -108,6 +108,9 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS * 2
 )
 
+# Check if a throttle is needed 1 out of every 5000 event requests
+GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
+
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 
