@@ -1,13 +1,67 @@
+from datetime import timedelta
+
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from ..models import Organization
 from ..tasks import (
+    check_organization_throttle,
     get_free_tier_organizations_with_event_count,
     set_organization_throttle,
 )
+
+
+class OrganizationThrottleCheckTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.product = baker.make(
+            "djstripe.Product", active=True, metadata={"events": 10}
+        )
+        cls.plan = baker.make(
+            "djstripe.Plan", active=True, amount=0, product=cls.product
+        )
+        cls.organization = baker.make("organizations_ext.Organization")
+        cls.user = baker.make("users.user")
+        cls.organization.add_user(cls.user)
+        cls.customer = baker.make(
+            "djstripe.Customer", subscriber=cls.organization, livemode=False
+        )
+        cls.subscription = baker.make(
+            "djstripe.Subscription",
+            customer=cls.customer,
+            livemode=False,
+            plan=cls.plan,
+            status="active",
+            current_period_end=timezone.now() + timedelta(hours=1),
+        )
+
+    @override_settings(
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
+    )
+    def test_check_throttle(self):
+        check_organization_throttle(self.organization.id)
+        self.assertTrue(Organization.objects.filter(event_throttle_rate=0).exists())
+
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project__organization=self.organization,
+            count=11,
+        )
+        check_organization_throttle(self.organization.id)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.event_throttle_rate, 10)
+
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project__organization=self.organization,
+            count=100,
+        )
+        check_organization_throttle(self.organization.id)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.event_throttle_rate, 100)
 
 
 class OrganizationThrottlingTestCase(TestCase):
