@@ -1,5 +1,6 @@
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
+import random
 
 from django.conf import settings
 from django.core.cache import cache
@@ -8,7 +9,9 @@ from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.projects.models import Project
 from glitchtip.api.exceptions import ThrottleException
+from glitchtip.utils import async_call_celery_task
 from sentry.utils.auth import parse_auth_header
+from apps.organizations_ext.tasks import check_organization_throttle
 
 from .constants import EVENT_BLOCK_CACHE_KEY
 
@@ -62,7 +65,7 @@ def deserialize_throttle(input: str) -> None | tuple[int, int]:
         return int(parts[1]), int(parts[2])
 
 
-async def get_project(request: HttpRequest) -> Optional[Project]:
+async def get_project(request: HttpRequest) -> Project | None:
     """
     Return the valid and accepting events project based on a request.
 
@@ -109,10 +112,18 @@ async def get_project(request: HttpRequest) -> Optional[Project]:
         raise REJECTION_MAP["t"]
     if not project.is_accepting_events:
         raise REJECTION_MAP["t"]
+
+    # Check throttle needs every 1 out of X requests
+    if settings.BILLING_ENABLED and random.random() < 1/settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL:
+        await async_call_celery_task(
+            check_organization_throttle,
+            project.organization_id
+        )
+
     return project
 
 
-async def event_auth(request: HttpRequest) -> Optional[Project]:
+async def event_auth(request: HttpRequest) -> Project | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
     Throttling is also handled here.
