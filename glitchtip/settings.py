@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import warnings
+from datetime import timedelta
 
 import environ
 import sentry_sdk
@@ -761,13 +762,9 @@ if BILLING_ENABLED:
     STRIPE_LIVE_PUBLIC_KEY = env.str("STRIPE_LIVE_PUBLIC_KEY", None)
     STRIPE_LIVE_SECRET_KEY = env.str("STRIPE_LIVE_SECRET_KEY", None)
     DJSTRIPE_WEBHOOK_SECRET = env.str("DJSTRIPE_WEBHOOK_SECRET", None)
-    CELERY_BEAT_SCHEDULE["set-organization-throttle"] = {
-        "task": "apps.organizations_ext.tasks.set_organization_throttle",
-        "schedule": crontab(hour=7, minute=1),
-    }
-    CELERY_BEAT_SCHEDULE["warn-organization-throttle"] = {
-        "task": "apps.djstripe_ext.tasks.warn_organization_throttle",
-        "schedule": crontab(minute=30),
+    CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
+        "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
+        "schedule": timedelta(hours=4),
     }
 elif TESTING:
     # Must run tests with djstripe enabled
