@@ -125,7 +125,11 @@ async def get_project(request: HttpRequest) -> Project | None:
     if not project:
         cache.set(block_cache_key, "v", REJECTION_WAIT)
         raise REJECTION_MAP["v"]
-    if not project.organization.is_accepting_events:
+    if (
+        not project.organization.is_accepting_events
+        or project.organization.event_throttle_rate == 100
+        or project.event_throttle_rate == 100
+    ):
         cache.set(block_cache_key, "t", REJECTION_WAIT)
         raise REJECTION_MAP["t"]
     if project.organization.event_throttle_rate or project.event_throttle_rate:
@@ -142,10 +146,12 @@ async def get_project(request: HttpRequest) -> Project | None:
             raise REJECTION_MAP["t"]
 
     # Check throttle needs every 1 out of X requests
-    if settings.BILLING_ENABLED and random.random() < 1/settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL:
+    if (
+        settings.BILLING_ENABLED
+        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
+    ):
         await async_call_celery_task(
-            check_organization_throttle,
-            project.organization_id
+            check_organization_throttle, project.organization_id
         )
 
     return project
