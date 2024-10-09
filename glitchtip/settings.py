@@ -428,7 +428,8 @@ if DATABASE_HOST and DATABASE_PASSWORD:
         "CONN_HEALTH_CHECKS": env.bool("DATABASE_CONN_HEALTH_CHECKS", False),
     }
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
-DATABASES["default"]["OPTIONS"] = {}
+if not DATABASES["default"].get("OPTIONS"):
+    DATABASES["default"]["OPTIONS"] = {}
 if env.bool("DATABASE_POOL", False):
     pool_options = {}
     min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
