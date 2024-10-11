@@ -38,7 +38,7 @@ test:
     matrix:
       - VERSION: '3.11'
         POSTGRES_VERSION: '13'
-      - VERSION: '3.12'
+      - VERSION: '3.13'
         POSTGRES_VERSION: '16'
 
 lint:
