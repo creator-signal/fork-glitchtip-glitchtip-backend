@@ -46,7 +46,7 @@ test:
     matrix:
       - PYTHON_VERSION: '3.11'
         POSTGRES_VERSION: '13'
-      - PYTHON_VERSION: '3.13'
+      - PYTHON_VERSION: '3.12'
         POSTGRES_VERSION: '16'
 
 lint:
