@@ -15,14 +15,24 @@ class MetQuotaEmail(DetailEmail):
         return self.object.email
 
     def get_context_data(self, **kwargs):
+        from djstripe.models import Product
+
         context = super().get_context_data(**kwargs)
         base_url = settings.GLITCHTIP_URL.geturl()
-        event_limit = settings.BILLING_FREE_TIER_EVENTS
         organization = self.object
         subscription_link = f"{base_url}/{organization.slug}/settings/subscription"
         context["organization_name"] = organization.name
-        context["event_limit"] = event_limit
-        context["subscription_link"] = subscription_link
+        product = Product.objects.filter(
+            plan__subscriptions__customer__subscriber=organization,
+            plan__subscriptions__status="active",
+        ).first()
+        context.update(
+            {
+                "product": product,
+                "event_limit": product.metadata.get("events") if product else None,
+                "subscription_link": subscription_link,
+            }
+        )
         return context
 
 

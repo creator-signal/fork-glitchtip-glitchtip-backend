@@ -745,8 +745,6 @@ PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 # Support plans available. Email info@burkesoftware.com for more info.
 I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
 
-# Max events per month for free tier
-BILLING_FREE_TIER_EVENTS = env.int("BILLING_FREE_TIER_EVENTS", 1000)
 DJSTRIPE_SUBSCRIBER_MODEL = "organizations_ext.Organization"
 DJSTRIPE_SUBSCRIBER_MODEL_REQUEST_CALLBACK = organization_request_callback
 DJSTRIPE_USE_NATIVE_JSONFIELD = True

@@ -61,14 +61,15 @@ def _check_and_update_throttle(org: Organization):
         org_throttle = 10
 
     if org.event_throttle_rate != org_throttle:
-        if org_throttle > org.event_throttle_rate:
-            send_throttle_email.delay(org.id, org.event_throttle_rate, org_throttle)
+        old_throttle = org.event_throttle_rate
         org.event_throttle_rate = org_throttle
         org.save(update_fields=["event_throttle_rate"])
+        if org_throttle > old_throttle:
+            send_throttle_email.delay(org.id)
 
 
 @shared_task
-def send_throttle_email(organization_id: int, old_throttle: int, new_throttle: int):
+def send_throttle_email(organization_id: int):
     MetQuotaEmail(pk=organization_id).send_email()
 
 

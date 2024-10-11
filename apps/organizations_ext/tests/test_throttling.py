@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from freezegun import freeze_time
@@ -65,6 +66,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         check_organization_throttle(self.organization.id)
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 10)
+        self.assertEqual(len(mail.outbox), 1)
 
         baker.make(
             "projects.IssueEventProjectHourlyStatistic",
@@ -74,6 +76,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         check_organization_throttle(self.organization.id)
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
+        self.assertEqual(len(mail.outbox), 2)
 
     def test_check_all_organizations_throttle(self):
         org = self.organization
@@ -90,12 +93,14 @@ class OrganizationThrottleCheckTestCase(TestCase):
         check_all_organizations_throttle()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
+        self.assertEqual(len(mail.outbox), 0)
 
         # 11 events (of 10), small throttle
         self._make_events(5)
         check_all_organizations_throttle()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 10)
+        self.assertEqual(len(mail.outbox), 1)
 
         # New time period, should reset throttle
         now = self.subscription.current_period_start + timedelta(hours=1)
@@ -105,6 +110,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         check_all_organizations_throttle()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
+        self.assertEqual(len(mail.outbox), 1)
 
         # Throttle again
         with freeze_time(now):
