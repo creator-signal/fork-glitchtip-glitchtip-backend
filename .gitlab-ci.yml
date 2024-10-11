@@ -10,6 +10,7 @@ variables:
   UV_PROJECT_ENVIRONMENT: "/usr/local"
   UV_CACHE_DIR: ".uv-cache"
   DEBUG: "true"
+  CI_DEBUG_TRACE: "true"
 
 include:
   - template: SAST.gitlab-ci.yml
@@ -53,7 +54,7 @@ test:
 lint:
   image: ghcr.io/astral-sh/ruff
   script:
-    - check glitchtip apps
+    - /ruff check glitchtip apps
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
