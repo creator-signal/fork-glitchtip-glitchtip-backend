@@ -41,7 +41,7 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     DSN keys, be connected to exactly one organization, and provide user permissions
     through teams.
     """
-
+    id: str
     avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
     features: list = []
@@ -65,6 +65,11 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
             "platform",
             "event_throttle_rate",  # Not in Sentry OSS
         ]
+
+    @staticmethod
+    def resolve_id(obj):
+        return str(obj.id)
+
 
     class Config(CamelSchema.Config):
         pass
