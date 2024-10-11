@@ -38,11 +38,11 @@ test:
     matrix:
       - VERSION: '3.11'
         POSTGRES_VERSION: '13'
-      - VERSION: '3.12'
+      - VERSION: '3.13'
         POSTGRES_VERSION: '16'
 
 lint:
-  image: python:3.12
+  image: python:3.13
   script:
     - curl -sSL https://install.python-poetry.org | python3 -
     - $POETRY_HOME/bin/poetry install --no-interaction --no-ansi
