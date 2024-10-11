@@ -2,9 +2,12 @@ variables:
   PROJECT_NAME: glitchtip
   PIP_DISABLE_PIP_VERSION_CHECK: "on"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  POETRY_VIRTUALENVS_CREATE: "false"
-  POETRY_HOME: "/opt/poetry"
   POSTGRES_HOST_AUTH_METHOD: "trust"
+  UV_VERSION: 0.4
+  BASE_LAYER: bookworm-slim
+  UV_SYSTEM_PYTHON: "true"
+  UV_PYTHON_DOWNLOADS: "never"
+  UV_PROJECT_ENVIRONMENT: "/usr/local"
   DEBUG: "true"
 
 include:
@@ -17,7 +20,7 @@ workflow:
     - when: always
 
 test:
-  image: python:$VERSION
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
   variables:
     SECRET_KEY: testing
     ENABLE_TEST_API: "true"
@@ -29,24 +32,21 @@ test:
     paths:
       - .cache/pip
   script:
-    - curl -sSL https://install.python-poetry.org | python3 -
-    - $POETRY_HOME/bin/poetry install --no-interaction --no-ansi
-    - ./manage.py test
+    - uv sync --frozen --no-install-project
+    - uv run ./manage.py test
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
   parallel:
     matrix:
-      - VERSION: '3.11'
+      - PYTHON_VERSION: '3.11'
         POSTGRES_VERSION: '13'
-      - VERSION: '3.13'
+      - PYTHON_VERSION: '3.13'
         POSTGRES_VERSION: '16'
 
 lint:
-  image: python:3.13
+  image: ghcr.io/astral-sh/ruff
   script:
-    - curl -sSL https://install.python-poetry.org | python3 -
-    - $POETRY_HOME/bin/poetry install --no-interaction --no-ansi
-    - ruff check glitchtip/ apps/
+    - check glitchtip/ apps/
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
