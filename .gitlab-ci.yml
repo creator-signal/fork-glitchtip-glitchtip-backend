@@ -52,6 +52,7 @@ test:
 
 lint:
   image: ghcr.io/astral-sh/ruff
+  entrypoint: [""]
   script:
     - ruff check glitchtip/ apps/
   rules:
