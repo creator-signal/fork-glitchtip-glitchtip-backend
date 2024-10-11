@@ -1,63 +1,61 @@
-[tool.poetry]
+[project]
 name = "glitchtip-backend"
 version = "0.1.0"
 description = "Django backend that powers GlitchTip, an open source reimplementation of Sentry"
 authors = ["David Burke"]
 license = "MIT"
-package-mode = false
+requires-python = ">=3.11"
+dependencies = [
+  "django~=5.1",
+  "django-allauth[mfa,socialaccount]~=65.0",
+  "django-cors-headers~=4.0",
+  "django-environ~=0.11",
+  "django-extensions~=3.0",
+  "django-organizations~=2.3",
+  "django-storages[boto3,azure,google]~=1.12",
+  "uWSGI~=2.0",
+  "whitenoise~=6.0",
+  "sentry-sdk~=2.0",
+  "celery[redis]~=5.4",
+  "django-csp~=3.6",
+  "dj-stripe~=2.8",
+  "django-anymail~=11.0",
+  "user-agents~=2.1",
+  "django-ipware~=7.0",
+  "anonymizeip~=1.0",
+  "symbolic~=10.0",
+  "django-rest-mfa~=1.2",
+  "aiohttp~=3.7",
+  "google-cloud-logging~=3.0",
+  "django-prometheus~=2.2",
+  "django-sql-utils~=0.7",
+  "django-redis[hiredis]~=5.2",
+  "uwsgi-chunked~=0.1",
+  "django-import-export~=4.1",
+  "psycopg[c,pool]~=3.1",
+  "uvicorn~=0.30",
+  "gunicorn~=23.0",
+  "django-ninja~=1.3",
+  "boto3~=1.34",
+  "orjson~=3.9",
+  "celery-batches~=0.9",
+  "pydantic[email]~=2.7",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-Django = "~5.1.0"
-django-allauth = {extras = ["mfa", "socialaccount"], version = "^65.0.0"}
-django-cors-headers = "^4.0.0"
-django-environ = "~0.11.2"
-django-extensions = "^3.0.2"
-django-organizations = "^2.3.1"
-django-storages = {extras = ["boto3", "azure", "google"], version = "^1.12.3"}
-uWSGI = "^2.0.18"
-whitenoise = "^6.0.0"
-sentry-sdk = "^2.0.0"
-celery = {version = "~5.4.0", extras = ["redis"]}
-django-csp = "^3.6"
-dj-stripe = "~2.8.0"
-django-anymail = "^11.0.0"
-user-agents = "^2.1"
-django-ipware = "^7.0.0"
-anonymizeip = "^1.0.0"
-symbolic = "^10.0.0"
-aiohttp = "^3.7.4"
-google-cloud-logging = "^3.0.0"
-django-prometheus = "^2.2.0"
-django-sql-utils = "^0.7.0"
-django-redis = {extras = ["hiredis"], version = "^5.2.0"}
-
-uwsgi-chunked = "^0.1.8"
-django-import-export = "~4.1.0"
-psycopg = {extras = ["c", "pool"], version = "^3.1.12"}
-uvicorn = "^0.31.0"
-gunicorn = "^23.0.0"
-django-ninja = "~1.3.0"
-boto3 = "1.35.29"
-orjson = "^3.9.9"
-celery-batches = "^0.9"
-pydantic = {extras = ["email"], version = "^2.9.0"}
-
-[tool.poetry.group.dev.dependencies]
-ipdb = "^0.13.2"
-locust = "^2.10.1"
-freezegun = "^1.1.0"
-rope = "^1.3.0"
-model_bakery = "^1.1.1"
-django-debug-toolbar = "^4.0.0"
-django-stubs = {extras = ["compatible-mypy"], version = "^5.0.0"}
-django-sslserver = "^0.22"
-aioresponses = "^0.7.6"
-requests-mock = "^1.9.3"
-memray = "^1.9.1"
-ruff = "^0.6.0"
-# Needed for test --parallel
-tblib = "^3.0.0"
+[tool.uv]
+dev-dependencies = [
+  "locust~=2.10",
+  "freezegun~=1.1",
+  "model_bakery~=1.1",
+  "django-debug-toolbar~=4.0",
+  "django-stubs[compatible-mypy]~=5.0",
+  "django-sslserver~=0.22",
+  "aioresponses~=0.7",
+  "requests-mock~=1.9",
+  "memray~=1.9",
+  "ruff~=0.6",
+  "tblib~=3.0",  # Needed for test --parallel
+]
 
 [tool.ruff.lint]
 extend-select = ["I"]
@@ -74,7 +72,3 @@ django_settings_module = "glitchtip.settings"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-
-[build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
