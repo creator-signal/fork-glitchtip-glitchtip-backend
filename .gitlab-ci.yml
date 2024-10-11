@@ -1,7 +1,6 @@
 variables:
   PROJECT_NAME: glitchtip
   PIP_DISABLE_PIP_VERSION_CHECK: "on"
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   POSTGRES_HOST_AUTH_METHOD: "trust"
   UV_VERSION: 0.4
   BASE_LAYER: bookworm
