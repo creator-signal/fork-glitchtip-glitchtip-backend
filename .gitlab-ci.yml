@@ -53,7 +53,7 @@ test:
 lint:
   image: ghcr.io/astral-sh/ruff
   script:
-    - check glitchtip/ apps/
+    - ruff check glitchtip/ apps/
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
