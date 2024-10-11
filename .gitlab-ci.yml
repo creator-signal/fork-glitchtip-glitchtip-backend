@@ -51,8 +51,9 @@ test:
         POSTGRES_VERSION: '16'
 
 lint:
-  image: ghcr.io/astral-sh/ruff
-  entrypoint: [""]
+  image:
+    name: ghcr.io/astral-sh/ruff
+    entrypoint: [""]
   script:
     - ruff check glitchtip/ apps/
   rules:
