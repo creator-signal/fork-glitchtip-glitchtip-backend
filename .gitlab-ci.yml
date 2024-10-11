@@ -51,11 +51,9 @@ test:
         POSTGRES_VERSION: '16'
 
 lint:
-  image:
-    name: ghcr.io/astral-sh/ruff
-    entrypoint: [""]
+  image: ghcr.io/astral-sh/ruff
   script:
-    - ruff check glitchtip/ apps/
+    - check glitchtip apps
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
