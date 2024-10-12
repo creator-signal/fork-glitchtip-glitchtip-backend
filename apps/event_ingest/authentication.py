@@ -94,7 +94,7 @@ async def get_project(request: HttpRequest) -> Project | None:
     # block cache check should be right before database call
     block_cache_key = EVENT_BLOCK_CACHE_KEY + str(project_id)
     if block_value := cache.get(block_cache_key):
-        if block_value.startwith("t"):
+        if block_value.startswith("t"):
             if throttle := deserialize_throttle(block_value):
                 org_throttle, project_throttle = throttle
                 if not is_accepting_events(org_throttle) or not is_accepting_events(

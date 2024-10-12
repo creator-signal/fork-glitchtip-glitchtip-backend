@@ -52,6 +52,8 @@ def _check_and_update_throttle(org: Organization):
         .values_list("metadata__events", flat=True)
         .first()
     )
+    if plan_events:
+        plan_events = int(plan_events)
     org_throttle = 0
     if plan_events is None or org.total_event_count > plan_events * 2:
         org_throttle = 100
