@@ -21,4 +21,5 @@ class AuthenticationTestCase(TestCase):
         self.organization.event_throttle_rate = 100
         self.organization.save()
         res = self.client.post(self.url, [{}], content_type="application/json")
+        self.assertEqual(res.headers.get('Retry-After'), '600')
         self.assertEqual(res.status_code, 429)

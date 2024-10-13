@@ -1,3 +1,4 @@
+import math
 import random
 from typing import Literal
 from uuid import UUID
@@ -75,6 +76,11 @@ def is_accepting_events(throttle_rate: int) -> bool:
     return random.randint(0, 100) > throttle_rate
 
 
+def calculate_retry_after(throttle: int):
+  """Calculates Retry-After using a power function."""
+  return math.ceil(0.02 * throttle**2.3)
+
+
 async def get_project(request: HttpRequest) -> Project | None:
     """
     Return the valid and accepting events project based on a request.
@@ -100,7 +106,7 @@ async def get_project(request: HttpRequest) -> Project | None:
                 if not is_accepting_events(org_throttle) or not is_accepting_events(
                     project_throttle
                 ):
-                    raise REJECTION_MAP["t"]
+                    raise ThrottleException(calculate_retry_after(max(throttle)))
         else:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
@@ -131,7 +137,7 @@ async def get_project(request: HttpRequest) -> Project | None:
         or project.event_throttle_rate == 100
     ):
         cache.set(block_cache_key, "t", REJECTION_WAIT)
-        raise REJECTION_MAP["t"]
+        raise ThrottleException(600)
     if project.organization.event_throttle_rate or project.event_throttle_rate:
         cache.set(
             block_cache_key,
@@ -143,7 +149,11 @@ async def get_project(request: HttpRequest) -> Project | None:
         if not is_accepting_events(
             project.organization.event_throttle_rate
         ) or not is_accepting_events(project.event_throttle_rate):
-            raise REJECTION_MAP["t"]
+            raise ThrottleException(
+                calculate_retry_after(
+                    max(project.organization.event_throttle_rate, project.event_throttle_rate)
+                )
+            )
 
     # Check throttle needs every 1 out of X requests
     if (
