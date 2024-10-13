@@ -2,6 +2,7 @@
 
 - Upgrade to django-allauth 65.0.0 
 - Upgrade Python to 3.13
+- Add organization and projects throttle. Can be set in Django admin.
 
 # v4.1.4
 
