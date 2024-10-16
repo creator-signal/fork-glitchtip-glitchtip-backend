@@ -11,7 +11,6 @@ x-environment: &default-environment
   CELERY_WORKER_PREFETCH_MULTIPLIER: 25
   CELERY_WORKER_POOL: "threads"
   CELERY_SKIP_CHECKS: "true"
-  PYTHONBREAKPOINT: "ipdb.set_trace"
 
 x-depends_on: &default-depends_on
   - postgres
