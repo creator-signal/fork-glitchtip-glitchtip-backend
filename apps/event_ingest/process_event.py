@@ -810,7 +810,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
 
         group, group_created = TransactionGroup.objects.get_or_create(
             project_id=ingest_event.project_id,
-            transaction=event.transaction,
+            transaction=event.transaction[:1024],  # Truncate
             op=op,
             method=method,
         )
