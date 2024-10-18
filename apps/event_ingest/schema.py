@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 
 CoercedStr = Annotated[
-    str, BeforeValidator(lambda v: str(v) if isinstance(v, bool) else v)
+    str, BeforeValidator(lambda v: str(v) if isinstance(v, (bool, list)) else v)
 ]
 """
-Coerced Str that will coerce bool to str when found
+Coerced Str that will coerce bool/list to str when found
 """
 
 
@@ -161,7 +161,7 @@ class ValueEventException(LaxIngestSchema):
 class EventMessage(LaxIngestSchema):
     formatted: str = Field(max_length=8192, default="")
     message: str | None = None
-    params: Union[list[str], dict[str, str]] | None = None
+    params: list[CoercedStr] | dict[str, str] | None = None
 
     @model_validator(mode="after")
     def set_formatted(self) -> "EventMessage":
