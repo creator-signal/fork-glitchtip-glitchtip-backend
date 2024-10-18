@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
+from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import (
     Exists,
@@ -618,9 +619,16 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     if settings.CACHE_IS_REDIS:
         # Add set of issue_ids for alerts to process later
-        get_redis_connection("default").sadd(
-            ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
-        )
+        if (
+            get_redis_connection("default").sadd(
+                ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
+            )
+            > 0
+        ):
+            # Set a long expiration time when a key is added
+            # We want all keys to have a long "sanity check" TTL to avoid redis out
+            # of memory errors (we can't ensure end users use all keys lru eviction)
+            cache.expire(ISSUE_IDS_KEY, timeout=3600)
 
     if issues_to_reopen:
         Issue.objects.filter(id__in=issues_to_reopen).update(
