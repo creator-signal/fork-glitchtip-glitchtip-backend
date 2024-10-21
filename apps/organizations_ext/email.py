@@ -21,13 +21,13 @@ class MetQuotaEmail(DetailEmail):
         base_url = settings.GLITCHTIP_URL.geturl()
         organization = self.object
         subscription_link = f"{base_url}/{organization.slug}/settings/subscription"
-        context["organization_name"] = organization.name
         product = Product.objects.filter(
             plan__subscriptions__customer__subscriber=organization,
             plan__subscriptions__status="active",
         ).first()
         context.update(
             {
+                "organization": organization,
                 "product": product,
                 "event_limit": product.metadata.get("events") if product else None,
                 "subscription_link": subscription_link,

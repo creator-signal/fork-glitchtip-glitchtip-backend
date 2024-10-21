@@ -1,5 +1,12 @@
-You have reached your event quota
-Organization: {{ organization_name }}
-Your plan allows for {{ event_limit }} events per month, and your projects have exceeded that limit.
-You will no longer receive events until the monthly cycle resets, or you upgrade your plan.
-Manage your subscription: {{ subscription_link }}"
+Hello and thank you for using GlitchTip. We noticed your organization {{ organization.name|striptags }}
+has exceeded its monthly event limit on your {{ product.name }} and wanted to give you a heads up.
+Your plan allows for {{ event_limit }} events, but for the current billing period we have received
+###EVENT_COUNT### events for your organization. Here are a couple options to avoid this in the future.
+
+Upgrade to a new plan for more events at this link: {{ subscription_link }}
+
+Configure your SDK to send a lower rate of events to GlitchTip
+
+In the meantime, we have placed a {{ organization.event_throttle_rate }}% throttle on incoming events
+from projects on your organization account for this billing period. If you choose to upgrade your plan,
+this throttle will be removed. Otherwise, it will reset at the beginning of your next billing cycle.
