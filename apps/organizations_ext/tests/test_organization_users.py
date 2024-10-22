@@ -294,6 +294,13 @@ class OrganizationUsersTestCase(TestCase):
             ).exists()
         )
 
+    def test_organization_users_update_ownerless_org(self):
+        """Do not allow ownerless organizations"""
+        url = self.get_org_member_detail_url(self.organization.slug, self.org_user.pk)
+        data = {"orgRole": OrganizationUserRole.MEMBER.label.lower(), "teamRoles": []}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+
     def test_organization_users_update_without_permissions(self):
         self.org_user.role = OrganizationUserRole.ADMIN
         self.org_user.save()
