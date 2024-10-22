@@ -45,7 +45,7 @@ from sentry.utils.strings import truncatechars
 
 from ..shared.schema.contexts import (
     BrowserContext,
-    ContextsSchema,
+    Contexts,
     DeviceContext,
     OSContext,
 )
@@ -166,11 +166,11 @@ def devalue(obj: Union[Schema, list]) -> Optional[Union[dict, list]]:
     return None
 
 
-def generate_contexts(event: IngestIssueEvent) -> ContextsSchema:
+def generate_contexts(event: IngestIssueEvent) -> Contexts:
     """
     Add additional contexts if they aren't already set
     """
-    contexts = event.contexts if event.contexts else ContextsSchema(root={})
+    contexts = event.contexts if event.contexts else Contexts({})
 
     if request := event.request:
         if isinstance(request.headers, list):
@@ -178,18 +178,18 @@ def generate_contexts(event: IngestIssueEvent) -> ContextsSchema:
                 (x[1] for x in request.headers if x[0] == "User-Agent"), None
             ):
                 user_agent = parse(ua_string)
-                if "browser" not in contexts.root:
-                    contexts.root["browser"] = BrowserContext(
+                if "browser" not in contexts:
+                    contexts["browser"] = BrowserContext(
                         name=user_agent.browser.family,
                         version=user_agent.browser.version_string,
                     )
-                if "os" not in contexts.root:
-                    contexts.root["os"] = OSContext(
+                if "os" not in contexts:
+                    contexts["os"] = OSContext(
                         name=user_agent.os.family, version=user_agent.os.version_string
                     )
-                if "device" not in contexts.root:
+                if "device" not in contexts:
                     device = user_agent.device
-                    contexts.root["device"] = DeviceContext(
+                    contexts["device"] = DeviceContext(
                         family=device.family,
                         model=device.model,
                         brand=device.brand,
@@ -202,14 +202,14 @@ def generate_tags(event: IngestIssueEvent) -> dict[str, str]:
     tags: dict[str, Optional[str]] = event.tags if isinstance(event.tags, dict) else {}
 
     if contexts := event.contexts:
-        if browser := contexts.root.get("browser"):
+        if browser := contexts.get("browser"):
             if isinstance(browser, BrowserContext):
                 tags["browser.name"] = browser.name
                 tags["browser"] = f"{browser.name} {browser.version}"
-        if os := contexts.root.get("os"):
+        if os := contexts.get("os"):
             if isinstance(os, OSContext):
                 tags["os.name"] = os.name
-        if device := contexts.root.get("device"):
+        if device := contexts.get("device"):
             if isinstance(device, DeviceContext) and device.model:
                 tags["device"] = device.model
 
@@ -527,7 +527,11 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         if user := event.user:
             event_data["user"] = user.dict(exclude_none=True)
         if contexts := event.contexts:
-            event_data["contexts"] = contexts.dict(exclude_none=True)
+            # Contexts may contain dict or Schema
+            event_data["contexts"] = {
+                key: value if isinstance(value, dict) else value.dict(exclude_none=True)
+                for key, value in contexts.items()
+            }
 
         processing_events.append(
             ProcessingEvent(

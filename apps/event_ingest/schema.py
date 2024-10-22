@@ -21,7 +21,7 @@ from pydantic import (
 from apps.issue_events.constants import IssueEventType
 
 from ..shared.schema.base import LaxIngestSchema
-from ..shared.schema.contexts import ContextsSchema
+from ..shared.schema.contexts import Contexts
 from ..shared.schema.event import (
     BaseIssueEvent,
     BaseRequest,
@@ -187,6 +187,23 @@ class EventTemplate(LaxIngestSchema):
     post_context: list[str] | None = None
 
 
+class BaseDebugImage(LaxIngestSchema):
+    type: Literal[Any]
+
+
+class SourceMapImage(BaseDebugImage):
+    type: Literal["sourcemap"]
+    code_file: str
+    debug_id: uuid.UUID
+
+
+DebugImage = Annotated[BaseDebugImage | SourceMapImage, Field(discriminator="type")]
+
+
+class DebugMeta(LaxIngestSchema):
+    images: list[DebugImage]
+
+
 class ValueEventBreadcrumb(LaxIngestSchema):
     values: list[EventBreadcrumb]
 
@@ -291,8 +308,9 @@ class IngestIssueEvent(BaseIssueEvent):
     breadcrumbs: Union[list[EventBreadcrumb], ValueEventBreadcrumb] | None = None
     sdk: ClientSDKInfo | None = None
     request: IngestRequest | None = None
-    contexts: ContextsSchema | None = None
+    contexts: Contexts | None = None
     user: EventUser | None = None
+    debug_meta: DebugMeta | None = None
 
     @field_validator("tags")
     @classmethod
