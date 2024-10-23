@@ -606,16 +606,16 @@ socialaccount = [
 
 [[package]]
 name = "django-anymail"
-version = "12.0"
+version = "11.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/cd/34eca54757511df252ae8b56f5b75f3d137cc51ba53c7c5c74b8d449fa0d/django_anymail-12.0.tar.gz", hash = "sha256:65789c1b0f42915aa0450a4f173f77572d4c552979b748ddd8125af41972ad30", size = 95175 }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/bf/cfbb881d794ac470f56372e8348a3f492a8cf224ac0a3e59b4f63c82350e/django_anymail-11.1.tar.gz", hash = "sha256:ec373c0a2d79f5e6a3ecda819c8087af0b0e114e4ec1d8576dea4c786f9b2a59", size = 94145 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/09/83c613d8781d56af7b8736c7c968f8dc0487763b2680ae9d726a7313c9de/django_anymail-12.0-py3-none-any.whl", hash = "sha256:de8458d713d0f9776da9ed04dcd3a0161be23e9ecbcb49dcf149219700ecd274", size = 131312 },
+    { url = "https://files.pythonhosted.org/packages/2e/82/0d33bc1edf5845709709d3f1e883bc9e42726a80286d07e32e6566c4dc69/django_anymail-11.1-py3-none-any.whl", hash = "sha256:f1a5b2de713f46fbdf311f875a9546511e4aa9bfa1c3f8350d21b43e75579acc", size = 130212 },
 ]
 
 [[package]]
@@ -1138,7 +1138,7 @@ requires-dist = [
     { name = "dj-stripe", specifier = "~=2.8" },
     { name = "django", specifier = "~=5.1" },
     { name = "django-allauth", extras = ["mfa", "socialaccount"], specifier = "~=65.0" },
-    { name = "django-anymail", specifier = "~=12.0" },
+    { name = "django-anymail", specifier = "~=11.0" },
     { name = "django-cors-headers", specifier = "~=4.0" },
     { name = "django-csp", specifier = "~=3.6" },
     { name = "django-environ", specifier = "~=0.11" },
@@ -1594,14 +1594,14 @@ wheels = [
 
 [[package]]
 name = "locust"
-version = "2.31.8"
+version = "2.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "configargparse" },
     { name = "flask" },
     { name = "flask-cors" },
     { name = "flask-login" },
-    { name = "gevent" },
+    { name = "gevent", marker = "python_full_version <= '3.12' or python_full_version > '3.13'" },
     { name = "geventhttpclient" },
     { name = "msgpack" },
     { name = "psutil" },
@@ -1610,9 +1610,9 @@ dependencies = [
     { name = "requests" },
     { name = "werkzeug" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ff/0e/5b9a118625e79657703f154731728ed5e22118f688b496ec6e85de4cbe1d/locust-2.31.8.tar.gz", hash = "sha256:b240c0d3e1724317d9211e81e99fbe42a3469071ef4d34d2ae6a727776d56377", size = 1188964 }
+sdist = { url = "https://files.pythonhosted.org/packages/18/c4/1169f4bf16123236991c653d4aa334dcc46aa27d5f66ea84c3a543c603b0/locust-2.32.0.tar.gz", hash = "sha256:d8f7f5d9d4e801b2e7b0ee3f31109333673da744ccedf85e7da0151f2d263dd9", size = 1190406 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/56/36cfd6d473b2fec7e16b62245b1a1487893f702cfa53ccfdc54234aa6353/locust-2.31.8-py3-none-any.whl", hash = "sha256:4194e3d4a0472f1206c51532ed527017f3da1a7d1037ca4b2f0735d5dcd2f78f", size = 1206169 },
+    { url = "https://files.pythonhosted.org/packages/fa/78/7a2dafb54248e5b2507e1663fc538b6c0cbbe9631e2fa17a025796926983/locust-2.32.0-py3-none-any.whl", hash = "sha256:e004514332b8631ca91382d11d224baee4ced040c5f5c8b2233800ebcbc73c0e", size = 1207795 },
 ]
 
 [[package]]
