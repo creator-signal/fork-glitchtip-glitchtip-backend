@@ -3,7 +3,7 @@ from django.contrib.auth import aget_user
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
-from ninja.errors import HttpError
+from ninja.errors import HttpError, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
@@ -15,13 +15,9 @@ from apps.users.utils import ais_user_registration_open
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
+from .constants import OrganizationUserRole
 from .invitation_backend import InvitationTokenGenerator
-from .models import (
-    Organization,
-    OrganizationOwner,
-    OrganizationUser,
-    OrganizationUserRole,
-)
+from .models import Organization, OrganizationOwner, OrganizationUser
 from .queryset_utils import get_organization_users_queryset, get_organizations_queryset
 from .schema import (
     AcceptInviteIn,
@@ -121,6 +117,7 @@ async def update_organization(
             request.auth.user_id,
             role_required=True,
             add_details=True,
+            organization_slug=organization_slug,
         ),
         slug=organization_slug,
     )
@@ -139,8 +136,11 @@ async def update_organization(
 @has_permission(["org:admin"])
 async def delete_organization(request: AuthHttpRequest, organization_slug: str):
     organization = await aget_object_or_404(
-        get_organizations_queryset(request.auth.user_id, role_required=True),
-        slug=organization_slug,
+        get_organizations_queryset(
+            request.auth.user_id,
+            role_required=True,
+            organization_slug=organization_slug,
+        )
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
@@ -206,10 +206,11 @@ async def create_organization_member(
 ):
     user_id = request.auth.user_id
     organization = await aget_object_or_404(
-        get_organizations_queryset(user_id, role_required=True)
+        get_organizations_queryset(
+            user_id, role_required=True, organization_slug=organization_slug
+        )
         .filter(organization_users__user=user_id)
         .prefetch_related("organization_users"),
-        slug=organization_slug,
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
@@ -300,6 +301,16 @@ async def update_organization_member(
     if member.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "Forbidden")
     member.role = OrganizationUserRole.from_string(payload.org_role)
+    # Disallow an ownerless organization
+    if (
+        member.role < OrganizationUserRole.OWNER
+        and not await OrganizationUser.objects.exclude(id=member_id)
+        .filter(
+            organization__slug=organization_slug, role__gte=OrganizationUserRole.OWNER
+        )
+        .aexists()
+    ):
+        raise ValidationError("Organization must have at least one owner")
     await member.asave()
     return member
 

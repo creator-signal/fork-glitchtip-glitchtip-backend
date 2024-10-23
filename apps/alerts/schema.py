@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from ninja import Field, ModelSchema
 from pydantic import HttpUrl
@@ -11,22 +11,20 @@ from .models import AlertRecipient, ProjectAlert
 
 class EmailAlertRecipientIn(CamelSchema):
     recipient_type: Literal[RecipientType.EMAIL]
-    url: Optional[Union[HttpUrl, Literal[""]]] = Field(default="")
+    url: HttpUrl | Literal[""] | None = Field(default="")
 
 
 class WebhookAlertRecipientIn(CamelSchema):
-    recipient_type: Union[
-        Literal[
-            RecipientType.DISCORD,
-            RecipientType.GENERAL_WEBHOOK,
-            RecipientType.GOOGLE_CHAT,
-        ]
+    recipient_type: Literal[
+        RecipientType.DISCORD,
+        RecipientType.GENERAL_WEBHOOK,
+        RecipientType.GOOGLE_CHAT,
     ]
     url: HttpUrl
 
 
 AlertRecipientIn = Annotated[
-    Union[EmailAlertRecipientIn, WebhookAlertRecipientIn],
+    EmailAlertRecipientIn | WebhookAlertRecipientIn,
     Field(discriminator="recipient_type"),
 ]
 
@@ -39,7 +37,7 @@ class AlertRecipientSchema(CamelSchema, ModelSchema):
 
 class ProjectAlertIn(CamelSchema, ModelSchema):
     name: str = Field(default="")
-    alert_recipients: Optional[list[AlertRecipientIn]] = Field(default_factory=list)
+    alert_recipients: list[AlertRecipientIn] | None = Field(default_factory=list)
 
     class Meta:
         model = ProjectAlert

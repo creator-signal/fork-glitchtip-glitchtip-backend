@@ -40,6 +40,7 @@ DELETE /organizations/{organization_slug}/releases/{version}/files/{file_id}/
 GET /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/ (sentry undocumented)
+PUT /projects/organizations/{organization_slug}/releases/{version}/ (sentry undocumented)
 POST /projects/{organization_slug}/{project_slug}/releases/ (sentry undocumented)
 GET /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/
 DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/files/{file_id}/ (sentry undocumented)
@@ -151,7 +152,7 @@ async def list_releases(
 
 
 @router.get(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/",
     response=ReleaseSchema,
     by_alias=True,
 )
@@ -163,7 +164,7 @@ async def get_release(request: AuthHttpRequest, organization_slug: str, version:
 
 
 @router.put(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/",
     response=ReleaseSchema,
     by_alias=True,
 )
@@ -185,7 +186,7 @@ async def update_release(
 
 
 @router.delete(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/",
     response={204: None},
 )
 @has_permission(["project:releases"])
@@ -201,7 +202,7 @@ async def delete_organization_release(
 
 
 @router.get(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/files/",
     response=list[ReleaseFileSchema],
     by_alias=True,
 )
@@ -221,7 +222,7 @@ async def list_release_files(
 
 
 @router.get(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/{int:file_id}/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/files/{int:file_id}/",
     response=ReleaseFileSchema,
     by_alias=True,
 )
@@ -245,7 +246,7 @@ async def get_organization_release_file(
 
 
 @router.delete(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/files/{int:file_id}/",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/files/{int:file_id}/",
     response={204: None},
 )
 @has_permission(["project:releases"])
@@ -279,7 +280,7 @@ async def list_project_releases(
 
 
 @router.get(
-    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/",
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/",
     response=ReleaseSchema,
     by_alias=True,
 )
@@ -297,8 +298,35 @@ async def get_project_release(
     )
 
 
+@router.put(
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/",
+    response=ReleaseSchema,
+    by_alias=True,
+)
+@has_permission(["project:releases"])
+async def update_project_release(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    version: str,
+    payload: ReleaseUpdate,
+):
+    user_id = request.auth.user_id
+    release = await aget_object_or_404(
+        get_releases_queryset(
+            organization_slug, user_id, version=version, project_slug=project_slug
+        )
+    )
+    for attr, value in payload.dict().items():
+        setattr(release, attr, value)
+    await release.asave()
+    return await get_releases_queryset(
+        organization_slug, user_id, id=release.id, project_slug=project_slug
+    ).aget()
+
+
 @router.delete(
-    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/",
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/",
     response={204: None},
 )
 @has_permission(["project:releases"])
@@ -317,7 +345,7 @@ async def delete_project_release(
 
 
 @router.get(
-    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/",
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/files/",
     response=list[ReleaseFileSchema],
     by_alias=True,
 )
@@ -339,7 +367,7 @@ async def list_project_release_files(
 
 
 @router.delete(
-    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/{int:file_id}/",
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/files/{int:file_id}/",
     response={204: None},
 )
 @has_permission(["project:releases"])
@@ -363,7 +391,7 @@ async def delete_project_release_file(
 
 
 @router.get(
-    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{slug:version}/files/{int:file_id}/",
+    "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/files/{int:file_id}/",
     response=ReleaseFileSchema,
     by_alias=True,
 )
@@ -386,9 +414,7 @@ async def get_project_release_file(
     )
 
 
-@router.post(
-    "/organizations/{slug:organization_slug}/releases/{slug:version}/assemble/"
-)
+@router.post("/organizations/{slug:organization_slug}/releases/{str:version}/assemble/")
 @has_permission(["project:releases", "project:write", "project:admin"])
 async def assemble_release(
     request: AuthHttpRequest,

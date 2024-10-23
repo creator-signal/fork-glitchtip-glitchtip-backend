@@ -4,7 +4,8 @@ from asgiref.sync import sync_to_async
 from django.db.models import Q
 from django.urls import reverse
 
-from apps.organizations_ext.models import OrganizationUser, OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
+from apps.organizations_ext.models import OrganizationUser
 from apps.organizations_ext.resources import (
     OrganizationResource,
     OrganizationUserResource,

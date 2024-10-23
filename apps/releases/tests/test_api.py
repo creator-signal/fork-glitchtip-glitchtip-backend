@@ -1,16 +1,19 @@
-from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
-from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
+from apps.organizations_ext.constants import OrganizationUserRole
+from glitchtip.test_utils.test_case import GlitchTestCase
 
 from ..models import Release
 
 
-class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
+class ReleaseAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
     def setUp(self):
-        self.create_logged_in_user()
+        self.client.force_login(self.user)
 
     def test_create(self):
         url = reverse("api:create_release", args=[self.organization.slug])
@@ -35,7 +38,9 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertNotContains(res, release3.version)  # Filtered our by url
 
     def test_retrieve(self):
-        release = baker.make("releases.Release", organization=self.organization)
+        release = baker.make(
+            "releases.Release", organization=self.organization, version="@1.1.1"
+        )
         url = reverse(
             "api:get_release",
             kwargs={
@@ -60,7 +65,9 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertContains(res, data["dateReleased"][:14])
 
     def test_destroy_org_release(self):
-        release1 = baker.make("releases.Release", organization=self.organization)
+        release1 = baker.make(
+            "releases.Release", organization=self.organization, version="@1.1.1"
+        )
         url = reverse(
             "api:delete_organization_release",
             kwargs={
@@ -104,11 +111,30 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertNotContains(res, release2.version)  # User not in project
         self.assertEqual(len(res.json()), 1)
 
-    def test_destroy_project_release(self):
+    def test_finalize_project_release(self):
         release = baker.make(
             "releases.Release", organization=self.organization, projects=[self.project]
         )
-        other_project= baker.make("projects.Project", organization=self.organization)
+        url = reverse(
+            "api:update_project_release",
+            kwargs={
+                "organization_slug": release.organization.slug,
+                "project_slug": self.project.slug,
+                "version": release.version,
+            },
+        )
+        data = {"dateReleased": "2021-09-04T14:08:57.388525996Z"}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertContains(res, data["dateReleased"][:14])
+
+    def test_destroy_project_release(self):
+        release = baker.make(
+            "releases.Release",
+            organization=self.organization,
+            projects=[self.project],
+            version="@1.1.1",
+        )
+        other_project = baker.make("projects.Project", organization=self.organization)
         url = reverse(
             "api:delete_project_release",
             kwargs={
@@ -132,3 +158,14 @@ class ReleaseAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(Release.objects.all().count(), 0)
+
+    def test_assemble(self):
+        version = "app@v1"
+        baker.make("releases.Release", version=version, organization=self.organization)
+        url = reverse("api:assemble_release", args=[self.organization.slug, version])
+        data = {
+            "checksum": "94bc085fe32db9b4b1b82236214d65eeeeeeeeee",
+            "chunks": ["94bc085fe32db9b4b1b82236214d65eeeeeeeeee"],
+        }
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)

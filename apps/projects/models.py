@@ -1,5 +1,4 @@
 import random
-from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -221,74 +220,6 @@ class ProjectStatisticBase(AggregationModel):
 class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
     class PartitioningMeta(AggregationModel.PartitioningMeta):
         pass
-
-    @classmethod
-    def update(cls, project_id: int, start_time: datetime):
-        """
-        Update current hour and last hour statistics
-        start_time should be the time of the last known event creation
-        This method recalculates both stats, replacing any previous entry
-        """
-        current_hour = start_time.replace(second=0, microsecond=0, minute=0)
-        next_hour = current_hour + timedelta(hours=1)
-        previous_hour = current_hour - timedelta(hours=1)
-        projects = Project.objects.filter(pk=project_id)
-        event_counts = cls.aggregate_queryset(
-            projects, previous_hour, current_hour, next_hour
-        )
-        statistics = []
-        if event_counts["previous_hour_count"]:
-            statistics.append(
-                cls(
-                    project_id=project_id,
-                    date=previous_hour,
-                    count=event_counts["previous_hour_count"],
-                )
-            )
-        if event_counts["current_hour_count"]:
-            statistics.append(
-                cls(
-                    project_id=project_id,
-                    date=current_hour,
-                    count=event_counts["current_hour_count"],
-                )
-            )
-        if statistics:
-            cls.objects.bulk_create(
-                statistics,
-                update_conflicts=True,
-                unique_fields=["project", "date"],
-                update_fields=["count"],
-            )
-
-    @classmethod
-    def aggregate_queryset(
-        cls,
-        project_queryset,
-        previous_hour: datetime,
-        current_hour: datetime,
-        next_hour: datetime,
-    ):
-        # Redundant filter optimization - otherwise all rows are scanned
-        return project_queryset.filter(
-            transactiongroup__transactionevent__start_timestamp__gte=previous_hour,
-            transactiongroup__transactionevent__start_timestamp__lt=next_hour,
-        ).aggregate(
-            previous_hour_count=Count(
-                "transactiongroup__transactionevent",
-                filter=Q(
-                    transactiongroup__transactionevent__start_timestamp__gte=previous_hour,
-                    transactiongroup__transactionevent__start_timestamp__lt=current_hour,
-                ),
-            ),
-            current_hour_count=Count(
-                "transactiongroup__transactionevent",
-                filter=Q(
-                    transactiongroup__transactionevent__start_timestamp__gte=current_hour,
-                    transactiongroup__transactionevent__start_timestamp__lt=next_hour,
-                ),
-            ),
-        )
 
 
 class IssueEventProjectHourlyStatistic(ProjectStatisticBase):

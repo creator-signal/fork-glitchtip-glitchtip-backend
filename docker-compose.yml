@@ -11,7 +11,6 @@ x-environment: &default-environment
   CELERY_WORKER_PREFETCH_MULTIPLIER: 25
   CELERY_WORKER_POOL: "threads"
   CELERY_SKIP_CHECKS: "true"
-  PYTHONBREAKPOINT: "ipdb.set_trace"
 
 x-depends_on: &default-depends_on
   - postgres
@@ -20,11 +19,11 @@ x-volumes: &default-volumes
   - .:/code
 services:
   postgres:
-    image: postgres:16
+    image: postgres:17
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
   redis:
-    image: valkey/valkey:7
+    image: valkey/valkey:8
   web:
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev

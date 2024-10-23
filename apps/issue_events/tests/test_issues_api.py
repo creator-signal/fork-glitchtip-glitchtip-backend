@@ -4,14 +4,16 @@ from timeit import default_timer as timer
 
 from django.contrib.postgres.search import SearchVector
 from django.db.models import F, Value
-from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.event_ingest.model_functions import PipeConcat
-from glitchtip.test_utils.test_case import APIPermissionTestCase, GlitchTipTestCaseMixin
+from glitchtip.test_utils.test_case import (
+    APIPermissionTestCase,
+    GlitchTestCase,
+)
 
 from ..constants import EventStatus, LogLevel
 from ..models import Issue
@@ -30,12 +32,16 @@ def get_organization_issue_url(organization_slug: str, issue_id: int) -> str:
     )
 
 
-class IssueAPITestCase(GlitchTipTestCaseMixin, TestCase):
-    def setUp(self):
-        super().create_logged_in_user()
-        self.list_url = reverse(
-            "api:list_issues", kwargs={"organization_slug": self.organization.slug}
+class IssueAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+        cls.list_url = reverse(
+            "api:list_issues", kwargs={"organization_slug": cls.organization.slug}
         )
+
+    def setUp(self):
+        self.client.force_login(self.user)
 
     def test_retrieve(self):
         issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
@@ -611,12 +617,16 @@ class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
         self.assertGetReqStatusCode(self.list_url, 200)
 
 
-class IssueEventTagsAPITestCase(GlitchTipTestCaseMixin, TestCase):
-    def get_url(self, issue_id: int) -> str:
-        return reverse("api:list_issue_tags", kwargs={"issue_id": issue_id})
+class IssueEventTagsAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
 
     def setUp(self):
-        super().create_logged_in_user()
+        self.client.force_login(self.user)
+
+    def get_url(self, issue_id: int) -> str:
+        return reverse("api:list_issue_tags", kwargs={"issue_id": issue_id})
 
     def test_issue_tags(self):
         issue = baker.make("issue_events.Issue", project=self.project)

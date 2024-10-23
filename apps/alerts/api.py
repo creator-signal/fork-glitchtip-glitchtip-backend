@@ -4,7 +4,7 @@ from django.shortcuts import aget_object_or_404
 from ninja import Router
 from ninja.pagination import paginate
 
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission

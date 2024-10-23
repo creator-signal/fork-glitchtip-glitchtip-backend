@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import UserProjectAlert
 from glitchtip.test_utils.test_case import GlitchTestCase
 
@@ -268,6 +268,101 @@ class UsersTestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 204)
         # Default deletes the row
         self.assertEqual(UserProjectAlert.objects.all().count(), 0)
+
+    def test_alert_notification_recipients_default_false(self):
+        User.inspect = True
+        self.user.subscribe_by_default = False
+        self.user.save()
+
+        no_mail_project = baker.make("projects.Project", organization=self.organization)
+        yes_mail_project = baker.make(
+            "projects.Project", organization=self.organization
+        )
+
+        no_mail_project.teams.add(self.team)
+        yes_mail_project.teams.add(self.team)
+
+        baker.make(
+            "projects.UserProjectAlert",
+            user=self.user,
+            project=no_mail_project,
+            status=0,
+        )
+        baker.make(
+            "projects.UserProjectAlert",
+            user=self.user,
+            project=yes_mail_project,
+            status=1,
+        )
+
+        generic_alert = baker.make("alerts.ProjectAlert", project=self.project)
+        no_mail_alert = baker.make("alerts.ProjectAlert", project=no_mail_project)
+        yes_mail_alert = baker.make("alerts.ProjectAlert", project=yes_mail_project)
+
+        generic_notification = baker.make(
+            "alerts.Notification", project_alert=generic_alert
+        )
+        no_notification = baker.make("alerts.Notification", project_alert=no_mail_alert)
+        yes_notification = baker.make(
+            "alerts.Notification", project_alert=yes_mail_alert
+        )
+
+        self.assertEqual(
+            0, User.objects.alert_notification_recipients(generic_notification).count()
+        )
+        self.assertEqual(
+            0, User.objects.alert_notification_recipients(no_notification).count()
+        )
+        self.assertEqual(
+            1, User.objects.alert_notification_recipients(yes_notification).count()
+        )
+
+    def test_alert_notification_recipients_default_true(self):
+        self.user.subscribe_by_default = True
+        self.user.save()
+
+        no_mail_project = baker.make("projects.Project", organization=self.organization)
+        yes_mail_project = baker.make(
+            "projects.Project", organization=self.organization
+        )
+
+        no_mail_project.teams.add(self.team)
+        yes_mail_project.teams.add(self.team)
+
+        baker.make(
+            "projects.UserProjectAlert",
+            user=self.user,
+            project=no_mail_project,
+            status=0,
+        )
+        baker.make(
+            "projects.UserProjectAlert",
+            user=self.user,
+            project=yes_mail_project,
+            status=1,
+        )
+
+        generic_alert = baker.make("alerts.ProjectAlert", project=self.project)
+        no_mail_alert = baker.make("alerts.ProjectAlert", project=no_mail_project)
+        yes_mail_alert = baker.make("alerts.ProjectAlert", project=yes_mail_project)
+
+        generic_notification = baker.make(
+            "alerts.Notification", project_alert=generic_alert
+        )
+        no_notification = baker.make("alerts.Notification", project_alert=no_mail_alert)
+        yes_notification = baker.make(
+            "alerts.Notification", project_alert=yes_mail_alert
+        )
+
+        self.assertEqual(
+            1, User.objects.alert_notification_recipients(generic_notification).count()
+        )
+        self.assertEqual(
+            0, User.objects.alert_notification_recipients(no_notification).count()
+        )
+        self.assertEqual(
+            1, User.objects.alert_notification_recipients(yes_notification).count()
+        )
 
     def test_reset_password(self):
         """

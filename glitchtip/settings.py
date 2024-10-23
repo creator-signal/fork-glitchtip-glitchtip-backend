@@ -86,6 +86,10 @@ if GLITCHTIP_URL.scheme not in ["http", "https"]:
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 4294967295  # TMP REMOVE THIS
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
+    "DATA_UPLOAD_MAX_NUMBER_FIELDS",
+    default=global_settings.DATA_UPLOAD_MAX_NUMBER_FIELDS,
+)
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", global_settings.DATA_UPLOAD_MAX_MEMORY_SIZE
@@ -103,6 +107,9 @@ GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS = env.int(
 GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS * 2
 )
+
+# Check if a throttle is needed 1 out of every 5000 event requests
+GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
 
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
@@ -196,8 +203,7 @@ INSTALLED_APPS = [
     "psqlextra",
     "django_prometheus",
     "allauth",
-    "apps.account.apps.AccountConfig",
-    # "allauth.account",
+    "allauth.account",
     "allauth.headless",
     "allauth.mfa",
     "allauth.socialaccount",
@@ -276,8 +282,7 @@ MIDDLEWARE += [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "sentry.middleware.proxy.DecompressBodyMiddleware",
     "django.middleware.locale.LocaleMiddleware",
-    "glitchtip.middleware.AccountMiddleware",
-    # "allauth.account.middleware.AccountMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 if ENABLE_OBSERVABILITY_API:
@@ -423,7 +428,8 @@ if DATABASE_HOST and DATABASE_PASSWORD:
         "CONN_HEALTH_CHECKS": env.bool("DATABASE_CONN_HEALTH_CHECKS", False),
     }
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
-DATABASES["default"]["OPTIONS"] = {}
+if not DATABASES["default"].get("OPTIONS"):
+    DATABASES["default"]["OPTIONS"] = {}
 # Enable pool by default, if there is no conn_max_age
 if DATABASES["default"].get("CONN_MAX_AGE", 0) > 0:
     if env.bool("DATABASE_POOL", True):
@@ -795,6 +801,7 @@ if CELERY_TASK_ALWAYS_EAGER:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
+CACHE_IS_REDIS = CACHES["default"]["BACKEND"] == "django_redis.cache.RedisCache"
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"

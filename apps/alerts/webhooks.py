@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import requests
 from django.conf import settings
@@ -23,10 +23,10 @@ class WebhookAttachment:
     title: str
     title_link: str
     text: str
-    image_url: Optional[str] = None
-    color: Optional[str] = None
-    fields: Optional[list[WebhookAttachmentField]] = None
-    mrkdown_in: Optional[list[str]] = None
+    image_url: str | None = None
+    color: str | None = None
+    fields: list[WebhookAttachmentField] | None = None
+    mrkdown_in: list[str] | None = None
 
 
 @dataclass
@@ -51,8 +51,8 @@ class WebhookPayload:
 def send_webhook(
     url: str,
     message: str,
-    attachments: Optional[list[WebhookAttachment]] = None,
-    sections: Optional[list[MSTeamsSection]] = None,
+    attachments: list[WebhookAttachment] | None = None,
+    sections: list[MSTeamsSection] | None = None,
 ):
     if not attachments:
         attachments = []
@@ -92,7 +92,7 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
             fields.append(
                 WebhookAttachmentField(
                     title="Environment",
-                    value=environment['value'],
+                    value=environment["value"],
                     short=True,
                 )
             )
@@ -105,7 +105,7 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
             fields.append(
                 WebhookAttachmentField(
                     title="Release",
-                    value=release['value'],
+                    value=release["value"],
                     short=False,
                 )
             )
@@ -173,7 +173,7 @@ def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
             fields.append(
                 DiscordField(
                     name="Environment",
-                    value=environment['value'],
+                    value=environment["value"],
                     inline=True,
                 )
             )
@@ -186,7 +186,7 @@ def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
             fields.append(
                 DiscordField(
                     name="Release",
-                    value=release['value'],
+                    value=release["value"],
                     inline=False,
                 )
             )
@@ -217,8 +217,8 @@ def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed]):
 
 @dataclass
 class GoogleChatCard:
-    header: Optional[dict] = None
-    sections: Optional[list[dict]] = None
+    header: dict | None = None
+    sections: list[dict] | None = None
 
     def construct_uptime_card(self, title: str, subtitle: str, text: str, url: str):
         self.header = dict(
@@ -255,7 +255,11 @@ class GoogleChatCard:
         )
         if environment:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Environment", text=environment['value']))
+                dict(
+                    decoratedText=dict(
+                        topLabel="Environment", text=environment["value"]
+                    )
+                )
             )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
@@ -264,7 +268,7 @@ class GoogleChatCard:
         )
         if release:
             widgets.append(
-                dict(decoratedText=dict(topLabel="Release", text=release['value']))
+                dict(decoratedText=dict(topLabel="Release", text=release["value"]))
             )
         widgets.append(
             dict(

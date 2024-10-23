@@ -1,6 +1,7 @@
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
@@ -9,6 +10,7 @@ from apps.uptime.models import Monitor
 from apps.users.models import User
 
 
+@csrf_exempt
 def seed_data(request: HttpRequest):
     """
     Delete existing data and seed data used in end to end testing

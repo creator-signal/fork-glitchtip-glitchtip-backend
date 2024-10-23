@@ -22,6 +22,7 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
 
 class ProjectIn(NameSlugProjectSchema):
     platform: Optional[str] = None  # This shouldn't be needed, but is.
+    event_throttle_rate: int = 0  # This shouldn't be needed, but is.
 
     class Meta(NameSlugProjectSchema.Meta):
         model = Project
@@ -29,6 +30,7 @@ class ProjectIn(NameSlugProjectSchema):
             "name",
             "slug",
             "platform",
+            "event_throttle_rate",  # Not in Sentry OSS
             # "default_rules",
         ]
 

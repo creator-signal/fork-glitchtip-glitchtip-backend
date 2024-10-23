@@ -15,7 +15,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
         data = {"data": {"text": "Test"}}
         not_my_issue = baker.make("issue_events.Issue")
 
-        res = self.client.post(self.url, data, format="json")
+        res = self.client.post(self.url, data, content_type="application/json")
 
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.json()["data"]["text"], "Test")
@@ -24,7 +24,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
             "api:list_comments",
             kwargs={"issue_id": not_my_issue.id},
         )
-        res = self.client.post(url, data, format="json")
+        res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 400)
 
     def test_comments_list(self):
@@ -36,9 +36,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
             _quantity=3,
         )
         not_my_issue = baker.make("issue_events.Issue")
-        baker.make(
-            "issue_events.Comment", issue=not_my_issue, _fill_optional=["text"]
-        )
+        baker.make("issue_events.Comment", issue=not_my_issue, _fill_optional=["text"])
         res = self.client.get(self.url)
         self.assertContains(res, comments[2].text)
 
@@ -59,7 +57,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
         )
         data = {"data": {"text": "Test"}}
 
-        res = self.client.put(url, data, format="json")
+        res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.json()["data"]["text"], "Test")
 
     def test_comment_delete(self):

@@ -6,7 +6,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
-from ..models import OrganizationUser, OrganizationUserRole
+from ..constants import OrganizationUserRole
+from ..models import OrganizationUser
 
 
 class OrganizationUsersTestCase(TestCase):
@@ -17,9 +18,7 @@ class OrganizationUsersTestCase(TestCase):
             "organizations_ext.Organization",
             name="<a>No</a><script>HtmlInOrgName</script>",
         )
-        cls.org_user = cls.organization.add_user(
-            cls.user, role=OrganizationUserRole.MANAGER
-        )
+        cls.org_user = cls.organization.add_user(cls.user)
         baker.make("organizations_ext.OrganizationUser", user=cls.user, role=5)
         cls.members_url = reverse(
             "api:list_organization_members", args=[cls.organization.slug]
@@ -230,6 +229,38 @@ class OrganizationUsersTestCase(TestCase):
         res = self.client.post(self.members_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 403)
 
+    def test_organization_users_create_without_org_specific_permissions(self):
+        """
+        Ensure queryset with role_required checks the correct organization user's role.
+        """
+
+        organization_2 = baker.make("organizations_ext.Organization")
+        org_2_user = organization_2.add_user(self.user)
+        org_2_user.role = OrganizationUserRole.ADMIN
+        org_2_user.save()
+
+        data = {
+            "email": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
+        }
+        url = reverse("api:list_organization_members", args=[organization_2.slug])
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 403)
+
+        org_2_user.role = OrganizationUserRole.MANAGER
+        org_2_user.save()
+
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertTrue(
+            OrganizationUser.objects.filter(
+                organization=organization_2,
+                email=data["email"],
+                user=None,
+                role=OrganizationUserRole.MANAGER,
+            ).exists()
+        )
+
     def test_organization_users_reinvite(self):
         other_user = baker.make("users.user")
         baker.make(
@@ -262,6 +293,13 @@ class OrganizationUsersTestCase(TestCase):
                 organization=self.organization, role=new_role, user=other_user
             ).exists()
         )
+
+    def test_organization_users_update_ownerless_org(self):
+        """Do not allow ownerless organizations"""
+        url = self.get_org_member_detail_url(self.organization.slug, self.org_user.pk)
+        data = {"orgRole": OrganizationUserRole.MEMBER.label.lower(), "teamRoles": []}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
 
     def test_organization_users_update_without_permissions(self):
         self.org_user.role = OrganizationUserRole.ADMIN

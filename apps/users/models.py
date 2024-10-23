@@ -6,7 +6,7 @@ from django.contrib.auth.models import (
     PermissionsMixin,
 )
 from django.db import models
-from django.db.models import Q
+from django.db.models import Exists, OuterRef
 from django.utils.translation import gettext_lazy as _
 
 from apps.projects.models import ProjectAlertStatus
@@ -57,12 +57,19 @@ class UserManager(BaseUserManager):
 
     def _exclude_recipients(self, queryset, project):
         """Exclude from queryset users who have a preference not to receive notifications"""
+        from apps.projects.models import UserProjectAlert
+
+        explicit_off = UserProjectAlert.objects.filter(
+            user=OuterRef("pk"), project=project, status=ProjectAlertStatus.OFF
+        )
+
+        has_project_alert = UserProjectAlert.objects.filter(
+            user=OuterRef("pk"), project=project
+        )
+
         return queryset.exclude(
-            Q(
-                userprojectalert__project=project,
-                userprojectalert__status=ProjectAlertStatus.OFF,
-            )
-            | Q(subscribe_by_default=False, userprojectalert=None),
+            Exists(explicit_off)
+            | (~Exists(has_project_alert) & ~models.Q(subscribe_by_default=True))
         ).distinct()
 
 

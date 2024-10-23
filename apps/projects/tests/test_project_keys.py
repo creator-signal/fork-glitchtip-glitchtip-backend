@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 
 from ..models import ProjectKey
 

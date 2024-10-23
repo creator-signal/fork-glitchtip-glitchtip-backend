@@ -33,24 +33,25 @@ def send_uptime_as_webhook(
         else "The monitored site is back up."
     )
     subject = "GlitchTip Uptime Alert"
+    title = monitor.name
 
     if recipient.recipient_type == RecipientType.GENERAL_WEBHOOK:
         attachment = WebhookAttachment(
-            str(monitor.name), monitor.get_detail_url(), message
+            title, monitor.get_detail_url(), message
         )
         section = MSTeamsSection(str(monitor.name), message)
         return send_webhook(recipient.url, subject, [attachment], [section])
     elif recipient.recipient_type == RecipientType.GOOGLE_CHAT:
         card = GoogleChatCard().construct_uptime_card(
             title=subject,
-            subtitle=str(monitor.name),
+            subtitle=title,
             text=message,
             url=monitor.get_detail_url(),
         )
         return send_googlechat_webhook(recipient.url, [card])
     elif recipient.recipient_type == RecipientType.DISCORD:
         embed = DiscordEmbed(
-            title=monitor,
+            title=title,
             description=message,
             color=None,
             fields=[],

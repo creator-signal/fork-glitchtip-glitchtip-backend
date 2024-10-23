@@ -46,6 +46,22 @@ REJECTION_MAP: dict[Literal["v", "t"], Exception] = {
 REJECTION_WAIT = 30
 
 
+def serialize_throttle(org_throttle: int, project_throttle: int):
+    """
+    Format example "t:30:0" means throttle with 30% org throttle and 0% (disaled)
+    project throttle
+    """
+    return f"t:{org_throttle}:{project_throttle}"
+
+
+def deserialize_throttle(input: str) -> None | tuple[int, int]:
+    parts = input.split(":")
+    if len(parts) == 1 and parts[0] == "t":
+        return 0, 0
+    elif len(parts) == 3 and parts[0] == "t":
+        return int(parts[1]), int(parts[2])
+
+
 async def get_project(request: HttpRequest) -> Optional[Project]:
     """
     Return the valid and accepting events project based on a request.
@@ -79,7 +95,9 @@ async def get_project(request: HttpRequest) -> Optional[Project]:
             "scrub_ip_addresses",
             "organization_id",
             "organization__is_accepting_events",
+            "organization__event_throttle_rate",
             "organization__scrub_ip_addresses",
+            "event_throttle_rate",
         )
         .afirst()
     )
@@ -88,6 +106,8 @@ async def get_project(request: HttpRequest) -> Optional[Project]:
         raise REJECTION_MAP["v"]
     if not project.organization.is_accepting_events:
         cache.set(block_cache_key, "t", REJECTION_WAIT)
+        raise REJECTION_MAP["t"]
+    if not project.is_accepting_events:
         raise REJECTION_MAP["t"]
     return project
 

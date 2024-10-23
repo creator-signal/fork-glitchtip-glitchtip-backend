@@ -7,11 +7,8 @@ from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
-from apps.organizations_ext.models import (
-    Organization,
-    OrganizationUser,
-    OrganizationUserRole,
-)
+from apps.organizations_ext.constants import OrganizationUserRole
+from apps.organizations_ext.models import Organization, OrganizationUser
 from apps.projects.models import Project
 from apps.shared.types import MeID
 from glitchtip.api.authentication import AuthHttpRequest

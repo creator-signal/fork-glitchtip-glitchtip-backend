@@ -20,9 +20,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE TRIGGER check_teamproject_organization_trigger
+DROP TRIGGER IF EXISTS check_teamproject_organization_trigger ON teams_team_projects;
+CREATE TRIGGER check_teamproject_organization_trigger
 BEFORE INSERT OR UPDATE ON teams_team_projects
 FOR EACH ROW EXECUTE FUNCTION check_teamproject_organization();
+
 """
 
 

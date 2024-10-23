@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional
 
 from ninja import Field, ModelSchema, Schema
 from pydantic import computed_field
@@ -163,8 +163,11 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     metadata: dict[str, str] = Field(default_factory=dict)
     tags: list[dict[str, Optional[str]]] = []
     entries: list[
-        Union[BreadcrumbsEntry, CSPEntry, ExceptionEntry, MessageEntry, RequestEntry]
-    ] = Field(discriminator="type", default_factory=list)
+        Annotated[
+            BreadcrumbsEntry | CSPEntry | ExceptionEntry | MessageEntry | RequestEntry,
+            Field(..., discriminator="type"),
+        ]
+    ] = Field(default_factory=list)
     contexts: Optional[Contexts] = Field(validation_alias="data.contexts", default=None)
     context: Optional[dict[str, Any]] = Field(
         validation_alias="data.extra", default=None

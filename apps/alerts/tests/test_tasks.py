@@ -8,7 +8,7 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.issue_events.models import EventStatus, Issue
-from apps.organizations_ext.models import OrganizationUserRole
+from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
@@ -137,7 +137,7 @@ class AlertTestCase(GlitchTipTestCase):
         projectkey = self.project.projectkey_set.first()
         params = f"?sentry_key={projectkey.public_key}"
         url = reverse("api:event_store", args=[self.project.id]) + params
-        self.client.post(url, data, format="json")
+        self.client.post(url, data, content_type="application/json")
 
         # First alert
         process_event_alerts()
@@ -150,7 +150,7 @@ class AlertTestCase(GlitchTipTestCase):
 
         # Send a second event
         data["event_id"] = "cf536c31b68a473f97e579507ce155e4"
-        self.client.post(url, data, format="json")
+        self.client.post(url, data, content_type="application/json")
         process_event_alerts()
         self.assertEqual(len(mail.outbox), 2)
 
