@@ -234,4 +234,4 @@ def default_types(v: Any) -> Any:
 
 
 # TODO warns Failed to get discriminator value for tagged union serialization with value
-Contexts = Annotated[dict[str, ContextsUnion | dict], BeforeValidator(default_types)]
+Contexts = Annotated[dict[str, ContextsUnion | Any], BeforeValidator(default_types)]
