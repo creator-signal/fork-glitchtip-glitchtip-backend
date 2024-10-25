@@ -495,7 +495,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         if contexts := event.contexts:
             # Contexts may contain dict or Schema
             event_data["contexts"] = {
-                key: value if isinstance(value, dict) else value.dict(exclude_none=True)
+                key: value.dict(exclude_none=True)
+                if isinstance(value, Schema)
+                else value
                 for key, value in contexts.items()
             }
 
