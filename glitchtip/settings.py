@@ -431,7 +431,7 @@ DATABASES["default"]["ENGINE"] = "psqlextra.backend"
 if not DATABASES["default"].get("OPTIONS"):
     DATABASES["default"]["OPTIONS"] = {}
 # Enable pool by default, if there is no conn_max_age
-if DATABASES["default"].get("CONN_MAX_AGE", 0) > 0:
+if DATABASES["default"].get("CONN_MAX_AGE", 0) == 0:
     if env.bool("DATABASE_POOL", True):
         pool_options = {}
         min_size = env.int("DATABASE_POOL_MIN_SIZE", 2)
