@@ -187,17 +187,17 @@ class EventTemplate(LaxIngestSchema):
     post_context: list[str] | None = None
 
 
-class BaseDebugImage(LaxIngestSchema):
-    type: Literal[Any]
-
-
-class SourceMapImage(BaseDebugImage):
+class SourceMapImage(LaxIngestSchema):
     type: Literal["sourcemap"]
     code_file: str
     debug_id: uuid.UUID
 
 
-DebugImage = Annotated[BaseDebugImage | SourceMapImage, Field(discriminator="type")]
+class OtherDebugImage(LaxIngestSchema):
+    type: str
+
+
+DebugImage = Annotated[SourceMapImage, Field(discriminator="type")] | OtherDebugImage
 
 
 class DebugMeta(LaxIngestSchema):

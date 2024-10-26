@@ -165,3 +165,10 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         event[2]["logentry"] = {"params": ["a", ["b"]], "message": "%s %s"}
         res = self.client.post(self.url, event, content_type="application/json")
         self.assertEqual(res.status_code, 200)
+
+    def test_weird_debug_meta(self):
+        event = self.django_event
+        # The ["b"] param is wrong, it should get coerced to a str
+        event[2]["debug_meta"] = {"images": [{"type": "silly"}]}
+        res = self.client.post(self.url, event, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
