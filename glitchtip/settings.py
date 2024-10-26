@@ -431,20 +431,22 @@ if DATABASE_HOST and DATABASE_PASSWORD:
 DATABASES["default"]["ENGINE"] = "psqlextra.backend"
 if not DATABASES["default"].get("OPTIONS"):
     DATABASES["default"]["OPTIONS"] = {}
-if env.bool("DATABASE_POOL", False):
-    pool_options = {}
-    min_size = env.int("DATABASE_POOL_MIN_SIZE", None)
-    max_size = env.int("DATABASE_POOL_MAX_SIZE", None)
+# Enable pool by default, if there is no conn_max_age
+if DATABASES["default"].get("CONN_MAX_AGE", 0) == 0:
+    if env.bool("DATABASE_POOL", True):
+        pool_options = {}
+        min_size = env.int("DATABASE_POOL_MIN_SIZE", 2)
+        max_size = env.int("DATABASE_POOL_MAX_SIZE", 6)
 
-    if min_size:
-        pool_options["min_size"] = min_size
-    if max_size:
-        pool_options["max_size"] = max_size
+        if min_size:
+            pool_options["min_size"] = min_size
+        if max_size:
+            pool_options["max_size"] = max_size
 
-    if pool_options:
-        DATABASES["default"]["OPTIONS"]["pool"] = pool_options
-    else:
-        DATABASES["default"]["OPTIONS"]["pool"] = True
+        if pool_options:
+            DATABASES["default"]["OPTIONS"]["pool"] = pool_options
+        else:
+            DATABASES["default"]["OPTIONS"]["pool"] = True
 
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
@@ -780,6 +782,7 @@ if TESTING:
     # Optimization
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     DATABASES["default"]["CONN_MAX_AGE"] = None
+    DATABASES["default"]["OPTIONS"]["pool"] = False
     CELERY_TASK_ALWAYS_EAGER = True
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES

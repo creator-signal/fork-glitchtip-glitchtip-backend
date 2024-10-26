@@ -1,7 +1,7 @@
-from typing import Annotated, Any, Callable, Literal, Optional, TypedDict, Union
+from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 
 from ninja import Field, Schema
-from pydantic import RootModel, model_serializer
+from pydantic import BeforeValidator, model_serializer
 
 from .base import LaxIngestSchema
 
@@ -150,14 +150,14 @@ class TraceContext(LaxIngestSchema, ExcludeNoneSchema):
     type: Literal["trace"] = "trace"
     trace_id: str
     span_id: str
-    parent_span_id: Optional[str] = None
-    op: Optional[str] = None
-    status: Optional[str] = None
-    exclusive_time: Optional[float] = None
-    client_sample_rate: Optional[float] = None
-    tags: Optional[Union[dict, list]] = None
-    dynamic_sampling_context: Optional[dict] = None
-    origin: Optional[str] = None
+    parent_span_id: str | None = None
+    op: str | None = None
+    status: str | None = None
+    exclusive_time: float | None = None
+    client_sample_rate: float | None = None
+    tags: dict | list | None = None
+    dynamic_sampling_context: dict | None = None
+    origin: str | None = None
 
 
 class ReplayContext(LaxIngestSchema):
@@ -185,25 +185,53 @@ class ContextsDict(TypedDict):
     response: ResponseContext
 
 
-ContextsUnion = Union[
-    DeviceContext,
-    OSContext,
-    RuntimeContext,
-    AppContext,
-    BrowserContext,
-    GPUContext,
-    StateContext,
-    CultureContext,
-    CloudResourceContext,
-    TraceContext,
-    ReplayContext,
-    ResponseContext,
+ContextsUnion = Annotated[
+    DeviceContext
+    | OSContext
+    | RuntimeContext
+    | AppContext
+    | BrowserContext
+    | GPUContext
+    | StateContext
+    | CultureContext
+    | CloudResourceContext
+    | TraceContext
+    | ReplayContext
+    | ResponseContext,
+    Field(discriminator="type"),
 ]
 
+
+type_strings = [
+    "device",
+    "os",
+    "runtime",
+    "app",
+    "browser",
+    "gpu",
+    "state",
+    "culture",
+    "cloud_resource",
+    "trace",
+    "replay",
+    "response",
+]
+
+
+def default_types(v: Any) -> Any:
+    if all(isinstance(value, dict) for value in v.values()):
+        return {
+            key: {
+                **value,
+                "type": key,
+            }
+            if key in type_strings and "type" not in value
+            else value
+            for key, value in v.items()
+        }
+
+    return v
+
+
 # TODO warns Failed to get discriminator value for tagged union serialization with value
-Contexts = dict[str, Union[Annotated[ContextsUnion, Field(discriminator="type")], Any]]
-
-
-class ContextsSchema(RootModel):
-    # TODO, add pre validation logic here to assign the type based on the key
-    root: Contexts
+Contexts = Annotated[dict[str, ContextsUnion | Any], BeforeValidator(default_types)]

@@ -43,7 +43,6 @@ async def difs_assemble_api(
     organization = await aget_object_or_404(
         Organization, slug=organization_slug.lower(), users=request.auth.user_id
     )
-    # self.check_object_permissions(request, organization)
     await aget_object_or_404(
         Project, slug=project_slug.lower(), organization=organization
     )

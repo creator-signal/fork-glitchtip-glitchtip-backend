@@ -30,7 +30,7 @@ class FileBlob(CreatedModel):
 
     OSS Sentry stores files in file blob chunks. Where one file gets saved as many blobs.
     GlitchTip uses Django FileField and does split files into chunks.
-    The FileBlob's still provide file deduplication.
+    The FileBlob's provide file deduplication.
     """
 
     blob = models.FileField(upload_to="uploads/file_blobs")
@@ -53,8 +53,8 @@ class FileBlob(CreatedModel):
             blob_file = file_with_checksum[0]
             blob.size = file_with_checksum[0].size
             blob.checksum = file_with_checksum[1]
-            await sync_to_async(blob.blob.save)(blob_file.name, blob_file)
-            await blob.asave()
+            if not await FileBlob.objects.filter(checksum=blob.checksum).aexists():
+                await sync_to_async(blob.blob.save)(blob_file.name, blob_file)
 
     @classmethod
     def from_file(cls, fileobj):

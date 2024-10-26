@@ -31,6 +31,8 @@ class ChunkUploadAPITestCase(GlitchTipTestCaseMixin, TestCase):
         data = {"file_gzip": generate_file()}
         res = self.client.post(self.url, data)
         self.assertEqual(res.status_code, 200)
+        res = self.client.post(self.url, data)  # Should do nothing
+        self.assertEqual(FileBlob.objects.count(), 1)
 
 
 class ReleaseAssembleAPITests(GlitchTipTestCaseMixin, TestCase):

@@ -45,7 +45,7 @@ from sentry.utils.strings import truncatechars
 
 from ..shared.schema.contexts import (
     BrowserContext,
-    ContextsSchema,
+    Contexts,
     DeviceContext,
     OSContext,
 )
@@ -57,7 +57,7 @@ from .schema import (
     InterchangeIssueEvent,
     InterchangeTransactionEvent,
 )
-from .utils import generate_hash, transform_parameterized_message
+from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
 
 
 @dataclass
@@ -84,40 +84,6 @@ class IssueUpdate:
 
 def get_search_vector(event: ProcessingEvent) -> str:
     return f"{event.title} {event.transaction}"
-
-
-Replacable = Union[str, dict, list]
-
-
-def replace(data: Replacable, match: str, repl: str) -> Replacable:
-    """A recursive replace function"""
-    if isinstance(data, dict):
-        return {k: replace(v, match, repl) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [replace(i, match, repl) for i in data]
-    elif isinstance(data, str):
-        return data.replace(match, repl)
-    return data
-
-
-def sanitize_bad_postgres_chars(data: str):
-    """
-    Remove values which are not supported by the postgres string data types
-    """
-    known_bads = ["\x00"]
-    for known_bad in known_bads:
-        data = data.replace(known_bad, " ")
-    return data
-
-
-def sanitize_bad_postgres_json(data: Replacable) -> Replacable:
-    """
-    Remove values which are not supported by the postgres JSONB data type
-    """
-    known_bads = ["\u0000"]
-    for known_bad in known_bads:
-        data = replace(data, known_bad, " ")
-    return data
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
@@ -166,11 +132,11 @@ def devalue(obj: Union[Schema, list]) -> Optional[Union[dict, list]]:
     return None
 
 
-def generate_contexts(event: IngestIssueEvent) -> ContextsSchema:
+def generate_contexts(event: IngestIssueEvent) -> Contexts:
     """
     Add additional contexts if they aren't already set
     """
-    contexts = event.contexts if event.contexts else ContextsSchema(root={})
+    contexts = event.contexts if event.contexts else Contexts({})
 
     if request := event.request:
         if isinstance(request.headers, list):
@@ -178,18 +144,18 @@ def generate_contexts(event: IngestIssueEvent) -> ContextsSchema:
                 (x[1] for x in request.headers if x[0] == "User-Agent"), None
             ):
                 user_agent = parse(ua_string)
-                if "browser" not in contexts.root:
-                    contexts.root["browser"] = BrowserContext(
+                if "browser" not in contexts:
+                    contexts["browser"] = BrowserContext(
                         name=user_agent.browser.family,
                         version=user_agent.browser.version_string,
                     )
-                if "os" not in contexts.root:
-                    contexts.root["os"] = OSContext(
+                if "os" not in contexts:
+                    contexts["os"] = OSContext(
                         name=user_agent.os.family, version=user_agent.os.version_string
                     )
-                if "device" not in contexts.root:
+                if "device" not in contexts:
                     device = user_agent.device
-                    contexts.root["device"] = DeviceContext(
+                    contexts["device"] = DeviceContext(
                         family=device.family,
                         model=device.model,
                         brand=device.brand,
@@ -202,14 +168,14 @@ def generate_tags(event: IngestIssueEvent) -> dict[str, str]:
     tags: dict[str, Optional[str]] = event.tags if isinstance(event.tags, dict) else {}
 
     if contexts := event.contexts:
-        if browser := contexts.root.get("browser"):
+        if browser := contexts.get("browser"):
             if isinstance(browser, BrowserContext):
                 tags["browser.name"] = browser.name
                 tags["browser"] = f"{browser.name} {browser.version}"
-        if os := contexts.root.get("os"):
+        if os := contexts.get("os"):
             if isinstance(os, OSContext):
                 tags["os.name"] = os.name
-        if device := contexts.root.get("device"):
+        if device := contexts.get("device"):
             if isinstance(device, DeviceContext) and device.model:
                 tags["device"] = device.model
 
@@ -527,7 +493,13 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         if user := event.user:
             event_data["user"] = user.dict(exclude_none=True)
         if contexts := event.contexts:
-            event_data["contexts"] = contexts.dict(exclude_none=True)
+            # Contexts may contain dict or Schema
+            event_data["contexts"] = {
+                key: value.dict(exclude_none=True)
+                if isinstance(value, Schema)
+                else value
+                for key, value in contexts.items()
+            }
 
         processing_events.append(
             ProcessingEvent(
@@ -554,8 +526,8 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         project_id = processing_event.event.project_id
         issue_defaults = {
             "type": event_type,
-            "title": sanitize_bad_postgres_chars(processing_event.title),
-            "metadata": sanitize_bad_postgres_json(processing_event.metadata),
+            "title": remove_bad_chars(processing_event.title),
+            "metadata": remove_bad_chars(processing_event.metadata),
             "first_seen": processing_event.event.received,
             "last_seen": processing_event.event.received,
         }
@@ -608,7 +580,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 received=processing_event.event.received,
                 title=processing_event.title,
                 transaction=processing_event.transaction,
-                data=sanitize_bad_postgres_json(processing_event.event_data),
+                data=remove_bad_chars(processing_event.event_data),
                 tags=processing_event.event_tags,
                 release_id=processing_event.release_id,
             )
@@ -618,9 +590,17 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     if settings.CACHE_IS_REDIS:
         # Add set of issue_ids for alerts to process later
-        get_redis_connection("default").sadd(
-            ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
-        )
+        with get_redis_connection("default") as con:
+            if (
+                con.sadd(
+                    ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
+                )
+                > 0
+            ):
+                # Set a long expiration time when a key is added
+                # We want all keys to have a long "sanity check" TTL to avoid redis out
+                # of memory errors (we can't ensure end users use all keys lru eviction)
+                con.expire(ISSUE_IDS_KEY, 3600)
 
     if issues_to_reopen:
         Issue.objects.filter(id__in=issues_to_reopen).update(
@@ -802,7 +782,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
 
         group, group_created = TransactionGroup.objects.get_or_create(
             project_id=ingest_event.project_id,
-            transaction=event.transaction,
+            transaction=event.transaction[:1024],  # Truncate
             op=op,
             method=method,
         )

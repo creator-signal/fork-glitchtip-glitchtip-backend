@@ -1,5 +1,3 @@
-from typing import Optional
-
 from anonymizeip import anonymize_ip
 from django.conf import settings
 from django.core.cache import cache
@@ -30,18 +28,18 @@ router = Router(auth=event_auth)
 
 class EventIngestOut(Schema):
     event_id: str
-    task_id: Optional[str] = None  # For debug purposes only
+    task_id: str | None = None  # For debug purposes only
 
 
 class EnvelopeIngestOut(Schema):
-    id: Optional[str] = None
+    id: str | None = None
 
 
 def get_issue_event_class(event: IngestIssueEvent):
     return ErrorIssueEventSchema if event.exception else IssueEventSchema
 
 
-def get_ip_address(request: EventAuthHttpRequest) -> Optional[str]:
+def get_ip_address(request: EventAuthHttpRequest) -> str | None:
     """
     Get IP address from request. Anonymize it based on project settings.
     Keep this logic in the api view, we aim to anonymize data before storing

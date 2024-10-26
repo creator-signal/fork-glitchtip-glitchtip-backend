@@ -1,8 +1,12 @@
 # Unreleased
 
+- Add organization and projects throttle. Can be set in Django admin.
+
+# v4.1.5
+
 - Upgrade to django-allauth 65.0.0 
 - Upgrade Python to 3.13
-- Add organization and projects throttle. Can be set in Django admin.
+- Use connection pooling by default, unless max conn age is set
 
 # v4.1.4
 

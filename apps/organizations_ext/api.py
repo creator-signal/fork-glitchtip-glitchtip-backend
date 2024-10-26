@@ -3,7 +3,7 @@ from django.contrib.auth import aget_user
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
-from ninja.errors import HttpError
+from ninja.errors import HttpError, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
@@ -301,6 +301,16 @@ async def update_organization_member(
     if member.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "Forbidden")
     member.role = OrganizationUserRole.from_string(payload.org_role)
+    # Disallow an ownerless organization
+    if (
+        member.role < OrganizationUserRole.OWNER
+        and not await OrganizationUser.objects.exclude(id=member_id)
+        .filter(
+            organization__slug=organization_slug, role__gte=OrganizationUserRole.OWNER
+        )
+        .aexists()
+    ):
+        raise ValidationError("Organization must have at least one owner")
     await member.asave()
     return member
 

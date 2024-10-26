@@ -2,6 +2,6 @@
 set -e
 
 echo "Run Django migrations"
-./manage.py migrate
+./manage.py migrate --skip-checks
 echo "Create and delete Postgres partitions"
 ./manage.py pgpartition --yes

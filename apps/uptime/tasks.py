@@ -84,6 +84,8 @@ def dispatch_checks():
             tick = con.incr(UPTIME_COUNTER_KEY)
             if tick >= UPTIME_TICK_EXPIRE:
                 con.delete(UPTIME_COUNTER_KEY)
+            elif tick % 1000 == 0:  # Set sanity check TTL
+                con.expire(UPTIME_COUNTER_KEY, 86400)
     except NotImplementedError:
         cache.add(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
         tick = cache.incr(UPTIME_COUNTER_KEY)
