@@ -11,6 +11,9 @@ class MetQuotaEmail(DetailEmail):
     subject_template_name = "organizations/met-quota-drip-subject.txt"
     model = Organization
 
+    def get_object(self, *args, **kwargs):
+        return super().get_object(queryset=Organization.objects.with_event_counts())
+
     def get_email(self):
         return self.object.email
 
