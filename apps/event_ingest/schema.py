@@ -281,7 +281,7 @@ class IngestIssueEvent(BaseIssueEvent):
     environment: str | None = None
     modules: dict[str, str | None] | None = None
     extra: dict[str, Any] | None = None
-    fingerprint: list[str] | None = None
+    fingerprint: list[Union[str, None]] | None = None
     errors: list[Any] | None = None
 
     exception: Union[list[EventException], ValueEventException] | None = None
