@@ -30,6 +30,7 @@ from apps.organizations_ext.api import router as organizations_ext_router
 from apps.performance.api import router as performance_router
 from apps.projects.api import router as projects_router
 from apps.releases.api import router as releases_router
+from apps.sourcecode.api import router as sourcecode_router
 from apps.stats.api import router as stats_router
 from apps.teams.api import router as teams_router
 from apps.uptime.api import router as uptime_router
@@ -72,6 +73,7 @@ api.add_router("0", organizations_ext_router)
 api.add_router("0", performance_router)
 api.add_router("0", projects_router)
 api.add_router("0", stats_router)
+api.add_router("0", sourcecode_router)
 api.add_router("0", teams_router)
 api.add_router("0", uptime_router)
 api.add_router("0", users_router)

@@ -365,12 +365,20 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         # Show that pre and post context is included
         self.assertEqual(
-            len(IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][0]["pre_context"]),
-            5
+            len(
+                IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][
+                    0
+                ]["pre_context"]
+            ),
+            5,
         )
         self.assertEqual(
-            len(IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][0]["post_context"]),
-            1
+            len(
+                IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][
+                    0
+                ]["post_context"]
+            ),
+            1,
         )
 
         self.assertTrue(IssueEvent.objects.filter(release=release).exists())
@@ -403,13 +411,15 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         data = SecuritySchema(**payload)
         event = CSPIssueEventSchema(csp=data.csp_report.dict(by_alias=True))
-        process_issue_events([
-            InterchangeIssueEvent(
-                project_id=self.project.id,
-                organization_id=self.organization.id,
-                payload=event.dict(by_alias=True),
-            )
-        ])
+        process_issue_events(
+            [
+                InterchangeIssueEvent(
+                    project_id=self.project.id,
+                    organization_id=self.organization.id,
+                    payload=event.dict(by_alias=True),
+                )
+            ]
+        )
         issue = Issue.objects.get()
         url = reverse("api:get_latest_issue_event", kwargs={"issue_id": issue.id})
         res = self.client.get(url)
@@ -864,7 +874,9 @@ class SentryCompatTestCase(EventIngestTestCase):
         sentry_exception = next(filter(is_exception, sentry_data["entries"]), None)
         self.assertEqual(
             res_exception["data"]["values"][0]["stacktrace"]["frames"][-1]["context"],
-            sentry_exception["data"]["values"][0]["stacktrace"]["frames"][-1]["context"],
+            sentry_exception["data"]["values"][0]["stacktrace"]["frames"][-1][
+                "context"
+            ],
         )
 
         self.assertCompareData(event_json, sentry_json, ["environment"])

@@ -71,3 +71,28 @@ def cache_set_nx(key, value, timeout: Optional[int] = 300) -> bool:
             return False
         cache.set(key, value, timeout)
         return True
+
+
+Replacable = str | dict | list
+KNOWN_BADS = ["\u0000", "\x00"]
+
+
+def _clean_string(s: str) -> str:
+    for char in KNOWN_BADS:
+        s = s.replace(char, "")
+    return s
+
+
+def remove_bad_chars(obj: Replacable) -> Replacable:
+    """Remove charachers which postgresql cannot store"""
+
+    if isinstance(obj, dict):
+        return {
+            _clean_string(key): remove_bad_chars(value) for key, value in obj.items()
+        }
+    elif isinstance(obj, list):
+        return [remove_bad_chars(item) for item in obj]
+    elif isinstance(obj, str):
+        return _clean_string(obj)
+    else:
+        return obj

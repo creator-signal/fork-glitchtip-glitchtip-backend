@@ -114,6 +114,11 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_update(self):
+        baker.make(
+            "organizations_ext.OrganizationUser",
+            role=OrganizationUserRole.OWNER,
+            organization=self.organization,
+        )  # Ensure alternative owner exists
         self.auth_token.add_permission("member:read")
         data = {"email": "lol@example.com", "orgRole": "member"}
         self.assertPutReqStatusCode(self.detail_url, data, 403)

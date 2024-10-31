@@ -21,7 +21,7 @@ from pydantic import (
 from apps.issue_events.constants import IssueEventType
 
 from ..shared.schema.base import LaxIngestSchema
-from ..shared.schema.contexts import ContextsSchema
+from ..shared.schema.contexts import Contexts
 from ..shared.schema.event import (
     BaseIssueEvent,
     BaseRequest,
@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 
 CoercedStr = Annotated[
-    str, BeforeValidator(lambda v: str(v) if isinstance(v, bool) else v)
+    str, BeforeValidator(lambda v: str(v) if isinstance(v, (bool, list)) else v)
 ]
 """
-Coerced Str that will coerce bool to str when found
+Coerced Str that will coerce bool/list to str when found
 """
 
 
@@ -161,7 +161,7 @@ class ValueEventException(LaxIngestSchema):
 class EventMessage(LaxIngestSchema):
     formatted: str = Field(max_length=8192, default="")
     message: str | None = None
-    params: Union[list[str], dict[str, str]] | None = None
+    params: list[CoercedStr] | dict[str, str] | None = None
 
     @model_validator(mode="after")
     def set_formatted(self) -> "EventMessage":
@@ -185,6 +185,23 @@ class EventTemplate(LaxIngestSchema):
     context_line: str
     pre_context: list[str] | None = None
     post_context: list[str] | None = None
+
+
+class SourceMapImage(LaxIngestSchema):
+    type: Literal["sourcemap"]
+    code_file: str
+    debug_id: uuid.UUID
+
+
+class OtherDebugImage(LaxIngestSchema):
+    type: str
+
+
+DebugImage = Annotated[SourceMapImage, Field(discriminator="type")] | OtherDebugImage
+
+
+class DebugMeta(LaxIngestSchema):
+    images: list[DebugImage]
 
 
 class ValueEventBreadcrumb(LaxIngestSchema):
@@ -291,8 +308,9 @@ class IngestIssueEvent(BaseIssueEvent):
     breadcrumbs: Union[list[EventBreadcrumb], ValueEventBreadcrumb] | None = None
     sdk: ClientSDKInfo | None = None
     request: IngestRequest | None = None
-    contexts: ContextsSchema | None = None
+    contexts: Contexts | None = None
     user: EventUser | None = None
+    debug_meta: DebugMeta | None = None
 
     @field_validator("tags")
     @classmethod
