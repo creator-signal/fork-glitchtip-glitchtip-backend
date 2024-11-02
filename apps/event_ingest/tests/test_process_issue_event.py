@@ -142,7 +142,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
                 }
             ],
             "event_id": uuid.uuid4(),
-            "fingerprint": ["foo"],
+            "fingerprint": ["foo", None, "bar"],
         }
         self.process_events(data)
 
