@@ -44,6 +44,21 @@ class CommentsApiTestCase(GlitchTipTestCase):
         res = self.client.get(url)
         self.assertEqual(len(res.json()), 0)
 
+    def test_comments_list_deleted_user(self):
+        user2 = baker.make(
+            "users.User"
+        )
+        self.organization.add_user(user2)
+        comment = baker.make(
+            "issue_events.Comment",
+            issue=self.issue,
+            user=user2,
+            _fill_optional=["text"],
+        )
+        user2.delete()
+        res = self.client.get(self.url)
+        self.assertContains(res, comment.text)
+
     def test_comment_update(self):
         comment = baker.make(
             "issue_events.Comment",
