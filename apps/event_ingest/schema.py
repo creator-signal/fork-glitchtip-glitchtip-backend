@@ -139,7 +139,9 @@ class EventException(LaxIngestSchema):
     value: Annotated[str | None, WrapValidator(invalid_to_none)] = None
     module: str | None = None
     thread_id: str | None = None
-    mechanism: ExceptionMechanism | None = None
+    mechanism: Annotated[ExceptionMechanism | None, WrapValidator(invalid_to_none)] = (
+        None
+    )
     stacktrace: Annotated[StackTrace | None, WrapValidator(invalid_to_none)] = None
 
     @model_validator(mode="after")
