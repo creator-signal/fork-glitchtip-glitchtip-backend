@@ -22,6 +22,11 @@ class MetQuotaEmail(DetailEmail):
 
         context = super().get_context_data(**kwargs)
         base_url = settings.GLITCHTIP_URL.geturl()
+        faq_link = (
+            settings.MARKETING_URL
+            + "/documentation/frequently-asked-questions"
+            + "#how-can-i-reduce-the-number-of-events-my-organization-is-using-each-month"
+        )
         organization = self.object
         subscription_link = f"{base_url}/{organization.slug}/settings/subscription"
         product = Product.objects.filter(
@@ -34,6 +39,7 @@ class MetQuotaEmail(DetailEmail):
                 "product": product,
                 "event_limit": product.metadata.get("events") if product else None,
                 "subscription_link": subscription_link,
+                "faq_link": faq_link,
             }
         )
         return context

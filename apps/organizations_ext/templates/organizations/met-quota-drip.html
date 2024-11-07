@@ -1,5 +1,5 @@
 {% extends "email/email_base.html" %}
-{% load static settings %}
+{% load humanize static settings %}
 {% block title_text %}
     Met event quota for {{ organization.name|striptags }}
 {% endblock %}
@@ -12,8 +12,9 @@
                     <p style="margin: 0;">
                         Hello and thank you for using GlitchTip. We noticed your organization <b>{{ organization.name|striptags }}</b>
                         has exceeded its monthly event limit on your {{ product.name }} and wanted to give you a heads up.
-                        Your plan allows for {{event_limit}} events, but for the current billing period we have received
-                        ###EVENT_COUNT### events for your organization. Here are a couple options to avoid this in the future.
+                        Your plan allows for {{ event_limit|intcomma }} events, but for the current billing period we have received
+                        {{ organization.total_event_count|intcomma }} events for your organization.
+                        Here are a couple options to avoid this in the future.
                     </p>
                 </td>
             </tr>
@@ -25,7 +26,8 @@
                             to a new plan for more events
                         </li>
                         <li style="margin:0 0 0px 30px;">
-                            Configure your SDK to send a lower rate of events to GlitchTip
+                            <a href="{{ faq_link }}" style="color: #e94056; text-decoration: none;">Read about</a>
+                            reducing the number of events your app sends out
                         </li>
                     </ul>
                     <p style="margin: 0;">

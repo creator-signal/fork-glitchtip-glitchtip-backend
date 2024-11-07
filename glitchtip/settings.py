@@ -204,6 +204,7 @@ WEB_INSTALLED_APPS = [
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.humanize",
     "psqlextra",
     "django_prometheus",
     "allauth",
@@ -754,6 +755,7 @@ DJSTRIPE_SUBSCRIBER_MODEL = "organizations_ext.Organization"
 DJSTRIPE_SUBSCRIBER_MODEL_REQUEST_CALLBACK = organization_request_callback
 DJSTRIPE_USE_NATIVE_JSONFIELD = True
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "djstripe_id"
+MARKETING_URL = "https://glitchtip.com"
 STRIPE_AUTOMATIC_TAX = env.bool("STRIPE_AUTOMATIC_TAX", False)
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", False)
 if BILLING_ENABLED:
