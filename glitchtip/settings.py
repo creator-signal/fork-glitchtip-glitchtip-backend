@@ -141,6 +141,8 @@ def before_send(event, hint):
 SENTRY_DSN = env.str("SENTRY_DSN", None)
 # Optionally allow a different DSN for the frontend
 SENTRY_FRONTEND_DSN = env.str("SENTRY_FRONTEND_DSN", SENTRY_DSN)
+# Set sample_rate to 1.0 to capture 100%.
+SENTRY_SAMPLE_RATE = env.float("SENTRY_SAMPLE_RATE", 1.0)
 # Set traces_sample_rate to 1.0 to capture 100%. Recommended to keep this value low.
 SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", 0.01)
 
@@ -166,6 +168,7 @@ if SENTRY_DSN:
         environment=ENVIRONMENT,
         auto_session_tracking=False,
         send_client_reports=False,
+        sample_rate=SENTRY_SAMPLE_RATE,
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         traces_sampler=traces_sampler,
     )

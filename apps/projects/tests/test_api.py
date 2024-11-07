@@ -52,6 +52,7 @@ class ProjectsAPITestCase(TestCase):
         res = self.client.get(self.url)
         self.assertContains(res, self.organization.name)
         data = res.json()[0]
+        self.assertIsInstance(data["id"], str)
         self.assertEqual(data["name"], self.project.name)
         self.assertTrue(data["isMember"])
         data_keys = res.json()[0].keys()

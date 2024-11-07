@@ -172,3 +172,15 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         event[2]["debug_meta"] = {"images": [{"type": "silly"}]}
         res = self.client.post(self.url, event, content_type="application/json")
         self.assertEqual(res.status_code, 200)
+
+    def test_invalid_mechanism(self):
+        """
+        The mechanism should not be an empty object, but the go sdk sends this
+        https://github.com/getsentry/sentry-go/issues/896
+        """
+        event = self.django_event
+        event[2]["exception"] = {
+            "values": [{"type": "Error", "value": "The error", "mechanism": {}}]
+        }
+        res = self.client.post(self.url, event, content_type="application/json")
+        self.assertEqual(res.status_code, 200)

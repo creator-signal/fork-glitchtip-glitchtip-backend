@@ -20,7 +20,7 @@ def generate_hash(
             [
                 default_hash_input(title, culprit, type)
                 if part == "{{ default }}"
-                else part
+                else (part or "")
                 for part in extra
             ]
         )

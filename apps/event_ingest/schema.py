@@ -139,7 +139,9 @@ class EventException(LaxIngestSchema):
     value: Annotated[str | None, WrapValidator(invalid_to_none)] = None
     module: str | None = None
     thread_id: str | None = None
-    mechanism: ExceptionMechanism | None = None
+    mechanism: Annotated[ExceptionMechanism | None, WrapValidator(invalid_to_none)] = (
+        None
+    )
     stacktrace: Annotated[StackTrace | None, WrapValidator(invalid_to_none)] = None
 
     @model_validator(mode="after")
@@ -298,7 +300,7 @@ class IngestIssueEvent(BaseIssueEvent):
     environment: str | None = None
     modules: dict[str, str | None] | None = None
     extra: dict[str, Any] | None = None
-    fingerprint: list[str] | None = None
+    fingerprint: list[Union[str, None]] | None = None
     errors: list[Any] | None = None
 
     exception: Union[list[EventException], ValueEventException] | None = None

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal
 
 from ninja import Field, ModelSchema, Schema
 from pydantic import computed_field
@@ -52,14 +52,14 @@ class IssueSchema(ModelSchema):
     project: ProjectReference = Field(validation_alias="project")
     short_id: str = Field(validation_alias="short_id_display")
     num_comments: int
-    stats: Optional[dict[str, list[list[float]]]] = {"24h": []}
-    share_id: Optional[int] = None
-    logger: Optional[str] = None
-    permalink: Optional[str] = "Not implemented"
-    status_details: Optional[dict[str, str]] = {}
-    subscription_details: Optional[str] = None
-    user_count: Optional[int] = 0
-    matching_event_id: Optional[str] = Field(
+    stats: dict[str, list[list[float]]] | None = {"24h": []}
+    share_id: int | None = None
+    logger: str | None = None
+    permalink: str | None = "Not implemented"
+    status_details: dict[str, str] | None = {}
+    subscription_details: str | None = None
+    user_count: int | None = 0
+    matching_event_id: str | None = Field(
         default=None, serialization_alias="matchingEventId"
     )
 
@@ -114,7 +114,7 @@ class CSPEntry(Schema):
 class APIEventBreadcrumb(EventBreadcrumb):
     """Slightly modified Breadcrumb for sentry api compatibility"""
 
-    event_id: Optional[str] = None
+    event_id: str | None = None
 
 
 class BreadcrumbsEntry(Schema):
@@ -123,14 +123,12 @@ class BreadcrumbsEntry(Schema):
 
 
 class Request(CamelSchema, BaseRequest):
-    headers: Optional[ListKeyValue] = None
-    query_string: Optional[ListKeyValue] = Field(
-        default=None, serialization_alias="query"
-    )
+    headers: ListKeyValue | None = None
+    query_string: ListKeyValue | None = Field(default=None, serialization_alias="query")
 
     @computed_field
     @property
-    def inferred_content_type(self) -> Optional[str]:
+    def inferred_content_type(self) -> str | None:
         if self.headers:
             return next(
                 (value for key, value in self.headers if key == "Content-Type"), None
@@ -153,26 +151,24 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     group_id: str
     date_created: datetime = Field(validation_alias="timestamp")
     date_received: datetime = Field(validation_alias="received")
-    dist: Optional[str] = None
-    culprit: Optional[str] = Field(validation_alias="transaction", default=None)
-    packages: Optional[dict[str, Optional[str]]] = Field(
+    dist: str | None = None
+    culprit: str | None = Field(validation_alias="transaction", default=None)
+    packages: dict[str, str | None] | None = Field(
         validation_alias="data.modules", default=None
     )
     type: str = Field(validation_alias="get_type_display")
     message: str
     metadata: dict[str, str] = Field(default_factory=dict)
-    tags: list[dict[str, Optional[str]]] = []
+    tags: list[dict[str, str | None]] = []
     entries: list[
         Annotated[
             BreadcrumbsEntry | CSPEntry | ExceptionEntry | MessageEntry | RequestEntry,
             Field(..., discriminator="type"),
         ]
     ] = Field(default_factory=list)
-    contexts: Optional[Contexts] = Field(validation_alias="data.contexts", default=None)
-    context: Optional[dict[str, Any]] = Field(
-        validation_alias="data.extra", default=None
-    )
-    user: Optional[Any] = Field(validation_alias="data.user", default=None)
+    contexts: Contexts | None = Field(validation_alias="data.contexts", default=None)
+    context: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
+    user: Any | None = Field(validation_alias="data.user", default=None)
 
     class Config:
         model = IssueEvent
@@ -243,7 +239,7 @@ class UserReportSchema(CamelSchema, ModelSchema):
     event_id: str = Field(validation_alias="event_id.hex")
     event: dict[str, str]
     date_created: datetime = Field(validation_alias="created")
-    user: Optional[str] = None
+    user: str | None = None
 
     class Config:
         model = UserReport
@@ -276,9 +272,9 @@ class CommentUserSchema(CamelSchema, ModelSchema):
 
 class CommentSchema(CamelSchema, ModelSchema):
     data: dict[str, str]
-    type: Optional[str] = "note"
+    type: str | None = "note"
     date_created: datetime = Field(validation_alias="created")
-    user: CommentUserSchema
+    user: CommentUserSchema | None
 
     class Config:
         model = Comment
@@ -292,9 +288,9 @@ class CommentSchema(CamelSchema, ModelSchema):
 
 
 class IssueEventDetailSchema(IssueEventSchema):
-    user_report: Optional[UserReportSchema]
-    next_event_id: Optional[str] = None
-    previous_event_id: Optional[str] = None
+    user_report: UserReportSchema | None
+    next_event_id: str | None = None
+    previous_event_id: str | None = None
 
     @staticmethod
     def resolve_previous_event_id(obj):
@@ -317,24 +313,20 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     x_datetime: datetime = Field(
         validation_alias="timestamp", serialization_alias="datetime"
     )
-    breadcrumbs: Optional[Any] = Field(
-        validation_alias="data.breadcrumbs", default=None
-    )
+    breadcrumbs: Any | None = Field(validation_alias="data.breadcrumbs", default=None)
     project: int = Field(validation_alias="issue.project_id")
-    level: Optional[str] = Field(validation_alias="get_level_display")
-    exception: Optional[Any] = Field(validation_alias="data.exception", default=None)
-    modules: Optional[dict[str, str]] = Field(
+    level: str | None = Field(validation_alias="get_level_display")
+    exception: Any | None = Field(validation_alias="data.exception", default=None)
+    modules: dict[str, str] | None = Field(
         validation_alias="data.modules", default_factory=dict
     )
-    contexts: Optional[dict] = Field(validation_alias="data.contexts", default=None)
-    sdk: Optional[dict] = Field(validation_alias="data.sdk", default_factory=dict)
-    type: Optional[str] = Field(validation_alias="get_type_display")
-    request: Optional[Any] = Field(validation_alias="data.request", default=None)
-    environment: Optional[str] = Field(
-        validation_alias="data.environment", default=None
-    )
-    extra: Optional[dict[str, Any]] = Field(validation_alias="data.extra", default=None)
-    user: Optional[EventUser] = Field(validation_alias="data.user", default=None)
+    contexts: dict | None = Field(validation_alias="data.contexts", default=None)
+    sdk: dict | None = Field(validation_alias="data.sdk", default_factory=dict)
+    type: str | None = Field(validation_alias="get_type_display")
+    request: Any | None = Field(validation_alias="data.request", default=None)
+    environment: str | None = Field(validation_alias="data.environment", default=None)
+    extra: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
+    user: EventUser | None = Field(validation_alias="data.user", default=None)
 
     class Config:
         model = IssueEvent
@@ -348,9 +340,9 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
 class IssueEventDataSchema(Schema):
     """IssueEvent model data json schema"""
 
-    metadata: Optional[dict[str, Any]] = None
-    breadcrumbs: Optional[list[EventBreadcrumb]] = None
-    exception: Optional[list[EventException]] = None
+    metadata: dict[str, Any] | None = None
+    breadcrumbs: list[EventBreadcrumb] | None = None
+    exception: list[EventException] | None = None
 
 
 class CSPIssueEventDataSchema(IssueEventDataSchema):
