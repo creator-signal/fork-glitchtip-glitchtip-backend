@@ -1,7 +1,5 @@
 from djstripe import webhooks
 
-print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
 
 @webhooks.handler("customer.subscription.updated")
 def update_subscription(event, **kwargs):
