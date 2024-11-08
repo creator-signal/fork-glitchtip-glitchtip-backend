@@ -29,7 +29,7 @@ router = Router()
     "subscriptions/{slug:organization_slug}/", response=SubscriptionSchema | None
 )
 async def get_subscription(request: AuthHttpRequest, organization_slug: str):
-    subscription = await (
+    return await (
         Subscription.objects.filter(
             livemode=settings.STRIPE_LIVE_MODE,
             customer__subscriber__users=request.auth.user_id,
@@ -46,19 +46,6 @@ async def get_subscription(request: AuthHttpRequest, organization_slug: str):
         .order_by("-created")
         .afirst()
     )
-    if not subscription:
-        return None
-
-    # Check organization throttle, in case it changed recently
-    await Organization.objects.filter(
-        id=subscription.customer.subscriber_id,
-        is_accepting_events=False,
-        is_active=True,
-        djstripe_customers__subscriptions__plan__amount__gt=0,
-        djstripe_customers__subscriptions__status="active",
-    ).aupdate(is_accepting_events=True)
-
-    return subscription
 
 
 @router.post("subscriptions/", response=CreateSubscriptionResponse)
