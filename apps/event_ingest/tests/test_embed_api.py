@@ -27,6 +27,18 @@ class ErrorPageEmbedTestCase(EventIngestTestCase):
         res = self.client.get(self.url, params)
         self.assertContains(res, self.project_key.public_key.hex)
 
+    def test_get_embed_throttle(self):
+        params = {"dsn": self.project_key.get_dsn(), "eventId": uuid.uuid4().hex}
+        self.project.organization.event_throttle_rate = 100
+        self.project.organization.save()
+        res = self.client.get(self.url, params)
+        self.assertEqual(res.status_code, 401)
+
+        self.project.organization.event_throttle_rate = 50
+        self.project.organization.save()
+        res = self.client.get(self.url, params)
+        self.assertContains(res, self.project_key.public_key.hex)
+
     def test_submit_report(self):
         params = f"?dsn={self.project_key.get_dsn()}&eventId={uuid.uuid4().hex}"
         data = {"name": "Test Name", "email": "test@example.com", "comments": "hmm"}

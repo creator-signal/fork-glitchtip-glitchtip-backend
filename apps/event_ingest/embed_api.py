@@ -29,12 +29,12 @@ async def embed_auth(request: HttpRequest):
                 id=project_id, projectkey__public_key=public_key
             )
             .select_related("organization")
-            .only("id", "organization__is_accepting_events")
+            .only("id", "organization__event_throttle_rate")
             .aget()
         )
     except ValueError:
         raise AuthenticationError([{"message": "Invalid DSN"}])
-    if not project.organization.is_accepting_events:
+    if project.organization.event_throttle_rate == 100:
         raise AuthenticationError([{"message": "Invalid DSN"}])
     return project
 
