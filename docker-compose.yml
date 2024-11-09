@@ -25,6 +25,9 @@ services:
   redis:
     image: valkey/valkey:8
   web:
+    # Uncomment for breakpoint
+    #stdin_open: true
+    #tty: true
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev
     command: ./manage.py runserver 0.0.0.0:8000

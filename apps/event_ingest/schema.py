@@ -9,6 +9,7 @@ from django.utils.timezone import now
 from ninja import Field
 from pydantic import (
     AliasChoices,
+    BaseModel,
     BeforeValidator,
     JsonValue,
     RootModel,
@@ -189,13 +190,15 @@ class EventTemplate(LaxIngestSchema):
     post_context: list[str] | None = None
 
 
-class SourceMapImage(LaxIngestSchema):
+# Important, for some reason using Schema will cause the DebugImage union not to work
+class SourceMapImage(BaseModel):
     type: Literal["sourcemap"]
     code_file: str
     debug_id: uuid.UUID
 
 
-class OtherDebugImage(LaxIngestSchema):
+# Important, for some reason using Schema will cause the DebugImage union not to work
+class OtherDebugImage(BaseModel):
     type: str
 
 
