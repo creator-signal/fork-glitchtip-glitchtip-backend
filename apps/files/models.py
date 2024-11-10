@@ -82,6 +82,13 @@ class File(CreatedModel):
     """
 
     name = models.TextField()
+    last_used = models.DateTimeField(auto_now=True, db_index=True)
+    debug_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Association between file and source code",
+    )
     type = models.CharField(max_length=64)
     headers = models.JSONField(blank=True, null=True)
     blob = models.ForeignKey(FileBlob, on_delete=models.CASCADE, null=True)
