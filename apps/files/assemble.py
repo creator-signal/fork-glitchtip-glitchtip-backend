@@ -1,4 +1,5 @@
-""" Partial port of sentry/tasks/assemble.py """
+"""Partial port of sentry/tasks/assemble.py"""
+
 import hashlib
 import json
 import shutil
@@ -109,11 +110,14 @@ def assemble_artifacts(organization, version, checksum, chunks):
     for rel_path, artifact in artifacts.items():
         artifact_url = artifact.get("url", rel_path)
         artifact_basename = artifact_url.rsplit("/", 1)[-1]
+        headers = artifact.get("headers", {})
+        debug_id = headers.pop("debug-id")
 
         file = File.objects.create(
             name=artifact_basename,
             type="release.file",
-            headers=artifact.get("headers", {}),
+            debug_id=debug_id,
+            headers=headers,
         )
 
         full_path = path.join(scratchpad, rel_path)
