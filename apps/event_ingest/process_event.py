@@ -27,6 +27,7 @@ from apps.alerts.models import Notification
 from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.environments.models import Environment, EnvironmentProject
+from apps.files.models import File
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import (
     Issue,
@@ -56,6 +57,7 @@ from .schema import (
     IngestIssueEvent,
     InterchangeIssueEvent,
     InterchangeTransactionEvent,
+    SourceMapImage,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
 
@@ -388,6 +390,21 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     releases = get_and_create_releases(release_set, projects_with_data)
     create_environments(environment_set, projects_with_data)
+
+    sourcemap_images = [
+        image
+        for event in ingest_events
+        if isinstance(event.payload, ErrorIssueEventSchema) and event.payload.debug_meta
+        for image in event.payload.debug_meta.images
+        if isinstance(image, SourceMapImage)
+    ]
+    sourcemap_files = File.objects.filter(
+        debug_id__in={image.debug_id for image in sourcemap_images},
+        # headers__sourcemap__in={
+        #     f"{image.code_file.split('/')[-1]}.map" for image in sourcemap_images
+        # }
+        # | {image.code_file.split("/")[-1] for image in sourcemap_images},
+    )
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
