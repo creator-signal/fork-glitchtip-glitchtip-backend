@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from symbolic import SourceMapView, SourceView
 
-from apps.files.models import File
+from apps.releases.models import ReleaseFile
 from sentry.utils.safe import get_path
 
 if TYPE_CHECKING:
@@ -63,9 +63,15 @@ class JavascriptEventProcessor:
     Based partially on sentry/lang/javascript/processor.py
     """
 
-    def __init__(self, release_id: int, data: "IssueEventSchema"):
+    def __init__(
+        self,
+        release_id: int,
+        data: "IssueEventSchema",
+        release_files: list[ReleaseFile],
+    ):
         self.release_id = release_id
         self.data = data
+        self.release_files = release_files
 
     def get_stacktraces(self) -> list["StackTrace"]:
         data = self.data
@@ -167,14 +173,7 @@ class JavascriptEventProcessor:
     def transform(self):
         stacktraces = self.get_stacktraces()
         frames = self.get_valid_frames(stacktraces)
-        filenames = {frame.filename.split("/")[-1] for frame in frames}
-        # Make a guess at which files are relevant, match then better after
-        source_files = File.objects.filter(
-            releasefile__release_id=self.release_id,
-            name__in={filename + ".map" for filename in filenames} | filenames,
-        )
-
-        if not source_files:
+        if not self.release_files:
             return
 
         # Copy original stacktrace before modifying them
@@ -189,11 +188,26 @@ class JavascriptEventProcessor:
             map_filename = minified_filename + ".map"
             minified_file = None
             map_file = None
-            for source_file in source_files:
-                if source_file.name == minified_filename:
-                    minified_file = source_file
-                if source_file.name == map_filename:
-                    map_file = source_file
+            for release_file in self.release_files:
+                # File name as given. When debug ids are used, this is based on the debug id
+                file_name = release_file.file.name
+                # The code file name is the one given by the debug_meta source code image
+                # When debug id is used, we must match on this name
+                code_file = release_file.file.headers.get("code_file")
+                if code_file:  # Get name, not full path
+                    code_file = code_file.split("/")[-1]
+                # A minified file will always have a set sourcemap. While a sourcemap will not.
+                sourcemap = release_file.file.headers.get("sourcemap")
+
+                # Match on file name or code file
+                if file_name == minified_filename or (
+                    sourcemap and code_file == minified_filename
+                ):
+                    minified_file = release_file.file
+                if file_name == map_filename or (
+                    not sourcemap and code_file == minified_filename
+                ):
+                    map_file = release_file.file
             if map_file:
                 frames_with_source.append((frame, map_file, minified_file))
 
