@@ -207,30 +207,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.35.57"
+version = "1.35.58"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/73/fb880ce301129a7116ff47b1aab1ca7427c7d63a163676701abc168309eb/boto3-1.35.57.tar.gz", hash = "sha256:db58348849a5af061f0f5ec9c3b699da5221ca83354059fdccb798e3ddb6b62a", size = 111010 }
+sdist = { url = "https://files.pythonhosted.org/packages/69/68/632769113ba3679fe63601d871bce1b1b4cdebac04c05bb071c3187032b5/boto3-1.35.58.tar.gz", hash = "sha256:1ee139e63f1545ee0192914cfe422b68360b8c344a94e4612ac657dd7ece93de", size = 111018 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/b4/2aa8168bb1d80c238538ff523d8902a48b0946aafd3cbd6c72754209ae8a/boto3-1.35.57-py3-none-any.whl", hash = "sha256:9edf49640c79a05b0a72f4c2d1e24dfc164344b680535a645f455ac624dc3680", size = 139178 },
+    { url = "https://files.pythonhosted.org/packages/c6/d1/428fe22e6b0b090161a01977edab1836662b6442614f1d9ec77df99d4e6f/boto3-1.35.58-py3-none-any.whl", hash = "sha256:856896fd5fc5871758eb04b27bad5bbbf0fdb6143a923f9e8d10125351efdf98", size = 139180 },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.35.57"
+version = "1.35.58"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/61/17/65b0a3bb507b19a7a1c6cc7c63e374906891798986f0ba2b6ad174ece86a/botocore-1.35.57.tar.gz", hash = "sha256:d96306558085baf0bcb3b022d7a8c39c93494f031edb376694d2b2dcd0e81327", size = 12951200 }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/d8/49a69f2aa71efcd9a278370171185160be3ac35f5e09ed303c08612c6336/botocore-1.35.58.tar.gz", hash = "sha256:8303309c7b59ddf04b11d79813530809d6b10b411ac9f93916d2032c283d6881", size = 12956170 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/29/6c3a0f688e7c19e2a3734ab0f50cbf85138c1d7a432db8ef4f51f7bae892/botocore-1.35.57-py3-none-any.whl", hash = "sha256:92ddd02469213766872cb2399269dd20948f90348b42bf08379881d5e946cc34", size = 12740042 },
+    { url = "https://files.pythonhosted.org/packages/7c/05/a09e7f96dd7875238a69963da091c8b239329cb3306fbb5af5ad6f6dfb2a/botocore-1.35.58-py3-none-any.whl", hash = "sha256:647b8706ae6484ee4c2208235f38976d9f0e52f80143e81d7941075215e96111", size = 12744249 },
 ]
 
 [[package]]
@@ -587,13 +587,13 @@ wheels = [
 
 [[package]]
 name = "django-allauth"
-version = "65.1.0"
+version = "65.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "django" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/a7/35a6586490b8d7dc47b514b78c0dab37f00625b3305cba89c48aaed71b5e/django_allauth-65.1.0.tar.gz", hash = "sha256:ab2c32c51797bab1e7a334f37afa61ef4a88c6f13dfd7bd898a16e2b7e567ef0", size = 1292228 }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/df/1db5a3d7c87df36c4258ad58502dc12971df28a3b9c1e0be2e41007a7277/django_allauth-65.2.0.tar.gz", hash = "sha256:0a3d7baf7beefd6fe8027316302c26ece7433cf4331a3b245d15fc9a7be68b6f", size = 1544072 }
 
 [package.optional-dependencies]
 mfa = [
@@ -681,16 +681,16 @@ wheels = [
 
 [[package]]
 name = "django-import-export"
-version = "4.2.0"
+version = "4.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diff-match-patch" },
     { name = "django" },
     { name = "tablib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/35/8fd254421563a5ea57ed3f5e06b6cebc89f77251af839ddaa59ac4879ecf/django_import_export-4.2.0.tar.gz", hash = "sha256:6a616046498b44bf4291610609615b00101bb2b9c4701b59b78edfaa5552aa7b", size = 2209870 }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/00/c2d4142f164d745df34dccc2c1712c7e30a71c4f0b0f0ce69e812cb9ee4a/django_import_export-4.2.1.tar.gz", hash = "sha256:a0919e5e0897b46e4364798b3fd4187dd813e6c58bff8b7184cb5223151133bc", size = 2212507 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/ec/1da370612ea9d81f28f108ec51cd3aed446afaf96f526ecf36e42ad5582e/django_import_export-4.2.0-py3-none-any.whl", hash = "sha256:bb8482bd8b124f1f47e58a877e34358820d09293c65fe36c21e9dbcdee170d4d", size = 134971 },
+    { url = "https://files.pythonhosted.org/packages/ce/ce/05d2da627d191bc246e7ef5a91e5bd27c3770b9bdc2fb9dcc95ee2d23108/django_import_export-4.2.1-py3-none-any.whl", hash = "sha256:09bf43af7964d9fdd30eb8e1f29867e53a73fb9533643ac0279c26994916b469", size = 135266 },
 ]
 
 [[package]]

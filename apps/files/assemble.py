@@ -111,7 +111,7 @@ def assemble_artifacts(organization, version, checksum, chunks):
         artifact_url = artifact.get("url", rel_path)
         artifact_basename = artifact_url.rsplit("/", 1)[-1]
         headers = artifact.get("headers", {})
-        debug_id = headers.pop("debug-id")
+        debug_id = headers.pop("debug-id", None)
 
         file = File.objects.create(
             name=artifact_basename,

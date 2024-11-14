@@ -38,7 +38,7 @@ from apps.issue_events.models import (
 )
 from apps.performance.models import TransactionEvent, TransactionGroup
 from apps.projects.models import Project
-from apps.releases.models import Release
+from apps.releases.models import Release, ReleaseFile
 from sentry.culprit import generate_culprit
 from sentry.eventtypes.error import ErrorEvent
 from sentry.utils.strings import truncatechars
@@ -56,6 +56,7 @@ from .schema import (
     IngestIssueEvent,
     InterchangeIssueEvent,
     InterchangeTransactionEvent,
+    SourceMapImage,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
 
@@ -285,7 +286,7 @@ def get_and_create_releases(
             None,
         )
     ]
-    releases: Union[list, QuerySet] = []
+    releases: list | QuerySet = []
     if releases_to_create:
         # Create database records for any release that doesn't exist
         Release.objects.bulk_create(releases_to_create, ignore_conflicts=True)
@@ -389,6 +390,36 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     releases = get_and_create_releases(release_set, projects_with_data)
     create_environments(environment_set, projects_with_data)
 
+    sourcemap_images = [
+        image
+        for event in ingest_events
+        if isinstance(event.payload, ErrorIssueEventSchema) and event.payload.debug_meta
+        for image in event.payload.debug_meta.images
+        if isinstance(image, SourceMapImage)
+    ]
+    filename_set = {
+        filename
+        for event in ingest_events
+        for exception in event.payload.exception.values or []
+        for frame in exception.stacktrace.frames
+        if exception.stacktrace
+        for filename in [
+            frame.filename.split("/")[-1],
+            frame.filename.split("/")[-1] + ".map",
+        ]
+    }
+
+    release_files = (
+        ReleaseFile.objects.filter(
+            release__version__in=release_version_set, release__projects__in=project_set
+        )
+        .filter(
+            Q(file__debug_id__in={image.debug_id for image in sourcemap_images})
+            | Q(file__name__in=filename_set)
+        )
+        .select_related("file", "release")
+    )
+
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
     # Collect Q objects for bulk issue hash lookup
@@ -412,7 +443,26 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             None,
         )
         if event.platform in ("javascript", "node") and release_id:
-            JavascriptEventProcessor(release_id, event).transform()
+            # Get related release files, matching release and org id
+            event_release_files = [
+                release_file
+                for release_file in release_files
+                if release_file.release_id == release_id
+                and release_file.release.organization_id == ingest_event.organization_id
+            ]
+            # Assign code_file to file headers
+            if event.debug_meta:
+                for sourcemap_image in [
+                    image
+                    for image in event.debug_meta.images
+                    if isinstance(image, SourceMapImage)
+                ]:
+                    for release_file in event_release_files:
+                        if sourcemap_image.debug_id == release_file.file.debug_id:
+                            release_file.file.headers["code_file"] = (
+                                sourcemap_image.code_file
+                            )
+            JavascriptEventProcessor(release_id, event, event_release_files).transform()
         elif (
             isinstance(event, ErrorIssueEventSchema)
             and event.exception
