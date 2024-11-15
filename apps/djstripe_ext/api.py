@@ -114,7 +114,10 @@ async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str
     session = await sync_to_async(stripe.billing_portal.Session.create)(
         api_key=djstripe_settings.STRIPE_SECRET_KEY,
         customer=customer.id,
-        return_url=domain + "/" + organization.slug + "/settings/subscription",
+        return_url=domain
+        + "/"
+        + organization.slug
+        + "/settings/subscription?billing_portal_redirect=true",
     )
     # Once we can update stripe-python
     # session = await stripe.billing_portal.Session.create_async(
