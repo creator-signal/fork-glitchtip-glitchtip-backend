@@ -1,7 +1,7 @@
 from celery import shared_task
 from django.core.cache import cache
 
-from .email import InvitationEmail, MetQuotaEmail
+from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
 
@@ -51,7 +51,7 @@ def _check_and_update_throttle(org: Organization):
 
 @shared_task
 def send_throttle_email(organization_id: int):
-    MetQuotaEmail(pk=organization_id).send_email()
+    ThrottleNoticeEmail(pk=organization_id).send_email()
 
 
 @shared_task
