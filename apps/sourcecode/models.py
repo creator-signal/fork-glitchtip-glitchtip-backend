@@ -1,9 +1,9 @@
 from django.db import models
 
 
-class ArtifactBundle(models.Model):
+class DebugSymbolBundle(models.Model):
     """
-    Supports Artifact Bundles and Release Bundles
+    Supports Artifact Bundles, Release Bundles, and DIFs
     """
 
     organization = models.ForeignKey(
@@ -17,7 +17,7 @@ class ArtifactBundle(models.Model):
         blank=True,
         null=True,
     )
-    minified_file = models.ForeignKey(
+    sourcemap_file = models.ForeignKey(
         "files.File", on_delete=models.SET_NULL, blank=True, null=True, related_name="+"
     )
     file = models.ForeignKey("files.File", on_delete=models.CASCADE, related_name="+")
@@ -27,5 +27,13 @@ class ArtifactBundle(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "debug_id"], name="unique_org_debug_id"
+            ),
+            models.UniqueConstraint(
+                fields=["release", "file"], name="unique_release_file"
+            ),
+            models.CheckConstraint(
+                check=models.Q(debug_id__isnull=False)
+                | models.Q(release__isnull=False),
+                name="debug_id_or_release_required",
             ),
         ]

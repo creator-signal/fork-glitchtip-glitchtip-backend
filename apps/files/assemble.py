@@ -10,7 +10,8 @@ from os import path
 from django.core.cache import cache
 
 from apps.organizations_ext.models import Organization
-from apps.releases.models import Release, ReleaseFile
+from apps.releases.models import Release
+from apps.sourcecode.models import DebugSymbolBundle
 from sentry.utils.zip import safe_extract_zip
 
 from .exceptions import AssembleArtifactsError, AssembleChecksumMismatch
@@ -61,7 +62,7 @@ def set_assemble_status(
 
 
 def assemble_artifacts(
-    organization: Organization, version: str, checksum: str, chunks: list[str]
+    organization: Organization, version: str | None, checksum: str, chunks: list[str]
 ):
     set_assemble_status(
         AssembleTask.ARTIFACTS, organization.pk, checksum, ChunkFileState.ASSEMBLING
@@ -103,46 +104,80 @@ def assemble_artifacts(
 
     release: Release | None = None
     if release_name:
-        try:
-            release = organization.release_set.get(version=release_name)
-        except Release.DoesNotExist as ex:
-            raise AssembleArtifactsError("release does not exist") from ex
+        release, _ = Release.objects.get_or_create(
+            organization=organization, version=release_name
+        )
 
     # Sentry OSS would add dist to release here
 
     artifacts = manifest.get("files", {})
+    files = []
     for rel_path, artifact in artifacts.items():
         artifact_url = artifact.get("url", rel_path)
         artifact_basename = artifact_url.rsplit("/", 1)[-1]
         headers = artifact.get("headers", {})
-        debug_id = headers.pop("debug-id", None)
 
         file = File.objects.create(
             name=artifact_basename,
-            type="release.file",
-            debug_id=debug_id,
+            type=artifact["type"],
             headers=headers,
         )
+        files.append(file)
 
         full_path = path.join(scratchpad, rel_path)
         with open(full_path, "rb") as fp:
             file.putfile(fp)
 
-        # kwargs = {
-        #     "organization_id": organization.id,
-        #     "release": release,
-        #     "name": artifact_url,
-        #     # "dist": dist,
-        # }
+    bundles: list[DebugSymbolBundle] = []
+    for file in files:
+        if file.type == "minified_source":
+            try:
+                sourcemap_file = next(
+                    value
+                    for value in files
+                    if value.type == "source_map"
+                    and (
+                        file.headers.get("sourcemap") == value.name
+                        or value.headers.get("debug-id") == file.headers.get("debug-id")
+                    )
+                )
+            except StopIteration:
+                sourcemap_file = None
 
-        release_file, created = ReleaseFile.objects.get_or_create(
-            release=release, name=artifact_url, defaults={"file": file}
-        )
-        if not created:
-            old_file = release_file.file
-            release_file.file = file
-            release_file.save(update_fields=["file"])
-            old_file.delete()
+            if sourcemap_file:
+                bundles.append(
+                    DebugSymbolBundle(
+                        organization=organization,
+                        debug_id=file.headers.get("debug-id"),
+                        release=release,
+                        sourcemap_file=sourcemap_file,
+                        file=file,
+                    )
+                )
+
+    DebugSymbolBundle.objects.bulk_create(
+        bundles,
+        ignore_conflicts=True,
+        # unique_fields=["organization", "debug_id", "release"],
+        # update_fields=["file", "sourcemap_file"],
+    )
+
+    # kwargs = {
+    #     "organization_id": organization.id,
+    #     "release": release,
+    #     "name": artifact_url,
+    #     # "dist": dist,
+    # }
+
+    # release_file, created = ReleaseFile.objects.get_or_create(
+    #     release=release, name=artifact_url, defaults={"file": file}
+    # )
+
+    # if not created:
+    #     old_file = release_file.file
+    #     release_file.file = file
+    #     release_file.save(update_fields=["file"])
+    #     old_file.delete()
 
     set_assemble_status(
         AssembleTask.ARTIFACTS, organization.pk, checksum, ChunkFileState.OK
