@@ -1,29 +1,8 @@
 from celery import shared_task
 from django.core.cache import cache
-from django.db.models import Q
 
 from .email import InvitationEmail, MetQuotaEmail
 from .models import Organization
-
-
-def get_free_tier_organizations_with_event_count():
-    """
-    Free tier means either no plan selected or only inactive plan
-    """
-    return Organization.objects.with_event_counts().filter(
-        Q(djstripe_customers__isnull=True)
-        | Q(
-            djstripe_customers__subscriptions__plan__amount=0,
-            djstripe_customers__subscriptions__status="active",
-        )
-        | Q(
-            djstripe_customers__subscriptions__status="canceled",
-        )
-        & ~Q(  # Avoid exclude, it doesn't filter relations the same way
-            djstripe_customers__subscriptions__plan__amount__gt=0,
-            djstripe_customers__subscriptions__status="active",
-        )
-    )
 
 
 @shared_task
