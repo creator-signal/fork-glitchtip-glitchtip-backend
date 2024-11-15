@@ -60,7 +60,9 @@ def set_assemble_status(
     cache.set(cache_key, (state, detail), 600)
 
 
-def assemble_artifacts(organization, version, checksum, chunks):
+def assemble_artifacts(
+    organization: Organization, version: str, checksum: str, chunks: list[str]
+):
     set_assemble_status(
         AssembleTask.ARTIFACTS, organization.pk, checksum, ChunkFileState.ASSEMBLING
     )
@@ -99,12 +101,14 @@ def assemble_artifacts(organization, version, checksum, chunks):
     if release_name != version:
         raise AssembleArtifactsError("release does not match uploaded bundle")
 
-    try:
-        release = organization.release_set.get(version=release_name)
-    except Release.DoesNotExist as ex:
-        raise AssembleArtifactsError("release does not exist") from ex
+    release: Release | None = None
+    if release_name:
+        try:
+            release = organization.release_set.get(version=release_name)
+        except Release.DoesNotExist as ex:
+            raise AssembleArtifactsError("release does not exist") from ex
 
-    # Sentry would add dist to release here
+    # Sentry OSS would add dist to release here
 
     artifacts = manifest.get("files", {})
     for rel_path, artifact in artifacts.items():

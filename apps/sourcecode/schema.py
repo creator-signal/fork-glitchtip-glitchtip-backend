@@ -10,7 +10,7 @@ class ArtifactBundleAssembleIn(Schema):
     checksum: HexField
     chunks: list[HexField]
     projects: list[str]
-    version: str
+    version: str | None = None
 
 
 AssembleState = Literal["created", "error", "not_found", "assembling", "ok"]
