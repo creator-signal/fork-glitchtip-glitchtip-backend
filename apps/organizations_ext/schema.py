@@ -34,6 +34,7 @@ class OrganizationSchema(OrganizationInSchema, ModelSchema):
             "name",
             "slug",
             "is_accepting_events",
+            "event_throttle_rate",
         ]
 
 

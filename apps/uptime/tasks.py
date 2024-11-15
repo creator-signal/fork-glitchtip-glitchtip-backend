@@ -91,7 +91,7 @@ def dispatch_checks():
         tick = cache.incr(UPTIME_COUNTER_KEY)
     tick = tick * settings.UPTIME_CHECK_INTERVAL
     monitors = (
-        Monitor.objects.filter(organization__is_accepting_events=True)
+        Monitor.objects.filter(organization__event_throttle_rate__lt=100)
         .annotate(mod=tick % F("interval"))
         .filter(mod__lt=UPTIME_CHECK_INTERVAL)
         .exclude(Q(url="") & ~Q(monitor_type=MonitorType.HEARTBEAT))

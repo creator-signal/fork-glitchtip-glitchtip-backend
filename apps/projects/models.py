@@ -1,4 +1,3 @@
-import random
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -121,13 +120,6 @@ class Project(CreatedModel, SoftDeleteModel):
             if slug in reserved_words:
                 slug += "-1"
         return slug
-
-    @property
-    def is_accepting_events(self):
-        """Is the project in its limits for event creation"""
-        if self.event_throttle_rate == 0:
-            return True
-        return random.randint(0, 100) > self.event_throttle_rate
 
 
 class ProjectCounter(models.Model):
