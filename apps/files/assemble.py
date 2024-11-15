@@ -161,18 +161,7 @@ def assemble_artifacts(
         # unique_fields=["organization", "debug_id", "release"],
         # update_fields=["file", "sourcemap_file"],
     )
-
-    # kwargs = {
-    #     "organization_id": organization.id,
-    #     "release": release,
-    #     "name": artifact_url,
-    #     # "dist": dist,
-    # }
-
-    # release_file, created = ReleaseFile.objects.get_or_create(
-    #     release=release, name=artifact_url, defaults={"file": file}
-    # )
-
+    # May need to readd this logic but in bulk
     # if not created:
     #     old_file = release_file.file
     #     release_file.file = file
