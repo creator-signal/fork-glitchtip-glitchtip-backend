@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from operator import itemgetter
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
@@ -18,6 +18,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Greatest
 from django.db.utils import IntegrityError
+from django.utils import timezone
 from django_redis import get_redis_connection
 from ninja import Schema
 from user_agents import parse
@@ -409,7 +410,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     debug_files = (
         DebugSymbolBundle.objects.filter(
-            organization__in={event.organization_id for event in process_issue_events}
+            organization__in={event.organization_id for event in ingest_events}
         )
         .filter(
             Q(
@@ -421,16 +422,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         )
         .select_related("file", "sourcemap_file", "release")
     )
-    # release_files = (
-    #     ReleaseFile.objects.filter(
-    #         release__version__in=release_version_set, release__projects__in=project_set
-    #     )
-    #     .filter(
-    #         Q(file__debug_id__in={image.debug_id for image in sourcemap_images})
-    #         | Q(file__name__in=filename_set)
-    #     )
-    #     .select_related("file", "release")
-    # )
+    now = timezone.now()
+    # Update last used if older than 1 day, to minimize queries
+    debug_files.filter(last_used__gt=now - timedelta(days=1)).update(last_used=now)
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
@@ -454,14 +448,13 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             ),
             None,
         )
-        if event.platform in ("javascript", "node") and release_id:
-            # Get related release files, matching release and org id
-            event_release_files = [
-                release_file
-                for release_file in release_files
-                if release_file.release_id == release_id
-                and release_file.release.organization_id == ingest_event.organization_id
+        if event.platform in ("javascript", "node"):
+            event_debug_files = [
+                debug_file
+                for debug_file in debug_files
+                if debug_file.organization_id == ingest_event.organization_id
             ]
+
             # Assign code_file to file headers
             if event.debug_meta:
                 for sourcemap_image in [
@@ -469,12 +462,20 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                     for image in event.debug_meta.images
                     if isinstance(image, SourceMapImage)
                 ]:
-                    for release_file in event_release_files:
-                        if sourcemap_image.debug_id == release_file.file.debug_id:
-                            release_file.file.headers["code_file"] = (
-                                sourcemap_image.code_file
-                            )
-            JavascriptEventProcessor(release_id, event, event_release_files).transform()
+                    for debug_file in event_debug_files:
+                        if sourcemap_image.debug_id == debug_file.debug_id:
+                            debug_file.data["code_file"] = sourcemap_image.code_file
+
+            JavascriptEventProcessor(
+                release_id,
+                event,
+                [
+                    debug_file
+                    for debug_file in event_debug_files
+                    if debug_file.release_id == release_id
+                    or debug_file.data.get("code_file")
+                ],
+            ).transform()
         elif (
             isinstance(event, ErrorIssueEventSchema)
             and event.exception

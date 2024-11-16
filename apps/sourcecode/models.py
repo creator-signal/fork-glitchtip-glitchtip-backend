@@ -21,7 +21,7 @@ class DebugSymbolBundle(models.Model):
         "files.File", on_delete=models.SET_NULL, blank=True, null=True, related_name="+"
     )
     file = models.ForeignKey("files.File", on_delete=models.CASCADE, related_name="+")
-    data = models.JSONField(null=True, blank=True)
+    data = models.JSONField(default={})
 
     class Meta:
         constraints = [
