@@ -38,7 +38,8 @@ from apps.issue_events.models import (
 )
 from apps.performance.models import TransactionEvent, TransactionGroup
 from apps.projects.models import Project
-from apps.releases.models import Release, ReleaseFile
+from apps.releases.models import Release
+from apps.sourcecode.models import DebugSymbolBundle
 from sentry.culprit import generate_culprit
 from sentry.eventtypes.error import ErrorEvent
 from sentry.utils.strings import truncatechars
@@ -403,22 +404,33 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         for exception in event.payload.exception.values or []
         for frame in exception.stacktrace.frames
         if exception.stacktrace
-        for filename in [
-            frame.filename.split("/")[-1],
-            frame.filename.split("/")[-1] + ".map",
-        ]
+        for filename in [frame.filename.split("/")[-1]]
     }
 
-    release_files = (
-        ReleaseFile.objects.filter(
-            release__version__in=release_version_set, release__projects__in=project_set
+    debug_files = (
+        DebugSymbolBundle.objects.filter(
+            organization__in={event.organization_id for event in process_issue_events}
         )
         .filter(
-            Q(file__debug_id__in={image.debug_id for image in sourcemap_images})
-            | Q(file__name__in=filename_set)
+            Q(
+                release__version__in=release_version_set,
+                release__projects__in=project_set,
+                file__name__in=filename_set,
+            )
+            | Q(debug_id__in={image.debug_id for image in sourcemap_images})
         )
-        .select_related("file", "release")
+        .select_related("file", "sourcemap_file", "release")
     )
+    # release_files = (
+    #     ReleaseFile.objects.filter(
+    #         release__version__in=release_version_set, release__projects__in=project_set
+    #     )
+    #     .filter(
+    #         Q(file__debug_id__in={image.debug_id for image in sourcemap_images})
+    #         | Q(file__name__in=filename_set)
+    #     )
+    #     .select_related("file", "release")
+    # )
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []

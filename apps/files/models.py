@@ -29,8 +29,9 @@ class FileBlob(CreatedModel):
     Port of sentry.models.file.FileBlob with simplifications
 
     OSS Sentry stores files in file blob chunks. Where one file gets saved as many blobs.
-    GlitchTip uses Django FileField and does split files into chunks.
-    The FileBlob's provide file deduplication.
+    GlitchTip uses Django FileField and does not split files into chunks.
+    The FileBlob's provide file deduplication. Multiple File objects may refer to the same
+    FileBlob.
     """
 
     blob = models.FileField(upload_to="uploads/file_blobs")
@@ -82,17 +83,17 @@ class File(CreatedModel):
     """
 
     name = models.TextField()
-    last_used = models.DateTimeField(auto_now=True, db_index=True)
-    debug_id = models.UUIDField(
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="Association between file and source code",
-    )
-    type = models.CharField(max_length=64)
+    # last_used = models.DateTimeField(auto_now=True, db_index=True)
+    # debug_id = models.UUIDField(
+    #     null=True,
+    #     blank=True,
+    #     db_index=True,
+    #     help_text="Association between file and source code",
+    # )  # Remove this?
+    type = models.CharField(max_length=64)  # Not currently used
     headers = models.JSONField(blank=True, null=True)
     blob = models.ForeignKey(FileBlob, on_delete=models.CASCADE, null=True)
-    size = models.PositiveIntegerField(default=0)
+    size = models.PositiveIntegerField(default=0)  # Not currently used
     checksum = models.CharField(max_length=40, null=True, db_index=True)
 
     def put_django_file(self, fileobj):
