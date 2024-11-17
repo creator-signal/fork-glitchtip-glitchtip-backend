@@ -1,5 +1,3 @@
-from typing import Optional
-
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -9,15 +7,16 @@ from ninja.pagination import paginate
 from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
+from apps.sourcecode.models import DebugSymbolBundle
+from apps.sourcecode.schema import DebugSymbolBundleSchema
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 
-from .models import Release, ReleaseFile
+from .models import Release
 from .schema import (
     AssembleSchema,
     ReleaseBase,
-    ReleaseFileSchema,
     ReleaseIn,
     ReleaseSchema,
     ReleaseUpdate,
@@ -50,9 +49,9 @@ DELETE /projects/{organization_slug}/{project_slug}/releases/{version}/files/{fi
 def get_releases_queryset(
     organization_slug: str,
     user_id: int,
-    id: Optional[int] = None,
-    version: Optional[str] = None,
-    project_slug: Optional[str] = None,
+    id: int | None = None,
+    version: str | None = None,
+    project_slug: str | None = None,
 ):
     qs = Release.objects.filter(
         organization__slug=organization_slug, organization__users=user_id
@@ -69,11 +68,11 @@ def get_releases_queryset(
 def get_release_files_queryset(
     organization_slug: str,
     user_id: int,
-    version: Optional[str] = None,
-    project_slug: Optional[str] = None,
-    id: Optional[int] = None,
+    version: str | None = None,
+    project_slug: str | None = None,
+    id: int | None = None,
 ):
-    qs = ReleaseFile.objects.filter(
+    qs = DebugSymbolBundle.objects.filter(
         release__organization__slug=organization_slug,
         release__organization__users=user_id,
     )
@@ -203,7 +202,7 @@ async def delete_organization_release(
 
 @router.get(
     "/organizations/{slug:organization_slug}/releases/{str:version}/files/",
-    response=list[ReleaseFileSchema],
+    response=list[DebugSymbolBundleSchema],
     by_alias=True,
 )
 @paginate
@@ -223,7 +222,7 @@ async def list_release_files(
 
 @router.get(
     "/organizations/{slug:organization_slug}/releases/{str:version}/files/{int:file_id}/",
-    response=ReleaseFileSchema,
+    response=DebugSymbolBundleSchema,
     by_alias=True,
 )
 @has_permission(["project:releases"])
@@ -346,7 +345,7 @@ async def delete_project_release(
 
 @router.get(
     "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/files/",
-    response=list[ReleaseFileSchema],
+    response=list[DebugSymbolBundleSchema],
     by_alias=True,
 )
 @paginate
@@ -392,7 +391,7 @@ async def delete_project_release_file(
 
 @router.get(
     "/projects/{slug:organization_slug}/{slug:project_slug}/releases/{str:version}/files/{int:file_id}/",
-    response=ReleaseFileSchema,
+    response=DebugSymbolBundleSchema,
     by_alias=True,
 )
 @has_permission(["project:releases"])

@@ -1,7 +1,9 @@
 from django.db import models
 
+from glitchtip.base_models import CreatedModel
 
-class DebugSymbolBundle(models.Model):
+
+class DebugSymbolBundle(CreatedModel):
     """
     Supports Artifact Bundles, Release Bundles, and DIFs
     """
@@ -21,7 +23,7 @@ class DebugSymbolBundle(models.Model):
         "files.File", on_delete=models.SET_NULL, blank=True, null=True, related_name="+"
     )
     file = models.ForeignKey("files.File", on_delete=models.CASCADE, related_name="+")
-    data = models.JSONField(default={})
+    data = models.JSONField(default=dict)
 
     class Meta:
         constraints = [
