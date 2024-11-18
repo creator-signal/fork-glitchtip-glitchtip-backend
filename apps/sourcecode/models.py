@@ -9,7 +9,7 @@ class DebugSymbolBundle(CreatedModel):
     """
 
     organization = models.ForeignKey(
-        "organizations_ext.Organization", on_delete=models.CASCADE, related_name="+"
+        "organizations_ext.Organization", on_delete=models.CASCADE
     )
     debug_id = models.UUIDField(blank=True, null=True)
     last_used = models.DateTimeField(auto_now=True, db_index=True)
@@ -22,7 +22,7 @@ class DebugSymbolBundle(CreatedModel):
     sourcemap_file = models.ForeignKey(
         "files.File", on_delete=models.SET_NULL, blank=True, null=True, related_name="+"
     )
-    file = models.ForeignKey("files.File", on_delete=models.CASCADE, related_name="+")
+    file = models.ForeignKey("files.File", on_delete=models.CASCADE)
     data = models.JSONField(default=dict)
 
     class Meta:

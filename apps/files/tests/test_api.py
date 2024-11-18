@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.sourcecode.models import DebugSymbolBundle
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..models import File, FileBlob
@@ -65,4 +66,8 @@ class ReleaseAssembleAPITests(GlitchTipTestCaseMixin, TestCase):
         self.assertTrue(File.objects.get(name=filename))
         map_file = File.objects.get(name=map_filename)
         self.assertTrue(map_file)
-        self.assertTrue(map_file.releasefile_set.filter(release=self.release).exists())
+        self.assertTrue(
+            DebugSymbolBundle.objects.filter(
+                sourcemap_file=map_file, release=self.release
+            ).exists()
+        )

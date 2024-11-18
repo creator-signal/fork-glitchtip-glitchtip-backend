@@ -74,7 +74,7 @@ class OrganizationManager(OrgManager):
             file_size=(
                 Coalesce(
                     SubquerySum(
-                        "release__releasefile__file__blob__size",
+                        "debugsymbolbundle__file__blob__size",
                         filter=subscription_filter,
                     ),
                     0,

@@ -122,7 +122,9 @@ class ReleaseFileAPIPermissionTests(APIPermissionTestCase):
         self.release = baker.make(
             "releases.Release", organization=self.organization, projects=[self.project]
         )
-        self.release_file = baker.make("releases.ReleaseFile", release=self.release)
+        self.release_file = baker.make(
+            "sourcecode.DebugSymbolBundle", release=self.release
+        )
 
         self.list_url = reverse(
             "api:list_project_release_files",

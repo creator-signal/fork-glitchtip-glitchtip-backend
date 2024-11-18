@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -58,6 +58,7 @@ from .schema import (
     IngestIssueEvent,
     InterchangeIssueEvent,
     InterchangeTransactionEvent,
+    IssueEventSchema,
     SourceMapImage,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
@@ -122,7 +123,7 @@ def update_issues(processing_events: list[ProcessingEvent]):
         )
 
 
-def devalue(obj: Union[Schema, list]) -> Optional[Union[dict, list]]:
+def devalue(obj: Schema | list[Schema]) -> dict | list[dict] | None:
     """
     Convert Schema like {"values": []} into list or dict without unnecessary 'values'
     """
@@ -399,13 +400,23 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         for image in event.payload.debug_meta.images
         if isinstance(image, SourceMapImage)
     ]
+
+    # Get each unique filename from each stacktrace frame
+    # The nesting is from the variable ways ingest data is accepted
+    # IMO it's even harder to read unnested...
     filename_set = {
-        filename
+        frame.filename.split("/")[-1]
         for event in ingest_events
-        for exception in event.payload.exception.values or []
-        for frame in exception.stacktrace.frames
+        if isinstance(event.payload, (ErrorIssueEventSchema, IssueEventSchema))
+        and event.payload.exception
+        for exception in (
+            event.payload.exception
+            if isinstance(event.payload.exception, list)
+            else event.payload.exception.values
+        )
         if exception.stacktrace
-        for filename in [frame.filename.split("/")[-1]]
+        for frame in exception.stacktrace.frames
+        if frame.filename
     }
 
     debug_files = (
@@ -424,7 +435,8 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     )
     now = timezone.now()
     # Update last used if older than 1 day, to minimize queries
-    debug_files.filter(last_used__gt=now - timedelta(days=1)).update(last_used=now)
+    if debug_files:
+        debug_files.filter(last_used__gt=now - timedelta(days=1)).update(last_used=now)
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []

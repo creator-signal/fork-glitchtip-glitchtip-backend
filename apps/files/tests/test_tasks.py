@@ -23,10 +23,12 @@ class TasksTestCase(GlitchTipTestCase):
         data = {"file_gzip": file}
         self.client.post(self.url, data)
         file_blob = FileBlob.objects.first()
+        release = baker.make("releases.Release", organization=self.organization)
         release_file = baker.make(
-            "releases.ReleaseFile",
+            "sourcecode.DebugSymbolBundle",
             file__blob=file_blob,
-            project__organization=self.organization,
+            organization=self.organization,
+            release=release,
         )
 
         cleanup_old_files()
@@ -35,9 +37,10 @@ class TasksTestCase(GlitchTipTestCase):
 
         with freeze_time(now() + timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS)):
             release_file = baker.make(
-                "releases.ReleaseFile",
+                "sourcecode.DebugSymbolBundle",
                 file__blob=file_blob,
-                project__organization=self.organization,
+                organization=self.organization,
+                release=release,
             )
             cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 1)
