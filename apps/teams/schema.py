@@ -17,13 +17,18 @@ class TeamIn(Schema):
 class TeamSlugSchema(CamelSchema, ModelSchema):
     """Used in relations including organization projects"""
 
+    id: str
+
     class Meta:
         model = Team
         fields = ["id", "slug"]
 
+    @staticmethod
+    def resolve_id(obj):
+        return str(obj.id)
+
 
 class TeamSchema(TeamSlugSchema):
-    id: str
     created: datetime = Field(serialization_alias="dateCreated")
     is_member: bool
     member_count: int
