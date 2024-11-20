@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
@@ -19,3 +21,8 @@ class StatsV2APITestCase(GlitchTipTestCase):
             {"category": "error", "start": start, "end": end, "field": "sum(quantity)"},
         )
         self.assertEqual(res.status_code, 200)
+
+        response = res.json()
+        self.assertIsInstance(response["intervals"], list)
+        self.assertEqual(len(response["intervals"]), 4)
+        self.assertIsInstance(datetime.fromisoformat(response["intervals"][0]), datetime)
