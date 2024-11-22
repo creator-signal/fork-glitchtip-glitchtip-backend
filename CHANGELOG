@@ -1,10 +1,12 @@
 # Unreleased
 
+- Support sentry sdk artifact bundles for source map support, including debug id mappings. Improves source map support for various sentry sdk integrations. Source maps no longer require a release. Users may need to reupload existing source maps.
+- GLITCHTIP_MAX_FILE_LIFE_DAYS now defaults to GLITCHTIP_MAX_EVENT_LIFE_DAYS (instead of 2 x event life).
 - Add organization and projects throttle. Can be set in Django admin.
 
 # v4.1.5
 
-- Upgrade to django-allauth 65.0.0 
+- Upgrade to django-allauth 65.0.0
 - Upgrade Python to 3.13
 - Use connection pooling by default, unless max conn age is set
 
