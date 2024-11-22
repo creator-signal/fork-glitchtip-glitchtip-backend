@@ -1,4 +1,6 @@
-from typing import Literal, Optional
+import math
+import random
+from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
@@ -6,8 +8,10 @@ from django.core.cache import cache
 from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
+from apps.organizations_ext.tasks import check_organization_throttle
 from apps.projects.models import Project
 from glitchtip.api.exceptions import ThrottleException
+from glitchtip.utils import async_call_celery_task
 from sentry.utils.auth import parse_auth_header
 
 from .constants import EVENT_BLOCK_CACHE_KEY
@@ -46,23 +50,38 @@ REJECTION_MAP: dict[Literal["v", "t"], Exception] = {
 REJECTION_WAIT = 30
 
 
-def serialize_throttle(org_throttle: int, project_throttle: int):
+def serialize_throttle(org_throttle: int, project_throttle: int) -> str:
     """
-    Format example "t:30:0" means throttle with 30% org throttle and 0% (disaled)
+    Format example "t:30:0" means throttle with 30% org throttle and 0% (disabled)
     project throttle
     """
     return f"t:{org_throttle}:{project_throttle}"
 
 
 def deserialize_throttle(input: str) -> None | tuple[int, int]:
-    parts = input.split(":")
-    if len(parts) == 1 and parts[0] == "t":
+    """Return (org_throttle, project_throttle) as integer %"""
+    if input == "t":
         return 0, 0
-    elif len(parts) == 3 and parts[0] == "t":
-        return int(parts[1]), int(parts[2])
+    if input.startswith("t:"):
+        parts = input.split(":", 2)
+        if len(parts) == 3:
+            return int(parts[1]), int(parts[2])
+    return None
 
 
-async def get_project(request: HttpRequest) -> Optional[Project]:
+def is_accepting_events(throttle_rate: int) -> bool:
+    """Consider throttle to determine if event are being accepted"""
+    if throttle_rate == 0:
+        return True
+    return random.randint(0, 100) > throttle_rate
+
+
+def calculate_retry_after(throttle: int):
+  """Calculates Retry-After using a power function."""
+  return math.ceil(0.02 * throttle**2.3)
+
+
+async def get_project(request: HttpRequest) -> Project | None:
     """
     Return the valid and accepting events project based on a request.
 
@@ -81,8 +100,16 @@ async def get_project(request: HttpRequest) -> Optional[Project]:
     # block cache check should be right before database call
     block_cache_key = EVENT_BLOCK_CACHE_KEY + str(project_id)
     if block_value := cache.get(block_cache_key):
-        # Repeat the original message until cache expires
-        raise REJECTION_MAP[block_value]
+        if block_value.startswith("t"):
+            if throttle := deserialize_throttle(block_value):
+                org_throttle, project_throttle = throttle
+                if not is_accepting_events(org_throttle) or not is_accepting_events(
+                    project_throttle
+                ):
+                    raise ThrottleException(calculate_retry_after(max(throttle)))
+        else:
+            # Repeat the original message until cache expires
+            raise REJECTION_MAP[block_value]
 
     project = (
         await Project.objects.filter(
@@ -104,15 +131,43 @@ async def get_project(request: HttpRequest) -> Optional[Project]:
     if not project:
         cache.set(block_cache_key, "v", REJECTION_WAIT)
         raise REJECTION_MAP["v"]
-    if not project.organization.is_accepting_events:
+    if (
+        not project.organization.is_accepting_events
+        or project.organization.event_throttle_rate == 100
+        or project.event_throttle_rate == 100
+    ):
         cache.set(block_cache_key, "t", REJECTION_WAIT)
-        raise REJECTION_MAP["t"]
-    if not project.is_accepting_events:
-        raise REJECTION_MAP["t"]
+        raise ThrottleException(600)
+    if project.organization.event_throttle_rate or project.event_throttle_rate:
+        cache.set(
+            block_cache_key,
+            serialize_throttle(
+                project.organization.event_throttle_rate, project.event_throttle_rate
+            ),
+            REJECTION_WAIT,
+        )
+        if not is_accepting_events(
+            project.organization.event_throttle_rate
+        ) or not is_accepting_events(project.event_throttle_rate):
+            raise ThrottleException(
+                calculate_retry_after(
+                    max(project.organization.event_throttle_rate, project.event_throttle_rate)
+                )
+            )
+
+    # Check throttle needs every 1 out of X requests
+    if (
+        settings.BILLING_ENABLED
+        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
+    ):
+        await async_call_celery_task(
+            check_organization_throttle, project.organization_id
+        )
+
     return project
 
 
-async def event_auth(request: HttpRequest) -> Optional[Project]:
+async def event_auth(request: HttpRequest) -> Project | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
     Throttling is also handled here.

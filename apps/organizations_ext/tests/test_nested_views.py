@@ -17,6 +17,7 @@ class OrganizationProjectsViewTestCase(GlitchTipTestCaseMixin, TestCase):
             res = self.client.get(self.url)
         self.assertNotContains(res, self.organization.slug)
         self.assertContains(res, self.team.slug)
+        self.assertIsInstance(res.json()[0]["teams"][0]["id"], str)
 
     def test_organization_projects_list_query(self):
         other_team = baker.make("teams.Team", organization=self.organization)

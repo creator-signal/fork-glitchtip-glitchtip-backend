@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import warnings
+from datetime import timedelta
 
 import environ
 import sentry_sdk
@@ -203,6 +204,7 @@ WEB_INSTALLED_APPS = [
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.humanize",
     "psqlextra",
     "django_prometheus",
     "allauth",
@@ -750,12 +752,11 @@ PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 # Support plans available. Email info@burkesoftware.com for more info.
 I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
 
-# Max events per month for free tier
-BILLING_FREE_TIER_EVENTS = env.int("BILLING_FREE_TIER_EVENTS", 1000)
 DJSTRIPE_SUBSCRIBER_MODEL = "organizations_ext.Organization"
 DJSTRIPE_SUBSCRIBER_MODEL_REQUEST_CALLBACK = organization_request_callback
 DJSTRIPE_USE_NATIVE_JSONFIELD = True
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "djstripe_id"
+MARKETING_URL = "https://glitchtip.com"
 STRIPE_AUTOMATIC_TAX = env.bool("STRIPE_AUTOMATIC_TAX", False)
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", False)
 if BILLING_ENABLED:
@@ -767,13 +768,9 @@ if BILLING_ENABLED:
     STRIPE_LIVE_PUBLIC_KEY = env.str("STRIPE_LIVE_PUBLIC_KEY", None)
     STRIPE_LIVE_SECRET_KEY = env.str("STRIPE_LIVE_SECRET_KEY", None)
     DJSTRIPE_WEBHOOK_SECRET = env.str("DJSTRIPE_WEBHOOK_SECRET", None)
-    CELERY_BEAT_SCHEDULE["set-organization-throttle"] = {
-        "task": "apps.organizations_ext.tasks.set_organization_throttle",
-        "schedule": crontab(hour=7, minute=1),
-    }
-    CELERY_BEAT_SCHEDULE["warn-organization-throttle"] = {
-        "task": "apps.djstripe_ext.tasks.warn_organization_throttle",
-        "schedule": crontab(minute=30),
+    CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
+        "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
+        "schedule": timedelta(hours=4),
     }
 elif TESTING:
     # Must run tests with djstripe enabled

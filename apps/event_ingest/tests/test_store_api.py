@@ -65,3 +65,19 @@ class StoreAPITestCase(EventIngestTestCase):
         self.assertEqual(
             IssueEvent.objects.filter(type=IssueEventType.ERROR).count(), 1
         )
+
+    @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=1)
+    async def test_check_throttle(self):
+        data = self.get_json_data("events/test_data/py_error.json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        # We know the throttle was checked when this simplistic lock is set
+        self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))
+
+    @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=100000000)
+    async def test_check_no_throttle(self):
+        data = self.get_json_data("events/test_data/py_error.json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        # We know the throttle was not checked when this simplistic lock isn't set
+        self.assertFalse(cache.get(f"org-throttle-{self.organization.id}"))

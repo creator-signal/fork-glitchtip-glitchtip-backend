@@ -11,18 +11,37 @@ class MetQuotaEmail(DetailEmail):
     subject_template_name = "organizations/met-quota-drip-subject.txt"
     model = Organization
 
+    def get_object(self, *args, **kwargs):
+        return super().get_object(queryset=Organization.objects.with_event_counts())
+
     def get_email(self):
         return self.object.email
 
     def get_context_data(self, **kwargs):
+        from djstripe.models import Product
+
         context = super().get_context_data(**kwargs)
         base_url = settings.GLITCHTIP_URL.geturl()
-        event_limit = settings.BILLING_FREE_TIER_EVENTS
+        faq_link = (
+            settings.MARKETING_URL
+            + "/documentation/frequently-asked-questions"
+            + "#how-can-i-reduce-the-number-of-events-my-organization-is-using-each-month"
+        )
         organization = self.object
         subscription_link = f"{base_url}/{organization.slug}/settings/subscription"
-        context["organization_name"] = organization.name
-        context["event_limit"] = event_limit
-        context["subscription_link"] = subscription_link
+        product = Product.objects.filter(
+            plan__subscriptions__customer__subscriber=organization,
+            plan__subscriptions__status="active",
+        ).first()
+        context.update(
+            {
+                "organization": organization,
+                "product": product,
+                "event_limit": product.metadata.get("events") if product else None,
+                "subscription_link": subscription_link,
+                "faq_link": faq_link,
+            }
+        )
         return context
 
 

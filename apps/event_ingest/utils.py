@@ -1,7 +1,5 @@
 import hashlib
-from typing import TYPE_CHECKING, List, Optional, Union
-
-from django.core.cache import cache
+from typing import TYPE_CHECKING
 
 from .schema import EventMessage
 
@@ -14,7 +12,7 @@ def default_hash_input(title: str, culprit: str, type: "IssueEventType") -> str:
 
 
 def generate_hash(
-    title: str, culprit: str, type: "IssueEventType", extra: Optional[List[str]] = None
+    title: str, culprit: str, type: "IssueEventType", extra: list[str] | None = None
 ) -> str:
     """Generate insecure hash used for grouping issues"""
     if extra:
@@ -31,7 +29,7 @@ def generate_hash(
     return hashlib.md5(hash_input.encode()).hexdigest()
 
 
-def transform_parameterized_message(message: Union[str, EventMessage]) -> str:
+def transform_parameterized_message(message: str | EventMessage) -> str:
     """
     Accept str or Event Message interface
     Returns formatted string with interpolation
@@ -58,19 +56,6 @@ def transform_parameterized_message(message: Union[str, EventMessage]) -> str:
             # Params not provided, return message as is
             return message.message
     return message.formatted
-
-
-def cache_set_nx(key, value, timeout: Optional[int] = 300) -> bool:
-    """
-    django-redis style cache set with nx, but with fallback for non-redis
-    """
-    try:
-        return cache.set(key, value, timeout, nx=True)
-    except TypeError:
-        if cache.get(key):
-            return False
-        cache.set(key, value, timeout)
-        return True
 
 
 Replacable = str | dict | list

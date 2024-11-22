@@ -1,5 +1,6 @@
 from anonymizeip import anonymize_ip
 from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpResponse
 from ipware import get_client_ip
 from ninja import Router, Schema
@@ -21,7 +22,6 @@ from .schema import (
     TransactionEventSchema,
 )
 from .tasks import ingest_event, ingest_transaction
-from .utils import cache_set_nx
 
 router = Router(auth=event_auth)
 
@@ -64,7 +64,7 @@ async def event_store(
     Event store is the original event ingest API from OSS Sentry but is used less often
     Unlike Envelope, it accepts only one Issue event.
     """
-    if cache_set_nx("uuid" + payload.event_id.hex, True) is False:
+    if cache.add("uuid" + payload.event_id.hex, True) is False:
         raise ValidationError([{"message": "Duplicate event id"}])
 
     if client_ip := get_ip_address(request):
@@ -121,7 +121,7 @@ async def event_envelope(
             interchange_event = InterchangeIssueEvent(**interchange_event_kwargs)
             # Faux unique uuid as GlitchTip can accept duplicate UUIDs
             # The primary key of an event is uuid, received
-            if cache_set_nx("uuid" + interchange_event.event_id.hex, True) is True:
+            if cache.add("uuid" + interchange_event.event_id.hex, True) is True:
                 await async_call_celery_task(ingest_event, interchange_event.dict())
         elif item_header.type == "transaction" and isinstance(
             item, TransactionEventSchema
@@ -132,7 +132,7 @@ async def event_envelope(
                 "payload": TransactionEventSchema(**item.dict()),
             }
             interchange_event = InterchangeIssueEvent(**interchange_event_kwargs)
-            if cache_set_nx("uuid" + interchange_event.event_id.hex, True) is True:
+            if cache.add("uuid" + interchange_event.event_id.hex, True) is True:
                 await async_call_celery_task(
                     ingest_transaction, interchange_event.dict()
                 )

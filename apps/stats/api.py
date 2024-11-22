@@ -83,7 +83,7 @@ async def stats_v2(
     series = await get_timeseries(category, start, end, interval, project_ids)
 
     return {
-        "intervals": [row[0] for row in series],
+        "intervals": [row[0].astimezone().replace(microsecond=0).isoformat() for row in series],
         "groups": [
             {
                 "series": {field: [row[1] for row in series]},
