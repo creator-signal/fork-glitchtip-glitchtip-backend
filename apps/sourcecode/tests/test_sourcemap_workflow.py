@@ -9,7 +9,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http.response import HttpResponse
 from django.urls import reverse
 
+from apps.event_ingest.tests.utils import generate_event
 from apps.files.models import File, FileBlob
+from apps.issue_events.models import Issue
 from glitchtip.test_utils.test_case import GlitchTestCase
 
 debug_id = str(uuid.uuid4())
@@ -90,6 +92,10 @@ class SourceCodeTestCase(GlitchTestCase):
         assemble_url = reverse(
             "api:artifact_bundle_assemble", args=[self.organization.slug]
         )
+        envelope_url = (
+            reverse("api:event_envelope", args=[self.project.id])
+            + f"?sentry_key={self.projectkey.public_key}"
+        )
 
         res = self.client.get(chunk_upload_url)
         self.assertContains(res, "artifact_bundles")  # sentry sdk requires this set
@@ -114,3 +120,47 @@ class SourceCodeTestCase(GlitchTestCase):
         self.assertEqual(File.objects.count(), 2)
 
         # Submit event
+        data = generate_event(
+            event_type="error",
+            platform="javascript",
+            event={
+                "exception": {
+                    "values": [
+                        {
+                            "type": "Error",
+                            "value": "err",
+                            "stacktrace": {
+                                "frames": [
+                                    {
+                                        "filename": "http://127.0.0.1:8080/assets/minified.js",
+                                        "function": "?",
+                                        "in_app": True,
+                                        "lineno": 2,
+                                        "colno": 4,
+                                    },
+                                ]
+                            },
+                        }
+                    ]
+                },
+                "debug_meta": {
+                    "images": [
+                        {
+                            "type": "sourcemap",
+                            "code_file": "http://127.0.0.1:8080/assets/minified.js",
+                            "debug_id": debug_id,
+                        }
+                    ]
+                },
+            },
+            envelope=True,
+        )
+        res = self.client.post(envelope_url, data, content_type="application/json")
+        self.assertContains(res, data[0]["event_id"][:8])
+        self.assertEqual(Issue.objects.count(), 1)
+        issue = Issue.objects.get()
+        event = issue.issueevent_set.first()
+        self.assertIn(
+            "firstNumber",
+            event.data["exception"][0]["stacktrace"]["frames"][0]["context_line"],
+        )
