@@ -24,3 +24,8 @@ class SourceCodeAPITestCase(GlitchTestCase):
         }
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
+
+    def test_integration_file_with_debug_id(self):
+        chunk_upload_url = reverse("api:get_chunk_upload_info", args=[self.organization.slug])
+        res = self.client.get(chunk_upload_url)
+        self.assertContains(res, "artifact_bundles") # sentry sdk requires this set

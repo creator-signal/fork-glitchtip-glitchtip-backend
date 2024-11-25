@@ -1,11 +1,14 @@
 from datetime import timedelta
 from uuid import uuid4
-from glitchtip.test_utils.test_case import GlitchTestCase
+
 from django.conf import settings
 from django.utils import timezone
 from model_bakery import baker
-from ..models import DebugSymbolBundle
+
+from glitchtip.test_utils.test_case import GlitchTestCase
+
 from ..maintenance import cleanup_old_debug_symbol_bundles
+from ..models import DebugSymbolBundle
 
 
 class SourceCodeMaintenanceTestCase(GlitchTestCase):
