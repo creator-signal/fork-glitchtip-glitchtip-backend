@@ -228,7 +228,6 @@ INSTALLED_APPS = [
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
 INSTALLED_APPS += [
-    "import_export",
     "storages",
     "glitchtip",
     "apps.alerts",
@@ -249,6 +248,7 @@ INSTALLED_APPS += [
     "apps.files",
     "apps.issue_events",
     "apps.event_ingest",
+    "import_export",  # Contains import management command, keep under apps.importer
 ]
 
 
