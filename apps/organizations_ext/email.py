@@ -5,10 +5,10 @@ from glitchtip.email import DetailEmail
 from .models import Organization, OrganizationUser
 
 
-class MetQuotaEmail(DetailEmail):
-    html_template_name = "organizations/met-quota-drip.html"
-    text_template_name = "organizations/met-quota-drip.txt"
-    subject_template_name = "organizations/met-quota-drip-subject.txt"
+class ThrottleNoticeEmail(DetailEmail):
+    html_template_name = "organizations/throttle-notice-drip.html"
+    text_template_name = "organizations/throttle-notice-drip.txt"
+    subject_template_name = "organizations/throttle-notice-drip-subject.txt"
     model = Organization
 
     def get_object(self, *args, **kwargs):
