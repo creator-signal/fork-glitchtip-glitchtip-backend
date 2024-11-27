@@ -77,8 +77,8 @@ def is_accepting_events(throttle_rate: int) -> bool:
 
 
 def calculate_retry_after(throttle: int):
-  """Calculates Retry-After using a power function."""
-  return math.ceil(0.02 * throttle**2.3)
+    """Calculates Retry-After using a power function."""
+    return math.ceil(0.02 * throttle**2.3)
 
 
 async def get_project(request: HttpRequest) -> Project | None:
@@ -151,7 +151,10 @@ async def get_project(request: HttpRequest) -> Project | None:
         ) or not is_accepting_events(project.event_throttle_rate):
             raise ThrottleException(
                 calculate_retry_after(
-                    max(project.organization.event_throttle_rate, project.event_throttle_rate)
+                    max(
+                        project.organization.event_throttle_rate,
+                        project.event_throttle_rate,
+                    )
                 )
             )
 

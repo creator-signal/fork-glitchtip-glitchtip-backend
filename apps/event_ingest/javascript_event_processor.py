@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from symbolic import SourceMapView, SourceView
 
-from apps.files.models import File
+from apps.sourcecode.models import DebugSymbolBundle
 from sentry.utils.safe import get_path
 
 if TYPE_CHECKING:
@@ -63,9 +63,15 @@ class JavascriptEventProcessor:
     Based partially on sentry/lang/javascript/processor.py
     """
 
-    def __init__(self, release_id: int, data: "IssueEventSchema"):
+    def __init__(
+        self,
+        release_id: int,
+        data: "IssueEventSchema",
+        debug_bundles: list[DebugSymbolBundle],
+    ):
         self.release_id = release_id
         self.data = data
+        self.debug_bundles = debug_bundles
 
     def get_stacktraces(self) -> list["StackTrace"]:
         data = self.data
@@ -167,14 +173,7 @@ class JavascriptEventProcessor:
     def transform(self):
         stacktraces = self.get_stacktraces()
         frames = self.get_valid_frames(stacktraces)
-        filenames = {frame.filename.split("/")[-1] for frame in frames}
-        # Make a guess at which files are relevant, match then better after
-        source_files = File.objects.filter(
-            releasefile__release_id=self.release_id,
-            name__in={filename + ".map" for filename in filenames} | filenames,
-        )
-
-        if not source_files:
+        if not self.debug_bundles:
             return
 
         # Copy original stacktrace before modifying them
@@ -186,14 +185,20 @@ class JavascriptEventProcessor:
         frames_with_source = []
         for frame in frames:
             minified_filename = frame.abs_path.split("/")[-1] if frame.abs_path else ""
-            map_filename = minified_filename + ".map"
             minified_file = None
             map_file = None
-            for source_file in source_files:
-                if source_file.name == minified_filename:
-                    minified_file = source_file
-                if source_file.name == map_filename:
-                    map_file = source_file
+            for debug_bundle in self.debug_bundles:
+                # File name as given. When debug ids are used, this is based on the debug id
+                file_name = debug_bundle.file.name
+                # The code file name is the one given by the debug_meta source code image
+                # When debug id is used, we must match on this name
+                code_file = debug_bundle.data.get("code_file")
+                if code_file:  # Get name, not full path
+                    code_file = code_file.split("/")[-1]
+
+                if minified_filename in [file_name, code_file]:
+                    minified_file = debug_bundle.file
+                    map_file = debug_bundle.sourcemap_file
             if map_file:
                 frames_with_source.append((frame, map_file, minified_file))
 

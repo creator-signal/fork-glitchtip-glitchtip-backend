@@ -306,7 +306,7 @@ class IngestIssueEvent(BaseIssueEvent):
     fingerprint: list[Union[str, None]] | None = None
     errors: list[Any] | None = None
 
-    exception: Union[list[EventException], ValueEventException] | None = None
+    exception: list[EventException] | ValueEventException | None = None
     message: Union[str, EventMessage] | None = None
     template: EventTemplate | None = None
 

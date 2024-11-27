@@ -104,9 +104,8 @@ GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS = env.int(
 GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
 )
-# Defaults to twice as long as event life
 GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
-    "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS * 2
+    "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
 )
 
 # Check if a throttle is needed 1 out of every 5000 event requests
@@ -244,6 +243,7 @@ INSTALLED_APPS += [
     "apps.projects",
     "apps.teams",
     "apps.releases",
+    "apps.sourcecode",
     "apps.difs",
     "apps.api_tokens",
     "apps.files",

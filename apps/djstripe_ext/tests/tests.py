@@ -99,8 +99,9 @@ class SubscriptionAPITestCase(TestCase):
                 count=1,
             )
             baker.make(
-                "releases.ReleaseFile",
+                "sourcecode.DebugSymbolBundle",
                 file__blob__size=1000000,
+                organization=self.organization,
                 release__organization=self.organization,
                 _quantity=2,
             )

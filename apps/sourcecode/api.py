@@ -18,7 +18,6 @@ async def artifact_bundle_assemble(
     request: AuthHttpRequest, organization_slug: str, payload: ArtifactBundleAssembleIn
 ):
     """Associate files with assembly bundle and optionally release"""
-    # TODO assembly bundle creation
     user_id = request.auth.user_id
     organization = await aget_object_or_404(
         Organization, slug=organization_slug, users=user_id

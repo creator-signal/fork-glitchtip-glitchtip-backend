@@ -7,7 +7,7 @@ from ninja import Field, ModelSchema, Schema
 from apps.projects.schema import NameSlugProjectSchema
 from glitchtip.schema import CamelSchema
 
-from .models import Release, ReleaseFile
+from .models import Release
 
 
 class ReleaseUpdate(Schema):
@@ -38,23 +38,6 @@ class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
             "projects",
             "version",
         ]
-
-
-class ReleaseFileSchema(CamelSchema, ModelSchema):
-    id: str
-    created: datetime = Field(serialization_alias="dateCreated")
-    sha1: Optional[str] = Field(validation_alias="file.checksum", default=None)
-    headers: Optional[dict[str, str]] = Field(
-        validation_alias="file.headers", default=None
-    )
-    size: int = Field(validation_alias="file.size")
-
-    class Meta:
-        model = ReleaseFile
-        fields = ["name"]
-
-    class Config(CamelSchema.Config):
-        coerce_numbers_to_str = True
 
 
 class AssembleSchema(Schema):

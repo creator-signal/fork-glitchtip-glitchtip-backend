@@ -330,16 +330,13 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "files.FileBlob", blob="uploads/file_blobs/bundle.js.map"
         )
         baker.make(
-            "releases.ReleaseFile",
+            "sourcecode.DebugSymbolBundle",
+            organization=self.organization,
             release=release,
             file__name="bundle.js",
             file__blob=blob_bundle,
-        )
-        baker.make(
-            "releases.ReleaseFile",
-            release=release,
-            file__name="bundle.js.map",
-            file__blob=blob_bundle_map,
+            sourcemap_file__name="bundle.js.map",
+            sourcemap_file__blob=blob_bundle_map,
         )
         try:
             os.mkdir("./uploads/file_blobs")
