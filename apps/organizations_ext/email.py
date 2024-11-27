@@ -33,7 +33,6 @@ class ThrottleNoticeEmail(DetailEmail):
             plan__subscriptions__customer__subscriber=organization,
             plan__subscriptions__status="active",
         ).first()
-        print(product)
         context.update(
             {
                 "organization": organization,
