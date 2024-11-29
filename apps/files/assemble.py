@@ -137,8 +137,13 @@ def assemble_artifacts(
                     for value in files
                     if value.type == "source_map"
                     and (
-                        file.headers.get("sourcemap") == value.name
-                        or (value.headers.get("debug-id") and value.headers.get("debug-id") == file.headers.get("debug-id"))
+                        file.headers.get("sourcemap", file.headers.get("Sourcemap"))
+                        == value.name
+                        or (
+                            value.headers.get("debug-id")
+                            and value.headers.get("debug-id")
+                            == file.headers.get("debug-id")
+                        )
                     )
                 )
             except StopIteration:
