@@ -1,4 +1,4 @@
-# Unreleased
+# v4.2.0
 
 - Support sentry sdk artifact bundles for source map support, including debug id mappings. Improves source map support for various sentry sdk integrations. Source maps no longer require a release. Users may need to reupload existing source maps.
 - GLITCHTIP_MAX_FILE_LIFE_DAYS now defaults to GLITCHTIP_MAX_EVENT_LIFE_DAYS (instead of 2 x event life).
