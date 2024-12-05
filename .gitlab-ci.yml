@@ -105,7 +105,7 @@ build_arm_x86:
     - unzip assets.zip
     - rm assets.zip
     - mv dist/glitchtip-frontend/browser/* dist/
-    - rmdir dist/glitchtip-frontend/
+    - rmdir dist/glitchtip-frontend/browser/
     - VERSION=${CI_COMMIT_REF_NAME#*v}
     - MINOR_VERSION=$(echo "$CI_COMMIT_REF_NAME" | sed 's/\.[^.]*$//')
     - echo "Build version $VERSION ci registry image $CI_REGISTRY_IMAGE commit ref $CI_COMMIT_REF_NAME"
