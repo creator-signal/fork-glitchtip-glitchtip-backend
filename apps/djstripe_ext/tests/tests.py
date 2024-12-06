@@ -32,7 +32,6 @@ class SubscriptionAPITestCase(TestCase):
         # Should get most recent
         baker.make(
             "djstripe.Subscription",
-            status="active",
             customer=customer,
             livemode=False,
             created=timezone.make_aware(timezone.datetime(2020, 1, 1)),
@@ -59,6 +58,15 @@ class SubscriptionAPITestCase(TestCase):
             "djstripe.Subscription",
             customer=customer,
             livemode=False,
+            status="cancelled",
+            current_period_start=timezone.make_aware(timezone.datetime(2019, 1, 2)),
+            current_period_end=timezone.make_aware(timezone.datetime(2019, 2, 2)),
+        )
+        baker.make(
+            "djstripe.Subscription",
+            customer=customer,
+            livemode=False,
+            status="active",
             current_period_start=timezone.make_aware(timezone.datetime(2020, 1, 2)),
             current_period_end=timezone.make_aware(timezone.datetime(2020, 2, 2)),
         )
@@ -66,7 +74,7 @@ class SubscriptionAPITestCase(TestCase):
             "djstripe.Subscription",
             customer=customer,
             livemode=False,
-            status="Cancelled",
+            status="cancelled",
             current_period_start=timezone.make_aware(timezone.datetime(2019, 1, 2)),
             current_period_end=timezone.make_aware(timezone.datetime(2019, 2, 2)),
         )
