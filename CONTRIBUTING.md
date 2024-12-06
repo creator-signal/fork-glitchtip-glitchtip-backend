@@ -63,3 +63,10 @@ This section describes the idealized approach to coding GlitchTip. You may notic
 ### Legacy Sentry SDK Client support
 
 The GlitchTip core team at this time is not interested in legacy sdk client support. Merge requests are accepted and welcome. Open legacy client feature requests along with the intention to implement or interest in funding development.
+
+
+## Security reports
+
+We ask that vulnerabilities are reported through GitLab issues. High severity reports should be marked confidential. DOS mitigations should be posted publicaly. Best practices should not be reported. If you'd like to discuss best practices, please start a discussion on Gitter.
+
+We do not offer any bug bounty program. Reporters soliciting fees will be directed to this page.
