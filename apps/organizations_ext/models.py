@@ -5,7 +5,6 @@ from django.db.models import Exists, F, OuterRef, Q
 from django.db.models.functions import Coalesce
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
-from djstripe.models import Subscription
 from organizations.abstract import SharedBaseModel
 from organizations.base import (
     OrganizationBase,
@@ -25,10 +24,13 @@ from .fields import OrganizationSlugField
 
 class OrganizationManager(OrgManager):
     def with_event_counts(self, current_period=True):
+        queryset = self
         subscription_filter = Q()
         event_subscription_filter = Q()
         checks_subscription_filter = Q()
         if current_period and settings.BILLING_ENABLED:
+            from djstripe.models import Subscription
+
             subscription_filter = Q(
                 created__gte=OuterRef(
                     "djstripe_customers__subscriptions__current_period_start"
@@ -53,64 +55,61 @@ class OrganizationManager(OrgManager):
                     "djstripe_customers__subscriptions__current_period_end"
                 ),
             )
-
-        queryset = (
-            self.annotate(
+            # If the org has an active sub, filter by it. If not, do not filter.
+            # This forces the exclusion of inactive subscriptions in subquery counts
+            queryset = queryset.annotate(
                 has_active_subscription=Exists(
                     Subscription.objects.filter(
                         status="active",
                     )
                 )
-            )
-            # If the org has an active sub, filter by it. If not, do not filter.
-            # This forces the exclusion of inactive subscriptions in subquery counts
-            .filter(
+            ).filter(
                 Q(
                     has_active_subscription=True,
                     djstripe_customers__subscriptions__status="active",
                 )
                 | Q(has_active_subscription=False)
             )
-            .annotate(
-                issue_event_count=Coalesce(
+
+        queryset = queryset.annotate(
+            issue_event_count=Coalesce(
+                SubquerySum(
+                    "projects__issueeventprojecthourlystatistic__count",
+                    filter=event_subscription_filter,
+                ),
+                0,
+            ),
+            transaction_count=Coalesce(
+                SubquerySum(
+                    "projects__transactioneventprojecthourlystatistic__count",
+                    filter=event_subscription_filter,
+                ),
+                0,
+            ),
+            uptime_check_event_count=SubqueryCount(
+                "monitor__checks", filter=checks_subscription_filter
+            ),
+            file_size=(
+                Coalesce(
                     SubquerySum(
-                        "projects__issueeventprojecthourlystatistic__count",
-                        filter=event_subscription_filter,
+                        "debugsymbolbundle__file__blob__size",
+                        filter=subscription_filter,
                     ),
                     0,
-                ),
-                transaction_count=Coalesce(
-                    SubquerySum(
-                        "projects__transactioneventprojecthourlystatistic__count",
-                        filter=event_subscription_filter,
-                    ),
-                    0,
-                ),
-                uptime_check_event_count=SubqueryCount(
-                    "monitor__checks", filter=checks_subscription_filter
-                ),
-                file_size=(
-                    Coalesce(
-                        SubquerySum(
-                            "debugsymbolbundle__file__blob__size",
-                            filter=subscription_filter,
-                        ),
-                        0,
-                    )
-                    + Coalesce(
-                        SubquerySum(
-                            "projects__debuginformationfile__file__blob__size",
-                            filter=subscription_filter,
-                        ),
-                        0,
-                    )
                 )
-                / 1000000,
-                total_event_count=F("issue_event_count")
-                + F("transaction_count")
-                + F("uptime_check_event_count")
-                + F("file_size"),
+                + Coalesce(
+                    SubquerySum(
+                        "projects__debuginformationfile__file__blob__size",
+                        filter=subscription_filter,
+                    ),
+                    0,
+                )
             )
+            / 1000000,
+            total_event_count=F("issue_event_count")
+            + F("transaction_count")
+            + F("uptime_check_event_count")
+            + F("file_size"),
         )
         return queryset.distinct("pk")
 
