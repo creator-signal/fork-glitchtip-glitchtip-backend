@@ -54,6 +54,8 @@ class SubscriptionAPITestCase(TestCase):
         Event count should be accurate and work when there are multiple subscriptions for a given customer
         """
         customer = baker.make("djstripe.Customer", subscriber=self.organization)
+        # Ensure we don't filter on any unrelated subscription
+        baker.make("djstripe.Subscription", status="active")
         baker.make(
             "djstripe.Subscription",
             customer=customer,

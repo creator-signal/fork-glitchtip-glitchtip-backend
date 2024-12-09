@@ -60,6 +60,7 @@ class OrganizationManager(OrgManager):
             queryset = queryset.annotate(
                 has_active_subscription=Exists(
                     Subscription.objects.filter(
+                        customer=OuterRef("djstripe_customers"),
                         status="active",
                     )
                 )
