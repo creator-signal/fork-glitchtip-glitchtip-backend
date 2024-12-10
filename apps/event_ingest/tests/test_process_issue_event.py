@@ -5,6 +5,7 @@ import uuid
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.event_ingest.tests.utils import generate_event
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
 from apps.projects.models import IssueEventProjectHourlyStatistic
@@ -959,3 +960,15 @@ class SentryCompatTestCase(EventIngestTestCase):
             sentry_json["exception"]["values"][0],
             ["type", "values", "exception", "abs_path"],
         )
+
+    def test_bad_message_format(self):
+        """%d will not accept a string, it should fallback to not formatting"""
+        event = generate_event()
+        event["message"] = {"message": "lol %d", "params": ["a"]}
+        result = self.submit_event(event)
+        self.assertEqual(result.data["logentry"]["formatted"], "")
+
+        event = generate_event()
+        event["message"] = {"message": "lol %d", "params": [1]}
+        result = self.submit_event(event)
+        self.assertEqual(result.data["logentry"]["formatted"], "lol 1")
