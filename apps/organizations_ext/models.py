@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import F, OuterRef, Q
+from django.db.models import Exists, F, OuterRef, Q
 from django.db.models.functions import Coalesce
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
@@ -24,10 +24,13 @@ from .fields import OrganizationSlugField
 
 class OrganizationManager(OrgManager):
     def with_event_counts(self, current_period=True):
+        queryset = self
         subscription_filter = Q()
         event_subscription_filter = Q()
         checks_subscription_filter = Q()
         if current_period and settings.BILLING_ENABLED:
+            from djstripe.models import Subscription
+
             subscription_filter = Q(
                 created__gte=OuterRef(
                     "djstripe_customers__subscriptions__current_period_start"
@@ -52,8 +55,24 @@ class OrganizationManager(OrgManager):
                     "djstripe_customers__subscriptions__current_period_end"
                 ),
             )
+            # If the org has an active sub, filter by it. If not, do not filter.
+            # This forces the exclusion of inactive subscriptions in subquery counts
+            queryset = queryset.annotate(
+                has_active_subscription=Exists(
+                    Subscription.objects.filter(
+                        customer=OuterRef("djstripe_customers"),
+                        status="active",
+                    )
+                )
+            ).filter(
+                Q(
+                    has_active_subscription=True,
+                    djstripe_customers__subscriptions__status="active",
+                )
+                | Q(has_active_subscription=False)
+            )
 
-        queryset = self.annotate(
+        queryset = queryset.annotate(
             issue_event_count=Coalesce(
                 SubquerySum(
                     "projects__issueeventprojecthourlystatistic__count",
