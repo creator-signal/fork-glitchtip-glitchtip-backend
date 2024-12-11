@@ -175,11 +175,11 @@ class EventMessage(LaxIngestSchema):
         if not self.formatted and self.message:
             params = self.params
             if isinstance(params, list) and params:
+                formatted_params = tuple(
+                    int(p) if isinstance(p, str) and p.isdigit() else p
+                    for p in params
+                )
                 try:
-                    formatted_params = tuple(
-                        int(p) if isinstance(p, str) and p.isdigit() else p
-                        for p in params
-                    )
                     self.formatted = self.message % tuple(formatted_params)
                 except TypeError:
                     pass
