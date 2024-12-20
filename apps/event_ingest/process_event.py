@@ -619,6 +619,18 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 break
 
         if not processing_event.issue_id:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO projects_projectcounter (project_id, value)
+                    VALUES (%s, 1)
+                    ON CONFLICT (project_id) DO UPDATE
+                    SET value = projects_projectcounter.value + 1
+                    RETURNING value;
+                    """,
+                    [project_id],
+                )
+                issue_defaults["short_id"] = cursor.fetchone()[0]
             try:
                 with transaction.atomic():
                     issue = Issue.objects.create(
