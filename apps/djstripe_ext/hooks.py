@@ -7,4 +7,5 @@ def update_subscription(event, **kwargs):
     # Avoid importing models during django app startup
     from apps.organizations_ext.tasks import check_organization_throttle
 
-    check_organization_throttle.delay(event.customer.subscriber_id)
+    if event.customer.subscriber_id:
+        check_organization_throttle.delay(event.customer.subscriber_id)
