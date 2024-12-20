@@ -38,7 +38,7 @@ from apps.issue_events.models import (
     TagValue,
 )
 from apps.performance.models import TransactionEvent, TransactionGroup
-from apps.projects.models import Project, ProjectCounter
+from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
 from sentry.culprit import generate_culprit
