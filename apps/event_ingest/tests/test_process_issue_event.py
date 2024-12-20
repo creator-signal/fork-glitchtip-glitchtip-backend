@@ -39,7 +39,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self.process_events([{}, {}])
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
@@ -69,6 +69,8 @@ class IssueEventIngestTestCase(EventIngestTestCase):
                 count=2, project=self.project
             ).exists()
         )
+        self.assertEqual(Issue.objects.first().short_id, 1)
+        self.assertEqual(Issue.objects.last().short_id, 2)
 
     def test_transaction_truncation(self):
         long_string = "x" * 201
@@ -118,7 +120,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(13):
+        with self.assertNumQueries(14):
             self.process_events([event1, {}])
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)

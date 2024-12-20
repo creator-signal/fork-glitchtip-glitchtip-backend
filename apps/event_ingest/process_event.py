@@ -38,7 +38,7 @@ from apps.issue_events.models import (
     TagValue,
 )
 from apps.performance.models import TransactionEvent, TransactionGroup
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectCounter
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
 from sentry.culprit import generate_culprit
@@ -619,6 +619,18 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 break
 
         if not processing_event.issue_id:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO projects_projectcounter (project_id, value)
+                    VALUES (%s, 1)
+                    ON CONFLICT (project_id) DO UPDATE
+                    SET value = projects_projectcounter.value + 1
+                    RETURNING value;
+                    """,
+                    [project_id],
+                )
+                issue_defaults["short_id"] = cursor.fetchone()[0]
             try:
                 with transaction.atomic():
                     issue = Issue.objects.create(
