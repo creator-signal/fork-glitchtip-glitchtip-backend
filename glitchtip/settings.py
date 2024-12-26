@@ -670,6 +670,7 @@ HEADLESS_FRONTEND_URLS = {
     "socialaccount_login_error": "/login?socialLoginError=true",
 }
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
+MFA_TOTP_TOLERANCE = 1
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
 MFA_PASSKEY_LOGIN_ENABLED = True
 MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
