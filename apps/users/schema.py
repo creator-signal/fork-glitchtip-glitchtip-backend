@@ -53,10 +53,10 @@ class UserIn(CamelSchema, ModelSchema):
 class UserSchema(CamelSchema, ModelSchema):
     id: str
     username: EmailStr = Field(validation_alias="email")
-    created: datetime = Field(serialization_alias="dateJoined")
+    created: datetime = Field(alias="dateJoined")
     email: EmailStr
     has_password_auth: bool = Field(validation_alias="has_usable_password")
-    identities: list[SocialAccountSchema] = Field(validation_alias="socialaccount_set")
+    socialaccount_set: list[SocialAccountSchema] = Field(alias="identities")
 
     class Meta(UserIn.Meta):
         fields = [
