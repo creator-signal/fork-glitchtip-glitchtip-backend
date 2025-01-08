@@ -129,7 +129,7 @@ class SocialAppSchema(ModelSchema):
 class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
-    i_paid_for_glitchtip: bool = Field(serialization_alias="iPaidForGlitchTip")
+    i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
     enable_user_registration: bool
     enable_organization_creation: bool
     stripe_public_key: Optional[str]
