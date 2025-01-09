@@ -55,7 +55,7 @@ class UserSchema(CamelSchema, ModelSchema):
     username: EmailStr = Field(validation_alias="email")
     created: datetime = Field(alias="dateJoined")
     email: EmailStr
-    has_password_auth: bool = Field(validation_alias="has_usable_password")
+    has_usable_password: bool = Field(alias="hasPasswordAuth")
     socialaccount_set: list[SocialAccountSchema] = Field(alias="identities")
 
     class Meta(UserIn.Meta):
@@ -86,7 +86,6 @@ class UserDetailSchema(UserSchema):
 
             hash = hmac.new(secret, message, hashlib.sha256)
             return hash.hexdigest()
-
 
 
 class EmailAddressIn(CamelSchema, ModelSchema):
