@@ -41,7 +41,17 @@ class SocialAccountSchema(CamelSchema, ModelSchema):
             return data.get("username")
 
 
+class UserOptions(CamelSchema):
+    timezone: str | None = None
+    stacktrace_order: int | None = None
+    language: str | None = None
+    clock24_hours: bool | None = None
+    preferred_theme: str | None = None
+
+
 class UserIn(CamelSchema, ModelSchema):
+    options: UserOptions
+
     class Meta:
         model = User
         fields = [
@@ -52,6 +62,7 @@ class UserIn(CamelSchema, ModelSchema):
 
 class UserSchema(CamelSchema, ModelSchema):
     id: str
+    options: UserOptions
     username: EmailStr = Field(validation_alias="email")
     created: datetime = Field(alias="dateJoined")
     email: EmailStr
