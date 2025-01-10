@@ -9,6 +9,7 @@ from django.db.models import Count, Sum
 from django.db.models.expressions import RawSQL
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
+from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Field, Query, Schema
 from ninja.pagination import paginate
@@ -36,9 +37,9 @@ async def get_queryset(
     qs = Issue.objects.all()
 
     if organization_slug:
-        organization = await Organization.objects.filter(
-            users=user_id, slug=organization_slug
-        ).afirst()
+        organization = await aget_object_or_404(
+            Organization, users=user_id, slug=organization_slug
+        )
         qs = qs.filter(project__organization_id=organization.id)
     else:
         qs = qs.filter(project__organization__users=user_id)
