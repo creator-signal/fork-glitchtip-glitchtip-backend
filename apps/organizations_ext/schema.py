@@ -60,7 +60,7 @@ class OrganizationUserIn(OrganizationUserUpdateSchema):
 
 class OrganizationUserSchema(CamelSchema, ModelSchema):
     id: str
-    role: str
+    role: OrgRole
     role_name: str
     created: datetime = Field(alias="dateCreated")
     email: str
