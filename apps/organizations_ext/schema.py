@@ -66,6 +66,7 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
     email: str
     user: UserSchema | None = None
     pending: bool
+    is_owner: bool
 
     class Meta:
         model = OrganizationUser
@@ -86,20 +87,19 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
     def resolve_role_name(obj):
         return obj.get_role_display()
 
+    @staticmethod
+    def resolve_is_owner(obj):
+        if owner := obj.organization.owner:
+            return owner.organization_user_id == obj.id
+        return False
+
 
 class OrganizationUserDetailSchema(OrganizationUserSchema):
     teams: list[str]
-    isOwner: bool
 
     @staticmethod
     def resolve_teams(obj):
         return [team.slug for team in obj.teams.all()]
-
-    @staticmethod
-    def resolve_isOwner(obj):
-        if owner := obj.organization.owner:
-            return owner.organization_user_id == obj.id
-        return False
 
 
 class AcceptInviteIn(CamelSchema):

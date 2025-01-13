@@ -56,7 +56,7 @@ def get_organization_users_queryset(
         OrganizationUser.objects.filter(
             organization__users=user_id, organization__slug=organization_slug
         )
-        .select_related("user")
+        .select_related("user", "organization__owner")
         .prefetch_related("user__socialaccount_set")
     )
     if team_slug:
@@ -70,5 +70,5 @@ def get_organization_users_queryset(
             )
         )
     if add_details:
-        qs = qs.select_related("organization__owner").prefetch_related("teams")
+        qs = qs.prefetch_related("teams")
     return qs

@@ -246,6 +246,9 @@ async def create_organization_member(
         await member.teams.aadd(*teams)
 
     await sync_to_async(invitation_backend().send_invitation)(member)
+    member = await get_organization_users_queryset(user_id, organization_slug).aget(
+        id=member.id
+    )
     return 201, member
 
 
@@ -356,7 +359,7 @@ async def validate_token(org_user_id: int, token: str) -> OrganizationUser:
     """Validate invite token and return org user"""
     org_user = await aget_object_or_404(
         OrganizationUser.objects.all()
-        .select_related("organization", "user")
+        .select_related("organization__owner", "user")
         .prefetch_related("user__socialaccount_set"),
         pk=org_user_id,
     )
@@ -393,7 +396,7 @@ async def accept_invite(
         await org_user.asave()
     org_user = (
         await OrganizationUser.objects.filter(pk=org_user.pk)
-        .select_related("organization", "user")
+        .select_related("organization__owner", "user")
         .prefetch_related("user__socialaccount_set")
         .aget()
     )
