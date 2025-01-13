@@ -60,10 +60,10 @@ class OrganizationUserIn(OrganizationUserUpdateSchema):
 
 class OrganizationUserSchema(CamelSchema, ModelSchema):
     id: str
-    role: str = Field(validation_alias="get_role")
-    role_name: str = Field(validation_alias="get_role_display")
-    date_created: datetime = Field(validation_alias="created")
-    email: str = Field(validation_alias="get_email")
+    role: str
+    role_name: str
+    created: datetime = Field(alias="dateCreated")
+    email: str
     user: UserSchema | None = None
     pending: bool
 
@@ -73,6 +73,18 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
 
     class Config(CamelSchema.Config):
         coerce_numbers_to_str = True
+
+    @staticmethod
+    def resolve_email(obj):
+        return obj.get_email()
+
+    @staticmethod
+    def resolve_role(obj):
+        return obj.get_role()
+
+    @staticmethod
+    def resolve_role_name(obj):
+        return obj.get_role_display()
 
 
 class OrganizationUserDetailSchema(OrganizationUserSchema):

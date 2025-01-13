@@ -85,10 +85,10 @@ class UsersTestCase(GlitchTestCase):
 
     def test_update(self):
         url = reverse("api:update_user", args=["me"])
-        data = {"name": "new", "options": {"foo": "bar"}}
+        data = {"name": "new", "options": {"language": "en"}}
         res = self.client.put(url, data, content_type="application/json")
         self.assertContains(res, data["name"])
-        self.assertContains(res, data["options"]["foo"])
+        self.assertContains(res, data["options"]["language"])
         self.assertTrue(User.objects.filter(name=data["name"]).exists())
 
     def test_organization_members_list(self):
