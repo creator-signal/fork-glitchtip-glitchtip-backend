@@ -334,19 +334,14 @@ CHATWOOT_IDENTITY_TOKEN = env.str("CHATWOOT_IDENTITY_TOKEN", None)
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", str, [])
 SECURE_BROWSER_XSS_FILTER = True
 CSP_DEFAULT_SRC = env.list("CSP_DEFAULT_SRC", str, ["'self'"])
-CSP_STYLE_SRC = env.list(
-    "CSP_STYLE_SRC", str, ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]
-)
+CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str, ["'self'", "'unsafe-inline'"])
 CSP_STYLE_SRC_ELEM = env.list(
     "CSP_STYLE_SRC_ELEM",
     str,
-    ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+    ["'self'", "'unsafe-inline'"],
 )
-CSP_FONT_SRC = env.list(
-    "CSP_FONT_SRC", str, ["'self'", "https://fonts.gstatic.com", "data:"]
-)
-# Redoc requires blob
-CSP_WORKER_SRC = env.list("CSP_WORKER_SRC", str, ["'self'", "blob:"])
+CSP_FONT_SRC = env.list("CSP_FONT_SRC", str, ["'self'", "data:"])
+CSP_WORKER_SRC = env.list("CSP_WORKER_SRC", str, ["'self'"])
 
 # Enable Chatwoot only when configured
 default_connect_src = ["'self'", "https://*.glitchtip.com"]
@@ -359,7 +354,7 @@ stripe_domain = "https://js.stripe.com"
 default_script_src = [
     "'self'",
     "https://*.glitchtip.com",
-    "'sha256-0Mfn7rrvFFIfp4wc7eyyIWdGty6Fhc4qVG7t12eqtio='",  # Theme picker inline JS
+    "'sha256-iRcDQ27XiXX4k+jbJ8nGeQFBnBOjmII7FdMlixb6QE4='",  # Theme picker inline JS
 ]
 default_frame_src = ["'self'"]
 if BILLING_ENABLED:
