@@ -334,14 +334,13 @@ CHATWOOT_IDENTITY_TOKEN = env.str("CHATWOOT_IDENTITY_TOKEN", None)
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", str, [])
 SECURE_BROWSER_XSS_FILTER = True
 CSP_DEFAULT_SRC = env.list("CSP_DEFAULT_SRC", str, ["'self'"])
-CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str, ["'self'", "'unsafe-inline'"])
-CSP_STYLE_SRC_ELEM = env.list(
-    "CSP_STYLE_SRC_ELEM",
-    str,
-    ["'self'", "'unsafe-inline'"],
-)
+if "CSP_STYLE_SRC" in os.environ:
+    CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str)
+if "CSP_STYLE_SRC_ELEM" in os.environ:
+    CSP_STYLE_SRC_ELEM = env.list("CSP_STYLE_SRC_ELEM", str)
 CSP_FONT_SRC = env.list("CSP_FONT_SRC", str, ["'self'", "data:"])
-CSP_WORKER_SRC = env.list("CSP_WORKER_SRC", str, ["'self'"])
+if "CSP_WORKER_SRC" in os.environ:
+    CSP_WORKER_SRC = env.list("CSP_WORKER_SRC", str)
 
 # Enable Chatwoot only when configured
 default_connect_src = ["'self'", "https://*.glitchtip.com"]
