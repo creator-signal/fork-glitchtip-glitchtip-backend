@@ -2133,15 +2133,15 @@ wheels = [
 
 [[package]]
 name = "psycopg"
-version = "3.2.3"
+version = "3.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions", marker = "python_full_version < '3.13'" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d1/ad/7ce016ae63e231575df0498d2395d15f005f05e32d3a2d439038e1bd0851/psycopg-3.2.3.tar.gz", hash = "sha256:a5764f67c27bec8bfac85764d23c534af2c27b893550377e37ce59c12aac47a2", size = 155550 }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/f2/954b1467b3e2ca5945b83b5e320268be1f4df486c3e8ffc90f4e4b707979/psycopg-3.2.4.tar.gz", hash = "sha256:f26f1346d6bf1ef5f5ef1714dd405c67fb365cfd1c6cea07de1792747b167b92", size = 156109 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/21/534b8f5bd9734b7a2fcd3a16b1ee82ef6cad81a4796e95ebf4e0c6a24119/psycopg-3.2.3-py3-none-any.whl", hash = "sha256:644d3973fe26908c73d4be746074f6e5224b03c1101d302d9a53bf565ad64907", size = 197934 },
+    { url = "https://files.pythonhosted.org/packages/40/49/15114d5f7ee68983f4e1a24d47e75334568960352a07c6f0e796e912685d/psycopg-3.2.4-py3-none-any.whl", hash = "sha256:43665368ccd48180744cab26b74332f46b63b7e06e8ce0775547a3533883d381", size = 198716 },
 ]
 
 [package.optional-dependencies]
@@ -2154,9 +2154,9 @@ pool = [
 
 [[package]]
 name = "psycopg-c"
-version = "3.2.3"
+version = "3.2.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/ba/74caf4eab78d95a173e65cb81507a589365aeafb1d9c84f374002b51dc53/psycopg_c-3.2.3.tar.gz", hash = "sha256:06ae7db8eaec1a3845960fa7f997f4ccdb1a7a7ab8dc593a680bcc74e1359671", size = 598888 }
+sdist = { url = "https://files.pythonhosted.org/packages/17/76/dbdadd9b93b8ad38cff31402c73a6bb9a23c88a4466fa09655d3c6db4d11/psycopg_c-3.2.4.tar.gz", hash = "sha256:22097a04263efb2efd2cc8b00a51fa90e23f9cd4a2e09903fe4d9c6923dac17a", size = 601853 }
 
 [[package]]
 name = "psycopg-pool"
