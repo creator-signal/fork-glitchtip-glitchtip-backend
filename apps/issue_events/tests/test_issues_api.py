@@ -530,6 +530,19 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url)
         self.assertEqual(len(res.json()), 3)
 
+    def test_issue_update(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
+        data = {"status": "resolved"}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.RESOLVED)
+
     def test_issue_delete(self):
         issue = baker.make("issue_events.Issue", project=self.project)
         not_my_issue = baker.make("issue_events.Issue")
@@ -540,7 +553,7 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.delete(get_issue_url(not_my_issue.id))
         self.assertEqual(res.status_code, 404)
 
-    def test_issue_update(self):
+    def test_organizations_issue_update(self):
         issue = baker.make("issue_events.Issue", project=self.project)
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         data = {"status": "resolved"}
