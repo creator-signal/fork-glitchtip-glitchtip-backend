@@ -75,11 +75,11 @@ def seed_data(request: HttpRequest):
         team.members.add(orgUser)
 
         if request.GET.get("seedIssues", None):
-            print("seed")
             issues = baker.make(
                 "issue_events.Issue",
                 project=project3,
-                _quantity=55
+                _quantity=55,
+                _bulk_create=True,
             )
 
             for issue in issues:
