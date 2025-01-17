@@ -2,6 +2,7 @@ from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from model_bakery import baker
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
@@ -72,5 +73,16 @@ def seed_data(request: HttpRequest):
         team.projects.add(project2)
         team.projects.add(project3)
         team.members.add(orgUser)
+
+        if request.GET.get("seedIssues", None):
+            print("seed")
+            issues = baker.make(
+                "issue_events.Issue",
+                project=project3,
+                _quantity=55
+            )
+
+            for issue in issues:
+                baker.make("issue_events.IssueEvent", issue=issue)
 
     return HttpResponse()
