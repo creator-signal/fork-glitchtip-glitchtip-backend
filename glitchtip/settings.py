@@ -119,11 +119,10 @@ MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
 
 
-STATIC_URL = "/static/"
+STATIC_URL = "static/"
 # Base HREF, such as example.com/glitchtip/ where BASE_PATH would be "/glitchtip"
 if "BASE_PATH" in os.environ or "FORCE_SCRIPT_NAME" in os.environ:
     FORCE_SCRIPT_NAME = env.str("BASE_PATH", env.str("FORCE_SCRIPT_NAME", ""))
-    STATIC_URL = f"{FORCE_SCRIPT_NAME}/static/"
 
 
 # GlitchTip can track GlitchTip's own errors.

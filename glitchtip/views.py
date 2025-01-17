@@ -8,4 +8,5 @@ async def health(request):
 
 
 def index(request, *args):
-    return render(request, "index.html", {"base_path": settings.FORCE_SCRIPT_NAME})
+    base_path = settings.FORCE_SCRIPT_NAME if settings.FORCE_SCRIPT_NAME else "/"
+    return render(request, "index.html", {"base_path": base_path})
