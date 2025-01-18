@@ -118,9 +118,11 @@ MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 # For development purposes only, prints out inbound event store json
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/dev/howto/static-files/
-STATIC_URL = "/static/"
+
+STATIC_URL = "static/"
+# Base HREF, such as example.com/glitchtip/ where BASE_PATH would be "/glitchtip"
+if "BASE_PATH" in os.environ or "FORCE_SCRIPT_NAME" in os.environ:
+    FORCE_SCRIPT_NAME = env.str("BASE_PATH", env.str("FORCE_SCRIPT_NAME", ""))
 
 
 # GlitchTip can track GlitchTip's own errors.

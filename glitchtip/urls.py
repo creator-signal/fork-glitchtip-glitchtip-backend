@@ -7,7 +7,7 @@ from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
 from .api.api import api
-from .views import health
+from .views import health, index
 
 urlpatterns = [
     path("_health/", health),
@@ -41,10 +41,10 @@ urlpatterns += [
     path("accounts/", include("allauth.urls")),
     path("_allauth/", include("allauth.headless.urls")),
     # These routes belong to the Angular single page app
-    re_path(r"^$", TemplateView.as_view(template_name="index.html")),
+    re_path(r"^$", index),
     re_path(
         r"^(auth|login|register|(.*)/issues|(.*)/settings|(.*)/performance|(.*)/projects|(.*)/releases|organizations|profile|(.*)/uptime-monitors|accept|reset-password).*$",
-        TemplateView.as_view(template_name="index.html"),
+        index,
     ),
     path("accept/", include(invitation_backend().get_urls())),
 ]
