@@ -1,6 +1,9 @@
+import re
+
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.template.loader import render_to_string
 
 
 async def health(request):
@@ -8,5 +11,11 @@ async def health(request):
 
 
 def index(request, *args):
-    base_path = settings.FORCE_SCRIPT_NAME if settings.FORCE_SCRIPT_NAME else "/"
-    return render(request, "index.html", {"base_path": base_path})
+    if base_path := settings.FORCE_SCRIPT_NAME:
+        content = render_to_string(
+            "index.html", {"base_path": base_path}, request=request
+        )
+        # Replace base href (Not easy to add this as a django template var from angular index.html)
+        content = re.sub(r'<base href="/"/>', f'<base href="/{base_path}/">', content)
+        return HttpResponse(content)
+    return render(request, "index.html")
