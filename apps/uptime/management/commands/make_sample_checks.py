@@ -1,14 +1,9 @@
 from random import randrange
 
 from django.utils import timezone
-from model_bakery import baker
-from model_bakery.random_gen import gen_json, gen_slug
 
 from apps.uptime.models import Monitor, MonitorCheck
 from glitchtip.base_commands import MakeSampleCommand
-
-baker.generators.add("organizations.fields.SlugField", gen_slug)
-baker.generators.add("django.db.models.JSONField", gen_json)
 
 
 class Command(MakeSampleCommand):
@@ -57,9 +52,7 @@ class Command(MakeSampleCommand):
                         is_up=is_up,
                         is_change=is_first,
                         start_check=start_time + timezone.timedelta(minutes=time_i),
-                        response_time=timezone.timedelta(
-                            milliseconds=randrange(1, 5000)
-                        ),
+                        response_time=randrange(1, 5000)
                     )
                 )
             if len(checks) > 10000:
