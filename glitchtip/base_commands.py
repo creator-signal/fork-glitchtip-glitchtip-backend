@@ -1,13 +1,7 @@
 from django.core.management.base import BaseCommand
-from model_bakery import baker
-from model_bakery.random_gen import gen_json, gen_slug
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
-
-baker.generators.add("organizations.fields.SlugField", gen_slug)
-baker.generators.add("apps.organizations_ext.fields.OrganizationSlugField", gen_slug)
-baker.generators.add("django.db.models.JSONField", gen_json)
 
 
 class MakeSampleCommand(BaseCommand):
@@ -33,7 +27,7 @@ class MakeSampleCommand(BaseCommand):
 
         organization = Organization.objects.first()
         if not organization:
-            organization = baker.make("organizations_ext.Organization")
+            organization = Organization.objects.create(name="sample org")
         return organization
 
     def get_project(self, project: str):
@@ -41,7 +35,10 @@ class MakeSampleCommand(BaseCommand):
             return Project.objects.get(slug=project, organization=self.organization)
         project = Project.objects.filter(organization=self.organization).first()
         if not project:
-            project = baker.make("projects.Project", organization=self.organization)
+            project = Project.objects.create(
+                name="sample project",
+                organization=self.organization
+            )
         return project
 
     def progress_tick(self):
