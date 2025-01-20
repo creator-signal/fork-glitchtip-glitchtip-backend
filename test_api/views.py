@@ -1,8 +1,8 @@
 from allauth.account.models import EmailAddress
 from django.conf import settings
+from django.core.management import call_command
 from django.http import Http404, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
-from model_bakery import baker
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
@@ -75,11 +75,12 @@ def seed_data(request: HttpRequest):
         team.members.add(orgUser)
 
         if request.GET.get("seedIssues", None):
-            baker.make(
-                "issue_events.IssueEvent",
-                issue__project=project3,
-                _quantity=55,
-                _bulk_create=True,
+            call_command(
+                "make_sample_issues",
+                org=organization.slug,
+                project=project3.slug,
+                issue_quantity=55,
+                events_quantity_per=1
             )
 
     return HttpResponse()
