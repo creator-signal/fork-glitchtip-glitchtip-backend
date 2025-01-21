@@ -2,7 +2,7 @@ variables:
   PROJECT_NAME: glitchtip
   PIP_DISABLE_PIP_VERSION_CHECK: "on"
   POSTGRES_HOST_AUTH_METHOD: "trust"
-  UV_VERSION: 0.4
+  UV_VERSION: 0.5
   BASE_LAYER: bookworm
   UV_SYSTEM_PYTHON: "true"
   UV_PYTHON_DOWNLOADS: "never"
@@ -46,8 +46,8 @@ test:
     matrix:
       - PYTHON_VERSION: '3.11'
         POSTGRES_VERSION: '13'
-      - PYTHON_VERSION: '3.12'
-        POSTGRES_VERSION: '16'
+      - PYTHON_VERSION: '3.13'
+        POSTGRES_VERSION: '17'
 
 lint:
   image: python:3.13-slim
