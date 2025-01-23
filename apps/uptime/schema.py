@@ -78,18 +78,19 @@ class MonitorIn(CamelSchema, ModelSchema):
         ]
 
 
-class MonitorSchema(MonitorIn, ModelSchema):
-    project: int | None = Field(validation_alias="project_id")
-    environment: int | None = Field(validation_alias="environment_id")
+class MonitorSchema(CamelSchema, ModelSchema):
+    project_id: int | None
+    environment_id: int | None
     is_up: bool | None = Field(validation_alias="latest_is_up")
     last_change: str | None
     heartbeat_endpoint: str | None
     project_name: str | None = None
     env_name: str | None = None
     checks: list[MonitorCheckSchema]
-    organization: int = Field(validation_alias="organization_id")
+    organization_id: int
 
-    class Meta(MonitorIn.Meta):
+    class Meta:
+        model = Monitor
         fields = [
             "id",
             "monitor_type",

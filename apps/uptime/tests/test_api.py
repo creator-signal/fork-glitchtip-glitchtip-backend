@@ -204,7 +204,7 @@ class UptimeAPITestCase(GlitchTestCase):
         data = res.json()
         self.assertEqual(data["isUp"], True)
         self.assertEqual(parse_datetime(data["lastChange"]), now)
-        self.assertEqual(data["environment"], environment.pk)
+        self.assertEqual(data["environmentID"], environment.pk)
         self.assertIn("responseTime", data["checks"][0])
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
@@ -253,7 +253,7 @@ class UptimeAPITestCase(GlitchTestCase):
 
         res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()["project"], self.project.id)
+        self.assertEqual(res.json()["projectID"], self.project.id)
         self.assertEqual(res.json()["url"], "https://differentexample.com")
 
         data = {
@@ -309,9 +309,7 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(Monitor.objects.count(), 0)
         self.assertEqual(MonitorCheck.objects.count(), 0)
 
-        another_org = baker.make(
-            "organizations_ext.Organization"
-        )
+        another_org = baker.make("organizations_ext.Organization")
         another_monitor = baker.make(
             "uptime.Monitor",
             organization=another_org,
@@ -324,7 +322,6 @@ class UptimeAPITestCase(GlitchTestCase):
         url = reverse("api:delete_monitor", args=[another_org.slug, another_monitor.pk])
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 404)
-
 
     @mock.patch("apps.uptime.tasks.perform_checks.run")
     def test_list_isolation(self, _):
