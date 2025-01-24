@@ -81,13 +81,14 @@ class MonitorIn(CamelSchema, ModelSchema):
 class MonitorSchema(CamelSchema, ModelSchema):
     project_id: int | None
     environment_id: int | None
-    is_up: bool | None = Field(validation_alias="latest_is_up")
+    is_up: bool | None
     last_change: str | None
     heartbeat_endpoint: str | None
     project_name: str | None = None
     env_name: str | None = None
     checks: list[MonitorCheckSchema]
     organization_id: int
+    monitor_type: MonitorType
 
     class Meta:
         model = Monitor
@@ -103,6 +104,10 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "interval",
             "timeout",
         ]
+
+    @staticmethod
+    def resolve_is_up(obj):
+        return obj.latest_is_up
 
     @staticmethod
     def resolve_last_change(obj):
