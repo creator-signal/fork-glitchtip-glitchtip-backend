@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import URLValidator
 from django.urls import reverse
-from ninja import Field, ModelSchema
+from ninja import ModelSchema
 from ninja.errors import ValidationError
 from pydantic import model_validator
 
