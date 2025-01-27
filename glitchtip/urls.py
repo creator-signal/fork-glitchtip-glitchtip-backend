@@ -6,6 +6,8 @@ from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
+from apps.event_ingest.views import event_envelope_view
+
 from .api.api import api
 from .views import health, index
 
@@ -19,6 +21,7 @@ urlpatterns = [
         "robots.txt",
         TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),
     ),
+    path("api/<int:project_id>/envelope/", event_envelope_view),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
     # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
     path(

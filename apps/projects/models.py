@@ -102,11 +102,6 @@ class Project(CreatedModel, SoftDeleteModel):
         super().force_delete(*args, **kwargs)
         clear_metrics_cache()
 
-    @property
-    def should_scrub_ip_addresses(self):
-        """Organization overrides project setting"""
-        return self.scrub_ip_addresses or self.organization.scrub_ip_addresses
-
     def slugify_function(self, content):
         """
         Make the slug the project name. Validate uniqueness with both name and org id.

@@ -17,6 +17,13 @@ from ..schema import (
 )
 
 
+def list_to_envelope(data: list[dict]) -> str:
+    result_lines = []
+    for item in data:
+        result_lines.append(json.dumps(item))
+    return "\n".join(result_lines)
+
+
 def generate_event(
     event_type="error",
     level="error",
