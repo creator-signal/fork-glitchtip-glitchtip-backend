@@ -1,26 +1,48 @@
 import math
 import random
+from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connection
 from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
-from apps.projects.models import Project
 from glitchtip.api.exceptions import ThrottleException
-from glitchtip.utils import async_call_celery_task
 from sentry.utils.auth import parse_auth_header
 
 from .constants import EVENT_BLOCK_CACHE_KEY
 
 
+@dataclass
+class OrganizationInfo:
+    id: int
+    is_accepting_events: bool
+    event_throttle_rate: int
+    scrub_ip_addresses: bool
+
+
+@dataclass
+class ProjectAuthInfo:
+    id: int
+    scrub_ip_addresses: bool
+    event_throttle_rate: int
+    organization_id: int
+    organization: OrganizationInfo
+
+    @property
+    def should_scrub_ip_addresses(self):
+        """Organization overrides project setting"""
+        return self.scrub_ip_addresses or self.organization.scrub_ip_addresses
+
+
 class EventAuthHttpRequest(HttpRequest):
     """Django HttpRequest that is known to be authenticated by a project DSN"""
 
-    auth: Project
+    auth: ProjectAuthInfo
 
 
 def auth_from_request(request: HttpRequest):
@@ -81,7 +103,7 @@ def calculate_retry_after(throttle: int):
     return math.ceil(0.02 * throttle**2.3)
 
 
-async def get_project(request: HttpRequest) -> Project | None:
+def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Return the valid and accepting events project based on a request.
 
@@ -111,26 +133,34 @@ async def get_project(request: HttpRequest) -> Project | None:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
 
-    project = (
-        await Project.objects.filter(
-            id=project_id,
-            projectkey__public_key=sentry_key,
+    # May someday be async https://code.djangoproject.com/ticket/35629
+    with connection.cursor() as cursor:
+        cursor.callproc(
+            "get_project_auth_info",
+            [
+                project_id,
+                sentry_key,
+            ],
         )
-        .select_related("organization")
-        .only(
-            "id",
-            "scrub_ip_addresses",
-            "organization_id",
-            "organization__is_accepting_events",
-            "organization__event_throttle_rate",
-            "organization__scrub_ip_addresses",
-            "event_throttle_rate",
-        )
-        .afirst()
-    )
-    if not project:
+        row = cursor.fetchone()
+
+    if not row:
         cache.set(block_cache_key, "v", REJECTION_WAIT)
         raise REJECTION_MAP["v"]
+
+    project = ProjectAuthInfo(
+        id=row[0],
+        scrub_ip_addresses=row[1],
+        event_throttle_rate=row[2],
+        organization_id=row[3],
+        organization=OrganizationInfo(
+            id=row[0],
+            is_accepting_events=row[4],
+            event_throttle_rate=row[5],
+            scrub_ip_addresses=row[6],
+        ),
+    )
+
     if (
         not project.organization.is_accepting_events
         or project.organization.event_throttle_rate == 100
@@ -142,7 +172,8 @@ async def get_project(request: HttpRequest) -> Project | None:
         cache.set(
             block_cache_key,
             serialize_throttle(
-                project.organization.event_throttle_rate, project.event_throttle_rate
+                project.organization.event_throttle_rate,
+                project.event_throttle_rate,
             ),
             REJECTION_WAIT,
         )
@@ -163,14 +194,20 @@ async def get_project(request: HttpRequest) -> Project | None:
         settings.BILLING_ENABLED
         and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
     ):
-        await async_call_celery_task(
-            check_organization_throttle, project.organization_id
-        )
+        check_organization_throttle.delay(project.organization_id)
+    return project
+
+    # Check throttle needs every 1 out of X requests
+    if (
+        settings.BILLING_ENABLED
+        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
+    ):
+        check_organization_throttle.delay(project.organization_id)
 
     return project
 
 
-async def event_auth(request: HttpRequest) -> Project | None:
+def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
     Throttling is also handled here.
@@ -180,4 +217,4 @@ async def event_auth(request: HttpRequest) -> Project | None:
         raise HttpError(
             503, "Events are not currently being accepted due to maintenance."
         )
-    return await get_project(request)
+    return get_project(request)

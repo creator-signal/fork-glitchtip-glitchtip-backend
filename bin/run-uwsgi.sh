@@ -20,7 +20,7 @@ exec uwsgi \
     --buffer-size=83146 \
     --log-x-forwarded-for \
     --log-format-strftime \
-    --http-socket=$HTTP_SOCKET \
+    --http-socket=:8000 \
     --cheaper-algo=busyness \
     --cheaper-overload=$CHEAPER_OVERLOAD \
     --cheaper-step=1 \

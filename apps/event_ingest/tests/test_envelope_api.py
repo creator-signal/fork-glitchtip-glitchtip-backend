@@ -10,7 +10,7 @@ from django.urls import reverse
 from apps.issue_events.models import IssueEvent
 from apps.performance.models import TransactionEvent
 
-from .utils import EventIngestTestCase
+from .utils import EventIngestTestCase, list_to_envelope
 
 
 class EnvelopeAPITestCase(EventIngestTestCase):
@@ -49,9 +49,11 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         return "\n".join([json.dumps(line) for line in json_data])
 
     def test_envelope_api(self):
-        with self.assertNumQueries(17):
+        with self.assertNumQueries(16):
             res = self.client.post(
-                self.url, self.django_event, content_type="application/json"
+                self.url,
+                list_to_envelope(self.django_event),
+                content_type="application/json",
             )
         self.assertContains(res, self.django_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
@@ -71,7 +73,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
     def test_accept_transaction(self):
         data = self.get_payload("events/test_data/transactions/django_simple.json")
         res = self.client.post(
-            self.url, data, content_type="application/x-sentry-envelope"
+            self.url,
+            data,
+            content_type="application/x-sentry-envelope",
         )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
@@ -82,7 +86,11 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "name": "cocoapods",
             "version": "just_aint_right",
         }
-        res = self.client.post(self.url, event, content_type="application/json")
+        res = self.client.post(
+            self.url,
+            list_to_envelope(event),
+            content_type="application/json",
+        )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(IssueEvent.objects.count(), 1)
 
@@ -94,34 +102,14 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
 
-    @mock.patch("glitchtip.api.api.logger.warning")
-    def test_invalid_event_warning(self, mock_log):
-        res = self.client.post(
-            self.url,
-            '{"event_id": "A"}\n{"type": "nothing"}',
-            content_type="application/x-sentry-envelope",
-        )
-        self.assertEqual(res.status_code, 422)
-        mock_log.assert_called_once()
-
-    @mock.patch("glitchtip.api.api.logger.warning")
+    @mock.patch("apps.event_ingest.views.logger.warning")
     def test_invalid_issue_event_warning(self, mock_log):
         res = self.client.post(
             self.url,
             '{}\n{"type": "event"}\n{"timestamp": false}',
             content_type="application/x-sentry-envelope",
         )
-        self.assertEqual(res.status_code, 422)
-        mock_log.assert_called_once()
-
-    @mock.patch("glitchtip.api.parsers.logger.warning")
-    def test_invalid_content_type(self, mock_log):
-        res = self.client.post(
-            self.url,
-            '{}\n{"type": "event"}\n{"timestamp": false}',
-            content_type="application/wut",
-        )
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 200)
         mock_log.assert_called_once()
 
     def test_no_content_type(self):
@@ -150,7 +138,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 {"module": "", "thread_id": 1, "stacktrace": {}},
             ]
         }
-        res = self.client.post(self.url, event, content_type="application/json")
+        res = self.client.post(
+            self.url, list_to_envelope(event), content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(
             IssueEvent.objects.filter(

@@ -1,7 +1,5 @@
 import logging
-from typing import Optional
 
-import orjson
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.openid_connect.views import (
     OpenIDConnectOAuth2Adapter,
@@ -11,8 +9,6 @@ from django.conf import settings
 from django.contrib.auth import aget_user
 from django.http import HttpRequest
 from ninja import Field, ModelSchema, NinjaAPI, Schema
-from ninja.errors import ValidationError
-from sentry_sdk import capture_exception, set_context, set_level
 
 from apps.alerts.api import router as alerts_router
 from apps.api_tokens.api import router as api_tokens_router
@@ -44,7 +40,7 @@ from glitchtip.constants import SOCIAL_ADAPTER_MAP
 from ..schema import CamelSchema
 from .authentication import SessionAuth, TokenAuth
 from .exceptions import ThrottleException
-from .parsers import EnvelopeParser
+from .parsers import ORJSONParser
 
 try:
     from djstripe.settings import djstripe_settings
@@ -54,7 +50,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 api = NinjaAPI(
-    parser=EnvelopeParser(),
+    parser=ORJSONParser(),
     title="GlitchTip API",
     urls_namespace="api",
     auth=[TokenAuth(), SessionAuth()],
@@ -87,20 +83,6 @@ if settings.BILLING_ENABLED:
     api.add_router("0", djstripe_ext_router)
 
 
-# Would be better at the router level
-# https://github.com/vitalik/django-ninja/issues/442
-@api.exception_handler(ValidationError)
-def log_validation(request, exc):
-    if request.resolver_match.route == "api/<project_id>/envelope/":
-        set_level("warning")
-        set_context(
-            "incoming event", [orjson.loads(line) for line in request.body.splitlines()]
-        )
-        capture_exception(exc)
-        logger.warning(f"Validation error on {request.path}", exc_info=exc)
-    return api.create_response(request, {"detail": exc.errors}, status=422)
-
-
 @api.exception_handler(ThrottleException)
 def throttled(request: HttpRequest, exc: ThrottleException):
     response = api.create_response(
@@ -119,7 +101,7 @@ def throttled(request: HttpRequest, exc: ThrottleException):
 
 class SocialAppSchema(ModelSchema):
     scopes: list[str]
-    authorize_url: Optional[str]
+    authorize_url: str | None
 
     class Config:
         model = SocialApp
@@ -132,13 +114,13 @@ class SettingsOut(CamelSchema):
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
     enable_user_registration: bool
     enable_organization_creation: bool
-    stripe_public_key: Optional[str]
-    plausible_url: Optional[str]
-    plausible_domain: Optional[str]
-    chatwoot_website_token: Optional[str]
-    sentryDSN: Optional[str]
-    sentry_traces_sample_rate: Optional[float]
-    environment: Optional[str]
+    stripe_public_key: str | None
+    plausible_url: str | None
+    plausible_domain: str | None
+    chatwoot_website_token: str | None
+    sentryDSN: str | None
+    sentry_traces_sample_rate: float | None
+    environment: str | None
     version: str
     server_time_zone: str
     use_new_social_callbacks: bool
@@ -191,8 +173,8 @@ async def get_settings(request: HttpRequest):
 
 class APIRootSchema(Schema):
     version: str
-    user: Optional[UserSchema]
-    auth: Optional[APITokenSchema]
+    user: UserSchema | None
+    auth: APITokenSchema | None
 
 
 @api.get("0/", auth=None, response=APIRootSchema, by_alias=True)

@@ -13,7 +13,6 @@ from pydantic import (
     BeforeValidator,
     JsonValue,
     RootModel,
-    ValidationError,
     WrapValidator,
     field_validator,
     model_validator,
@@ -176,8 +175,7 @@ class EventMessage(LaxIngestSchema):
             params = self.params
             if isinstance(params, list) and params:
                 formatted_params = tuple(
-                    int(p) if isinstance(p, str) and p.isdigit() else p
-                    for p in params
+                    int(p) if isinstance(p, str) and p.isdigit() else p for p in params
                 )
                 try:
                     self.formatted = self.message % tuple(formatted_params)
@@ -385,33 +383,6 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
     _items: list[
         tuple[ItemHeaderSchema, IngestIssueEvent | TransactionEventSchema]
     ] = []
-
-    @model_validator(mode="after")
-    def validate_envelope(self) -> "EnvelopeSchema":
-        data = self.root
-        try:
-            header = data.pop(0)
-        except IndexError:
-            raise ValidationError([{"message": "Envelope is empty"}])
-        self._header = EnvelopeHeaderSchema(**header)
-
-        while len(data) >= 2:
-            item_header_data = data.pop(0)
-            if item_header_data.get("type", None) not in SUPPORTED_ITEMS:
-                continue
-            item_header = ItemHeaderSchema(**item_header_data)
-            if item_header.type == "event":
-                try:
-                    item = IngestIssueEvent(**data.pop(0))
-                except ValidationError as err:
-                    logger.warning("Envelope Event item invalid", exc_info=True)
-                    raise err
-                self._items.append((item_header, item))
-            elif item_header.type == "transaction":
-                item = TransactionEventSchema(**data.pop(0))
-                self._items.append((item_header, item))
-
-        return self
 
 
 class CSPReportSchema(LaxIngestSchema):
