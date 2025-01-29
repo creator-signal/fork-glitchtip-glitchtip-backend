@@ -1,0 +1,9 @@
+from django.apps import AppConfig
+from django.conf import settings
+
+class DjstripeExtAppConfig(AppConfig):
+    name = 'djstripe_ext'
+
+    def ready(self):
+        if not settings.IS_CELERY:
+            import .hooks.update_subscription  # noqa: F401

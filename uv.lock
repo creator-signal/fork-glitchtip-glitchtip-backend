@@ -449,7 +449,7 @@ name = "click"
 version = "8.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "platform_system == 'Windows'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/d3/f04c7bfcf5c1862a2a5b845c6b2b360488cf47af55dfa79c98f6a6bf98b5/click-8.1.7.tar.gz", hash = "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de", size = 336121 }
 wheels = [
@@ -565,15 +565,15 @@ wheels = [
 
 [[package]]
 name = "dj-stripe"
-version = "2.8.4"
+version = "2.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "stripe" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/c7/4703a8b451e9f93d7184e8a683c7dfead01bfec8eb72fc274fd630f3146d/dj_stripe-2.8.4.tar.gz", hash = "sha256:2abfc4f690af4dd65d57dfbb5d36ffaf63b9225f0a5ac95ea21783c80a95982b", size = 151454 }
+sdist = { url = "https://files.pythonhosted.org/packages/49/f3/1cffa275501f3a32760463a724d4c99f14e53dd79c7dd1161a7906044f4a/dj_stripe-2.9.0.tar.gz", hash = "sha256:679730f0532694fcf0e943a96ac381b787c36b40cdd224040403ac7bccbad914", size = 152105 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/2a/0593c5bb89e7b65457ef14f09444309c1f7c29a14fced92ee0f198ad26f1/dj_stripe-2.8.4-py3-none-any.whl", hash = "sha256:e4665ffc9b54b558310b157b4f67aa92ec6936c0c4e21e13ddeaac90c25b90b1", size = 182913 },
+    { url = "https://files.pythonhosted.org/packages/81/c0/23f4fc8a271e6a7fe77ddb0e6e733a0a0de0656f50141a37c162eec1b1b5/dj_stripe-2.9.0-py3-none-any.whl", hash = "sha256:98c37787c5cef8528c9e590313c0ee6b2e65af7c8d0049762def67f32c496f07", size = 185174 },
 ]
 
 [[package]]
@@ -1170,7 +1170,7 @@ requires-dist = [
     { name = "boto3", specifier = "~=1.34" },
     { name = "celery", extras = ["redis"], specifier = "~=5.4" },
     { name = "celery-batches", specifier = "~=0.9" },
-    { name = "dj-stripe", specifier = "~=2.8" },
+    { name = "dj-stripe", specifier = "~=2.9" },
     { name = "django", specifier = "~=5.1" },
     { name = "django-allauth", extras = ["mfa", "socialaccount"], specifier = "~=65.0" },
     { name = "django-anymail", specifier = "~=12.0" },
@@ -2574,14 +2574,15 @@ wheels = [
 
 [[package]]
 name = "stripe"
-version = "4.2.0"
+version = "11.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/06/7b69b9fb7148732f7c5eed4e0062c04214bca40c176419373d53e3e19dfd/stripe-4.2.0.tar.gz", hash = "sha256:f0134704bd4e9410fae25034836dc6f5849d92c0f9083d58d43e01b3e631ac4c", size = 267578 }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/49/902b7cb88e788754c529710598a5110242f788c8694ffbbacbf58a3c6882/stripe-11.5.0.tar.gz", hash = "sha256:bc3e0358ffc23d5ecfa8aafec1fa4f048ee8107c3237bcb00003e68c8c96fa02", size = 1386601 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/9f/863f6b804cb80c8baf8f7d6e0c776e4e4da6238f530ef8c6648ffac07a82/stripe-4.2.0-py2.py3-none-any.whl", hash = "sha256:8ce03bfc099465740e33890000c454e79316c8730e45ad1efbaec3d52a019d05", size = 252200 },
+    { url = "https://files.pythonhosted.org/packages/b2/76/a5a7b407da86ed47c41e88e8450ea4965e0a49a9cc301602edc6733382d7/stripe-11.5.0-py2.py3-none-any.whl", hash = "sha256:3b2cd47ed3002328249bff5cacaee38d5e756c3899ab425d3bd07acdaf32534a", size = 1633231 },
 ]
 
 [[package]]
