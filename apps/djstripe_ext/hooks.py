@@ -1,7 +1,5 @@
 from djstripe.event_handlers import djstripe_receiver
 
-
-
 djstripe_receiver(["customer.subscription.updated", "customer.subscription.created"])
 def update_subscription(event, **kwargs):
     """When the subscription is updated, immediately check for throttle adjustments"""
