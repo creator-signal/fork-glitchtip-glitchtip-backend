@@ -1,4 +1,5 @@
-import stripe
+from contextlib import asynccontextmanager
+
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db.models import Prefetch
@@ -9,6 +10,7 @@ from djstripe.settings import djstripe_settings
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import paginate
+from stripe import AIOHTTPClient, StripeClient
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
@@ -23,6 +25,21 @@ from .schema import (
 )
 
 router = Router()
+
+
+@asynccontextmanager
+async def get_stripe_client():
+    client = StripeClient(
+        djstripe_settings.STRIPE_SECRET_KEY,
+        http_client=AIOHTTPClient(),
+        stripe_version=djstripe_settings.STRIPE_API_VERSION,
+    )
+    try:
+        yield client
+    finally:
+        # Close the client
+        # https://github.com/stripe/stripe-python/issues/874
+        await client._requestor._client.close_async()
 
 
 @router.get(
@@ -111,16 +128,16 @@ async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str
     )
     customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
     domain = settings.GLITCHTIP_URL.geturl()
-    session = await stripe.billing_portal.Session.create_async(
-        api_key=djstripe_settings.STRIPE_SECRET_KEY,
-        customer=customer.id,
-        return_url=domain
-        + "/"
-        + organization.slug
-        + "/settings/subscription?billing_portal_redirect=true",
-    )
-    # Once we can update stripe-python
-    # session = await stripe.billing_portal.Session.create_async(
+    async with get_stripe_client() as client:
+        session = await client.billing_portal.sessions.create_async(
+            params={
+                "customer": customer.id,
+                "return_url": domain
+                + "/"
+                + organization.slug
+                + "/settings/subscription?billing_portal_redirect=true",
+            }
+        )
     return session
 
 
@@ -143,30 +160,32 @@ async def create_stripe_subscription_checkout(
     price = await aget_object_or_404(Price, id=payload.price)
     customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
     domain = settings.GLITCHTIP_URL.geturl()
-    session = await stripe.checkout.Session.create_async(
-        api_key=djstripe_settings.STRIPE_SECRET_KEY,
-        payment_method_types=["card"],
-        line_items=[
-            {
-                "price": price.id,
-                "quantity": 1,
+    async with get_stripe_client() as client:
+        session = await client.checkout.sessions.create_async(
+            params={
+                "payment_method_types": ["card"],
+                "line_items": [
+                    {
+                        "price": price.id,
+                        "quantity": 1,
+                    }
+                ],
+                "mode": "subscription",
+                "customer": customer.id,
+                "automatic_tax": {
+                    "enabled": settings.STRIPE_AUTOMATIC_TAX,
+                },
+                "customer_update": {"address": "auto", "name": "auto"},
+                "tax_id_collection": {
+                    "enabled": True,
+                },
+                "success_url": domain
+                + "/"
+                + organization.slug
+                + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
+                "cancel_url": domain + "",
             }
-        ],
-        mode="subscription",
-        customer=customer.id,
-        automatic_tax={
-            "enabled": settings.STRIPE_AUTOMATIC_TAX,
-        },
-        customer_update={"address": "auto", "name": "auto"},
-        tax_id_collection={
-            "enabled": True,
-        },
-        success_url=domain
-        + "/"
-        + organization.slug
-        + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url=domain + "",
-    )
+        )
 
     return session
 
