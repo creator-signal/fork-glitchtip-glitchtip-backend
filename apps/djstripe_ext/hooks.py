@@ -1,7 +1,6 @@
-from djstripe import webhooks
+from djstripe.event_handlers import djstripe_receiver
 
-
-@webhooks.handler("customer.subscription.updated", "customer.subscription.created")
+djstripe_receiver(["customer.subscription.updated", "customer.subscription.created"])
 def update_subscription(event, **kwargs):
     """When the subscription is updated, immediately check for throttle adjustments"""
     # Avoid importing models during django app startup
