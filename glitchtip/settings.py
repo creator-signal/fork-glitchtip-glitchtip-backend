@@ -764,7 +764,6 @@ if BILLING_ENABLED:
     STRIPE_TEST_SECRET_KEY = env.str("STRIPE_TEST_SECRET_KEY", None)
     STRIPE_LIVE_PUBLIC_KEY = env.str("STRIPE_LIVE_PUBLIC_KEY", None)
     STRIPE_LIVE_SECRET_KEY = env.str("STRIPE_LIVE_SECRET_KEY", None)
-    DJSTRIPE_WEBHOOK_SECRET = env.str("DJSTRIPE_WEBHOOK_SECRET", None)
     CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
         "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
         "schedule": timedelta(hours=4),
@@ -776,7 +775,6 @@ elif TESTING:
     INSTALLED_APPS.append("apps.djstripe_ext")
     STRIPE_TEST_PUBLIC_KEY = "fake"
     STRIPE_TEST_SECRET_KEY = "sk_test_fake"  # nosec
-    DJSTRIPE_WEBHOOK_SECRET = "whsec_fake"  # nosec
     logging.disable(logging.WARNING)
 
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", False)
