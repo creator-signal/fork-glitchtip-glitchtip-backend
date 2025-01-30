@@ -111,7 +111,7 @@ async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str
     )
     customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
     domain = settings.GLITCHTIP_URL.geturl()
-    session = await sync_to_async(stripe.billing_portal.Session.create)(
+    session = await stripe.billing_portal.Session.create_async(
         api_key=djstripe_settings.STRIPE_SECRET_KEY,
         customer=customer.id,
         return_url=domain
@@ -143,7 +143,7 @@ async def create_stripe_subscription_checkout(
     price = await aget_object_or_404(Price, id=payload.price)
     customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
     domain = settings.GLITCHTIP_URL.geturl()
-    session = await sync_to_async(stripe.checkout.Session.create)(
+    session = await stripe.checkout.Session.create_async(
         api_key=djstripe_settings.STRIPE_SECRET_KEY,
         payment_method_types=["card"],
         line_items=[
