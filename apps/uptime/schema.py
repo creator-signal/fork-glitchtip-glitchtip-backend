@@ -105,10 +105,8 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "timeout",
         ]
 
-    @staticmethod
-    def resolve_project_id(obj):
-        if obj.project_id:
-            return str(obj.project_id)
+    class Config(CamelSchema.Config):
+        coerce_numbers_to_str = True
 
     @staticmethod
     def resolve_is_up(obj):
