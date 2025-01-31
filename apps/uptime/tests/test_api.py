@@ -79,7 +79,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "expectedStatus": 200,
             "expectedBody": "",
             "interval": 60,
-            "project": self.project.pk,
+            "project": str(self.project.pk),
             "timeout": 25,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
@@ -160,7 +160,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "expectedBody": "",
             "timeout": None,
             "interval": 60,
-            "project": self.project.pk,
+            "project": str(self.project.pk),
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
         mocked.assert_called_once()
@@ -248,12 +248,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "expectedBody": "",
             "expected_status": None,
             "timeout": 20,
-            "project": self.project.id,
+            "project": str(self.project.id),
         }
 
         res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()["projectID"], self.project.id)
+        self.assertEqual(res.json()["projectID"], str(self.project.id))
         self.assertEqual(res.json()["url"], "https://differentexample.com")
 
         data = {
@@ -264,7 +264,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "expectedBody": "test",
             "expected_status": None,
             "timeout": 20,
-            "project": self.project.id,
+            "project": str(self.project.id),
         }
 
         res = self.client.put(url, data, content_type="application/json")
@@ -278,7 +278,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "expectedBody": "",
             "expected_status": 422,
             "timeout": None,
-            "project": self.project.id,
+            "project": str(self.project.id),
         }
 
         res = self.client.put(url, data, content_type="application/json")
