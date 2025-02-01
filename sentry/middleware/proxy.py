@@ -2,6 +2,7 @@ import io
 import logging
 import zlib
 
+import brotli
 from django.conf import settings
 from django.core.exceptions import RequestDataTooBig
 
@@ -97,6 +98,52 @@ class ZDecoder(io.RawIOBase):
         return n
 
 
+class BrotliDecoder(io.RawIOBase):
+    """
+    Brotli-based HTTP content decoder for handling streaming decompression efficiently.
+    """
+
+    BR_CHUNK = 8192
+
+    def __init__(self, fp):
+        self.fp = fp
+        self.decompressor = None
+        self.buffer = b""
+        self.counter = 0
+
+    def readable(self):
+        return True
+
+    def readinto(self, buf):
+        """
+        Reads Brotli-compressed data in chunks and decompresses it incrementally.
+        """
+        if self.decompressor is None:
+            self.decompressor = brotli.Decompressor()
+
+        n = 0
+        max_length = len(buf)
+        # DOS mitigation - prevent uncompressed payloads from exceeding allowed limits
+        self.counter += 1
+        if self.counter * max_length > settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE:
+            raise RequestDataTooBig()
+
+        while max_length > 0:
+            if not self.buffer:
+                chunk = self.fp.read(self.BR_CHUNK)
+                if not chunk:
+                    return n
+                self.buffer = self.decompressor.process(chunk)
+
+            read_size = min(max_length, len(self.buffer))
+            buf[n : n + read_size] = self.buffer[:read_size]
+            self.buffer = self.buffer[read_size:]
+            n += read_size
+            max_length -= read_size
+
+        return n
+
+
 class DeflateDecoder(ZDecoder):
     """
     Decoding for "content-encoding: deflate"
@@ -177,6 +224,10 @@ class DecompressBodyMiddleware(object):
 
         if encoding == "deflate":
             request._stream = DeflateDecoder(request._stream)
+            decode = True
+
+        if encoding == "br":
+            request._stream = BrotliDecoder(request._stream)
             decode = True
 
         if decode:
