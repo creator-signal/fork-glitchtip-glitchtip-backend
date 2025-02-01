@@ -6,6 +6,7 @@ authors = ["David Burke"]
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+  "Brotli==1.1.0",
   "django~=5.1",
   "django-allauth[mfa,socialaccount]~=65.0",
   "django-cors-headers~=4.0",
@@ -15,7 +16,7 @@ dependencies = [
   "django-storages[boto3,azure,google]~=1.12",
   "uWSGI~=2.0",
   "whitenoise~=6.0",
-  "sentry-sdk~=2.0",
+  "sentry-sdk~=2.20",
   "celery[redis]~=5.4",
   "django-csp~=3.6",
   "dj-stripe~=2.8",
