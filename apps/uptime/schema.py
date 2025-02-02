@@ -33,6 +33,7 @@ class MonitorIn(CamelSchema, ModelSchema):
     expected_body: str
     expected_status: int | None
     timeout: Annotated[int, Ge(1), Le(60)] | None
+    project: str | None = None
 
     @model_validator(mode="after")
     def validate(self):
@@ -73,13 +74,12 @@ class MonitorIn(CamelSchema, ModelSchema):
             "monitor_type",
             "name",
             "url",
-            "project",
             "interval",
         ]
 
 
 class MonitorSchema(CamelSchema, ModelSchema):
-    project_id: int | None
+    project_id: str | None
     environment_id: int | None
     is_up: bool | None
     last_change: str | None
@@ -104,6 +104,9 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "interval",
             "timeout",
         ]
+
+    class Config(CamelSchema.Config):
+        coerce_numbers_to_str = True
 
     @staticmethod
     def resolve_is_up(obj):
