@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from datetime import timedelta
 from ssl import SSLError
@@ -11,6 +12,8 @@ from django.utils import timezone
 
 from .constants import MonitorCheckReason, MonitorType
 from .models import MonitorCheck
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 20  # Seconds
 PAYLOAD_LIMIT = 2_000_000  # 2mb
@@ -82,6 +85,9 @@ async def fetch(session, monitor):
     except ClientConnectorError:
         monitor["reason"] = MonitorCheckReason.NETWORK
     except OSError:
+        monitor["reason"] = MonitorCheckReason.UNKNOWN
+    except Exception as e:
+        logger.error(f"Monitor {monitor['id']} check failed", exc_info=e)
         monitor["reason"] = MonitorCheckReason.UNKNOWN
     return monitor
 

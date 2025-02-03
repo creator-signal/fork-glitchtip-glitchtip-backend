@@ -1,6 +1,6 @@
 import asyncio
+import logging
 from datetime import timedelta
-from typing import List
 
 from celery import shared_task
 from django.conf import settings
@@ -16,6 +16,8 @@ from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType
 from .utils import fetch_all
 from .webhooks import send_uptime_as_webhook
+
+logger = logging.getLogger(__name__)
 
 UPTIME_COUNTER_KEY = "uptime_counter"
 UPTIME_TICK_EXPIRE = 2147483647
@@ -108,7 +110,7 @@ def dispatch_checks():
 
 
 @shared_task
-def perform_checks(monitor_ids: List[int], now=None):
+def perform_checks(monitor_ids: list[int], now=None):
     """
     Performant check monitors and save results
 
@@ -122,13 +124,15 @@ def perform_checks(monitor_ids: List[int], now=None):
     monitors = list(
         Monitor.objects.with_check_annotations().filter(pk__in=monitor_ids).values()
     )
-    results = asyncio.run(fetch_all(monitors))
-    # Filter out "up" heartbeats
-    results = [
-        result
-        for result in results
-        if result["monitor_type"] != MonitorType.HEARTBEAT or result["is_up"] is False
-    ]
+    results = []
+    for result in asyncio.run(fetch_all(monitors)):
+        # Log and ignore exceptions
+        if isinstance(result, Exception):
+            logger.error("Critical monitor check failure", exc_info=result)
+        # Filter out "up" heartbeats
+        elif result["monitor_type"] != MonitorType.HEARTBEAT or result["is_up"] is False:
+            results.append(result)
+
     monitor_checks = MonitorCheck.objects.bulk_create(
         [
             MonitorCheck(
