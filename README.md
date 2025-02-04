@@ -67,6 +67,14 @@ Now go to localhost:8089 to run the test.
 
 Locust will not be installed to production docker images and cannot be run from them.
 
+### Memory profiling
+
+Use memray to profile. For example we can profile celery beat (bin/run-beat.sh) with
+
+`exec memray run /usr/local/bin/celery -A glitchtip beat -s /tmp/celerybeat-schedule -l info --pidfile=`
+
+Then run `memray flamegraph file.bin` on the above file output.
+
 ### Observability metrics with Prometheus
 
 1. Edit monitoring/prometheus/prometheus.yml and set credentials to a GlitchTip auth token
