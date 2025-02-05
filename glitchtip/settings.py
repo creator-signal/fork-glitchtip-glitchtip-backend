@@ -366,6 +366,7 @@ CSP_SCRIPT_SRC = env.list("CSP_SCRIPT_SRC", str, default_script_src)
 CSP_IMG_SRC = env.list("CSP_IMG_SRC", str, ["'self'"])
 CSP_FRAME_SRC = env.list("CSP_FRAME_SRC", str, default_frame_src)
 # Consider tracking CSP reports with GlitchTip itself
+CSP_INCLUDE_NONCE_IN = ["default-src", "script-src"]
 CSP_REPORT_URI = env.tuple("CSP_REPORT_URI", str, None)
 CSP_REPORT_ONLY = env.bool("CSP_REPORT_ONLY", False)
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
