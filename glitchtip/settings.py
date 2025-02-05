@@ -336,8 +336,11 @@ CHATWOOT_IDENTITY_TOKEN = env.str("CHATWOOT_IDENTITY_TOKEN", None)
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", str, [])
 SECURE_BROWSER_XSS_FILTER = True
 CSP_DEFAULT_SRC = env.list("CSP_DEFAULT_SRC", str, ["'self'"])
-if "CSP_STYLE_SRC" in os.environ:
-    CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str)
+# https://github.com/swimlane/ngx-charts/issues/1937
+CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str, ["'self'", "'unsafe-inline'"])
+# Use this once unsafe-inline is removed (blame is ngx-charts)
+# if "CSP_STYLE_SRC" in os.environ:
+#     CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str)
 if "CSP_STYLE_SRC_ELEM" in os.environ:
     CSP_STYLE_SRC_ELEM = env.list("CSP_STYLE_SRC_ELEM", str)
 CSP_FONT_SRC = env.list("CSP_FONT_SRC", str, ["'self'", "data:"])
