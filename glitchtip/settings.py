@@ -670,6 +670,8 @@ HEADLESS_FRONTEND_URLS = {
     "account_reset_password_from_key": "/reset-password/set-new-password/{key}",
     "socialaccount_login_error": "/login?socialLoginError=true",
 }
+HEADLESS_CLIENTS = ("browser",)
+HEADLESS_SERVE_SPECIFICATION = True
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_TOTP_TOLERANCE = 1
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]

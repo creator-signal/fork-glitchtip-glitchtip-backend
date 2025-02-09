@@ -55,7 +55,8 @@ dev-dependencies = [
   "requests-mock~=1.9",
   "memray~=1.9",
   "ruff~=0.6",
-  "tblib~=3.0",  # Needed for test --parallel
+  "tblib~=3.0", # Needed for test --parallel
+  "pyyaml>=6.0.2", # allauth openapi spec
 ]
 
 [tool.ruff.lint]
