@@ -1,3 +1,8 @@
+# v4.3.1
+
+- Add OrganizationSocialApp, configurable in django admin, that allows Organizations to be associated to SocialApps and automatically assign users who log in with
+  the associated SocialApp to the Organization.
+
 # v4.2.1
 
 - Critical fix for static file locations

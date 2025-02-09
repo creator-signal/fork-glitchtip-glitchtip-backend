@@ -11,7 +11,12 @@ from organizations.base_admin import (
     BaseOwnerInline,
 )
 
-from .models import Organization, OrganizationOwner, OrganizationUser
+from .models import (
+    Organization,
+    OrganizationOwner,
+    OrganizationSocialApp,
+    OrganizationUser,
+)
 from .resources import OrganizationResource, OrganizationUserResource
 
 ORGANIZATION_LIST_FILTER = (
@@ -163,7 +168,13 @@ class OrganizationUserAdmin(BaseOrganizationUserAdmin, ImportExportModelAdmin):
     resource_class = OrganizationUserResource
 
 
+class OrganizationSocialAppAdmin(admin.ModelAdmin):
+    list_display = ["organization", "social_app"]
+    search_fields = ("organization__name", "social_app__name")
+
+
 admin.site.register(Organization, OrganizationAdmin)
 if settings.BILLING_ENABLED:
     admin.site.register(OrganizationSubscription, OrganizationSubscriptionAdmin)
 admin.site.register(OrganizationUser, OrganizationUserAdmin)
+admin.site.register(OrganizationSocialApp, OrganizationSocialAppAdmin)
