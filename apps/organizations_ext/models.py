@@ -1,3 +1,4 @@
+from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
@@ -280,3 +281,14 @@ class OrganizationOwner(OrganizationOwnerBase):
 
 class OrganizationInvitation(OrganizationInvitationBase):
     """Required to exist for django-organizations"""
+
+
+class OrganizationSocialApp(models.Model):
+    """
+    Associate organization with social app, for authentication purposes.
+    Example: If Foo org has social app FooGoogle, then any user logging in via FooGoogle
+    OAuth must be automatically assigned to the Foo org.
+    """
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    social_app = models.OneToOneField(SocialApp, on_delete=models.CASCADE)
