@@ -106,12 +106,18 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(self.detail_url, 204)
 
     def test_user_destroy(self):
+        another_user = baker.make("users.user")
+        another_org_user = self.organization.add_user(another_user)
+        url = reverse(
+            "api:get_organization_member",
+            args=[self.organization.slug, another_org_user.pk],
+        )
         self.set_client_credentials(None)
         self.client.force_login(self.user)
         self.set_user_role(OrganizationUserRole.MEMBER)
-        self.assertDeleteReqStatusCode(self.detail_url, 403)
+        self.assertDeleteReqStatusCode(url, 403)
         self.set_user_role(OrganizationUserRole.OWNER)
-        self.assertDeleteReqStatusCode(self.detail_url, 204)
+        self.assertDeleteReqStatusCode(url, 204)
 
     def test_update(self):
         baker.make(
