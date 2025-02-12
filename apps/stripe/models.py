@@ -92,14 +92,14 @@ class StripeSubscription(StripeModel):
                 try:
                     organization_id = int(
                         org_metadata.get(
-                            "organization_id", org_metadata["djstripe_subscriber"]
+                            "organization_id", org_metadata.get("djstripe_subscriber")
                         )
                     )
                 except (ValueError, KeyError):
                     continue  # Skip if no organization ID in metadata
 
                 items = subscription.items.data
-                if not items or not items[0]["price"].get("product"):
+                if not items or not items[0].get("price", {}).get("product"):
                     continue  # Skip
 
                 product_id = items[0]["price"]["product"]
@@ -113,9 +113,7 @@ class StripeSubscription(StripeModel):
                     if organization:
                         active_organization_ids.add(organization_id)
                         if not organization.stripe_customer_id:
-                            organization.stripe_customer_id = subscription["customer"][
-                                "id"
-                            ]
+                            organization.stripe_customer_id = subscription.customer.id
                             await organization.asave(
                                 update_fields=["stripe_customer_id"]
                             )
