@@ -57,6 +57,7 @@ dev-dependencies = [
   "ruff~=0.6",
   "tblib~=3.0", # Needed for test --parallel
   "pyyaml>=6.0.2", # allauth openapi spec
+  "ipython>=8.32.0",
 ]
 
 [tool.ruff.lint]

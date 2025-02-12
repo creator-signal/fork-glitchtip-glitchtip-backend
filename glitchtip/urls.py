@@ -7,6 +7,7 @@ from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
 from apps.event_ingest.views import event_envelope_view
+from apps.stripe.views import stripe_webhook_view
 
 from .api.api import api
 from .views import health, index
@@ -31,6 +32,7 @@ urlpatterns = [
         ),
     ),
     path("api/", api.urls),
+    path("stripe/webhook/", stripe_webhook_view),
 ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:

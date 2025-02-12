@@ -11,6 +11,9 @@ from organizations.base_admin import (
     BaseOwnerInline,
 )
 
+from apps.stripe.models import StripeSubscription
+from apps.stripe.utils import get_stripe_link
+
 from .models import (
     Organization,
     OrganizationOwner,
@@ -22,9 +25,8 @@ from .resources import OrganizationResource, OrganizationUserResource
 ORGANIZATION_LIST_FILTER = (
     "is_active",
     "is_accepting_events",
+    "stripesubscription__product",
 )
-if settings.BILLING_ENABLED:
-    ORGANIZATION_LIST_FILTER += ("djstripe_customers__subscriptions__plan__product",)
 
 
 class OwnerInline(BaseOwnerInline):
@@ -37,24 +39,26 @@ class OrganizationUserInline(admin.StackedInline):
     extra = 0
 
 
+class OrganizationSubscriptionInline(admin.StackedInline):
+    model = StripeSubscription
+    extra = 0
+    readonly_fields = [field.name for field in StripeSubscription._meta.fields]
+
+
 class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
-    readonly_fields = ("customers", "created")
+    readonly_fields = ("customer_link", "created")
     list_filter = ORGANIZATION_LIST_FILTER
-    inlines = [OrganizationUserInline, OwnerInline]
+    inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
     show_full_result_count = False
 
     def issue_events(self, obj):
         return obj.issue_event_count
 
-    def customers(self, obj):
-        return format_html(
-            " ".join(
-                [
-                    f'<a href="{customer.get_stripe_dashboard_url()}" target="_blank">{customer.id}</a>'
-                    for customer in obj.djstripe_customers.all()
-                ]
+    def customer_link(self, obj):
+        if customer_id := obj.stripe_customer_id:
+            return format_html(
+                f'<a href="{get_stripe_link(customer_id)}" target="_blank">{customer_id}</a>'
             )
-        )
 
     def transaction_events(self, obj):
         return obj.transaction_count
