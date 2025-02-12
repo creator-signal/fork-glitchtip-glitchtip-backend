@@ -359,6 +359,18 @@ class OrganizationUsersTestCase(TestCase):
         self.assertEqual(res.status_code, 403)
         self.assertEqual(other_user.organizations_ext_organizationuser.count(), 1)
 
+    def test_organization_users_delete_self(self):
+        other_user = baker.make("users.user")
+        other_org_user = self.organization.add_user(other_user)
+
+        self.client.force_login(other_user)
+
+        url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
+
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(other_user.organizations_ext_organizationuser.count(), 0)
+
     def test_organization_members_set_owner(self):
         other_user = baker.make("users.user")
         other_org_user = self.organization.add_user(other_user)

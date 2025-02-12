@@ -272,7 +272,8 @@ async def delete_organization_member(
         get_organization_users_queryset(user_id, organization_slug, role_required=True),
         id=member_id,
     )
-    if org_user.actor_role < OrganizationUserRole.MANAGER:
+    # Check org role of user initiating request, but allow org users to remove themselves
+    if org_user.actor_role < OrganizationUserRole.MANAGER and not (org_user.user and org_user.user.id == user_id):
         raise HttpError(403, "Forbidden")
     await org_user.adelete()
 
