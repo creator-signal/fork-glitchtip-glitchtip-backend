@@ -25,8 +25,6 @@ class Product(BaseModel):
     marketing_features: list
     metadata: dict[str, str] | None
     name: str
-    package_dimensions: object | None
-    shippable: bool | None
     statement_descriptor: str | None
     tax_code: str | None
     type: str
