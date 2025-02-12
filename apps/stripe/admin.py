@@ -1,0 +1,41 @@
+from django.contrib import admin
+from django.utils.html import format_html
+
+from .models import StripeProduct, StripeSubscription
+from .utils import get_stripe_link
+
+
+class StripeBaseAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def stripe_link(self, obj):
+        return format_html(
+            f'<a href="{get_stripe_link(obj.stripe_id)}" target="_blank">{obj.stripe_id}</a>'
+        )
+
+    def get_readonly_fields(self, request, obj=None):
+        return (
+            list(self.readonly_fields)
+            + [field.name for field in obj._meta.fields]
+            + [field.name for field in obj._meta.many_to_many]
+            + ["stripe_link"]
+        )
+
+
+@admin.register(StripeProduct)
+class StripeProductAdmin(StripeBaseAdmin):
+    list_display = ["stripe_id", "name", "price", "events", "is_public"]
+
+
+@admin.register(StripeSubscription)
+class StripeSubscriptionAdmin(StripeBaseAdmin):
+    list_display = [
+        "stripe_id",
+        "organization",
+        "product",
+        "current_period_start",
+        "current_period_end",
+        "is_active",
+    ]
+    list_filter = ["is_active", "product"]

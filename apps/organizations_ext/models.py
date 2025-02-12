@@ -140,6 +140,7 @@ class Organization(SharedBaseModel, OrganizationBase):
         default=True,
         help_text="Default for whether projects should script IP Addresses",
     )
+    stripe_customer_id = models.CharField(max_length=28, blank=True)
 
     objects = OrganizationManager()
 

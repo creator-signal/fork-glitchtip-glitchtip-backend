@@ -245,6 +245,7 @@ INSTALLED_APPS += [
     "apps.projects",
     "apps.teams",
     "apps.releases",
+    "apps.stripe",
     "apps.sourcecode",
     "apps.difs",
     "apps.api_tokens",
@@ -326,6 +327,8 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 ]
 
 BILLING_ENABLED = False
+STRIPE_SECRET_KEY = env.str("STRIPE_SECRET_KEY", None)
+STRIPE_WEBHOOK_SECRET = env.str("STRIPE_WEBHOOK_SECRET", None)
 if env.str("STRIPE_TEST_PUBLIC_KEY", None) or env.str("STRIPE_LIVE_PUBLIC_KEY", None):
     BILLING_ENABLED = True
 
