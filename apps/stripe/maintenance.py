@@ -1,6 +1,8 @@
+from django.conf import settings
 from .models import StripeProduct, StripeSubscription
 
 
 async def sync_stripe_models():
-    await StripeProduct.sync_from_stripe()
-    await StripeSubscription.sync_from_stripe()
+    if settings.BILLING_ENABLED:
+        await StripeProduct.sync_from_stripe()
+        await StripeSubscription.sync_from_stripe()

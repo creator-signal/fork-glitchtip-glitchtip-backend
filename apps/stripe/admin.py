@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.conf import settings
 from django.utils.html import format_html
 
 from .models import StripeProduct, StripeSubscription
@@ -11,7 +12,9 @@ class StripeBaseAdmin(admin.ModelAdmin):
 
     def stripe_link(self, obj):
         return format_html(
-            f'<a href="{get_stripe_link(obj.stripe_id)}" target="_blank">{obj.stripe_id}</a>'
+            '<a href="{}" target="_blank">{}</a>',
+            get_stripe_link(obj.stripe_id),
+            obj.stripe_id
         )
 
     def get_readonly_fields(self, request, obj=None):
@@ -23,12 +26,10 @@ class StripeBaseAdmin(admin.ModelAdmin):
         )
 
 
-@admin.register(StripeProduct)
 class StripeProductAdmin(StripeBaseAdmin):
     list_display = ["stripe_id", "name", "price", "events", "is_public"]
 
 
-@admin.register(StripeSubscription)
 class StripeSubscriptionAdmin(StripeBaseAdmin):
     list_display = [
         "stripe_id",
@@ -39,3 +40,8 @@ class StripeSubscriptionAdmin(StripeBaseAdmin):
         "is_active",
     ]
     list_filter = ["is_active", "product"]
+
+
+if settings.BILLING_ENABLED:
+    admin.site.register(StripeSubscription, StripeSubscriptionAdmin)
+    admin.site.register(StripeProduct, StripeProductAdmin)
