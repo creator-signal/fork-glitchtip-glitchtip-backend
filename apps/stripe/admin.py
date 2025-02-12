@@ -1,5 +1,5 @@
-from django.contrib import admin
 from django.conf import settings
+from django.contrib import admin
 from django.utils.html import format_html
 
 from .models import StripeProduct, StripeSubscription
@@ -14,7 +14,7 @@ class StripeBaseAdmin(admin.ModelAdmin):
         return format_html(
             '<a href="{}" target="_blank">{}</a>',
             get_stripe_link(obj.stripe_id),
-            obj.stripe_id
+            obj.stripe_id,
         )
 
     def get_readonly_fields(self, request, obj=None):
