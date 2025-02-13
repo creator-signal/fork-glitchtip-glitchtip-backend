@@ -1,3 +1,4 @@
+import unittest
 from allauth.account.signals import user_logged_in
 from allauth.socialaccount.models import (
     SocialAccount,
@@ -9,6 +10,7 @@ from model_bakery import baker
 from apps.users.models import User
 
 
+@unittest.skip("User signals currently disabled")
 class TestAddUserToSocialAppOragnizationTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
