@@ -21,7 +21,7 @@ class StripeSubscriptionSchema(CamelSchema, ModelSchema):
 
 
 @router.get("products/", response=list[StripeProductSchema])
-async def list_products(request: AuthHttpRequest):
+async def list_stripe_products(request: AuthHttpRequest):
     return [
         product
         async for product in StripeProduct.objects.filter(is_public=True, events__gt=0)
@@ -31,7 +31,7 @@ async def list_products(request: AuthHttpRequest):
 @router.get(
     "subscriptions/{slug:organization_slug}/", response=StripeSubscriptionSchema | None
 )
-async def get_subscription(request: AuthHttpRequest, organization_slug: str):
+async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: str):
     return await (
         StripeSubscription.objects.filter(
             organization__users=request.auth.user_id,

@@ -4,10 +4,8 @@ from asgiref.sync import sync_to_async
 from django.test import TestCase
 from model_bakery import baker
 
-from glitchtip.test_utils import generators  # noqa: F401
-
-from .models import StripeProduct, StripeSubscription
-from .schema import (
+from ..models import StripeProduct, StripeSubscription
+from ..schema import (
     Customer,
     Items,
     Price,
