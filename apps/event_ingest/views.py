@@ -4,6 +4,7 @@ import orjson
 from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from ninja.errors import AuthenticationError
 from pydantic import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
@@ -55,6 +56,8 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         response = HttpResponse("Too Many Requests", status=429)
         response["Retry-After"] = e.retry_after
         return response
+    except AuthenticationError:
+        return JsonResponse({"detail": "Denied"}, status=403)
 
     if project is None:
         return JsonResponse({"detail": "Denied"}, status=403)
