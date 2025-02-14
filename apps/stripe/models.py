@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class StripeModel(models.Model):
-    stripe_id = models.CharField(primary_key=True, max_length=28)
+    stripe_id = models.CharField(primary_key=True, max_length=30)
 
     class Meta:
         abstract = True
@@ -21,7 +21,9 @@ class StripeModel(models.Model):
 class StripeProduct(StripeModel):
     name = models.CharField()
     description = models.TextField()
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    default_price = models.ForeignKey(
+        "StripePrice", on_delete=models.CASCADE, blank=True, null=True
+    )
     events = models.PositiveBigIntegerField()
     is_public = models.BooleanField()
 
@@ -57,6 +59,12 @@ class StripeProduct(StripeModel):
         result = await StripeProduct.objects.exclude(stripe_id__in=stripe_ids).adelete()
         if result[0]:
             logger.info(f"Deleted {result[0]} products in Django")
+
+
+class StripePrice(StripeModel):
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    nickname = models.CharField(max_length=255)
+    product = models.ForeignKey(StripeProduct, on_delete=models.CASCADE)
 
 
 class StripeSubscription(StripeModel):

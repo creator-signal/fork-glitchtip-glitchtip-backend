@@ -27,7 +27,7 @@ class StripeBaseAdmin(admin.ModelAdmin):
 
 
 class StripeProductAdmin(StripeBaseAdmin):
-    list_display = ["stripe_id", "name", "price", "events", "is_public"]
+    list_display = ["stripe_id", "name", "events", "is_public"]
 
 
 class StripeSubscriptionAdmin(StripeBaseAdmin):
