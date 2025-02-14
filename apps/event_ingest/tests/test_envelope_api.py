@@ -80,6 +80,16 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 
+    def test_invalid_dsn(self):
+        self.project.delete()
+        data = self.get_payload("events/test_data/transactions/django_simple.json")
+        res = self.client.post(
+            self.url,
+            data,
+            content_type="application/x-sentry-envelope",
+        )
+        self.assertEqual(res.status_code, 403)
+
     def test_malformed_sdk_packages(self):
         event = self.django_event
         event[2]["sdk"]["packages"] = {
