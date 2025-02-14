@@ -1,7 +1,9 @@
 # Unreleased
 
-- Add OrganizationSocialApp, configurable in django admin, that allows Organizations to be associated to SocialApps and automatically assign users who log in with
-  the associated SocialApp to the Organization.
+- Add OrganizationSocialApp, configurable in django admin, that allows Organizations to be associated to SocialApps and automatically assign users who log in with the associated SocialApp to the Organization. Signals currently disabled.
+
+# v4.2.4
+
 - Initial custom stripe integration (not yet used but visible in django admin)
 - Consistency fixes around how api ids are handled
 - openapi spec fixes
