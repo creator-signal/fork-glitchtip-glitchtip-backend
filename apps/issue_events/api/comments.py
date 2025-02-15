@@ -27,7 +27,9 @@ def get_queryset(request: AuthHttpRequest, issue_id: int):
 )
 @has_permission(["event:read", "event:admin"])
 @paginate
-async def list_comments(request: AuthHttpRequest, response: HttpResponse, issue_id: int):
+async def list_comments(
+    request: AuthHttpRequest, response: HttpResponse, issue_id: int
+):
     return get_queryset(request, issue_id)
 
 

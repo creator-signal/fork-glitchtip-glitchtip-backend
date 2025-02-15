@@ -4,22 +4,24 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('releases', '0001_squashed_0004_alter_release_id_alter_releasefile_id_and_more'),
+        (
+            "releases",
+            "0001_squashed_0004_alter_release_id_alter_releasefile_id_and_more",
+        ),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='releasefile',
+            name="releasefile",
             unique_together=None,
         ),
         migrations.RemoveField(
-            model_name='releasefile',
-            name='file',
+            model_name="releasefile",
+            name="file",
         ),
         migrations.RemoveField(
-            model_name='releasefile',
-            name='release',
+            model_name="releasefile",
+            name="release",
         ),
     ]

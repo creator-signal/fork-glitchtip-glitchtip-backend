@@ -4,20 +4,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('files', '0009_alter_file_size'),
-        ('releases', '0005_alter_releasefile_unique_together_and_more'),
-        ('sourcecode', '0001_initial'),
+        ("files", "0009_alter_file_size"),
+        ("releases", "0005_alter_releasefile_unique_together_and_more"),
+        ("sourcecode", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='release',
-            name='files',
-            field=models.ManyToManyField(through='sourcecode.DebugSymbolBundle', to='files.file'),
+            model_name="release",
+            name="files",
+            field=models.ManyToManyField(
+                through="sourcecode.DebugSymbolBundle", to="files.file"
+            ),
         ),
         migrations.DeleteModel(
-            name='ReleaseFile',
+            name="ReleaseFile",
         ),
     ]

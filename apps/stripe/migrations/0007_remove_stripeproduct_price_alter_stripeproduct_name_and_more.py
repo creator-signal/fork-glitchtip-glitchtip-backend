@@ -5,56 +5,69 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('stripe', '0001_squashed_0006_stripeproduct_name'),
+        ("stripe", "0001_squashed_0006_stripeproduct_name"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='stripeproduct',
-            name='price',
+            model_name="stripeproduct",
+            name="price",
         ),
         migrations.AlterField(
-            model_name='stripeproduct',
-            name='name',
+            model_name="stripeproduct",
+            name="name",
             field=models.CharField(),
         ),
         migrations.AlterField(
-            model_name='stripeproduct',
-            name='stripe_id',
+            model_name="stripeproduct",
+            name="stripe_id",
             field=models.CharField(max_length=30, primary_key=True, serialize=False),
         ),
         migrations.AlterField(
-            model_name='stripesubscription',
-            name='created',
+            model_name="stripesubscription",
+            name="created",
             field=models.DateTimeField(),
         ),
         migrations.AlterField(
-            model_name='stripesubscription',
-            name='is_active',
+            model_name="stripesubscription",
+            name="is_active",
             field=models.BooleanField(),
         ),
         migrations.AlterField(
-            model_name='stripesubscription',
-            name='stripe_id',
+            model_name="stripesubscription",
+            name="stripe_id",
             field=models.CharField(max_length=30, primary_key=True, serialize=False),
         ),
         migrations.CreateModel(
-            name='StripePrice',
+            name="StripePrice",
             fields=[
-                ('stripe_id', models.CharField(max_length=30, primary_key=True, serialize=False)),
-                ('price', models.DecimalField(decimal_places=2, max_digits=10)),
-                ('nickname', models.CharField(max_length=255)),
-                ('product', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='stripe.stripeproduct')),
+                (
+                    "stripe_id",
+                    models.CharField(max_length=30, primary_key=True, serialize=False),
+                ),
+                ("price", models.DecimalField(decimal_places=2, max_digits=10)),
+                ("nickname", models.CharField(max_length=255)),
+                (
+                    "product",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="stripe.stripeproduct",
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.AddField(
-            model_name='stripeproduct',
-            name='default_price',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, to='stripe.stripeprice'),
+            model_name="stripeproduct",
+            name="default_price",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                to="stripe.stripeprice",
+            ),
         ),
     ]

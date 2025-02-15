@@ -75,6 +75,7 @@ async def get_issue(request: AuthHttpRequest, issue_id: int):
     except Issue.DoesNotExist:
         raise Http404()
 
+
 @router.put(
     "/issues/{int:issue_id}/",
     response=IssueDetailSchema,
@@ -88,6 +89,7 @@ async def update_issue(
     qs = await get_queryset(request)
     return await update_issue_status(qs, issue_id, payload)
 
+
 @router.delete("/issues/{int:issue_id}/", response={204: None})
 @has_permission(["event:write", "event:admin"])
 async def delete_issue(request: AuthHttpRequest, issue_id: int):
@@ -97,6 +99,7 @@ async def delete_issue(request: AuthHttpRequest, issue_id: int):
         raise Http404()
     await async_call_celery_task(delete_issue_task, [issue_id])
     return 204, None
+
 
 @router.put(
     "organizations/{slug:organization_slug}/issues/{int:issue_id}/",
@@ -127,7 +130,6 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
     obj.status = EventStatus.from_string(payload.status)
     await obj.asave()
     return obj
-
 
 
 RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")

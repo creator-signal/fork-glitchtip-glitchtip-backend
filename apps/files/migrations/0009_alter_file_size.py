@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('files', '0008_alter_file_type_alter_fileblob_blob'),
+        ("files", "0008_alter_file_type_alter_fileblob_blob"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='file',
-            name='size',
+            model_name="file",
+            name="size",
             field=models.PositiveIntegerField(default=0),
         ),
     ]

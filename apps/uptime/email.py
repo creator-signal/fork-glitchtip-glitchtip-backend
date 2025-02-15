@@ -24,9 +24,9 @@ class MonitorEmail(DetailEmail):
         org_slug = monitor.project.organization.slug
 
         context["monitor_link"] = f"{base_url}/{org_slug}/uptime-monitors/{monitor.id}"
-        context[
-            "project_notification_settings_link"
-        ] = f"{base_url}/{org_slug}/settings/projects/{monitor.project.slug}"
+        context["project_notification_settings_link"] = (
+            f"{base_url}/{org_slug}/settings/projects/{monitor.project.slug}"
+        )
         context["monitor_name"] = monitor.name
         context["monitor_url"] = monitor.url
         if self.object.reason:

@@ -5,6 +5,8 @@ from django.conf import settings
 from pydantic import BaseModel
 
 from .schema import (
+    Price,
+    PriceListResponse,
     ProductExpandedPrice,
     ProductExpandedPriceListResponse,
     StripeListResponse,
@@ -123,4 +125,10 @@ async def list_subscriptions() -> AsyncGenerator[
     async for page in _paginated_stripe_get(
         "subscriptions", SubscriptionExpandCustomerResponse, params
     ):
+        yield page
+
+
+async def list_prices() -> AsyncGenerator[list[Price], None]:
+    """Yield each price"""
+    async for page in _paginated_stripe_get("prices", PriceListResponse):
         yield page

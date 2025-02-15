@@ -13,8 +13,10 @@ class OrganizationSlugField(AutoSlugField):
     def slug_generator(self, original_slug, start):
         yield original_slug
         for i in range(start, self.max_unique_query_attempts):
-            yield original_slug + "-" + "".join(
-                random.choices(string.ascii_lowercase + string.digits, k=i)
+            yield (
+                original_slug
+                + "-"
+                + "".join(random.choices(string.ascii_lowercase + string.digits, k=i))
             )
         raise RuntimeError(
             "max slug attempts for %s exceeded (%s)"

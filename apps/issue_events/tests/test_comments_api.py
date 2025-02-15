@@ -45,9 +45,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
         self.assertEqual(len(res.json()), 0)
 
     def test_comments_list_deleted_user(self):
-        user2 = baker.make(
-            "users.User"
-        )
+        user2 = baker.make("users.User")
         self.organization.add_user(user2)
         comment = baker.make(
             "issue_events.Comment",

@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import StripeProduct, StripeSubscription
+from .models import StripePrice, StripeProduct, StripeSubscription
 from .utils import get_stripe_link
 
 
@@ -26,8 +26,15 @@ class StripeBaseAdmin(admin.ModelAdmin):
         )
 
 
+class StripePriceInline(admin.StackedInline):
+    model = StripePrice
+    extra = 0
+    readonly_fields = ["stripe_id", "nickname", "price"]
+
+
 class StripeProductAdmin(StripeBaseAdmin):
-    list_display = ["stripe_id", "name", "events", "is_public"]
+    list_display = ["stripe_id", "name", "events", "default_price", "is_public"]
+    inlines = [StripePriceInline]
 
 
 class StripeSubscriptionAdmin(StripeBaseAdmin):

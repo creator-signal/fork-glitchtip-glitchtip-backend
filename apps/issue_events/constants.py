@@ -1,4 +1,3 @@
-
 from glitchtip.model_utils import FromStringIntegerChoices
 
 

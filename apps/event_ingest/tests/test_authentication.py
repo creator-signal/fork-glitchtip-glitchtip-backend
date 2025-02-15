@@ -11,9 +11,10 @@ class AuthenticationTestCase(TestCase):
         cls.organization = cls.project.organization
 
     def setUp(self):
-        self.url = reverse(
-            "api:event_envelope", args=[self.project.id]
-        ) + f"?sentry_key={self.project_key.public_key}"
+        self.url = (
+            reverse("api:event_envelope", args=[self.project.id])
+            + f"?sentry_key={self.project_key.public_key}"
+        )
 
     def test_org_throttle(self):
         res = self.client.post(self.url, [{}], content_type="application/json")
@@ -21,5 +22,5 @@ class AuthenticationTestCase(TestCase):
         self.organization.event_throttle_rate = 100
         self.organization.save()
         res = self.client.post(self.url, [{}], content_type="application/json")
-        self.assertEqual(res.headers.get('Retry-After'), '600')
+        self.assertEqual(res.headers.get("Retry-After"), "600")
         self.assertEqual(res.status_code, 429)

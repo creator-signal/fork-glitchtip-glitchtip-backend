@@ -3,7 +3,7 @@ from django.conf import settings
 
 
 class DjstripeExtAppConfig(AppConfig):
-    name = 'apps.djstripe_ext'
+    name = "apps.djstripe_ext"
 
     def ready(self):
         if not settings.IS_CELERY:
