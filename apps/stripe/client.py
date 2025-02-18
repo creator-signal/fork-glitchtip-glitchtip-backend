@@ -12,6 +12,7 @@ from .schema import (
     PriceListResponse,
     ProductExpandedPrice,
     ProductExpandedPriceListResponse,
+    Session,
     StripeListResponse,
     SubscriptionExpandCustomer,
     SubscriptionExpandCustomerResponse,
@@ -157,3 +158,32 @@ async def create_customer(organization: Organization) -> Customer:
     organization.stripe_customer_id = customer.id
     await organization.asave(update_fields=["stripe_customer_id"])
     return customer
+
+
+async def create_session(price_id: str, customer_id: str, organization_slug: str):
+    domain = settings.GLITCHTIP_URL.geturl()
+    params = {
+        "payment_method_types": ["card"],
+        "line_items": [
+            {
+                "price": price_id,
+                "quantity": 1,
+            }
+        ],
+        "mode": "subscription",
+        "customer": customer_id,
+        "automatic_tax": {
+            "enabled": True,
+        },
+        "customer_update": {"address": "auto", "name": "auto"},
+        "tax_id_collection": {
+            "enabled": True,
+        },
+        "success_url": domain
+        + "/"
+        + organization_slug
+        + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
+        "cancel_url": domain + "",
+    }
+    response = await stripe_post("/checkout/sessions", params)
+    return Session.model_validate_json(response)

@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
 
@@ -7,7 +6,7 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
-from .client import create_customer, stripe_post
+from .client import create_customer, create_session
 from .models import StripePrice, StripeProduct, StripeSubscription
 
 router = Router()
@@ -56,7 +55,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
 @router.post(
     "organizations/{slug:organization_slug}/create-stripe-subscription-checkout/"
 )
-async def create_stripe_subscription_checkout(
+async def create_stripe_session(
     request: AuthHttpRequest, organization_slug: str, payload: PriceIDSchema
 ):
     """
@@ -64,7 +63,7 @@ async def create_stripe_subscription_checkout(
     See https://stripe.com/docs/api/checkout/sessions/create
     """
     organization = await aget_object_or_404(
-        Organization.objects.select_related("owner__organizationuser__user"),
+        Organization.objects.select_related("owner__organization_user__user"),
         slug=organization_slug,
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
@@ -77,29 +76,4 @@ async def create_stripe_subscription_checkout(
     # Ensure price exists
     price_id = payload.price
     await aget_object_or_404(StripePrice, stripe_id=price_id)
-    domain = settings.GLITCHTIP_URL.geturl()
-    params = {
-        "payment_method_types": ["card"],
-        "line_items": [
-            {
-                "price": price_id,
-                "quantity": 1,
-            }
-        ],
-        "mode": "subscription",
-        "customer": customer_id,
-        "automatic_tax": {
-            "enabled": True,
-        },
-        "customer_update": {"address": "auto", "name": "auto"},
-        "tax_id_collection": {
-            "enabled": True,
-        },
-        "success_url": domain
-        + "/"
-        + organization.slug
-        + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
-        "cancel_url": domain + "",
-    }
-    session = await stripe_post("/checkout/sessions", params)
-    return session
+    return await create_session(price_id, customer_id, organization_slug)

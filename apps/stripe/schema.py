@@ -104,11 +104,96 @@ class EventData(BaseModel):
 
 class StripeEvent(BaseModel):
     id: str
-    object: str = "event"  # Ensure it is an event
+    object: str = "event"
     api_version: str
     created: int
     data: EventData
     livemode: bool
     pending_webhooks: int
-    request: dict  # Or a more specific Request model if needed
-    type: str  # This field is crucial for discrimination
+    request: dict
+    type: str
+
+
+class AutomaticTax(BaseModel):
+    enabled: bool
+    liability: str | None = None
+    status: str | None = None
+
+
+class CustomText(BaseModel):
+    shipping_address: str | None = None
+    submit: str | None = None
+
+
+class InvoiceData(BaseModel):
+    account_tax_ids: list[str] | None = None
+    custom_fields: list[str] | None = None
+    description: str | None = None
+    footer: str | None = None
+    issuer: str | None = None
+    metadata: dict[str, str]
+    rendering_options: str | None = None
+
+
+class InvoiceCreation(BaseModel):
+    enabled: bool
+    invoice_data: InvoiceData
+
+
+class PhoneNumberCollection(BaseModel):
+    enabled: bool
+
+
+class TotalDetails(BaseModel):
+    amount_discount: int
+    amount_shipping: int
+    amount_tax: int
+
+
+class Session(BaseModel):
+    id: str
+    object: str
+    after_expiration: str | None = None
+    allow_promotion_codes: str | None = None
+    amount_subtotal: int
+    amount_total: int
+    automatic_tax: AutomaticTax
+    billing_address_collection: str | None = None
+    cancel_url: str | None = None
+    client_reference_id: str | None = None
+    consent: str | None = None
+    consent_collection: str | None = None
+    created: int
+    currency: str
+    custom_fields: list
+    custom_text: CustomText
+    customer: str | None = None
+    customer_creation: str
+    customer_details: str | None = None
+    customer_email: str | None = None
+    expires_at: int
+    invoice: str | None = None
+    invoice_creation: InvoiceCreation | None
+    livemode: bool
+    locale: str | None = None
+    metadata: dict[str, str]
+    mode: str
+    payment_intent: str | None = None
+    payment_link: str | None = None
+    payment_method_collection: str
+    payment_method_options: dict
+    payment_method_types: list[str]
+    payment_status: str
+    phone_number_collection: PhoneNumberCollection
+    recovered_from: str | None = None
+    setup_intent: str | None = None
+    shipping_address_collection: str | None = None
+    shipping_cost: str | None = None
+    shipping_details: str | None = None
+    shipping_options: list
+    status: str
+    submit_type: str | None = None
+    subscription: str | None = None
+    success_url: str
+    total_details: TotalDetails
+    url: str
