@@ -5,19 +5,38 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations_ext', '0005_organization_event_throttle_rate'),
-        ('socialaccount', '0006_alter_socialaccount_extra_data'),
+        ("organizations_ext", "0005_organization_event_throttle_rate"),
+        ("socialaccount", "0006_alter_socialaccount_extra_data"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='OrganizationSocialApp',
+            name="OrganizationSocialApp",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='organizations_ext.organization')),
-                ('social_app', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='socialaccount.socialapp')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "organization",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                (
+                    "social_app",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="socialaccount.socialapp",
+                    ),
+                ),
             ],
         ),
     ]

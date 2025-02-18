@@ -52,7 +52,7 @@ class Command(MakeSampleCommand):
                         is_up=is_up,
                         is_change=is_first,
                         start_check=start_time + timezone.timedelta(minutes=time_i),
-                        response_time=randrange(1, 5000)
+                        response_time=randrange(1, 5000),
                     )
                 )
             if len(checks) > 10000:

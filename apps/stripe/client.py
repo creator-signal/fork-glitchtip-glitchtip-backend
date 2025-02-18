@@ -4,7 +4,12 @@ import aiohttp
 from django.conf import settings
 from pydantic import BaseModel
 
+from apps.organizations_ext.models import Organization
+
 from .schema import (
+    Customer,
+    Price,
+    PriceListResponse,
     ProductExpandedPrice,
     ProductExpandedPriceListResponse,
     StripeListResponse,
@@ -39,7 +44,7 @@ def param_helper(data: AIODictParams) -> AIOTupleParams:
 async def stripe_get(
     endpoint: str,
     params: AIODictParams | AIOTupleParams | None = None,
-) -> dict | T | list[T]:
+) -> str:
     """Makes GET requests to the Stripe API."""
     if isinstance(params, dict):
         params = param_helper(params)
@@ -56,8 +61,8 @@ async def stripe_get(
             return await response.text()
 
 
-async def stripe_post(endpoint: str, data: dict) -> dict:
-    """Makes POST requests to the Stripe API."""
+async def stripe_post(endpoint: str, data: dict) -> str:
+    """Makes POST requests to the Stripe API. Returns response text"""
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{STRIPE_URL}/{endpoint}", headers=HEADERS, data=data
@@ -67,13 +72,13 @@ async def stripe_post(endpoint: str, data: dict) -> dict:
                 raise Exception(
                     f"Stripe API Error: {response.status} - {error_data.get('error', {}).get('message', 'Unknown error')}"
                 )
-            return await response.json()
+            return await response.text()
 
 
 async def _paginated_stripe_get(
     endpoint: str,
     response_model: Type[StripeListResponse[T]],  # Use the generic type here
-    params: dict[str, AIODictParams] = None,
+    params: dict[str, AIODictParams] | None = None,
 ) -> AsyncGenerator[list[T], None]:
     """
     Generic function to handle paginated GET requests to the Stripe API.
@@ -124,3 +129,31 @@ async def list_subscriptions() -> AsyncGenerator[
         "subscriptions", SubscriptionExpandCustomerResponse, params
     ):
         yield page
+
+
+async def list_prices() -> AsyncGenerator[list[Price], None]:
+    """Yield each price"""
+    async for page in _paginated_stripe_get("prices", PriceListResponse):
+        yield page
+
+
+async def create_customer(organization: Organization) -> Customer:
+    """
+    Create a Stripe customer for the given organization, saving the customer ID
+    to the organization.
+    """
+    response = await stripe_post(
+        "customers",
+        {
+            "name": organization.name,
+            "email": organization.email,
+            "metadata": {
+                "organization_id": organization.id,
+                "organization_slug": organization.slug,
+            },
+        },
+    )
+    customer = Customer.model_validate_json(response)
+    organization.stripe_customer_id = customer.id
+    await organization.asave(update_fields=["stripe_customer_id"])
+    return customer

@@ -130,7 +130,9 @@ def perform_checks(monitor_ids: list[int], now=None):
         if isinstance(result, Exception):
             logger.error("Critical monitor check failure", exc_info=result)
         # Filter out "up" heartbeats
-        elif result["monitor_type"] != MonitorType.HEARTBEAT or result["is_up"] is False:
+        elif (
+            result["monitor_type"] != MonitorType.HEARTBEAT or result["is_up"] is False
+        ):
             results.append(result)
 
     monitor_checks = MonitorCheck.objects.bulk_create(

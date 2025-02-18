@@ -114,9 +114,10 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         uploaded_zip_file.namelist.return_value = iter([f"proguard/{self.uuid}.txt"])
         uploaded_zip_file.open.return_value.__enter__.return_value = proguard_file  # noqa
 
-        with patch("zipfile.is_zipfile", return_value=True), patch(
-            "zipfile.ZipFile"
-        ) as ZipFile:
+        with (
+            patch("zipfile.is_zipfile", return_value=True),
+            patch("zipfile.ZipFile") as ZipFile,
+        ):
             ZipFile.return_value.__enter__.return_value = uploaded_zip_file
             yield
 

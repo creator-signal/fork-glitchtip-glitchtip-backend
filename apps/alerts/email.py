@@ -30,9 +30,9 @@ class AlertEmail(GlitchTipEmail):
         context["issue_count"] = notification.issues.count()
         context["project_notification_settings_link"] = settings_link
         context["org_slug"] = org_slug
-        context[
-            "project_link"
-        ] = f"{base_url}/{org_slug}/issues?project={first_issue.project.id}"
+        context["project_link"] = (
+            f"{base_url}/{org_slug}/issues?project={first_issue.project.id}"
+        )
         return context
 
 

@@ -36,9 +36,7 @@ def send_uptime_as_webhook(
     title = monitor.name
 
     if recipient.recipient_type == RecipientType.GENERAL_WEBHOOK:
-        attachment = WebhookAttachment(
-            title, monitor.get_detail_url(), message
-        )
+        attachment = WebhookAttachment(title, monitor.get_detail_url(), message)
         section = MSTeamsSection(str(monitor.name), message)
         return send_webhook(recipient.url, subject, [attachment], [section])
     elif recipient.recipient_type == RecipientType.GOOGLE_CHAT:

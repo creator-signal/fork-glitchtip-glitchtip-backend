@@ -5,15 +5,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations_ext', '0004_organizationsubscription_alter_organization_slug'),
+        ("organizations_ext", "0004_organizationsubscription_alter_organization_slug"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='organization',
-            name='event_throttle_rate',
-            field=models.PositiveSmallIntegerField(default=0, help_text='Probability (in percent) on how many events are throttled. Used for throttling at project level', validators=[django.core.validators.MaxValueValidator(100)]),
+            model_name="organization",
+            name="event_throttle_rate",
+            field=models.PositiveSmallIntegerField(
+                default=0,
+                help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
+                validators=[django.core.validators.MaxValueValidator(100)],
+            ),
         ),
     ]

@@ -11,6 +11,7 @@ class PriceIDSchema(CamelSchema):
 class SubscriptionIn(PriceIDSchema):
     organization: int
 
+
 class ProductSchema(CamelSchema, ModelSchema):
     class Meta:
         model = Product

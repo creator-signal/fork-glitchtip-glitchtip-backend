@@ -23,7 +23,7 @@ class Product(BaseModel):
     images: list[str]
     livemode: bool
     marketing_features: list
-    metadata: dict[str, str] | None
+    metadata: dict[str, str]
     name: str
     statement_descriptor: str | None
     tax_code: str | None
@@ -51,7 +51,7 @@ class Price(BaseModel):
     livemode: bool
     lookup_key: str | None
     nickname: str | None
-    product: str | dict | None  # Can be a string ID or a nested Product object
+    product: str | dict | None
     recurring: dict | None
     tax_behavior: str | None
     tiers_mode: str | None
@@ -59,6 +59,9 @@ class Price(BaseModel):
     unit_amount: int | None
     unit_amount_decimal: str | None
     metadata: dict[str, str] | None
+
+
+PriceListResponse = StripeListResponse[Price]
 
 
 class ProductExpandedPrice(Product):

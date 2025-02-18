@@ -120,7 +120,9 @@ class OrganizationMemberAPIPermissionTests(APIPermissionTestCase):
         self.assertDeleteReqStatusCode(url, 204)
 
     def test_invite_destroy(self):
-        invitee = baker.make("organizations_ext.OrganizationUser", organization=self.organization)
+        invitee = baker.make(
+            "organizations_ext.OrganizationUser", organization=self.organization
+        )
         url = reverse(
             "api:get_organization_member",
             args=[self.organization.slug, invitee.pk],

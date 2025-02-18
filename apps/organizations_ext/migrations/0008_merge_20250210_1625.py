@@ -4,11 +4,12 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations_ext', '0006_organizationsocialapp'),
-        ('organizations_ext', '0007_rename_stripe_subscription_id_organization_stripe_customer_id'),
+        ("organizations_ext", "0006_organizationsocialapp"),
+        (
+            "organizations_ext",
+            "0007_rename_stripe_subscription_id_organization_stripe_customer_id",
+        ),
     ]
 
-    operations = [
-    ]
+    operations = []

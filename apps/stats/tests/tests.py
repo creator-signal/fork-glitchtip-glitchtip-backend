@@ -25,4 +25,6 @@ class StatsV2APITestCase(GlitchTipTestCase):
         response = res.json()
         self.assertIsInstance(response["intervals"], list)
         self.assertEqual(len(response["intervals"]), 4)
-        self.assertIsInstance(datetime.fromisoformat(response["intervals"][0]), datetime)
+        self.assertIsInstance(
+            datetime.fromisoformat(response["intervals"][0]), datetime
+        )

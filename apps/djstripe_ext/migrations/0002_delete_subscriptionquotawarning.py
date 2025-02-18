@@ -4,13 +4,12 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('djstripe_ext', '0001_initial'),
+        ("djstripe_ext", "0001_initial"),
     ]
 
     operations = [
         migrations.DeleteModel(
-            name='SubscriptionQuotaWarning',
+            name="SubscriptionQuotaWarning",
         ),
     ]
