@@ -7,7 +7,7 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
-from .client import stripe_post
+from .client import create_customer, stripe_post
 from .models import StripePrice, StripeProduct, StripeSubscription
 
 router = Router()
@@ -64,7 +64,7 @@ async def create_stripe_subscription_checkout(
     See https://stripe.com/docs/api/checkout/sessions/create
     """
     organization = await aget_object_or_404(
-        Organization,
+        Organization.objects.select_related("owner__organizationuser__user"),
         slug=organization_slug,
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
@@ -72,8 +72,8 @@ async def create_stripe_subscription_checkout(
     if organization.stripe_customer_id:
         customer_id = organization.stripe_customer_id
     else:
-        customer_id = ""
-        pass  # customer_id = Create it
+        customer = await create_customer(organization)
+        customer_id = customer.id
     # Ensure price exists
     price_id = payload.price
     await aget_object_or_404(StripePrice, stripe_id=price_id)
