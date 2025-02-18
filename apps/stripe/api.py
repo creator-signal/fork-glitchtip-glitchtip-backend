@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
 
@@ -6,7 +7,8 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
-from .models import StripeProduct, StripeSubscription
+from .client import stripe_post
+from .models import StripePrice, StripeProduct, StripeSubscription
 
 router = Router()
 
@@ -67,34 +69,37 @@ async def create_stripe_subscription_checkout(
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
     )
-    # price = await aget_object_or_404(Price, id=payload.price)
-    # customer, _ = await sync_to_async(Customer.get_or_create)(subscriber=organization)
-    # domain = settings.GLITCHTIP_URL.geturl()
-    # async with get_stripe_client() as client:
-    #     session = await client.checkout.sessions.create_async(
-    #         params={
-    #             "payment_method_types": ["card"],
-    #             "line_items": [
-    #                 {
-    #                     "price": price.id,
-    #                     "quantity": 1,
-    #                 }
-    #             ],
-    #             "mode": "subscription",
-    #             "customer": customer.id,
-    #             "automatic_tax": {
-    #                 "enabled": settings.STRIPE_AUTOMATIC_TAX,
-    #             },
-    #             "customer_update": {"address": "auto", "name": "auto"},
-    #             "tax_id_collection": {
-    #                 "enabled": True,
-    #             },
-    #             "success_url": domain
-    #             + "/"
-    #             + organization.slug
-    #             + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
-    #             "cancel_url": domain + "",
-    #         }
-    #     )
-
-    # return session
+    if organization.stripe_customer_id:
+        customer_id = organization.stripe_customer_id
+    else:
+        customer_id = ""
+        pass  # customer_id = Create it
+    # Ensure price exists
+    price_id = payload.price
+    await aget_object_or_404(StripePrice, stripe_id=price_id)
+    domain = settings.GLITCHTIP_URL.geturl()
+    params = {
+        "payment_method_types": ["card"],
+        "line_items": [
+            {
+                "price": price_id,
+                "quantity": 1,
+            }
+        ],
+        "mode": "subscription",
+        "customer": customer_id,
+        "automatic_tax": {
+            "enabled": True,
+        },
+        "customer_update": {"address": "auto", "name": "auto"},
+        "tax_id_collection": {
+            "enabled": True,
+        },
+        "success_url": domain
+        + "/"
+        + organization.slug
+        + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
+        "cancel_url": domain + "",
+    }
+    session = await stripe_post("/checkout/sessions", params)
+    return session
