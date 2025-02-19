@@ -49,7 +49,7 @@ class GlitchTipEmail(ContextMixin):
         subject = self.get_subject_content(context)
         msg = EmailMultiAlternatives(subject, self.get_text_content(context), to=to)
         if users:
-            msg.merge_data = {user.email: {"unique_id": user.id} for user in users}
+            msg.merge_metadata = {user.email: {"unique_id": user.id} for user in users}
         msg.attach_alternative(self.get_html_content(context), "text/html")
         msg.send()
 
