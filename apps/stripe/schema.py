@@ -197,3 +197,17 @@ class Session(BaseModel):
     success_url: str
     total_details: TotalDetails
     url: str
+
+
+class PortalSession(BaseModel):
+    id: str
+    object: Literal["billing_portal.session"]
+    configuration: str
+    created: int
+    customer: str
+    flow: str | None = None
+    livemode: bool
+    locale: str | None = None
+    on_behalf_of: str | None = None
+    return_url: str
+    url: str

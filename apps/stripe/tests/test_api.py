@@ -1,5 +1,6 @@
-from django.test import TestCase
 from unittest.mock import patch
+
+from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
@@ -38,4 +39,10 @@ class StripeAPITestCase(TestCase):
         res = self.client.post(
             url, {"price": price.stripe_id}, content_type="application/json"
         )
+        self.assertEqual(res.status_code, 200)
+
+    @patch("apps.stripe.api.create_portal_session")
+    def test_manage_billing(self, mock_create_portal_session):
+        url = reverse("api:stripe_billing_portal", args=[self.organization.slug])
+        res = self.client.post(url, {}, content_type="application/json")
         self.assertEqual(res.status_code, 200)

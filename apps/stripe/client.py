@@ -8,6 +8,7 @@ from apps.organizations_ext.models import Organization
 
 from .schema import (
     Customer,
+    PortalSession,
     Price,
     PriceListResponse,
     ProductExpandedPrice,
@@ -160,7 +161,9 @@ async def create_customer(organization: Organization) -> Customer:
     return customer
 
 
-async def create_session(price_id: str, customer_id: str, organization_slug: str):
+async def create_session(
+    price_id: str, customer_id: str, organization_slug: str
+) -> Session:
     domain = settings.GLITCHTIP_URL.geturl()
     params = {
         "payment_method_types": ["card"],
@@ -187,3 +190,16 @@ async def create_session(price_id: str, customer_id: str, organization_slug: str
     }
     response = await stripe_post("/checkout/sessions", params)
     return Session.model_validate_json(response)
+
+
+async def create_portal_session(customer_id: str, organization_slug: str):
+    domain = settings.GLITCHTIP_URL.geturl()
+    params = {
+        "customer": customer_id,
+        "return_url": domain
+        + "/"
+        + organization_slug
+        + "/settings/subscription?billing_portal_redirect=true",
+    }
+    response = await stripe_post("/billing_portal/sessions", params)
+    return PortalSession.model_validate_json(response)

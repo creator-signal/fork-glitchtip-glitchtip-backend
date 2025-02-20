@@ -6,7 +6,7 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
-from .client import create_customer, create_session
+from .client import create_customer, create_portal_session, create_session
 from .models import StripePrice, StripeProduct, StripeSubscription
 
 router = Router()
@@ -77,3 +77,20 @@ async def create_stripe_session(
     price_id = payload.price
     await aget_object_or_404(StripePrice, stripe_id=price_id)
     return await create_session(price_id, customer_id, organization_slug)
+
+
+@router.post("organizations/{slug:organization_slug}/create-billing-portal/")
+async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str):
+    """See https://stripe.com/docs/billing/subscriptions/integrating-self-serve-portal"""
+    organization = await aget_object_or_404(
+        Organization,
+        slug=organization_slug,
+        organization_users__role=OrganizationUserRole.OWNER,
+        organization_users__user=request.auth.user_id,
+    )
+    if organization.stripe_customer_id:
+        customer_id = organization.stripe_customer_id
+    else:
+        customer = await create_customer(organization)
+        customer_id = customer.id
+    return await create_portal_session(customer_id, organization_slug)
