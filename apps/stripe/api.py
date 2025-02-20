@@ -118,9 +118,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
     )
-    price = await aget_object_or_404(
-        StripePrice, stripe_id=payload.price, unit_amount=0
-    )
+    price = await aget_object_or_404(StripePrice, stripe_id=payload.price, price=0)
     if organization.stripe_customer_id:
         customer_id = organization.stripe_customer_id
     else:
