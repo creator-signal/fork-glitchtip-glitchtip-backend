@@ -46,3 +46,13 @@ class StripeAPITestCase(TestCase):
         url = reverse("api:stripe_billing_portal", args=[self.organization.slug])
         res = self.client.post(url, {}, content_type="application/json")
         self.assertEqual(res.status_code, 200)
+
+    @patch("apps.stripe.api.create_subscription")
+    def test_stripe_create_subscription(self, mock_create_subscription):
+        url = reverse("api:stripe_create_subscription")
+        res = self.client.post(
+            url,
+            {"organization": self.organization.id, "price": ""},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)

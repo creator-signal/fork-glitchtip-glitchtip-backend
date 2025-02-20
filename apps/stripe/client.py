@@ -15,6 +15,7 @@ from .schema import (
     ProductExpandedPriceListResponse,
     Session,
     StripeListResponse,
+    Subscription,
     SubscriptionExpandCustomer,
     SubscriptionExpandCustomerResponse,
 )
@@ -203,3 +204,9 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     }
     response = await stripe_post("/billing_portal/sessions", params)
     return PortalSession.model_validate_json(response)
+
+
+async def create_subscription(customer: str, price: str) -> Subscription:
+    params = {"customer": customer, "items": [{"price": price}]}
+    response = await stripe_post("/subscriptions", params)
+    return Subscription.model_validate_json(response)

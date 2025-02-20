@@ -1,3 +1,4 @@
+from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
 
@@ -6,7 +7,12 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
-from .client import create_customer, create_portal_session, create_session
+from .client import (
+    create_customer,
+    create_portal_session,
+    create_session,
+    create_subscription,
+)
 from .models import StripePrice, StripeProduct, StripeSubscription
 
 router = Router()
@@ -26,6 +32,14 @@ class StripeSubscriptionSchema(CamelSchema, ModelSchema):
 
 class PriceIDSchema(CamelSchema):
     price: str
+
+
+class SubscriptionIn(PriceIDSchema):
+    organization: int
+
+
+class CreateSubscriptionResponse(SubscriptionIn):
+    subscription: StripeSubscriptionSchema
 
 
 @router.get("products/", response=list[StripeProductSchema])
@@ -94,3 +108,38 @@ async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str
         customer = await create_customer(organization)
         customer_id = customer.id
     return await create_portal_session(customer_id, organization_slug)
+
+
+@router.post("subscriptions/", response=CreateSubscriptionResponse)
+async def stripe_create_subscription(request: AuthHttpRequest, payload: SubscriptionIn):
+    organization = await aget_object_or_404(
+        Organization,
+        id=payload.organization,
+        organization_users__role=OrganizationUserRole.OWNER,
+        organization_users__user=request.auth.user_id,
+    )
+    price = await aget_object_or_404(
+        StripePrice, stripe_id=payload.price, unit_amount=0
+    )
+    if organization.stripe_customer_id:
+        customer_id = organization.stripe_customer_id
+    else:
+        customer = await create_customer(organization)
+        customer_id = customer.id
+    if (
+        await StripeSubscription.objects.filter(organization=organization)
+        .exclude(status="canceled")
+        .aexists()
+    ):
+        return JsonResponse(
+            {"detail": "Customer already has subscription"}, status_code=400
+        )
+    subscription = await create_subscription(customer_id, price.stripe_id)
+    subscription = await StripeSubscription.objects.filter(
+        stripe_id=subscription.id
+    ).aget()
+    return {
+        "price": price.stripe_id,
+        "organization": organization.id,
+        "subscription": subscription,
+    }
