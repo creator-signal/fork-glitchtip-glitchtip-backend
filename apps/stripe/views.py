@@ -67,7 +67,7 @@ async def update_subscription(subscription: Subscription):
         and subscription.items.data[0].get("plan", {}).get("product")
     ) is None:
         return
-    await StripeSubscription.objects.aupdate_or_create(
+    stripe_subscription, created = await StripeSubscription.objects.aupdate_or_create(
         stripe_id=subscription.id,
         defaults={
             "created": unix_to_datetime(subscription.created),
@@ -75,9 +75,20 @@ async def update_subscription(subscription: Subscription):
             "current_period_end": unix_to_datetime(subscription.current_period_end),
             "product_id": product_id,
             "organization_id": organization.id,
-            "is_active": True,
+            "is_active": subscription.status == "active",
         },
     )
+    if stripe_subscription.is_active:
+        primary_subscription = await StripeSubscription.get_primary_subscription(
+            organization
+        )
+        if (
+            primary_subscription
+            and primary_subscription.stripe_id
+            != organization.stripe_primary_subscription_id
+        ):
+            organization.stripe_primary_subscription = primary_subscription
+            await organization.asave(update_fields=["stripe_primary_subscription"])
 
 
 @csrf_exempt

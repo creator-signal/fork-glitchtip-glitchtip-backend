@@ -136,13 +136,14 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     subscription_resp = await create_subscription(customer_id, price.stripe_id)
     subscription = await StripeSubscription.objects.acreate(
         is_active=True,
-        is_primary=True,
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),
         current_period_end=unix_to_datetime(subscription_resp.current_period_end),
         product_id=price.product_id,
         organization=organization,
     )
+    organization.stripe_primary_subscription = subscription
+    await organization.asave(update_fields=["stripe_primary_subscription"])
     return {
         "price": price.stripe_id,
         "organization": organization.id,
