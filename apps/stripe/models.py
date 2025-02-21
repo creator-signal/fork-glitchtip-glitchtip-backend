@@ -1,7 +1,7 @@
 import logging
 
 from django.db import models
-from django.db.models import Q, UniqueConstraint
+from django.db.models.expressions import OuterRef, Subquery
 
 from apps.organizations_ext.models import Organization
 
@@ -127,7 +127,6 @@ class StripePrice(StripeModel):
 
 class StripeSubscription(StripeModel):
     is_active = models.BooleanField()
-    is_primary = models.BooleanField(default=False)
     created = models.DateTimeField()
     current_period_start = models.DateTimeField()
     current_period_end = models.DateTimeField()
@@ -136,14 +135,43 @@ class StripeSubscription(StripeModel):
         "organizations_ext.Organization", on_delete=models.SET_NULL, null=True
     )
 
-    class Meta:
-        constraints = [
-            UniqueConstraint(
-                fields=["organization", "is_primary"],
-                condition=Q(is_primary=True),
-                name="unique_primary_subscription_per_organization",
-            ),
-        ]
+    def __str__(self):
+        return f"{self.stripe_id}"
+
+    @classmethod
+    async def get_primary_subscription(cls, organization: Organization):
+        return (
+            await cls.objects.filter(organization=organization, is_active=True)
+            .order_by("-product__events", "-created")
+            .afirst()
+        )
+
+    @classmethod
+    async def set_primary_subscriptions_for_organizations(
+        cls, organization_ids: set[int]
+    ):
+        # This subquery finds the primary subscription ID for each organization.
+        primary_subscription_subquery = (
+            cls.objects.filter(organization_id=OuterRef("pk"), is_active=True)
+            .order_by("-product__events", "-created")
+            .values("pk")[:1]
+        )
+
+        org_updates = []
+        async for org in Organization.objects.filter(id__in=organization_ids).annotate(
+            primary_subscription_id=Subquery(primary_subscription_subquery)
+        ):
+            if (
+                org.primary_subscription_id
+                and org.primary_subscription_id != org.stripe_primary_subscription_id
+            ):
+                org.stripe_primary_subscription_id = org.primary_subscription_id
+                org_updates.append(org)
+
+        if org_updates:
+            await Organization.objects.abulk_update(
+                org_updates, ["stripe_primary_subscription_id"]
+            )
 
     @classmethod
     async def sync_from_stripe(cls):
@@ -217,3 +245,5 @@ class StripeSubscription(StripeModel):
             logger.info(
                 f"Created/updated {len(stripe_subscriptions)} subscriptions in Django"
             )
+
+        await cls.set_primary_subscriptions_for_organizations(active_organization_ids)

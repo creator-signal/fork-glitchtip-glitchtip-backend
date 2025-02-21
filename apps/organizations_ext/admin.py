@@ -46,7 +46,7 @@ class OrganizationSubscriptionInline(admin.StackedInline):
 
 
 class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
-    readonly_fields = ("customer_link", "created")
+    readonly_fields = ("customer_link", "subscription_link", "created")
     list_filter = ORGANIZATION_LIST_FILTER
     inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
     show_full_result_count = False
@@ -57,7 +57,17 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
     def customer_link(self, obj):
         if customer_id := obj.stripe_customer_id:
             return format_html(
-                f'<a href="{get_stripe_link(customer_id)}" target="_blank">{customer_id}</a>'
+                '<a href="{}" target="_blank">{}</a>',
+                get_stripe_link(customer_id),
+                customer_id,
+            )
+
+    def subscription_link(self, obj):
+        if subscription_id := obj.stripe_primary_subscription_id:
+            return format_html(
+                '<a href="{}" target="_blank">{}</a>',
+                get_stripe_link(subscription_id),
+                subscription_id,
             )
 
     def transaction_events(self, obj):
@@ -83,6 +93,7 @@ class OrganizationAdmin(GlitchTipBaseOrganizationAdmin, ImportExportModelAdmin):
         "uptime_check_events",
         "file_size",
         "total_events",
+        "stripe_primary_subscription",
     ]
     resource_class = OrganizationResource
 

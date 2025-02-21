@@ -8,11 +8,14 @@ from apps.organizations_ext.models import Organization
 
 from .schema import (
     Customer,
+    PortalSession,
     Price,
     PriceListResponse,
     ProductExpandedPrice,
     ProductExpandedPriceListResponse,
+    Session,
     StripeListResponse,
+    Subscription,
     SubscriptionExpandCustomer,
     SubscriptionExpandCustomerResponse,
 )
@@ -157,3 +160,53 @@ async def create_customer(organization: Organization) -> Customer:
     organization.stripe_customer_id = customer.id
     await organization.asave(update_fields=["stripe_customer_id"])
     return customer
+
+
+async def create_session(
+    price_id: str, customer_id: str, organization_slug: str
+) -> Session:
+    domain = settings.GLITCHTIP_URL.geturl()
+    params = {
+        "payment_method_types": ["card"],
+        "line_items": [
+            {
+                "price": price_id,
+                "quantity": 1,
+            }
+        ],
+        "mode": "subscription",
+        "customer": customer_id,
+        "automatic_tax": {
+            "enabled": True,
+        },
+        "customer_update": {"address": "auto", "name": "auto"},
+        "tax_id_collection": {
+            "enabled": True,
+        },
+        "success_url": domain
+        + "/"
+        + organization_slug
+        + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
+        "cancel_url": domain + "",
+    }
+    response = await stripe_post("/checkout/sessions", params)
+    return Session.model_validate_json(response)
+
+
+async def create_portal_session(customer_id: str, organization_slug: str):
+    domain = settings.GLITCHTIP_URL.geturl()
+    params = {
+        "customer": customer_id,
+        "return_url": domain
+        + "/"
+        + organization_slug
+        + "/settings/subscription?billing_portal_redirect=true",
+    }
+    response = await stripe_post("/billing_portal/sessions", params)
+    return PortalSession.model_validate_json(response)
+
+
+async def create_subscription(customer: str, price: str) -> Subscription:
+    params = {"customer": customer, "items": [{"price": price}]}
+    response = await stripe_post("/subscriptions", params)
+    return Subscription.model_validate_json(response)
