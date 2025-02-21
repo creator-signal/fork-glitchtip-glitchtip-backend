@@ -14,6 +14,7 @@ from .client import (
     create_subscription,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
+from .utils import unix_to_datetime
 
 router = Router()
 
@@ -94,7 +95,9 @@ async def create_stripe_session(
 
 
 @router.post("organizations/{slug:organization_slug}/create-billing-portal/")
-async def stripe_billing_portal(request: AuthHttpRequest, organization_slug: str):
+async def stripe_billing_portal_session(
+    request: AuthHttpRequest, organization_slug: str
+):
     """See https://stripe.com/docs/billing/subscriptions/integrating-self-serve-portal"""
     organization = await aget_object_or_404(
         Organization,
@@ -124,18 +127,22 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     else:
         customer = await create_customer(organization)
         customer_id = customer.id
-    if (
-        await StripeSubscription.objects.filter(organization=organization)
-        .exclude(status="canceled")
-        .aexists()
-    ):
+    if await StripeSubscription.objects.filter(
+        organization=organization, is_active=True
+    ).aexists():
         return JsonResponse(
             {"detail": "Customer already has subscription"}, status_code=400
         )
-    subscription = await create_subscription(customer_id, price.stripe_id)
-    subscription = await StripeSubscription.objects.filter(
-        stripe_id=subscription.id
-    ).aget()
+    subscription_resp = await create_subscription(customer_id, price.stripe_id)
+    subscription = await StripeSubscription.objects.acreate(
+        is_active=True,
+        is_primary=True,
+        created=unix_to_datetime(subscription_resp.created),
+        current_period_start=unix_to_datetime(subscription_resp.current_period_start),
+        current_period_end=unix_to_datetime(subscription_resp.current_period_end),
+        product_id=price.product_id,
+        organization=organization,
+    )
     return {
         "price": price.stripe_id,
         "organization": organization.id,

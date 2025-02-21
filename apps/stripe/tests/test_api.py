@@ -44,7 +44,9 @@ class StripeAPITestCase(TestCase):
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
     def test_manage_billing(self, mock_create_portal_session):
         mock_create_portal_session.return_value = {}
-        url = reverse("api:stripe_billing_portal", args=[self.organization.slug])
+        url = reverse(
+            "api:stripe_billing_portal_session", args=[self.organization.slug]
+        )
         res = self.client.post(url, {}, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         mock_create_portal_session.assert_called_once()
