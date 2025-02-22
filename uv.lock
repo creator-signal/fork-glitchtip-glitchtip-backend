@@ -710,16 +710,16 @@ wheels = [
 
 [[package]]
 name = "django-import-export"
-version = "4.3.5"
+version = "4.3.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diff-match-patch" },
     { name = "django" },
     { name = "tablib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/82/95749066a3fc1476d3279e82634af22c950918c8e0ef97f3597fc0907461/django_import_export-4.3.5.tar.gz", hash = "sha256:61e078cea307a6199a7e905840640e55db3521d7c81be224fd8b6576ce9bd0fc", size = 2220757 }
+sdist = { url = "https://files.pythonhosted.org/packages/16/cb/64af5439fd5de56377da89b4f83a7f39002118eef3dd3c56589f55974c26/django_import_export-4.3.6.tar.gz", hash = "sha256:ecb4e6cdb4790d69bce261f9cca1007ca19cb431bb5a950ba907898245c8817b", size = 2221464 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/fd/9e457b463364a3288bd26b3d0c53d128f224881603ac1a43434057030cd2/django_import_export-4.3.5-py3-none-any.whl", hash = "sha256:143611d9d3c8b000c54e33db122c8d283eef38167acd7a854d15b9ad77c328e7", size = 144185 },
+    { url = "https://files.pythonhosted.org/packages/53/90/752d695acd82961de41b091644615f2211d7abe4962e7573893fc6207351/django_import_export-4.3.6-py3-none-any.whl", hash = "sha256:317842a64233025a277040129fb6792fc48fd39622c185b70bf8c18c393d708f", size = 144360 },
 ]
 
 [[package]]
