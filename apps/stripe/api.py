@@ -149,3 +149,18 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         "organization": organization.id,
         "subscription": subscription,
     }
+
+
+@router.get("subscriptions/{slug:organization_slug}/events_count/")
+async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
+    org = await aget_object_or_404(
+        Organization.objects.with_event_counts(),
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+    return {
+        "eventCount": org.issue_event_count,
+        "transactionEventCount": org.transaction_count,
+        "uptimeCheckEventCount": org.uptime_check_event_count,
+        "fileSizeMB": org.file_size,
+    }

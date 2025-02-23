@@ -43,11 +43,6 @@ from .authentication import SessionAuth, TokenAuth
 from .exceptions import ThrottleException
 from .parsers import ORJSONParser
 
-try:
-    from djstripe.settings import djstripe_settings
-except ImportError:
-    pass
-
 logger = logging.getLogger(__name__)
 
 api = NinjaAPI(
@@ -158,9 +153,7 @@ async def get_settings(request: HttpRequest):
         "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
         "enable_user_registration": await ais_user_registration_open(),
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,
-        "stripe_public_key": djstripe_settings.STRIPE_PUBLIC_KEY
-        if billing_enabled
-        else None,
+        "stripe_public_key": settings.STRIPE_PUBLIC_KEY,
         "plausible_url": settings.PLAUSIBLE_URL,
         "plausible_domain": settings.PLAUSIBLE_DOMAIN,
         "chatwoot_website_token": settings.CHATWOOT_WEBSITE_TOKEN,

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from apps.organizations_ext.models import Organization
 
 from .client import stripe_get
-from .models import StripeProduct, StripeSubscription
+from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import unix_to_datetime
 
@@ -28,20 +28,30 @@ async def update_product(product: Product):
     if "events" not in metadata:
         return
 
-    # Get price
-    price_obj = Price.model_validate_json(
-        await stripe_get(f"prices/{product.default_price}")
-    )
-    price = price_obj.unit_amount / 100
-
     await StripeProduct.objects.aupdate_or_create(
         stripe_id=product.id,
         defaults={
             "name": product.name,
             "description": product.description,
-            "price": price,
             "events": metadata["events"],
             "is_public": metadata.get("is_public") == "true",
+        },
+    )
+
+
+async def update_price(price: Price):
+    if (
+        not price.unit_amount
+        or not await StripeProduct.objects.filter(stripe_id=price.product).aexists()
+    ):
+        return
+
+    await StripePrice.objects.aupdate_or_create(
+        stripe_id=price.id,
+        defaults={
+            "product_id": price.product,
+            "nickname": price.nickname,
+            "price": price.unit_amount / 100,
         },
     )
 
@@ -133,6 +143,8 @@ async def stripe_webhook_view(request: HttpRequest):
         "customer.subscription.created",
     ]:
         await update_subscription(event.data.object)
+    elif event.type in ["price.updated", "price.created"]:
+        await update_price(event.data.object)
     else:
         logger.info(f"Unhandled Stripe event type: {event.type}")
 
