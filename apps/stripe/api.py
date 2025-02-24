@@ -61,7 +61,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
             organization__slug=organization_slug,
             is_active=True,
         )
-        .select_related("product")
+        .select_related("price__product")
         .order_by("-created")
         .afirst()
     )
@@ -139,7 +139,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),
         current_period_end=unix_to_datetime(subscription_resp.current_period_end),
-        product_id=price.product_id,
+        price=price,
         organization=organization,
     )
     organization.stripe_primary_subscription = subscription

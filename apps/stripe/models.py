@@ -130,7 +130,7 @@ class StripeSubscription(StripeModel):
     created = models.DateTimeField()
     current_period_start = models.DateTimeField()
     current_period_end = models.DateTimeField()
-    product = models.ForeignKey(StripeProduct, on_delete=models.CASCADE)
+    price = models.ForeignKey(StripePrice, on_delete=models.RESTRICT)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.SET_NULL, null=True
     )
@@ -142,7 +142,7 @@ class StripeSubscription(StripeModel):
     async def get_primary_subscription(cls, organization: Organization):
         return (
             await cls.objects.filter(organization=organization, is_active=True)
-            .order_by("-product__events", "-created")
+            .order_by("-price__product__events", "-created")
             .afirst()
         )
 
@@ -153,7 +153,7 @@ class StripeSubscription(StripeModel):
         # This subquery finds the primary subscription ID for each organization.
         primary_subscription_subquery = (
             cls.objects.filter(organization_id=OuterRef("pk"), is_active=True)
-            .order_by("-product__events", "-created")
+            .order_by("-price__product__events", "-created")
             .values("pk")[:1]
         )
 
@@ -193,10 +193,10 @@ class StripeSubscription(StripeModel):
                     continue  # Skip if no organization ID in metadata
 
                 items = subscription.items.data
-                if not items or not items[0].get("price", {}).get("product"):
+                if not items or not items[0].get("price"):
                     continue  # Skip
 
-                product_id = items[0]["price"]["product"]
+                price_id = items[0]["price"]
 
                 # If unseen organization id, check if it exists
                 if organization_id not in organization_ids:
@@ -223,7 +223,7 @@ class StripeSubscription(StripeModel):
                             current_period_end=unix_to_datetime(
                                 subscription.current_period_end
                             ),
-                            product_id=product_id,
+                            price_id=price_id,
                             organization_id=organization_id,
                             is_active=subscription.status == "active",
                         )
@@ -236,7 +236,7 @@ class StripeSubscription(StripeModel):
                     "created",
                     "current_period_start",
                     "current_period_end",
-                    "product_id",
+                    "price_id",
                     "organization_id",
                     "is_active",
                 ],
