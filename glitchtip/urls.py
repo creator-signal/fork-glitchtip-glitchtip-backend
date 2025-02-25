@@ -32,7 +32,7 @@ urlpatterns = [
         ),
     ),
     path("api/", api.urls),
-    path("stripe/webhook/", stripe_webhook_view),
+    path("stripe/webhook/", stripe_webhook_view, name="stripe_webhook"),
 ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:

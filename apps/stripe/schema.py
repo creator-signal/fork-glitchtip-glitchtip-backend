@@ -99,7 +99,7 @@ SubscriptionExpandCustomerResponse = StripeListResponse[SubscriptionExpandCustom
 
 class EventData(BaseModel):
     object: Product | Price | Subscription = Field(discriminator="object")
-    previous_attributes: dict | None
+    previous_attributes: dict | None = None
 
 
 class StripeEvent(BaseModel):
