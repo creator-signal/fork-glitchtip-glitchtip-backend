@@ -4,21 +4,46 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
-class Migration(migrations.Migration):
+def migrate_subscription_product_to_price(apps, schema_editor):
+    StripeSubscription = apps.get_model("stripe", "StripeSubscription")
+    StripePrice = apps.get_model("stripe", "StripePrice")
 
+    for subscription in StripeSubscription.objects.all():
+        if subscription.product and subscription.product.default_price:
+            try:
+                price = StripePrice.objects.get(
+                    stripe_id=subscription.product.default_price
+                )
+                subscription.price = price
+                subscription.save()
+            except StripePrice.DoesNotExist:
+                print(
+                    f"Warning: Price with stripe_id '{subscription.product.default_price}' not found for subscription {subscription.id}"
+                )
+
+
+class Migration(migrations.Migration):
     dependencies = [
-        ('stripe', '0008_remove_stripesubscription_unique_primary_subscription_per_organization_and_more'),
+        (
+            "stripe",
+            "0008_remove_stripesubscription_unique_primary_subscription_per_organization_and_more",
+        ),
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name='stripesubscription',
-            name='product',
-        ),
         migrations.AddField(
-            model_name='stripesubscription',
-            name='price',
-            field=models.ForeignKey(default=1, on_delete=django.db.models.deletion.RESTRICT, to='stripe.stripeprice'),
+            model_name="stripesubscription",
+            name="price",
+            field=models.ForeignKey(
+                default=1,
+                on_delete=django.db.models.deletion.RESTRICT,
+                to="stripe.stripeprice",
+            ),
             preserve_default=False,
+        ),
+        migrations.RunPython(migrate_subscription_product_to_price),
+        migrations.RemoveField(
+            model_name="stripesubscription",
+            name="product",
         ),
     ]
