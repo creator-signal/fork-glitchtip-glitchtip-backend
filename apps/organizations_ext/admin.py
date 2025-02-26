@@ -25,7 +25,7 @@ from .resources import OrganizationResource, OrganizationUserResource
 ORGANIZATION_LIST_FILTER = (
     "is_active",
     "is_accepting_events",
-    "stripesubscription__product",
+    "stripesubscription__price__product",
 )
 
 

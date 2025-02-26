@@ -41,12 +41,12 @@ class StripeSubscriptionAdmin(StripeBaseAdmin):
     list_display = [
         "stripe_id",
         "organization",
-        "product",
+        "price__product",
         "current_period_start",
         "current_period_end",
         "is_active",
     ]
-    list_filter = ["is_active", "product"]
+    list_filter = ["is_active", "price__product"]
 
 
 if settings.BILLING_ENABLED:

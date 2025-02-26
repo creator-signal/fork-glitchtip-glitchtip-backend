@@ -63,7 +63,7 @@ async def update_subscription(subscription: Subscription):
     customer_metadata = customer_obj.metadata
     organization_id = int(
         customer_metadata.get(
-            "organization_id", customer_metadata["djstripe_subscriber"]
+            "organization_id", customer_metadata.get("djstripe_subscriber")
         )
     )
     if not organization_id:
@@ -72,10 +72,7 @@ async def update_subscription(subscription: Subscription):
     if not organization:
         return
 
-    if (
-        product_id := subscription.items.data
-        and subscription.items.data[0].get("plan", {}).get("product")
-    ) is None:
+    if (price_id := subscription.items.data[0]["price"]["id"]) is None:
         return
     stripe_subscription, created = await StripeSubscription.objects.aupdate_or_create(
         stripe_id=subscription.id,
@@ -83,7 +80,7 @@ async def update_subscription(subscription: Subscription):
             "created": unix_to_datetime(subscription.created),
             "current_period_start": unix_to_datetime(subscription.current_period_start),
             "current_period_end": unix_to_datetime(subscription.current_period_end),
-            "product_id": product_id,
+            "price_id": price_id,
             "organization_id": organization.id,
             "is_active": subscription.status == "active",
         },
@@ -132,8 +129,8 @@ async def stripe_webhook_view(request: HttpRequest):
 
     try:
         event = StripeEvent.model_validate_json(payload)
-    except ValidationError:
-        logger.warning("Invalid JSON payload in Stripe webhook.")
+    except ValidationError as e:
+        logger.warning("Invalid JSON payload in Stripe webhook.", exc_info=e)
         return HttpResponse(status=200)
 
     if event.type in ["product.updated", "product.created"]:
@@ -194,9 +191,7 @@ def verify_stripe_signature(payload, sig_header):
             return False
 
         # Construct the signed payload string.
-        signed_payload = (
-            f"{timestamp}.{payload.decode('utf-8')}"  # Important: decode to string
-        )
+        signed_payload = f"{timestamp}.{payload.decode('utf-8')}"
 
         # Compute the expected signature.
         expected_signature = hmac.new(

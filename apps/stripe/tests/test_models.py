@@ -78,9 +78,7 @@ class StripeTestCase(TestCase):
 
     @patch("apps.stripe.models.list_subscriptions")
     async def test_sync_subscription(self, mock_list_subscriptions):
-        await sync_to_async(baker.make)(
-            "stripe.StripeProduct", stripe_id=test_price.product
-        )
+        await sync_to_async(baker.make)("stripe.StripePrice", stripe_id=test_price.id)
         subscriptions_page_1 = [
             SubscriptionExpandCustomer(
                 object="subscription",
@@ -92,7 +90,7 @@ class StripeTestCase(TestCase):
                     metadata={"organization_id": str(self.org.id)},
                     name="",
                 ),
-                items=Items(object="list", data=[{"price": test_price.dict()}]),
+                items=Items(object="list", data=[{"price": test_price.id}]),
                 created=1678886400,
                 current_period_end=1678886400 + 2592000,  # +30 days
                 current_period_start=1678886400,
