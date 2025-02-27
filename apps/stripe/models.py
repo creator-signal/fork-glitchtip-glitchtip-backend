@@ -177,6 +177,7 @@ class StripeSubscription(StripeModel):
     async def sync_from_stripe(cls):
         organization_ids = set()
         active_organization_ids = set()
+        known_price_ids = set()
         async for subscriptions in list_subscriptions():
             logger.info(f"Found {len(subscriptions)} subcriptions in Stripe")
 
@@ -196,7 +197,18 @@ class StripeSubscription(StripeModel):
                 if not items or not items[0].get("price"):
                     continue  # Skip
 
-                price_id = items[0]["price"]
+                price = items[0]["price"]
+                price_id = price["id"]
+                if price_id not in known_price_ids:
+                    await StripePrice.objects.aupdate_or_create(
+                        stripe_id=price_id,
+                        defaults={
+                            "product_id": price["product"],
+                            "nickname": price.get("nickname") or "",
+                            "price": price["unit_amount"] / 100,
+                        },
+                    )
+                    known_price_ids.add(price_id)
 
                 # If unseen organization id, check if it exists
                 if organization_id not in organization_ids:
