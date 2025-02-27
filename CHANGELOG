@@ -2,6 +2,11 @@
 
 - Add OrganizationSocialApp, configurable in django admin, that allows Organizations to be associated to SocialApps and automatically assign users who log in with the associated SocialApp to the Organization. Signals currently disabled.
 
+# v4.2.5
+
+- Fix for event query params not displaying on frontend
+- Adds initial custom stripe webhook integration (not yet used but visible in django admin)
+
 # v4.2.4
 
 - Initial custom stripe integration (not yet used but visible in django admin)
