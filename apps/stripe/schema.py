@@ -36,7 +36,7 @@ class Product(BaseModel):
 class Customer(BaseModel):
     object: Literal["customer"]
     id: str
-    email: str
+    email: str | None
     metadata: dict[str, str] | None
     name: str | None
 
