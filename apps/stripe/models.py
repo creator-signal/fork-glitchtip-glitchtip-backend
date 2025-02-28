@@ -190,7 +190,7 @@ class StripeSubscription(StripeModel):
                             "organization_id", org_metadata.get("djstripe_subscriber")
                         )
                     )
-                except (ValueError, KeyError):
+                except (ValueError, TypeError):
                     continue  # Skip if no organization ID in metadata
 
                 items = subscription.items.data

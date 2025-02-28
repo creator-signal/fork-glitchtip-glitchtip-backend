@@ -90,7 +90,7 @@ class StripeTestCase(TestCase):
                     object="customer",
                     id="cus_1",
                     email="foo@example.com",
-                    metadata={"organization_id": str(self.org.id)},
+                    metadata={},
                     name="",
                 ),
                 items=Items(
@@ -118,6 +118,15 @@ class StripeTestCase(TestCase):
         async def mock_subscriptions_generator():
             yield subscriptions_page_1
 
+        mock_list_subscriptions.return_value = mock_subscriptions_generator()
+        await StripeSubscription.sync_from_stripe()
+
+        # Subscription without valid organization_id in customer metadata should be skipped
+        self.assertEqual(
+            await StripeSubscription.objects.acount(), 0
+        )
+
+        subscriptions_page_1[0].customer.metadata = {"organization_id": str(self.org.id)}
         mock_list_subscriptions.return_value = mock_subscriptions_generator()
         await StripeSubscription.sync_from_stripe()
 
