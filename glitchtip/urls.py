@@ -54,9 +54,6 @@ urlpatterns += [
     path("accept/", include(invitation_backend().get_urls())),
 ]
 
-if settings.BILLING_ENABLED:
-    urlpatterns.append(path("stripe/", include("djstripe.urls", namespace="djstripe")))
-
 if settings.DEBUG_TOOLBAR:
     urlpatterns.append(path("__debug__/", include("debug_toolbar.urls")))
 

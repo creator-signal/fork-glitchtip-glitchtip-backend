@@ -1,6 +1,8 @@
 from celery import shared_task
 from django.core.cache import cache
 
+from apps.stripe.models import StripeProduct
+
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
@@ -10,29 +12,28 @@ def check_organization_throttle(organization_id: int):
     if not cache.add(f"org-throttle-{organization_id}", True):
         return  # Recent check already performed
 
-    org = Organization.objects.with_event_counts().get(id=organization_id)
+    org = (
+        Organization.objects.with_event_counts()
+        .select_related("stripe_primary_subscription__price__product")
+        .get(id=organization_id)
+    )
     _check_and_update_throttle(org)
 
 
 @shared_task
 def check_all_organizations_throttle():
-    for org in Organization.objects.with_event_counts().iterator():
+    for org in (
+        Organization.objects.with_event_counts()
+        .select_related("stripe_primary_subscription__price__product")
+        .iterator()
+    ):
         _check_and_update_throttle(org)
 
 
 def _check_and_update_throttle(org: Organization):
-    from djstripe.models import Product
-
-    plan_events: int | None = (
-        Product.objects.filter(
-            plan__subscriptions__customer__subscriber=org,
-            plan__subscriptions__status="active",
-        )
-        .values_list("metadata__events", flat=True)
-        .first()
-    )
-    if plan_events:
-        plan_events = int(plan_events)
+    plan_events: int | None = None
+    if org.stripe_primary_subscription:
+        plan_events = org.stripe_primary_subscription.price.product.events
     org_throttle = 0
     if plan_events is None or org.total_event_count > plan_events * 2:
         org_throttle = 100
