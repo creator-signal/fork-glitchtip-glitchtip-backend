@@ -161,16 +161,13 @@ class StripeSubscription(StripeModel):
         async for org in Organization.objects.filter(id__in=organization_ids).annotate(
             primary_subscription_id=Subquery(primary_subscription_subquery)
         ):
-            if (
-                org.primary_subscription_id
-                and org.primary_subscription_id != org.stripe_primary_subscription_id
-            ):
+            if org.primary_subscription_id != org.stripe_primary_subscription_id:
                 org.stripe_primary_subscription_id = org.primary_subscription_id
                 org_updates.append(org)
 
         if org_updates:
             await Organization.objects.abulk_update(
-                org_updates, ["stripe_primary_subscription_id"]
+                org_updates, ["stripe_primary_subscription"]
             )
 
     @classmethod

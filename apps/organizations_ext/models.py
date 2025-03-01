@@ -2,7 +2,7 @@ from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import F, OuterRef, Q
 from django.db.models.functions import Coalesce
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
@@ -30,48 +30,25 @@ class OrganizationManager(OrgManager):
         event_subscription_filter = Q()
         checks_subscription_filter = Q()
         if current_period and settings.BILLING_ENABLED:
-            from djstripe.models import Subscription
-
             subscription_filter = Q(
                 created__gte=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_start"
+                    "stripe_primary_subscription__current_period_start"
                 ),
-                created__lt=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_end"
-                ),
+                created__lt=OuterRef("stripe_primary_subscription__current_period_end"),
             )
             event_subscription_filter = Q(
-                date__gte=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_start"
-                ),
-                date__lt=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_end"
-                ),
+                date__gte=OuterRef("stripe_primary_subscription__current_period_start"),
+                date__lt=OuterRef("stripe_primary_subscription__current_period_end"),
             )
             checks_subscription_filter = Q(
                 start_check__gte=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_start"
+                    "stripe_primary_subscription__current_period_start"
                 ),
                 start_check__lt=OuterRef(
-                    "djstripe_customers__subscriptions__current_period_end"
+                    "stripe_primary_subscription__current_period_end"
                 ),
             )
-            # If the org has an active sub, filter by it. If not, do not filter.
-            # This forces the exclusion of inactive subscriptions in subquery counts
-            queryset = queryset.annotate(
-                has_active_subscription=Exists(
-                    Subscription.objects.filter(
-                        customer=OuterRef("djstripe_customers"),
-                        status="active",
-                    )
-                )
-            ).filter(
-                Q(
-                    has_active_subscription=True,
-                    djstripe_customers__subscriptions__status="active",
-                )
-                | Q(has_active_subscription=False)
-            )
+            # Do we need to filter out inactive subs?
 
         queryset = queryset.annotate(
             issue_event_count=Coalesce(

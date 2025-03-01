@@ -1,8 +1,14 @@
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
+from asgiref.sync import async_to_sync
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
+from freezegun import freeze_time
 from model_bakery import baker
+
+from apps.stripe.models import StripeSubscription
 
 
 class StripeAPITestCase(TestCase):
@@ -61,3 +67,81 @@ class StripeAPITestCase(TestCase):
         )
         self.assertEqual(res.status_code, 200)
         mock_create_subscription.assert_called_once()
+
+    def test_events_count(self):
+        # Ensure we don't filter on any unrelated subscription
+        baker.make("stripe.StripeSubscription", is_active=True)
+        # Create a few subscriptions, but only one is active
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            is_active=False,
+        )
+        # Active subscription has a set time period to match events
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            is_active=True,
+            current_period_start=timezone.make_aware(datetime(2020, 1, 2)),
+            current_period_end=timezone.make_aware(datetime(2020, 2, 2)),
+        )
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            is_active=False,
+        )
+        url = reverse("api:subscription_events_count", args=[self.organization.slug])
+        with freeze_time(datetime(2020, 3, 1)):
+            baker.make(
+                "issue_events.IssueEvent",
+                issue__project__organization=self.organization,
+            )
+        with freeze_time(datetime(2020, 1, 5)):
+            baker.make("issue_events.IssueEvent")
+            baker.make(
+                "issue_events.IssueEvent",
+                issue__project__organization=self.organization,
+            )
+            baker.make(
+                "projects.IssueEventProjectHourlyStatistic",
+                project__organization=self.organization,
+                count=1,
+            )
+            baker.make(
+                "performance.TransactionEvent",
+                group__project__organization=self.organization,
+            )
+            baker.make(
+                "projects.TransactionEventProjectHourlyStatistic",
+                project__organization=self.organization,
+                count=1,
+            )
+            baker.make(
+                "sourcecode.DebugSymbolBundle",
+                file__blob__size=1000000,
+                organization=self.organization,
+                release__organization=self.organization,
+                _quantity=2,
+            )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        res = self.client.get(url)
+        self.assertEqual(
+            res.json(),
+            {
+                "eventCount": 1,
+                "fileSizeMB": 2,
+                "transactionEventCount": 1,
+                "uptimeCheckEventCount": 0,
+            },
+        )
+
+    def test_events_count_without_customer(self):
+        """
+        Due to async nature of Stripe integration, a customer may not exist
+        """
+        baker.make("stripe.StripeSubscription")
+        url = reverse("api:subscription_events_count", args=[self.organization.slug])
+        res = self.client.get(url)
+        self.assertEqual(sum(res.json().values()), 0)

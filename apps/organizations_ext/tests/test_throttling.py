@@ -1,10 +1,13 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
+
+from apps.stripe.models import StripeSubscription
 
 from ..models import Organization
 from ..tasks import (
@@ -16,26 +19,20 @@ from ..tasks import (
 class OrganizationThrottleCheckTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.product = baker.make(
-            "djstripe.Product", active=True, metadata={"events": 10}
-        )
-        cls.plan = baker.make(
-            "djstripe.Plan", active=True, amount=0, product=cls.product
-        )
+        cls.product = baker.make("stripe.StripeProduct", events=10)
+        cls.price = baker.make("stripe.StripePrice", price=0, product=cls.product)
         cls.organization = baker.make("organizations_ext.Organization")
         cls.user = baker.make("users.user")
         cls.organization.add_user(cls.user)
-        cls.customer = baker.make(
-            "djstripe.Customer", subscriber=cls.organization, livemode=False
-        )
         cls.subscription = baker.make(
-            "djstripe.Subscription",
-            customer=cls.customer,
-            livemode=False,
-            plan=cls.plan,
-            status="active",
+            "stripe.StripeSubscription",
+            organization=cls.organization,
+            price=cls.price,
+            is_active=True,
             current_period_end=timezone.now() + timedelta(hours=1),
         )
+        cls.organization.stripe_primary_subscription = cls.subscription
+        cls.organization.save()
 
     def _make_events(self, i: int):
         baker.make(
@@ -82,7 +79,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         org = self.organization
 
         # No events, no throttle
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             check_all_organizations_throttle()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
@@ -137,32 +134,39 @@ class OrganizationThrottleCheckTestCase(TestCase):
 
         # Make plan active
         subscription = baker.make(
-            "djstripe.Subscription",
-            customer=self.customer,
-            livemode=False,
-            plan=self.plan,
-            status="active",
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            price=self.price,
+            is_active=True,
             current_period_end=timezone.now() + timedelta(hours=1),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
         )
         check_all_organizations_throttle()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 0)
 
         # Cancel plan
-        subscription.status = "canceled"
+        subscription.is_active = False
         subscription.save()
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
         check_all_organizations_throttle()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
 
         # Add new active plan (still has canceled plan)
         subscription = baker.make(
-            "djstripe.Subscription",
-            customer=self.customer,
-            livemode=False,
-            plan=self.plan,
-            status="active",
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            price=self.price,
+            is_active=True,
             current_period_end=timezone.now() + timedelta(hours=1),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
         )
         check_all_organizations_throttle()
         self.organization.refresh_from_db()

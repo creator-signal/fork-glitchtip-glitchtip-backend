@@ -1,5 +1,4 @@
 version = 1
-revision = 1
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version <= '3.11'",
@@ -464,7 +463,7 @@ name = "click"
 version = "8.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "platform_system == 'Windows'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/d3/f04c7bfcf5c1862a2a5b845c6b2b360488cf47af55dfa79c98f6a6bf98b5/click-8.1.7.tar.gz", hash = "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de", size = 336121 }
 wheels = [
@@ -585,19 +584,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0e/ad/32e1777dd57d8e85fa31e3a243af66c538245b8d64b7265bec9a61f2ca33/diff_match_patch-20241021.tar.gz", hash = "sha256:beae57a99fa48084532935ee2968b8661db861862ec82c6f21f4acdd6d835073", size = 39962 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/bb/2aa9b46a01197398b901e458974c20ed107935c26e44e37ad5b0e5511e44/diff_match_patch-20241021-py3-none-any.whl", hash = "sha256:93cea333fb8b2bc0d181b0de5e16df50dd344ce64828226bda07728818936782", size = 43252 },
-]
-
-[[package]]
-name = "dj-stripe"
-version = "2.9.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django" },
-    { name = "stripe" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/49/f3/1cffa275501f3a32760463a724d4c99f14e53dd79c7dd1161a7906044f4a/dj_stripe-2.9.0.tar.gz", hash = "sha256:679730f0532694fcf0e943a96ac381b787c36b40cdd224040403ac7bccbad914", size = 152105 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/c0/23f4fc8a271e6a7fe77ddb0e6e733a0a0de0656f50141a37c162eec1b1b5/dj_stripe-2.9.0-py3-none-any.whl", hash = "sha256:98c37787c5cef8528c9e590313c0ee6b2e65af7c8d0049762def67f32c496f07", size = 185174 },
 ]
 
 [[package]]
@@ -1151,7 +1137,6 @@ dependencies = [
     { name = "brotli" },
     { name = "celery", extra = ["redis"] },
     { name = "celery-batches" },
-    { name = "dj-stripe" },
     { name = "django" },
     { name = "django-allauth", extra = ["mfa", "socialaccount"] },
     { name = "django-anymail" },
@@ -1207,7 +1192,6 @@ requires-dist = [
     { name = "brotli", specifier = "==1.1.0" },
     { name = "celery", extras = ["redis"], specifier = "~=5.4" },
     { name = "celery-batches", specifier = "~=0.9" },
-    { name = "dj-stripe", specifier = "~=2.9" },
     { name = "django", specifier = "~=5.1" },
     { name = "django-allauth", extras = ["mfa", "socialaccount"], specifier = "~=65.0" },
     { name = "django-anymail", specifier = "~=12.0" },
@@ -2742,19 +2726,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521 },
-]
-
-[[package]]
-name = "stripe"
-version = "11.5.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/49/902b7cb88e788754c529710598a5110242f788c8694ffbbacbf58a3c6882/stripe-11.5.0.tar.gz", hash = "sha256:bc3e0358ffc23d5ecfa8aafec1fa4f048ee8107c3237bcb00003e68c8c96fa02", size = 1386601 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/76/a5a7b407da86ed47c41e88e8450ea4965e0a49a9cc301602edc6733382d7/stripe-11.5.0-py2.py3-none-any.whl", hash = "sha256:3b2cd47ed3002328249bff5cacaee38d5e756c3899ab425d3bd07acdaf32534a", size = 1633231 },
 ]
 
 [[package]]

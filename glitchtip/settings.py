@@ -332,8 +332,6 @@ STRIPE_SECRET_KEY = env.str("STRIPE_SECRET_KEY", None)
 STRIPE_WEBHOOK_SECRET = env.str("STRIPE_WEBHOOK_SECRET", None)
 if STRIPE_PUBLIC_KEY and STRIPE_SECRET_KEY:
     BILLING_ENABLED = True
-if env.str("STRIPE_TEST_PUBLIC_KEY", None) or env.str("STRIPE_LIVE_PUBLIC_KEY", None):
-    BILLING_ENABLED = True
 
 # Set to chatwoot website token to enable live help widget. Assumes app.chatwoot.com.
 CHATWOOT_WEBSITE_TOKEN = env.str("CHATWOOT_WEBSITE_TOKEN", None)
@@ -747,12 +745,6 @@ if LOGGING_HANDLER_CLASS is not logging.StreamHandler:
         logger.addHandler(handler())
 
 
-def organization_request_callback(request):
-    raise ImproperlyConfigured(
-        "Organization request callback required by dj-stripe but not used."
-    )
-
-
 # Set to track activity with Plausible
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
 PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
@@ -761,32 +753,16 @@ PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 # Support plans available. Email info@burkesoftware.com for more info.
 I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
 
-DJSTRIPE_SUBSCRIBER_MODEL = "organizations_ext.Organization"
-DJSTRIPE_SUBSCRIBER_MODEL_REQUEST_CALLBACK = organization_request_callback
-DJSTRIPE_USE_NATIVE_JSONFIELD = True
-DJSTRIPE_FOREIGN_KEY_TO_FIELD = "djstripe_id"
 MARKETING_URL = "https://glitchtip.com"
-STRIPE_AUTOMATIC_TAX = env.bool("STRIPE_AUTOMATIC_TAX", False)
-STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", False)
 if BILLING_ENABLED:
     I_PAID_FOR_GLITCHTIP = True
-    INSTALLED_APPS.append("djstripe")
-    INSTALLED_APPS.append("apps.djstripe_ext")
-    STRIPE_TEST_PUBLIC_KEY = env.str("STRIPE_TEST_PUBLIC_KEY", None)
-    STRIPE_TEST_SECRET_KEY = env.str("STRIPE_TEST_SECRET_KEY", None)
-    STRIPE_LIVE_PUBLIC_KEY = env.str("STRIPE_LIVE_PUBLIC_KEY", None)
-    STRIPE_LIVE_SECRET_KEY = env.str("STRIPE_LIVE_SECRET_KEY", None)
     CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
         "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
         "schedule": timedelta(hours=4),
     }
 elif TESTING:
-    # Must run tests with djstripe enabled
+    # Must run tests with billing enabled
     BILLING_ENABLED = True
-    INSTALLED_APPS.append("djstripe")
-    INSTALLED_APPS.append("apps.djstripe_ext")
-    STRIPE_TEST_PUBLIC_KEY = "fake"
-    STRIPE_TEST_SECRET_KEY = "sk_test_fake"  # nosec
     logging.disable(logging.WARNING)
 
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", False)

@@ -1,8 +1,13 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 
 from glitchtip.email import DetailEmail
 
 from .models import Organization, OrganizationUser
+
+if TYPE_CHECKING:
+    from apps.stripe.models import StripeProduct
 
 
 class ThrottleNoticeEmail(DetailEmail):
@@ -18,8 +23,6 @@ class ThrottleNoticeEmail(DetailEmail):
         return self.object.email
 
     def get_context_data(self, **kwargs):
-        from djstripe.models import Product
-
         context = super().get_context_data(**kwargs)
         base_url = settings.GLITCHTIP_URL.geturl()
         faq_link = (
@@ -29,15 +32,14 @@ class ThrottleNoticeEmail(DetailEmail):
         )
         organization = self.object
         subscription_link = f"{base_url}/{organization.slug}/settings/subscription"
-        product = Product.objects.filter(
-            plan__subscriptions__customer__subscriber=organization,
-            plan__subscriptions__status="active",
-        ).first()
+        product: StripeProduct | None = None
+        if organization.stripe_primary_subscription:
+            product = organization.stripe_primary_subscription.price.product
         context.update(
             {
                 "organization": organization,
                 "product": product,
-                "event_limit": product.metadata.get("events") if product else None,
+                "event_limit": product.events if product else None,
                 "subscription_link": subscription_link,
                 "faq_link": faq_link,
             }
