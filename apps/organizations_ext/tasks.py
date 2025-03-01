@@ -1,8 +1,6 @@
 from celery import shared_task
 from django.core.cache import cache
 
-from apps.stripe.models import StripeProduct
-
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
