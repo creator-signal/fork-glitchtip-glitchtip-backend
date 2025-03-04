@@ -20,15 +20,29 @@ router = Router()
 
 
 class StripeProductSchema(CamelSchema, ModelSchema):
+    default_price: int | None
+
     class Meta:
         model = StripeProduct
         fields = ["stripe_id", "name", "description", "events"]
 
+    @staticmethod
+    def resolve_default_price(obj: StripeProduct):
+        if obj.default_price:
+            return obj.default_price.price
+        return None
+
 
 class StripeSubscriptionSchema(CamelSchema, ModelSchema):
+    product: StripeProductSchema
+
     class Meta:
         model = StripeSubscription
         fields = ["stripe_id", "created", "current_period_start", "current_period_end"]
+
+    @staticmethod
+    def resolve_product(obj: StripeSubscription):
+        return obj.price.product
 
 
 class PriceIDSchema(CamelSchema):
@@ -47,7 +61,9 @@ class CreateSubscriptionResponse(SubscriptionIn):
 async def list_stripe_products(request: AuthHttpRequest):
     return [
         product
-        async for product in StripeProduct.objects.filter(is_public=True, events__gt=0)
+        async for product in StripeProduct.objects.filter(
+            is_public=True, events__gt=0
+        ).select_related("default_price")
     ]
 
 
@@ -121,7 +137,9 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
     )
-    price = await aget_object_or_404(StripePrice, stripe_id=payload.price, price=0)
+    price = await aget_object_or_404(
+        StripePrice.objects.select_related("product"), stripe_id=payload.price, price=0
+    )
     if organization.stripe_customer_id:
         customer_id = organization.stripe_customer_id
     else:
