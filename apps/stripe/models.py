@@ -181,6 +181,11 @@ class StripeSubscription(StripeModel):
             subscription_objects = []
             for subscription in subscriptions:
                 org_metadata = subscription.customer.metadata
+                if (
+                    org_metadata is None
+                    or org_metadata.get("region", "") != settings.STRIPE_REGION
+                ):
+                    continue  # Skip orgs in other regions
                 try:
                     organization_id = int(
                         org_metadata.get(

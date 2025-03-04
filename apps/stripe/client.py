@@ -153,6 +153,7 @@ async def create_customer(organization: Organization) -> Customer:
             "metadata": {
                 "organization_id": organization.id,
                 "organization_slug": organization.slug,
+                "region": settings.STRIPE_REGION,
             },
         },
     )
