@@ -19,8 +19,20 @@ from .utils import unix_to_datetime
 router = Router()
 
 
+class StripeNestedPriceSchema(CamelSchema, ModelSchema):
+    price: str
+
+    class Meta:
+        model = StripePrice
+        fields = ["price", "stripe_id"]
+
+    @staticmethod
+    def resolve_price(obj: StripePrice):
+        return str(obj.price)
+
+
 class StripeProductSchema(CamelSchema, ModelSchema):
-    default_price: int | None
+    default_price: StripeNestedPriceSchema | None
 
     class Meta:
         model = StripeProduct
@@ -57,7 +69,7 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: StripeSubscriptionSchema
 
 
-@router.get("products/", response=list[StripeProductSchema])
+@router.get("products/", response=list[StripeProductSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
     return [
         product
@@ -68,7 +80,9 @@ async def list_stripe_products(request: AuthHttpRequest):
 
 
 @router.get(
-    "subscriptions/{slug:organization_slug}/", response=StripeSubscriptionSchema | None
+    "subscriptions/{slug:organization_slug}/",
+    response=StripeSubscriptionSchema | None,
+    by_alias=True,
 )
 async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: str):
     return await (
@@ -129,7 +143,7 @@ async def stripe_billing_portal_session(
     return await create_portal_session(customer_id, organization_slug)
 
 
-@router.post("subscriptions/", response=CreateSubscriptionResponse)
+@router.post("subscriptions/", response=CreateSubscriptionResponse, by_alias=True)
 async def stripe_create_subscription(request: AuthHttpRequest, payload: SubscriptionIn):
     organization = await aget_object_or_404(
         Organization,
