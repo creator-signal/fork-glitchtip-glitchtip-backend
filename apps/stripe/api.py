@@ -19,38 +19,46 @@ from .utils import unix_to_datetime
 router = Router()
 
 
-class StripeNestedPriceSchema(CamelSchema, ModelSchema):
+class StripeIDSchema(CamelSchema):
+    stripe_id: str
+
+
+class StripeNestedPriceSchema(StripeIDSchema, ModelSchema):
     price: str
 
     class Meta:
         model = StripePrice
-        fields = ["price", "stripe_id"]
+        fields = ["price"]
 
     @staticmethod
     def resolve_price(obj: StripePrice):
         return str(obj.price)
 
 
-class StripeProductSchema(CamelSchema, ModelSchema):
-    default_price: StripeNestedPriceSchema | None
+class StripeProductSchema(StripeIDSchema, ModelSchema):
+    class Meta:
+        model = StripeProduct
+        fields = ["name", "description", "events", "default_price"]
+
+
+class StripeProductExpandedPriceSchema(StripeIDSchema, ModelSchema):
+    default_price: StripeNestedPriceSchema
 
     class Meta:
         model = StripeProduct
-        fields = ["stripe_id", "name", "description", "events"]
+        fields = ["name", "description", "events"]
 
     @staticmethod
     def resolve_default_price(obj: StripeProduct):
-        if obj.default_price:
-            return obj.default_price.price
-        return None
+        return obj.default_price
 
 
-class StripeSubscriptionSchema(CamelSchema, ModelSchema):
+class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     product: StripeProductSchema
 
     class Meta:
         model = StripeSubscription
-        fields = ["stripe_id", "created", "current_period_start", "current_period_end"]
+        fields = ["created", "current_period_start", "current_period_end"]
 
     @staticmethod
     def resolve_product(obj: StripeSubscription):
@@ -69,7 +77,7 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: StripeSubscriptionSchema
 
 
-@router.get("products/", response=list[StripeProductSchema], by_alias=True)
+@router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
     return [
         product

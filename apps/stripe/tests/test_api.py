@@ -21,6 +21,8 @@ class StripeAPITestCase(TestCase):
         cls.org_user = cls.organization.add_user(cls.user)
         cls.product = baker.make("stripe.StripeProduct", is_public=True, events=5)
         cls.price = baker.make("stripe.StripePrice", product=cls.product, price=0)
+        cls.product.default_price = cls.price
+        cls.product.save()
 
     def setUp(self):
         self.client.force_login(self.user)
