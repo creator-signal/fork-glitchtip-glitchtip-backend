@@ -3,6 +3,7 @@ import logging
 import time
 
 from django.conf import settings
+from django.core.cache import cache
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -61,6 +62,8 @@ async def update_subscription(subscription: Subscription):
         await stripe_get(f"customers/{subscription.customer}")
     )
     customer_metadata = customer_obj.metadata
+    if not customer_metadata:
+        return
     organization_id = int(
         customer_metadata.get(
             "organization_id", customer_metadata.get("djstripe_subscriber")
@@ -68,6 +71,13 @@ async def update_subscription(subscription: Subscription):
     )
     if not organization_id:
         return
+
+    # Check region, is it this region or should it be forwarded
+    region = customer_metadata.get("region")
+    if region != settings.STRIPE_REGION:
+        domain = settings.STRIPE_REGION.get(region)
+        # Forward entire request
+
     organization = await Organization.objects.filter(id=organization_id).afirst()
     if not organization:
         return
@@ -132,6 +142,10 @@ async def stripe_webhook_view(request: HttpRequest):
     except ValidationError as e:
         logger.warning("Invalid JSON payload in Stripe webhook.", exc_info=e)
         return HttpResponse(status=200)
+
+    if idempotency_key := event.request.idempotency_key:
+        if cache.get_or_set("stripe" + idempotency_key, True, 60):
+            return HttpResponse(status=200)
 
     if event.type in ["product.updated", "product.created"]:
         await update_product(event.data.object)
