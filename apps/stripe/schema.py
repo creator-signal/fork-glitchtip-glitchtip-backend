@@ -103,8 +103,8 @@ class EventData(BaseModel):
 
 
 class StripeEventRequest(BaseModel):
-    id: str | None
-    idempotency_key: str | None
+    id: str | None = None
+    idempotency_key: str | None = None
 
 
 class StripeEvent(BaseModel):

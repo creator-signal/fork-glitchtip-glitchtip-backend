@@ -2,6 +2,7 @@ import hmac
 import logging
 import time
 
+import aiohttp
 from django.conf import settings
 from django.core.cache import cache
 from django.http import (
@@ -57,7 +58,7 @@ async def update_price(price: Price):
     )
 
 
-async def update_subscription(subscription: Subscription):
+async def update_subscription(subscription: Subscription, request: HttpRequest):
     customer_obj = Customer.model_validate_json(
         await stripe_get(f"customers/{subscription.customer}")
     )
@@ -73,10 +74,19 @@ async def update_subscription(subscription: Subscription):
         return
 
     # Check region, is it this region or should it be forwarded
-    region = customer_metadata.get("region")
+    region = customer_metadata.get("region", "")
     if region != settings.STRIPE_REGION:
-        domain = settings.STRIPE_REGION.get(region)
-        # Forward entire request
+        forward_url = settings.STRIPE_REGION_DOMAINS.get(region)
+        headers = {
+            "Stripe-Signature": request.headers.get("Stripe-Signature"),
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                forward_url, data=request.body, headers=headers, ssl=True
+            ) as response:
+                await response.read()
+        return
 
     organization = await Organization.objects.filter(id=organization_id).afirst()
     if not organization:
@@ -110,7 +120,7 @@ async def update_subscription(subscription: Subscription):
 
 @csrf_exempt
 @require_POST
-async def stripe_webhook_view(request: HttpRequest):
+async def stripe_webhook_view(request: HttpRequest, event_type: str | None = None):
     """
     Handles Stripe webhook events.
 
@@ -125,7 +135,7 @@ async def stripe_webhook_view(request: HttpRequest):
         return HttpResponseForbidden("Missing signature header")
 
     try:
-        if not verify_stripe_signature(payload, sig_header):
+        if not verify_stripe_signature(payload, sig_header, event_type):
             logger.warning("Stripe webhook signature verification failed.")
             return HttpResponseForbidden("Invalid signature")
     except ValueError as e:
@@ -144,7 +154,7 @@ async def stripe_webhook_view(request: HttpRequest):
         return HttpResponse(status=200)
 
     if idempotency_key := event.request.idempotency_key:
-        if cache.get_or_set("stripe" + idempotency_key, True, 60):
+        if not cache.add("stripe" + idempotency_key, None, 60):
             return HttpResponse(status=200)
 
     if event.type in ["product.updated", "product.created"]:
@@ -153,7 +163,7 @@ async def stripe_webhook_view(request: HttpRequest):
         "customer.subscription.updated",
         "customer.subscription.created",
     ]:
-        await update_subscription(event.data.object)
+        await update_subscription(event.data.object, request)
     elif event.type in ["price.updated", "price.created"]:
         await update_price(event.data.object)
     else:
@@ -162,7 +172,7 @@ async def stripe_webhook_view(request: HttpRequest):
     return HttpResponse(status=200)
 
 
-def verify_stripe_signature(payload, sig_header):
+def verify_stripe_signature(payload, sig_header, event_type: str):
     """Verifies the Stripe webhook signature.
 
     Args:
@@ -175,7 +185,11 @@ def verify_stripe_signature(payload, sig_header):
         ValueError: if the signature header is malformed.
     """
 
-    webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
+    webhook_secret = (
+        settings.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION
+        if event_type == "subscription"
+        else settings.STRIPE_WEBHOOK_SECRET
+    )
     if not webhook_secret:
         logger.error("STRIPE_WEBHOOK_SECRET not configured in settings.")
         #  Return False/raise exception based on desired behavior (security vs. failing fast).
