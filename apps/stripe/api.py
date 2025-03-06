@@ -77,6 +77,19 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: StripeSubscriptionSchema
 
 
+class StripeSessionSchema(CamelSchema):
+    id: str
+
+
+# async def _aget_organization_or_404(organization_slug, user_id):
+#     return await aget_object_or_404(
+#         Organization.objects.select_related("owner__organization_user__user"),
+#         slug=organization_slug,
+#         organization_users__role=OrganizationUserRole.OWNER,
+#         organization_users__user=user_id,
+#     )
+
+
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
     return [
@@ -106,7 +119,8 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
 
 
 @router.post(
-    "organizations/{slug:organization_slug}/create-stripe-subscription-checkout/"
+    "organizations/{slug:organization_slug}/create-stripe-subscription-checkout/",
+    response=StripeSessionSchema,
 )
 async def create_stripe_session(
     request: AuthHttpRequest, organization_slug: str, payload: PriceIDSchema
@@ -132,13 +146,16 @@ async def create_stripe_session(
     return await create_session(price_id, customer_id, organization_slug)
 
 
-@router.post("organizations/{slug:organization_slug}/create-billing-portal/")
+@router.post(
+    "organizations/{slug:organization_slug}/create-billing-portal/",
+    response=StripeSessionSchema,
+)
 async def stripe_billing_portal_session(
     request: AuthHttpRequest, organization_slug: str
 ):
     """See https://stripe.com/docs/billing/subscriptions/integrating-self-serve-portal"""
     organization = await aget_object_or_404(
-        Organization,
+        Organization.objects.select_related("owner__organization_user__user"),
         slug=organization_slug,
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
@@ -154,7 +171,7 @@ async def stripe_billing_portal_session(
 @router.post("subscriptions/", response=CreateSubscriptionResponse, by_alias=True)
 async def stripe_create_subscription(request: AuthHttpRequest, payload: SubscriptionIn):
     organization = await aget_object_or_404(
-        Organization,
+        Organization.objects.select_related("owner__organization_user__user"),
         id=payload.organization,
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,

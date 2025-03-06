@@ -123,9 +123,9 @@ async def list_products() -> AsyncGenerator[list[ProductExpandedPrice], None]:
         yield page
 
 
-async def list_subscriptions() -> AsyncGenerator[
-    list[SubscriptionExpandCustomer], None
-]:
+async def list_subscriptions() -> (
+    AsyncGenerator[list[SubscriptionExpandCustomer], None]
+):
     """Yield each subscription with associated price and customer"""
     params = {"expand": ["data.customer"]}
     async for page in _paginated_stripe_get(
@@ -150,11 +150,9 @@ async def create_customer(organization: Organization) -> Customer:
         {
             "name": organization.name,
             "email": organization.email,
-            "metadata": {
-                "organization_id": organization.id,
-                "organization_slug": organization.slug,
-                "region": settings.STRIPE_REGION,
-            },
+            "metadata[organization_id]": organization.id,
+            "metadata[organization_slug]": organization.slug,
+            "metadata[region]": settings.STRIPE_REGION,
         },
     )
     customer = Customer.model_validate_json(response)
@@ -209,5 +207,5 @@ async def create_portal_session(customer_id: str, organization_slug: str):
 
 async def create_subscription(customer: str, price: str) -> Subscription:
     params = {"customer": customer, "items": [{"price": price}]}
-    response = await stripe_post("/subscriptions", params)
+    response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
