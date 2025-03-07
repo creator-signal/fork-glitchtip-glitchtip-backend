@@ -64,22 +64,35 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
     )
     customer_metadata = customer_obj.metadata
     if not customer_metadata:
+        logger.warning(f"Customer {customer_obj.id} has no metadata")
         return
-    organization_id = int(
-        customer_metadata.get(
-            "organization_id", customer_metadata.get("djstripe_subscriber")
+    try:
+        organization_id = int(
+            customer_metadata.get(
+                "organization_id", customer_metadata.get("djstripe_subscriber")
+            )
         )
-    )
+    except TypeError:
+        logger.warning(
+            f"Customer {customer_obj.id} has no organization_id", exc_info=True
+        )
+        return
     if not organization_id:
         return
 
     # Check region, is it this region or should it be forwarded
     region = customer_metadata.get("region", "")
     if region != settings.STRIPE_REGION:
-        forward_url = settings.STRIPE_REGION_DOMAINS.get(region)
+        if from_region := request.headers.get("From-Region"):
+            logger.warning(
+                f"Received webhook from region {from_region} but server is region {settings.STRIPE_REGION}"
+            )
+            return
+        forward_url = settings.STRIPE_REGION_DOMAINS.get(region) + request.path
         headers = {
             "Stripe-Signature": request.headers.get("Stripe-Signature"),
             "Content-Type": "application/json",
+            "From-Region": settings.STRIPE_REGION,
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -127,7 +140,6 @@ async def stripe_webhook_view(request: HttpRequest, event_type: str | None = Non
     This view verifies the webhook signature using the raw request body and the
     Stripe webhook secret.  It then processes the event based on its type.
     """
-
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
     if not sig_header:
