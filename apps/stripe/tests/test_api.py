@@ -43,7 +43,7 @@ class StripeAPITestCase(TestCase):
     @patch("apps.stripe.api.create_session")
     def test_create_stripe_session(self, mock_create_session):
         url = reverse("api:create_stripe_session", args=[self.organization.slug])
-        mock_create_session.return_value = {}
+        mock_create_session.return_value = {"id": "test"}
         res = self.client.post(
             url, {"price": self.price.stripe_id}, content_type="application/json"
         )
@@ -51,7 +51,7 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
     def test_manage_billing(self, mock_create_portal_session):
-        mock_create_portal_session.return_value = {}
+        mock_create_portal_session.return_value = {"id": "test"}
         url = reverse(
             "api:stripe_billing_portal_session", args=[self.organization.slug]
         )

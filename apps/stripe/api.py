@@ -188,10 +188,11 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         organization=organization, is_active=True
     ).aexists():
         return JsonResponse(
-            {"detail": "Customer already has subscription"}, status_code=400
+            {"detail": "Customer already has subscription"}, status=400
         )
     subscription_resp = await create_subscription(customer_id, price.stripe_id)
     subscription = await StripeSubscription.objects.acreate(
+        stripe_id=subscription_resp.id,
         is_active=True,
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),

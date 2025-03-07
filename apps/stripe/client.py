@@ -166,8 +166,8 @@ async def create_session(
 ) -> Session:
     domain = settings.GLITCHTIP_URL.geturl()
     params = {
-        "payment_method_types": ["card"],
-        "line_items": [
+        "payment_method_types": "card",
+        "line_items[]": [
             {
                 "price": price_id,
                 "quantity": 1,
@@ -175,13 +175,10 @@ async def create_session(
         ],
         "mode": "subscription",
         "customer": customer_id,
-        "automatic_tax": {
-            "enabled": True,
-        },
-        "customer_update": {"address": "auto", "name": "auto"},
-        "tax_id_collection": {
-            "enabled": True,
-        },
+        "automatic_tax[enabled]": True,
+        "customer_update[address]": "auto",
+        "customer_update[name]": "auto",
+        "tax_id_collection[enabled]": True,
         "success_url": domain
         + "/"
         + organization_slug
@@ -206,6 +203,6 @@ async def create_portal_session(customer_id: str, organization_slug: str):
 
 
 async def create_subscription(customer: str, price: str) -> Subscription:
-    params = {"customer": customer, "items": [{"price": price}]}
+    params = {"customer": customer, "items[][price]":  price}
     response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
