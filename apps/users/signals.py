@@ -23,6 +23,7 @@ def add_user_to_socialapp_organization(request, user, **kwargs):
                 "provider", flat=True
             )
         )
+        .exclude(organizationsocialapp=None)
         .select_related("organizationsocialapp__organization")
         .prefetch_related(
             Prefetch(
