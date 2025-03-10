@@ -116,7 +116,7 @@ class StripeEvent(BaseModel):
 
 class AutomaticTax(BaseModel):
     enabled: bool
-    liability: str | None = None
+    liability: dict | None = None
     status: str | None = None
 
 
@@ -168,8 +168,8 @@ class Session(BaseModel):
     custom_fields: list
     custom_text: CustomText
     customer: str | None = None
-    customer_creation: str
-    customer_details: str | None = None
+    customer_creation: str | None
+    customer_details: dict | None = None
     customer_email: str | None = None
     expires_at: int
     invoice: str | None = None
