@@ -22,6 +22,7 @@ class OrganizationInSchema(CamelSchema, ModelSchema):
 
 
 class OrganizationSchema(OrganizationInSchema, ModelSchema):
+    id: str
     date_created: datetime = Field(validation_alias="created")
     status: dict[str, str] = {"id": "active", "name": "active"}
     avatar: dict[str, str | None] = {"avatarType": "", "avatarUuid": None}
@@ -30,12 +31,15 @@ class OrganizationSchema(OrganizationInSchema, ModelSchema):
 
     class Meta(OrganizationInSchema.Meta):
         fields = [
-            "id",
             "name",
             "slug",
             "is_accepting_events",
             "event_throttle_rate",
         ]
+
+    @staticmethod
+    def resolve_id(obj):
+        return str(obj.id)
 
 
 OrgRole = Literal["member", "admin", "manager", "owner"]
