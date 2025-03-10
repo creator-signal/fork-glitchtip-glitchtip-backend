@@ -61,6 +61,7 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_subscription")
     def test_stripe_create_subscription(self, mock_create_subscription):
+        mock_create_subscription.return_value.id = "test"
         url = reverse("api:stripe_create_subscription")
         res = self.client.post(
             url,
