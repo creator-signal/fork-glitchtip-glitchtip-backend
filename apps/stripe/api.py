@@ -7,6 +7,7 @@ from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
+from .constants import SubscriptionStatus
 from .client import (
     create_customer,
     create_portal_session,
@@ -59,7 +60,7 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
 
     class Meta:
         model = StripeSubscription
-        fields = ["created", "current_period_start", "current_period_end"]
+        fields = ["created", "current_period_start", "current_period_end", "status"]
 
     @staticmethod
     def resolve_price(obj: StripeSubscription):
@@ -106,7 +107,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
         StripeSubscription.objects.filter(
             organization__users=request.auth.user_id,
             organization__slug=organization_slug,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
         )
         .select_related("price__product")
         .order_by("-created")
@@ -181,7 +182,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         customer = await create_customer(organization)
         customer_id = customer.id
     if await StripeSubscription.objects.filter(
-        organization=organization, is_active=True
+        organization=organization, status=SubscriptionStatus.ACTIVE
     ).aexists():
         return JsonResponse(
             {"detail": "Customer already has subscription"}, status=400
@@ -189,7 +190,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     subscription_resp = await create_subscription(customer_id, price.stripe_id)
     subscription = await StripeSubscription.objects.acreate(
         stripe_id=subscription_resp.id,
-        is_active=True,
+        status=SubscriptionStatus.ACTIVE,
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),
         current_period_end=unix_to_datetime(subscription_resp.current_period_end),
