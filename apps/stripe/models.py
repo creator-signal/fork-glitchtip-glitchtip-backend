@@ -7,6 +7,7 @@ from django.db.models.expressions import OuterRef, Subquery
 from apps.organizations_ext.models import Organization
 
 from .client import list_prices, list_products, list_subscriptions
+from .constants import SubscriptionStatus
 from .utils import unix_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -127,13 +128,15 @@ class StripePrice(StripeModel):
 
 
 class StripeSubscription(StripeModel):
-    is_active = models.BooleanField()
     created = models.DateTimeField()
     current_period_start = models.DateTimeField()
     current_period_end = models.DateTimeField()
     price = models.ForeignKey(StripePrice, on_delete=models.RESTRICT)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.SET_NULL, null=True
+    )
+    status = models.CharField(
+        max_length=18, choices=SubscriptionStatus.choices, null=True, db_index=True
     )
 
     def __str__(self):
@@ -142,7 +145,9 @@ class StripeSubscription(StripeModel):
     @classmethod
     async def get_primary_subscription(cls, organization: Organization):
         return (
-            await cls.objects.filter(organization=organization, is_active=True)
+            await cls.objects.filter(
+                organization=organization, status=SubscriptionStatus.ACTIVE
+            )
             .order_by("-price__product__events", "-created")
             .afirst()
         )
@@ -153,7 +158,9 @@ class StripeSubscription(StripeModel):
     ):
         # This subquery finds the primary subscription ID for each organization.
         primary_subscription_subquery = (
-            cls.objects.filter(organization_id=OuterRef("pk"), is_active=True)
+            cls.objects.filter(
+                organization_id=OuterRef("pk"), status=SubscriptionStatus.ACTIVE
+            )
             .order_by("-price__product__events", "-created")
             .values("pk")[:1]
         )
@@ -240,7 +247,7 @@ class StripeSubscription(StripeModel):
                             ),
                             price_id=price_id,
                             organization_id=organization_id,
-                            is_active=subscription.status == "active",
+                            status=subscription.status,
                         )
                     )
 
@@ -253,7 +260,7 @@ class StripeSubscription(StripeModel):
                     "current_period_end",
                     "price_id",
                     "organization_id",
-                    "is_active",
+                    "status",
                 ],
                 unique_fields=["stripe_id"],
             )

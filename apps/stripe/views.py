@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from apps.organizations_ext.models import Organization
 
 from .client import stripe_get
+from .constants import SubscriptionStatus
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import unix_to_datetime
@@ -115,10 +116,10 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             "current_period_end": unix_to_datetime(subscription.current_period_end),
             "price_id": price_id,
             "organization_id": organization.id,
-            "is_active": subscription.status == "active",
+            "status": subscription.status,
         },
     )
-    if stripe_subscription.is_active:
+    if stripe_subscription.status is SubscriptionStatus.ACTIVE:
         primary_subscription = await StripeSubscription.get_primary_subscription(
             organization
         )

@@ -7,6 +7,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from apps.organizations_ext.models import Organization
+from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripePrice, StripeProduct, StripeSubscription
 from apps.stripe.views import stripe_webhook_view
 
@@ -305,4 +306,4 @@ class TestStripeWebhookView(TestCase):
 
         # 5. Verify the StripeSubscription was created.
         subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
-        self.assertTrue(subscription.is_active)
+        self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)

@@ -8,6 +8,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripeSubscription
 
 
@@ -34,7 +35,7 @@ class StripeAPITestCase(TestCase):
 
     def test_get_stripe_subscription(self):
         sub = baker.make(
-            "stripe.StripeSubscription", organization=self.organization, is_active=True
+            "stripe.StripeSubscription", organization=self.organization, status=SubscriptionStatus.ACTIVE
         )
         url = reverse("api:get_stripe_subscription", args=[self.organization.slug])
         res = self.client.get(url)
@@ -73,25 +74,25 @@ class StripeAPITestCase(TestCase):
 
     def test_events_count(self):
         # Ensure we don't filter on any unrelated subscription
-        baker.make("stripe.StripeSubscription", is_active=True)
+        baker.make("stripe.StripeSubscription", status=SubscriptionStatus.ACTIVE)
         # Create a few subscriptions, but only one is active
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=False,
+            status=SubscriptionStatus.CANCELED
         )
         # Active subscription has a set time period to match events
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
             current_period_start=timezone.make_aware(datetime(2020, 1, 2)),
             current_period_end=timezone.make_aware(datetime(2020, 2, 2)),
         )
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=False,
+            status=SubscriptionStatus.CANCELED,
         )
         url = reverse("api:subscription_events_count", args=[self.organization.slug])
         with freeze_time(datetime(2020, 3, 1)):

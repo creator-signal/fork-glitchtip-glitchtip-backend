@@ -44,9 +44,9 @@ class StripeSubscriptionAdmin(StripeBaseAdmin):
         "price__product",
         "current_period_start",
         "current_period_end",
-        "is_active",
+        "status",
     ]
-    list_filter = ["is_active", "price__product"]
+    list_filter = ["status", "price__product"]
 
 
 if settings.BILLING_ENABLED:
