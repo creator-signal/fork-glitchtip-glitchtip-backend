@@ -81,15 +81,6 @@ class StripeSessionSchema(CamelSchema):
     id: str
 
 
-# async def _aget_organization_or_404(organization_slug, user_id):
-#     return await aget_object_or_404(
-#         Organization.objects.select_related("owner__organization_user__user"),
-#         slug=organization_slug,
-#         organization_users__role=OrganizationUserRole.OWNER,
-#         organization_users__user=user_id,
-#     )
-
-
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
     return [
