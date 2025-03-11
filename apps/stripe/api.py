@@ -55,10 +55,15 @@ class StripeProductExpandedPriceSchema(StripeIDSchema, ModelSchema):
 
 class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     product: StripeProductSchema
+    price: StripeNestedPriceSchema
 
     class Meta:
         model = StripeSubscription
         fields = ["created", "current_period_start", "current_period_end"]
+
+    @staticmethod
+    def resolve_price(obj: StripeSubscription):
+        return obj.price
 
     @staticmethod
     def resolve_product(obj: StripeSubscription):
