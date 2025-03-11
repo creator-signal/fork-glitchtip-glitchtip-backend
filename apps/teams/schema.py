@@ -55,7 +55,6 @@ class ProjectTeamSchema(ProjectSchema):
 
 # Depends on teams, thus part of the teams app
 class OrganizationDetailSchema(OrganizationSchema, ModelSchema):
-    id: int
     projects: list[ProjectTeamSchema]
     teams: list[TeamSchema]
 

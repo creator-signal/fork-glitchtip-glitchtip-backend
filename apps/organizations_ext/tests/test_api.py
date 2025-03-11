@@ -22,6 +22,7 @@ class OrganizationsAPITestCase(TestCase):
         res = self.client.get(self.url)
         self.assertContains(res, self.organization.slug)
         self.assertNotContains(res, not_my_organization.slug)
+        self.assertIsInstance(res.json()[0]["id"], str)
         self.assertFalse(
             "teams" in res.json()[0].keys(), "List view shouldn't contain teams"
         )
@@ -31,6 +32,7 @@ class OrganizationsAPITestCase(TestCase):
         team = baker.make("teams.Team", organization=self.organization)
         url = reverse("api:get_organization", args=[self.organization.slug])
         res = self.client.get(url)
+        self.assertIsInstance(res.json()["id"], str)
         self.assertContains(res, self.organization.name)
         self.assertContains(res, project.name)
         data = res.json()
