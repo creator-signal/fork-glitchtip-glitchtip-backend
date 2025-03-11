@@ -6,8 +6,8 @@ from django.db.models.expressions import OuterRef, Subquery
 
 from apps.organizations_ext.models import Organization
 
-from .constants import SubscriptionStatus
 from .client import list_prices, list_products, list_subscriptions
+from .constants import SubscriptionStatus
 from .utils import unix_to_datetime
 
 logger = logging.getLogger(__name__)

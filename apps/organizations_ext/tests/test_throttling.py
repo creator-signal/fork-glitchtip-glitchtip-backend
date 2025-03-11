@@ -7,8 +7,8 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.stripe.models import StripeSubscription
 from apps.stripe.constants import SubscriptionStatus
+from apps.stripe.models import StripeSubscription
 
 from ..models import Organization
 from ..tasks import (

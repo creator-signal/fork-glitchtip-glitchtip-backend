@@ -17,8 +17,8 @@ from pydantic import ValidationError
 
 from apps.organizations_ext.models import Organization
 
-from .constants import SubscriptionStatus
 from .client import stripe_get
+from .constants import SubscriptionStatus
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import unix_to_datetime
