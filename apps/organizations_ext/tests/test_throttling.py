@@ -7,6 +7,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripeSubscription
 
 from ..models import Organization
@@ -28,7 +29,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
             "stripe.StripeSubscription",
             organization=cls.organization,
             price=cls.price,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
             current_period_end=timezone.now() + timedelta(hours=1),
         )
         cls.organization.stripe_primary_subscription = cls.subscription
@@ -137,7 +138,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
             "stripe.StripeSubscription",
             organization=self.organization,
             price=self.price,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
             current_period_end=timezone.now() + timedelta(hours=1),
         )
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
@@ -148,7 +149,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.assertEqual(self.organization.event_throttle_rate, 0)
 
         # Cancel plan
-        subscription.is_active = False
+        subscription.status = SubscriptionStatus.CANCELED
         subscription.save()
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
             {self.organization.id}
@@ -162,7 +163,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
             "stripe.StripeSubscription",
             organization=self.organization,
             price=self.price,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
             current_period_end=timezone.now() + timedelta(hours=1),
         )
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(

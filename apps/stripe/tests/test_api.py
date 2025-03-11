@@ -8,6 +8,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripeSubscription
 
 
@@ -21,6 +22,8 @@ class StripeAPITestCase(TestCase):
         cls.org_user = cls.organization.add_user(cls.user)
         cls.product = baker.make("stripe.StripeProduct", is_public=True, events=5)
         cls.price = baker.make("stripe.StripePrice", product=cls.product, price=0)
+        cls.product.default_price = cls.price
+        cls.product.save()
 
     def setUp(self):
         self.client.force_login(self.user)
@@ -32,7 +35,7 @@ class StripeAPITestCase(TestCase):
 
     def test_get_stripe_subscription(self):
         sub = baker.make(
-            "stripe.StripeSubscription", organization=self.organization, is_active=True
+            "stripe.StripeSubscription", organization=self.organization, status=SubscriptionStatus.ACTIVE
         )
         url = reverse("api:get_stripe_subscription", args=[self.organization.slug])
         res = self.client.get(url)
@@ -41,7 +44,7 @@ class StripeAPITestCase(TestCase):
     @patch("apps.stripe.api.create_session")
     def test_create_stripe_session(self, mock_create_session):
         url = reverse("api:create_stripe_session", args=[self.organization.slug])
-        mock_create_session.return_value = {}
+        mock_create_session.return_value = {"id": "test"}
         res = self.client.post(
             url, {"price": self.price.stripe_id}, content_type="application/json"
         )
@@ -49,7 +52,7 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
     def test_manage_billing(self, mock_create_portal_session):
-        mock_create_portal_session.return_value = {}
+        mock_create_portal_session.return_value = {"id": "test"}
         url = reverse(
             "api:stripe_billing_portal_session", args=[self.organization.slug]
         )
@@ -59,6 +62,7 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_subscription")
     def test_stripe_create_subscription(self, mock_create_subscription):
+        mock_create_subscription.return_value.id = "test"
         url = reverse("api:stripe_create_subscription")
         res = self.client.post(
             url,
@@ -70,25 +74,25 @@ class StripeAPITestCase(TestCase):
 
     def test_events_count(self):
         # Ensure we don't filter on any unrelated subscription
-        baker.make("stripe.StripeSubscription", is_active=True)
+        baker.make("stripe.StripeSubscription", status=SubscriptionStatus.ACTIVE)
         # Create a few subscriptions, but only one is active
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=False,
+            status=SubscriptionStatus.CANCELED
         )
         # Active subscription has a set time period to match events
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=True,
+            status=SubscriptionStatus.ACTIVE,
             current_period_start=timezone.make_aware(datetime(2020, 1, 2)),
             current_period_end=timezone.make_aware(datetime(2020, 2, 2)),
         )
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            is_active=False,
+            status=SubscriptionStatus.CANCELED,
         )
         url = reverse("api:subscription_events_count", args=[self.organization.slug])
         with freeze_time(datetime(2020, 3, 1)):

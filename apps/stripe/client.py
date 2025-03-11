@@ -123,9 +123,9 @@ async def list_products() -> AsyncGenerator[list[ProductExpandedPrice], None]:
         yield page
 
 
-async def list_subscriptions() -> AsyncGenerator[
-    list[SubscriptionExpandCustomer], None
-]:
+async def list_subscriptions() -> (
+    AsyncGenerator[list[SubscriptionExpandCustomer], None]
+):
     """Yield each subscription with associated price and customer"""
     params = {"expand": ["data.customer"]}
     async for page in _paginated_stripe_get(
@@ -150,11 +150,9 @@ async def create_customer(organization: Organization) -> Customer:
         {
             "name": organization.name,
             "email": organization.email,
-            "metadata": {
-                "organization_id": organization.id,
-                "organization_slug": organization.slug,
-                "region": settings.STRIPE_REGION,
-            },
+            "metadata[organization_id]": organization.id,
+            "metadata[organization_slug]": organization.slug,
+            "metadata[region]": settings.STRIPE_REGION,
         },
     )
     customer = Customer.model_validate_json(response)
@@ -168,29 +166,22 @@ async def create_session(
 ) -> Session:
     domain = settings.GLITCHTIP_URL.geturl()
     params = {
-        "payment_method_types": ["card"],
-        "line_items": [
-            {
-                "price": price_id,
-                "quantity": 1,
-            }
-        ],
+        "payment_method_types[]": "card",
+        "line_items[][price]": price_id,
+        "line_items[][quantity]": 1,
         "mode": "subscription",
         "customer": customer_id,
-        "automatic_tax": {
-            "enabled": True,
-        },
-        "customer_update": {"address": "auto", "name": "auto"},
-        "tax_id_collection": {
-            "enabled": True,
-        },
+        "automatic_tax[enabled]": True,
+        "customer_update[address]": "auto",
+        "customer_update[name]": "auto",
+        "tax_id_collection[enabled]": True,
         "success_url": domain
         + "/"
         + organization_slug
         + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
         "cancel_url": domain + "",
     }
-    response = await stripe_post("/checkout/sessions", params)
+    response = await stripe_post("checkout/sessions", params)
     return Session.model_validate_json(response)
 
 
@@ -203,11 +194,11 @@ async def create_portal_session(customer_id: str, organization_slug: str):
         + organization_slug
         + "/settings/subscription?billing_portal_redirect=true",
     }
-    response = await stripe_post("/billing_portal/sessions", params)
+    response = await stripe_post("billing_portal/sessions", params)
     return PortalSession.model_validate_json(response)
 
 
 async def create_subscription(customer: str, price: str) -> Subscription:
-    params = {"customer": customer, "items": [{"price": price}]}
-    response = await stripe_post("/subscriptions", params)
+    params = {"customer": customer, "items[][price]": price}
+    response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
