@@ -102,6 +102,11 @@ class EventData(BaseModel):
     previous_attributes: dict | None = None
 
 
+class StripeEventRequest(BaseModel):
+    id: str | None = None
+    idempotency_key: str | None = None
+
+
 class StripeEvent(BaseModel):
     id: str
     object: str = "event"
@@ -110,7 +115,7 @@ class StripeEvent(BaseModel):
     data: EventData
     livemode: bool
     pending_webhooks: int
-    request: dict
+    request: StripeEventRequest
     type: str
 
 
