@@ -112,6 +112,8 @@ class StripeTestCase(TestCase):
                 livemode=False,
                 metadata={},
                 cancel_at_period_end=False,
+                start_date=1678886400,
+                collection_method="charge_automatically"
             )
         ]
 

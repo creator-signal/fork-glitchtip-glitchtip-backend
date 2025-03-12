@@ -13,7 +13,7 @@ from .client import (
     create_session,
     create_subscription,
 )
-from .constants import SubscriptionStatus
+from .constants import CollectionMethod, SubscriptionStatus
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .utils import unix_to_datetime
 
@@ -58,6 +58,8 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     product: StripeProductSchema
     price: StripeNestedPriceSchema
     status: SubscriptionStatus | None
+    collection_method: CollectionMethod
+    start_date: str
 
     class Meta:
         model = StripeSubscription
@@ -70,6 +72,10 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     @staticmethod
     def resolve_product(obj: StripeSubscription):
         return obj.price.product
+
+    @staticmethod
+    def resolve_start_date(obj: StripeSubscription):
+        return obj.start_date.isoformat().replace("+00:00", "Z")
 
 
 class PriceIDSchema(CamelSchema):
@@ -194,6 +200,8 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),
         current_period_end=unix_to_datetime(subscription_resp.current_period_end),
+        start_date=unix_to_datetime(subscription_resp.start_date),
+        collection_method=subscription_resp.collection_method,
         price=price,
         organization=organization,
     )
