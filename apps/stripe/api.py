@@ -1,7 +1,6 @@
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
-from typing import Literal
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
