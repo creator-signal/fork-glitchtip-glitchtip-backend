@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
+from typing import Literal
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
@@ -57,10 +58,11 @@ class StripeProductExpandedPriceSchema(StripeIDSchema, ModelSchema):
 class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     product: StripeProductSchema
     price: StripeNestedPriceSchema
+    status: SubscriptionStatus | None
 
     class Meta:
         model = StripeSubscription
-        fields = ["created", "current_period_start", "current_period_end", "status"]
+        fields = ["created", "current_period_start", "current_period_end"]
 
     @staticmethod
     def resolve_price(obj: StripeSubscription):
@@ -76,7 +78,7 @@ class PriceIDSchema(CamelSchema):
 
 
 class SubscriptionIn(PriceIDSchema):
-    organization: int
+    organization: str
 
 
 class CreateSubscriptionResponse(SubscriptionIn):
@@ -167,9 +169,10 @@ async def stripe_billing_portal_session(
 
 @router.post("subscriptions/", response=CreateSubscriptionResponse, by_alias=True)
 async def stripe_create_subscription(request: AuthHttpRequest, payload: SubscriptionIn):
+    org_id = int(payload.organization)
     organization = await aget_object_or_404(
         Organization.objects.select_related("owner__organization_user__user"),
-        id=payload.organization,
+        id=org_id,
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
     )
@@ -184,9 +187,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     if await StripeSubscription.objects.filter(
         organization=organization, status=SubscriptionStatus.ACTIVE
     ).aexists():
-        return JsonResponse(
-            {"detail": "Customer already has subscription"}, status=400
-        )
+        return JsonResponse({"detail": "Customer already has subscription"}, status=400)
     subscription_resp = await create_subscription(customer_id, price.stripe_id)
     subscription = await StripeSubscription.objects.acreate(
         stripe_id=subscription_resp.id,
@@ -201,7 +202,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     await organization.asave(update_fields=["stripe_primary_subscription"])
     return {
         "price": price.stripe_id,
-        "organization": organization.id,
+        "organization": str(organization.id),
         "subscription": subscription,
     }
 

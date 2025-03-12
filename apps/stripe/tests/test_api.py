@@ -66,7 +66,7 @@ class StripeAPITestCase(TestCase):
         url = reverse("api:stripe_create_subscription")
         res = self.client.post(
             url,
-            {"organization": self.organization.id, "price": self.price.stripe_id},
+            {"organization": str(self.organization.id), "price": self.price.stripe_id},
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
