@@ -635,7 +635,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 with transaction.atomic():
                     issue = Issue.objects.create(
                         project_id=project_id,
-                        search_vector=SearchVector(Value(issue_defaults["title"])),
+                        search_vector=SearchVector(Value(get_search_vector(processing_event))),
                         **issue_defaults,
                     )
                     new_issue_hash = IssueHash.objects.create(
