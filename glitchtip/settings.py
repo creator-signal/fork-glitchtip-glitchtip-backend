@@ -74,6 +74,10 @@ if POD_IP:
 
 ENVIRONMENT = env.str("ENVIRONMENT", None)
 GLITCHTIP_VERSION = env.str("GLITCHTIP_VERSION", "0.0.0-unknown")
+# Multiline, markdown accepted. Example: "[Burke Software's](https://burkesoftware.com) GlitchTip Server"
+GLITCHTIP_INSTANCE_NAME: str | None = None
+if "GLITCHTIP_INSTANCE_NAME" in os.environ:
+    GLITCHTIP_INSTANCE_NAME = env.str("GLITCHTIP_INSTANCE_NAME", None, multiline=True)
 
 # Used in email and DSN generation. Set to full domain such as https://glitchtip.example.com
 default_url = env.str(
