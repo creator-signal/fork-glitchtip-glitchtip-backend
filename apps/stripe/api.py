@@ -98,6 +98,13 @@ class StripePortalSessionSchema(CamelSchema):
     url: str
 
 
+class EventsCountSchema(CamelSchema):
+    event_count: int
+    transaction_event_count: int
+    uptime_check_event_count: int
+    file_size_mb: int
+
+
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
     return [
@@ -218,7 +225,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     }
 
 
-@router.get("subscriptions/{slug:organization_slug}/events_count/")
+@router.get("subscriptions/{slug:organization_slug}/events_count/", response=EventsCountSchema, by_alias=True)
 async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
     org = await aget_object_or_404(
         Organization.objects.with_event_counts(),
@@ -226,8 +233,8 @@ async def subscription_events_count(request: AuthHttpRequest, organization_slug:
         users=request.auth.user_id,
     )
     return {
-        "eventCount": org.issue_event_count,
-        "transactionEventCount": org.transaction_count,
-        "uptimeCheckEventCount": org.uptime_check_event_count,
-        "fileSizeMB": org.file_size,
+        "event_count": org.issue_event_count,
+        "transaction_event_count": org.transaction_count,
+        "uptime_check_event_count": org.uptime_check_event_count,
+        "file_size_mb": org.file_size,
     }
