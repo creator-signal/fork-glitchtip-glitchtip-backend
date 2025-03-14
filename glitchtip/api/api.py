@@ -116,6 +116,7 @@ class SettingsOut(CamelSchema):
     version: str
     server_time_zone: str
     use_new_social_callbacks: bool
+    glitchtip_instance_name: str | None
 
 
 @api.get("settings/", response=SettingsOut, by_alias=True, auth=None)
@@ -158,6 +159,7 @@ async def get_settings(request: HttpRequest):
         "version": settings.GLITCHTIP_VERSION,
         "server_time_zone": settings.TIME_ZONE,
         "use_new_social_callbacks": settings.USE_NEW_SOCIAL_CALLBACKS,
+        "glitchtip_instance_name": settings.GLITCHTIP_INSTANCE_NAME,
     }
 
 
