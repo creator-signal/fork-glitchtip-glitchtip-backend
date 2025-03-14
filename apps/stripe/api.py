@@ -90,8 +90,12 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: StripeSubscriptionSchema
 
 
-class StripeSessionSchema(CamelSchema):
+class StripeCheckoutSessionSchema(CamelSchema):
     id: str
+
+
+class StripePortalSessionSchema(CamelSchema):
+    url: str
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -124,7 +128,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
 
 @router.post(
     "organizations/{slug:organization_slug}/create-stripe-subscription-checkout/",
-    response=StripeSessionSchema,
+    response=StripeCheckoutSessionSchema,
 )
 async def create_stripe_session(
     request: AuthHttpRequest, organization_slug: str, payload: PriceIDSchema
@@ -152,7 +156,7 @@ async def create_stripe_session(
 
 @router.post(
     "organizations/{slug:organization_slug}/create-billing-portal/",
-    response=StripeSessionSchema,
+    response=StripePortalSessionSchema,
 )
 async def stripe_billing_portal_session(
     request: AuthHttpRequest, organization_slug: str
