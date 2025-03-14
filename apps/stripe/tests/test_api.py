@@ -137,7 +137,7 @@ class StripeAPITestCase(TestCase):
             res.json(),
             {
                 "eventCount": 1,
-                "fileSizeMB": 2,
+                "fileSizeMb": 2,
                 "transactionEventCount": 1,
                 "uptimeCheckEventCount": 0,
             },
