@@ -87,7 +87,11 @@ class IssueUpdate:
 
 
 def get_search_vector(event: ProcessingEvent) -> str:
-    return f"{event.title} {event.transaction}"
+    vector = f"{event.title} {event.transaction}"
+    if request := event.event.payload.request:
+        if request.url:
+            vector += f" {request.url}"
+    return vector
 
 
 def update_issues(processing_events: list[ProcessingEvent]):

@@ -403,6 +403,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         file_name = event_data["exception"]["values"][0]["stacktrace"]["frames"][0]["filename"]
         issue_event = IssueEvent.objects.get(pk=event.event_id)
         self.assertIn(file_name, issue_event.issue.search_vector)
+        self.assertIn(event_data["request"]["url"].split("//")[-1], issue_event.issue.search_vector)
 
 
     def test_null_character_event(self):
