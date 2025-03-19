@@ -60,6 +60,7 @@ from .schema import (
     InterchangeTransactionEvent,
     IssueEventSchema,
     SourceMapImage,
+    ValueEventException,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
 
@@ -87,10 +88,32 @@ class IssueUpdate:
 
 
 def get_search_vector(event: ProcessingEvent) -> str:
+    """
+    Get string for postgres search vector. The string must be short to ensure
+    performance.
+    """
     vector = f"{event.title} {event.transaction}"
-    if request := event.event.payload.request:
+    payload = event.event.payload
+    if request := payload.request:
         if request.url:
             vector += f" {request.url}"
+
+    # Get filenames of first three frames from first three stacktraces
+    if isinstance(payload, ErrorIssueEventSchema):
+        if exception := payload.exception:
+            if isinstance(exception, ValueEventException):
+                filenames = [
+                    frame.filename
+                    for value in (
+                        exception.values[:3]
+                        if len(exception.values) > 3
+                        else exception.values
+                    )
+                    if value.stacktrace
+                    for frame in value.stacktrace.frames
+                    if frame.filename
+                ][:3]
+                vector += f" {' '.join(filenames)}"
     return vector
 
 
@@ -639,7 +662,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 with transaction.atomic():
                     issue = Issue.objects.create(
                         project_id=project_id,
-                        search_vector=SearchVector(Value(get_search_vector(processing_event))),
+                        search_vector=SearchVector(
+                            Value(get_search_vector(processing_event))
+                        ),
                         **issue_defaults,
                     )
                     new_issue_hash = IssueHash.objects.create(
