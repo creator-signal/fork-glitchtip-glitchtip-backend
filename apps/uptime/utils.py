@@ -93,9 +93,7 @@ async def fetch(session, monitor):
 
 
 async def fetch_all(monitors):
-    async with aiohttp.ClientSession(
-        headers={"User-Agent": "GlitchTip/" + settings.GLITCHTIP_VERSION}
-    ) as session:
+    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
         results = await asyncio.gather(
             *[fetch(session, monitor) for monitor in monitors], return_exceptions=True
         )

@@ -52,7 +52,7 @@ async def stripe_get(
     if isinstance(params, dict):
         params = param_helper(params)
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
         async with session.get(
             f"{STRIPE_URL}/{endpoint}", headers=HEADERS, params=params
         ) as response:
@@ -66,7 +66,7 @@ async def stripe_get(
 
 async def stripe_post(endpoint: str, data: dict) -> str:
     """Makes POST requests to the Stripe API. Returns response text"""
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
         async with session.post(
             f"{STRIPE_URL}/{endpoint}", headers=HEADERS, data=data
         ) as response:
@@ -123,9 +123,9 @@ async def list_products() -> AsyncGenerator[list[ProductExpandedPrice], None]:
         yield page
 
 
-async def list_subscriptions() -> (
-    AsyncGenerator[list[SubscriptionExpandCustomer], None]
-):
+async def list_subscriptions() -> AsyncGenerator[
+    list[SubscriptionExpandCustomer], None
+]:
     """Yield each subscription with associated price and customer"""
     params = {"expand": ["data.customer"]}
     async for page in _paginated_stripe_get(
