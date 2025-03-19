@@ -95,7 +95,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             "Content-Type": "application/json",
             "From-Region": settings.STRIPE_REGION,
         }
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
             async with session.post(
                 forward_url, data=request.body, headers=headers, ssl=True
             ) as response:

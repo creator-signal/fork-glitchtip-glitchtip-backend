@@ -197,6 +197,14 @@ DEBUG_TOOLBAR_PANELS = [
     # "debug_toolbar.panels.profiling.ProfilingPanel",
 ]
 
+
+# Should GlitchTip trust and use proxy settings from environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
+PROXY_ENV = env.bool("PROXY_ENV", False)
+AIOHTTP_CONFIG = {
+    "headers": {"User-Agent": "GlitchTip/" + GLITCHTIP_VERSION},
+    "trust_env": PROXY_ENV,
+}
+
 # Application definition
 # Conditionally load to workaround unnecessary memory usage in celery/beat
 WEB_INSTALLED_APPS = [
