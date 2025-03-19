@@ -4,12 +4,6 @@ import django.utils.timezone
 from django.db import migrations, models
 
 
-def migrate_active_subscription_statuses(apps, schema_editor):
-    StripeSubscription = apps.get_model("stripe", "StripeSubscription")
-
-    StripeSubscription.objects.filter(is_active=False).update(status="canceled")
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -17,6 +11,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RemoveField(
+            model_name="stripesubscription",
+            name="is_active",
+        ),
         migrations.AddField(
             model_name="stripesubscription",
             name="collection_method",
@@ -53,10 +51,5 @@ class Migration(migrations.Migration):
                 max_length=18,
                 default="active",
             ),
-        ),
-        migrations.RunPython(migrate_active_subscription_statuses),
-        migrations.RemoveField(
-            model_name="stripesubscription",
-            name="is_active",
         ),
     ]

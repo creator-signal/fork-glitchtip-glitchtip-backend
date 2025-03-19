@@ -128,6 +128,10 @@ class Migration(migrations.Migration):
             ),
             preserve_default=False,
         ),
+        migrations.RemoveField(
+            model_name="stripesubscription",
+            name="is_active",
+        ),
         migrations.AddField(
             model_name="stripesubscription",
             name="collection_method",
@@ -164,9 +168,5 @@ class Migration(migrations.Migration):
                 max_length=18,
                 default="canceled",
             ),
-        ),
-        migrations.RemoveField(
-            model_name="stripesubscription",
-            name="is_active",
         ),
     ]
