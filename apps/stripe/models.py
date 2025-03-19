@@ -136,7 +136,10 @@ class StripeSubscription(StripeModel):
         "organizations_ext.Organization", on_delete=models.SET_NULL, null=True
     )
     status = models.CharField(
-        max_length=18, choices=SubscriptionStatus.choices, null=True, db_index=True
+        max_length=18,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.ACTIVE,
+        db_index=True,
     )
     collection_method = models.CharField(
         max_length=20,

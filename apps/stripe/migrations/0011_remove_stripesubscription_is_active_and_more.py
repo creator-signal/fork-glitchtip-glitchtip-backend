@@ -4,31 +4,59 @@ import django.utils.timezone
 from django.db import migrations, models
 
 
+def migrate_active_subscription_statuses(apps, schema_editor):
+    StripeSubscription = apps.get_model("stripe", "StripeSubscription")
+
+    StripeSubscription.objects.filter(is_active=False).update(status="canceled")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('stripe', '0010_remove_stripesubscription_product_and_more'),
+        ("stripe", "0010_remove_stripesubscription_product_and_more"),
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name='stripesubscription',
-            name='is_active',
+        migrations.AddField(
+            model_name="stripesubscription",
+            name="collection_method",
+            field=models.CharField(
+                choices=[
+                    ("charge_automatically", "Charge Automatically"),
+                    ("send_invoice", "Send Invoice"),
+                ],
+                default="charge_automatically",
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='stripesubscription',
-            name='collection_method',
-            field=models.CharField(choices=[('charge_automatically', 'Charge Automatically'), ('send_invoice', 'Send Invoice')], default='charge_automatically', max_length=20),
-        ),
-        migrations.AddField(
-            model_name='stripesubscription',
-            name='start_date',
+            model_name="stripesubscription",
+            name="start_date",
             field=models.DateTimeField(default=django.utils.timezone.now),
             preserve_default=False,
         ),
         migrations.AddField(
-            model_name='stripesubscription',
-            name='status',
-            field=models.CharField(choices=[('incomplete', 'Incomplete'), ('incomplete_expired', 'Incomplete Expired'), ('trialing', 'Trialing'), ('active', 'Active'), ('past_due', 'Past Due'), ('canceled', 'Canceled'), ('unpaid', 'Unpaid'), ('paused', 'Paused')], db_index=True, max_length=18, null=True),
+            model_name="stripesubscription",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("incomplete", "Incomplete"),
+                    ("incomplete_expired", "Incomplete Expired"),
+                    ("trialing", "Trialing"),
+                    ("active", "Active"),
+                    ("past_due", "Past Due"),
+                    ("canceled", "Canceled"),
+                    ("unpaid", "Unpaid"),
+                    ("paused", "Paused"),
+                ],
+                db_index=True,
+                max_length=18,
+                default="active",
+            ),
+        ),
+        migrations.RunPython(migrate_active_subscription_statuses),
+        migrations.RemoveField(
+            model_name="stripesubscription",
+            name="is_active",
         ),
     ]
