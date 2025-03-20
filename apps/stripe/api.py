@@ -59,11 +59,10 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     price: StripeNestedPriceSchema
     status: SubscriptionStatus | None
     collection_method: CollectionMethod
-    start_date: str
 
     class Meta:
         model = StripeSubscription
-        fields = ["created", "current_period_start", "current_period_end"]
+        fields = ["created", "current_period_start", "current_period_end", "start_date"]
 
     @staticmethod
     def resolve_price(obj: StripeSubscription):
@@ -72,10 +71,6 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     @staticmethod
     def resolve_product(obj: StripeSubscription):
         return obj.price.product
-
-    @staticmethod
-    def resolve_start_date(obj: StripeSubscription):
-        return obj.start_date.isoformat().replace("+00:00", "Z")
 
 
 class PriceIDSchema(CamelSchema):
@@ -225,7 +220,11 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     }
 
 
-@router.get("subscriptions/{slug:organization_slug}/events_count/", response=EventsCountSchema, by_alias=True)
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/",
+    response=EventsCountSchema,
+    by_alias=True,
+)
 async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
     org = await aget_object_or_404(
         Organization.objects.with_event_counts(),
