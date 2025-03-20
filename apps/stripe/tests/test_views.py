@@ -260,6 +260,8 @@ class TestStripeWebhookView(TestCase):
                     "livemode": False,
                     "metadata": {},
                     "cancel_at_period_end": False,
+                    "start_date": 1678886400,
+                    "collection_method": "charge_automatically"
                 }
             },
             "api_version": "2022-08-01",

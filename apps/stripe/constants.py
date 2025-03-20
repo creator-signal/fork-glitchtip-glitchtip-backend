@@ -10,3 +10,8 @@ class SubscriptionStatus(models.TextChoices):
     CANCELED = "canceled"
     UNPAID = "unpaid"
     PAUSED = "paused"
+
+
+class CollectionMethod(models.TextChoices):
+    CHARGE_AUTOMATICALLY = "charge_automatically"
+    SEND_INVOICE = "send_invoice"

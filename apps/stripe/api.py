@@ -13,7 +13,7 @@ from .client import (
     create_session,
     create_subscription,
 )
-from .constants import SubscriptionStatus
+from .constants import CollectionMethod, SubscriptionStatus
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .utils import unix_to_datetime
 
@@ -58,10 +58,11 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     product: StripeProductSchema
     price: StripeNestedPriceSchema
     status: SubscriptionStatus | None
+    collection_method: CollectionMethod
 
     class Meta:
         model = StripeSubscription
-        fields = ["created", "current_period_start", "current_period_end"]
+        fields = ["created", "current_period_start", "current_period_end", "start_date"]
 
     @staticmethod
     def resolve_price(obj: StripeSubscription):
@@ -84,8 +85,19 @@ class CreateSubscriptionResponse(SubscriptionIn):
     subscription: StripeSubscriptionSchema
 
 
-class StripeSessionSchema(CamelSchema):
+class StripeCheckoutSessionSchema(CamelSchema):
     id: str
+
+
+class StripePortalSessionSchema(CamelSchema):
+    url: str
+
+
+class EventsCountSchema(CamelSchema):
+    event_count: int
+    transaction_event_count: int
+    uptime_check_event_count: int
+    file_size_mb: int
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -118,7 +130,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
 
 @router.post(
     "organizations/{slug:organization_slug}/create-stripe-subscription-checkout/",
-    response=StripeSessionSchema,
+    response=StripeCheckoutSessionSchema,
 )
 async def create_stripe_session(
     request: AuthHttpRequest, organization_slug: str, payload: PriceIDSchema
@@ -146,7 +158,7 @@ async def create_stripe_session(
 
 @router.post(
     "organizations/{slug:organization_slug}/create-billing-portal/",
-    response=StripeSessionSchema,
+    response=StripePortalSessionSchema,
 )
 async def stripe_billing_portal_session(
     request: AuthHttpRequest, organization_slug: str
@@ -194,6 +206,8 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         created=unix_to_datetime(subscription_resp.created),
         current_period_start=unix_to_datetime(subscription_resp.current_period_start),
         current_period_end=unix_to_datetime(subscription_resp.current_period_end),
+        start_date=unix_to_datetime(subscription_resp.start_date),
+        collection_method=subscription_resp.collection_method,
         price=price,
         organization=organization,
     )
@@ -206,7 +220,11 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     }
 
 
-@router.get("subscriptions/{slug:organization_slug}/events_count/")
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/",
+    response=EventsCountSchema,
+    by_alias=True,
+)
 async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
     org = await aget_object_or_404(
         Organization.objects.with_event_counts(),
@@ -214,8 +232,8 @@ async def subscription_events_count(request: AuthHttpRequest, organization_slug:
         users=request.auth.user_id,
     )
     return {
-        "eventCount": org.issue_event_count,
-        "transactionEventCount": org.transaction_count,
-        "uptimeCheckEventCount": org.uptime_check_event_count,
-        "fileSizeMB": org.file_size,
+        "event_count": org.issue_event_count,
+        "transaction_event_count": org.transaction_count,
+        "uptime_check_event_count": org.uptime_check_event_count,
+        "file_size_mb": org.file_size,
     }

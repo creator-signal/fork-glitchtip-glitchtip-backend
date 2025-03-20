@@ -117,6 +117,8 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             "price_id": price_id,
             "organization_id": organization.id,
             "status": subscription.status,
+            "start_date": unix_to_datetime(subscription.start_date),
+            "collection_method": subscription.collection_method,
         },
     )
     if stripe_subscription.status is SubscriptionStatus.ACTIVE:

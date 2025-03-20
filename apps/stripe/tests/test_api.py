@@ -52,7 +52,7 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
     def test_manage_billing(self, mock_create_portal_session):
-        mock_create_portal_session.return_value = {"id": "test"}
+        mock_create_portal_session.return_value = {"url": "test"}
         url = reverse(
             "api:stripe_billing_portal_session", args=[self.organization.slug]
         )
@@ -63,6 +63,8 @@ class StripeAPITestCase(TestCase):
     @patch("apps.stripe.api.create_subscription")
     def test_stripe_create_subscription(self, mock_create_subscription):
         mock_create_subscription.return_value.id = "test"
+        mock_create_subscription.return_value.start_date = 1681564800
+        mock_create_subscription.return_value.collection_method = "charge_automatically"
         url = reverse("api:stripe_create_subscription")
         res = self.client.post(
             url,
@@ -135,7 +137,7 @@ class StripeAPITestCase(TestCase):
             res.json(),
             {
                 "eventCount": 1,
-                "fileSizeMB": 2,
+                "fileSizeMb": 2,
                 "transactionEventCount": 1,
                 "uptimeCheckEventCount": 0,
             },

@@ -7,7 +7,7 @@ from django.db.models.expressions import OuterRef, Subquery
 from apps.organizations_ext.models import Organization
 
 from .client import list_prices, list_products, list_subscriptions
-from .constants import SubscriptionStatus
+from .constants import CollectionMethod, SubscriptionStatus
 from .utils import unix_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -136,8 +136,17 @@ class StripeSubscription(StripeModel):
         "organizations_ext.Organization", on_delete=models.SET_NULL, null=True
     )
     status = models.CharField(
-        max_length=18, choices=SubscriptionStatus.choices, null=True, db_index=True
+        max_length=18,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.ACTIVE,
+        db_index=True,
     )
+    collection_method = models.CharField(
+        max_length=20,
+        choices=CollectionMethod.choices,
+        default=CollectionMethod.CHARGE_AUTOMATICALLY,
+    )
+    start_date = models.DateTimeField()
 
     def __str__(self):
         return f"{self.stripe_id}"
@@ -248,6 +257,8 @@ class StripeSubscription(StripeModel):
                             price_id=price_id,
                             organization_id=organization_id,
                             status=subscription.status,
+                            start_date=unix_to_datetime(subscription.start_date),
+                            collection_method=subscription.collection_method,
                         )
                     )
 
@@ -261,6 +272,8 @@ class StripeSubscription(StripeModel):
                     "price_id",
                     "organization_id",
                     "status",
+                    "start_date",
+                    "collection_method",
                 ],
                 unique_fields=["stripe_id"],
             )

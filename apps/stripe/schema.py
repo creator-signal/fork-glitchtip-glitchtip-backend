@@ -88,6 +88,8 @@ class Subscription(BaseModel):
     livemode: bool
     metadata: dict[str, str] | None
     cancel_at_period_end: bool
+    start_date: int
+    collection_method: str
 
 
 class SubscriptionExpandCustomer(Subscription):
