@@ -391,6 +391,25 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertTrue(issue)
         self.assertEqual(len(issue.search_vector.split(" ")), 1)
 
+    def test_search_vector_content(self):
+        event_data = generate_event()
+        event = InterchangeIssueEvent(
+            event_id=event_data["event_id"],
+            organization_id=self.organization.id,
+            project_id=self.project.id,
+            payload=ErrorIssueEventSchema(**event_data),
+        )
+        process_issue_events([event])
+        file_name = event_data["exception"]["values"][0]["stacktrace"]["frames"][0][
+            "filename"
+        ]
+        issue_event = IssueEvent.objects.get(pk=event.event_id)
+        self.assertIn(file_name, issue_event.issue.search_vector)
+        self.assertIn(
+            event_data["request"]["url"].split("//")[-1],
+            issue_event.issue.search_vector,
+        )
+
     def test_null_character_event(self):
         """
         Unicode null characters \u0000 are not supported by Postgres JSONB
