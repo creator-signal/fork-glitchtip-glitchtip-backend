@@ -112,7 +112,7 @@ def get_search_vector(event: ProcessingEvent) -> str:
                     if value.stacktrace
                     for frame in value.stacktrace.frames
                     if frame.filename
-                ][:3]
+                ][-3:]
                 vector += f" {' '.join(filenames)}"
     return vector
 
