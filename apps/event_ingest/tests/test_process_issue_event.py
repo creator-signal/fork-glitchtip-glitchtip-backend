@@ -974,3 +974,15 @@ class SentryCompatTestCase(EventIngestTestCase):
         event["message"] = {"message": "lol %d", "params": [1]}
         result = self.submit_event(event)
         self.assertEqual(result.data["logentry"]["formatted"], "lol 1")
+
+    def test_invalid_user(self):
+        """User interface may contain some arbitrary data"""
+        event = generate_event()
+        event["user"] = {"username": {"a": "b"}}
+        result = self.submit_event(event)
+        self.assertEqual(result.data.get("user"), None)
+
+        event = generate_event()
+        event["user"] = {"username": "user", "subscription": {"isActive": True}}
+        result = self.submit_event(event)
+        self.assertEqual(result.data["user"]["username"], "user")

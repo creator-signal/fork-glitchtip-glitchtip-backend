@@ -319,7 +319,7 @@ class IngestIssueEvent(BaseIssueEvent):
     sdk: ClientSDKInfo | None = None
     request: IngestRequest | None = None
     contexts: Contexts | None = None
-    user: EventUser | None = None
+    user: Annotated[EventUser | None, WrapValidator(invalid_to_none)] = None
     debug_meta: DebugMeta | None = None
 
     @field_validator("tags")
