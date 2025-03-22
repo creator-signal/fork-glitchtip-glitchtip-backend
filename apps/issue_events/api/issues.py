@@ -56,7 +56,8 @@ EventStatusEnum = StrEnum("EventStatusEnum", EventStatus.labels)
 
 
 class UpdateIssueSchema(Schema):
-    status: EventStatusEnum
+    status: EventStatusEnum | None = None
+    merge: int | None
 
 
 @router.get(
@@ -302,7 +303,10 @@ async def update_issues(
 ):
     qs = await get_queryset(request, organization_slug=organization_slug)
     qs = filter_issue_list(qs, filters)
-    await qs.aupdate(status=EventStatus.from_string(payload.status))
+    if payload.status:
+        await qs.aupdate(status=EventStatus.from_string(payload.status))
+    if payload.merge:
+        breakpoint()
     return payload
 
 
