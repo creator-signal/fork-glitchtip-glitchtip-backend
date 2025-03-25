@@ -53,7 +53,7 @@ urlpatterns += [
     # These routes belong to the Angular single page app
     re_path(r"^$", index),
     re_path(
-        r"^(auth|login|register|(.*)/issues|(.*)/settings|(.*)/performance|(.*)/projects|(.*)/releases|organizations|profile|(.*)/uptime-monitors|accept|reset-password).*$",
+        r"^(auth|login|register|(.*)/issues|(.*)/settings|(.*)/performance|(.*)/projects|(.*)/releases|organizations|profile|(.*)/uptime-monitors|accept|reset-password|system-info).*$",
         index,
     ),
     path("accept/", include(invitation_backend().get_urls())),
