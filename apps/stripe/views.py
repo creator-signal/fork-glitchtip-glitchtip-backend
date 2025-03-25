@@ -89,17 +89,18 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
                 f"Received webhook from region {from_region} but server is region {settings.STRIPE_REGION}"
             )
             return
-        forward_url = settings.STRIPE_REGION_DOMAINS.get(region) + request.path
-        headers = {
-            "Stripe-Signature": request.headers.get("Stripe-Signature"),
-            "Content-Type": "application/json",
-            "From-Region": settings.STRIPE_REGION,
-        }
-        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.post(
-                forward_url, data=request.body, headers=headers, ssl=True
-            ) as response:
-                await response.read()
+        if forward_region := settings.STRIPE_REGION_DOMAINS.get(region):
+            forward_url = forward_region + request.path
+            headers = {
+                "Stripe-Signature": request.headers.get("Stripe-Signature"),
+                "Content-Type": "application/json",
+                "From-Region": settings.STRIPE_REGION,
+            }
+            async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+                async with session.post(
+                    forward_url, data=request.body, headers=headers, ssl=True
+                ) as response:
+                    await response.read()
         return
 
     organization = await Organization.objects.filter(id=organization_id).afirst()
