@@ -22,7 +22,7 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 
 from ..constants import EventStatus, LogLevel
-from ..models import Issue
+from ..models import Issue, IssueEvent, IssueHash
 from ..schema import IssueDetailSchema, IssueSchema, IssueTagSchema
 from ..tasks import delete_issue_task
 from . import router
@@ -306,7 +306,19 @@ async def update_issues(
     if payload.status:
         await qs.aupdate(status=EventStatus.from_string(payload.status))
     if payload.merge:
-        breakpoint()
+        issue = await qs.order_by("-id").afirst()
+        if not issue:
+            return payload
+        remove_qs = qs.exclude(id=issue.id)
+        await remove_qs.aupdate(is_deleted=True)
+        await IssueHash.objects.filter(issue__in=remove_qs).aupdate(issue=issue)
+        # Switch only the first 1000 events
+        event_ids = []
+        async for event_id in IssueEvent.objects.filter(
+            issue__in=remove_qs
+        ).values_list("id", flat=True)[:1000]:
+            event_ids.append(event_id)
+        await IssueEvent.objects.filter(id__in=event_ids).aupdate(issue=issue)
     return payload
 
 
