@@ -18,7 +18,7 @@ class TestStripeWebhookView(TestCase):
         self.url = reverse("stripe_webhook")
         self.webhook_secret = "test_webhook_secret"  # Use a test secret
 
-    def generateStripeRequest(self, payload):
+    def generate_stripe_request(self, payload):
         payload_bytes = json.dumps(payload).encode("utf-8")
         timestamp = int(time.time())
         signed_payload = f"{timestamp}.{payload_bytes.decode('utf-8')}"
