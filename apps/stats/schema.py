@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from ninja import Schema
 from ninja.errors import ValidationError
@@ -9,7 +9,7 @@ from pydantic import Field, model_validator
 class StatsV2Schema(Schema):
     category: Literal["error", "transaction"]
     interval: Literal["1d", "1h", "1m"] | None = "1h"
-    project: list[int] | None = Field(default=None, ge=-1)
+    project: list[Annotated[int, Field(ge=-1)]] | None = None
     field: Literal["sum(quantity)", "sum(times_seen)"]
     start: datetime
     end: datetime
