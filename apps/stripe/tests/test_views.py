@@ -75,7 +75,7 @@ class TestStripeWebhookView(TestCase):
 
         # Create a valid payload with an unsupported event type
         payload = {"type": "some.unsupported.event", "data": {"object": {}}}
-        request = self.generateStripeRequest(payload)
+        request = self.generate_stripe_request(payload)
         with patch("apps.stripe.views.logger") as mock_logger:
             response = await stripe_webhook_view(request)
             self.assertEqual(response.status_code, 200)
@@ -118,7 +118,7 @@ class TestStripeWebhookView(TestCase):
             "pending_webhooks": 1,
             "request": {"id": "req_test", "idemoptency_key": "test_key"},
         }
-        request = self.generateStripeRequest(payload)
+        request = self.generate_stripe_request(payload)
 
         response = await stripe_webhook_view(request)
         self.assertEqual(response.status_code, 200)
@@ -174,7 +174,7 @@ class TestStripeWebhookView(TestCase):
             "request": {"id": "req_test", "idemoptency_key": "test_key"},
         }
 
-        request = self.generateStripeRequest(payload)
+        request = self.generate_stripe_request(payload)
 
         response = await stripe_webhook_view(request)
         self.assertEqual(response.status_code, 200)
@@ -257,7 +257,7 @@ class TestStripeWebhookView(TestCase):
             "name": None,
         }
 
-        request = self.generateStripeRequest(payload)
+        request = self.generate_stripe_request(payload)
 
         # Use AsyncMock for the asynchronous stripe_get function.
         with patch(
@@ -350,23 +350,23 @@ class TestStripeWebhookView(TestCase):
             "request": {"id": "req_test", "idemoptency_key": "test_key"},
         }
 
-        create_request = self.generateStripeRequest(payload)
+        create_request = self.generate_stripe_request(payload)
 
         # Duplicate event ID should be ignored
         payload["data"]["object"]["status"] = "incomplete_expired"
-        duplicate_create_request = self.generateStripeRequest(payload)
+        duplicate_create_request = self.generate_stripe_request(payload)
 
         payload["id"] = "evt_test_subscription_update"
         payload["type"] = "customer.subscription.updated"
         payload["created"] = 1678886402
         payload["data"]["object"]["status"] = "active"
-        update_request = self.generateStripeRequest(payload)
+        update_request = self.generate_stripe_request(payload)
 
         # Separate event created prior to last received event for same Stripe object, should be ignored
         payload["id"] = "evt_test_subscription_update2"
         payload["created"] = 1678886400
         payload["data"]["object"]["status"] = "incomplete"
-        mistimed_update_request = self.generateStripeRequest(payload)
+        mistimed_update_request = self.generate_stripe_request(payload)
 
         # Use AsyncMock for the asynchronous stripe_get function.
         with patch(
