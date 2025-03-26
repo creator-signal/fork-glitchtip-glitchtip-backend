@@ -375,6 +375,8 @@ class TestStripeWebhookView(TestCase):
             mock_stripe_get.return_value = json.dumps(
                 mock_customer_data
             )  # Return JSON string
+
+            # 5. Verify no changes to status for events that should be ignored
             response = await stripe_webhook_view(create_request)
             self.assertEqual(response.status_code, 200)
             subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
