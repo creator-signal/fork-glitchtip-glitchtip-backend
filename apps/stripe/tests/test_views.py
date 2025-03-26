@@ -1,7 +1,7 @@
 import hmac
 import json
 import time
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -353,6 +353,7 @@ class TestStripeWebhookView(TestCase):
         create_request = self.generateStripeRequest(payload)
 
         # Duplicate event ID should be ignored
+        payload["data"]["object"]["status"] = "incomplete_expired"
         duplicate_create_request = self.generateStripeRequest(payload)
 
         payload["id"] = "evt_test_subscription_update"
@@ -376,18 +377,20 @@ class TestStripeWebhookView(TestCase):
             )  # Return JSON string
             response = await stripe_webhook_view(create_request)
             self.assertEqual(response.status_code, 200)
+            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
+
             response = await stripe_webhook_view(duplicate_create_request)
             self.assertEqual(response.status_code, 200)
+            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
+
             response = await stripe_webhook_view(update_request)
             self.assertEqual(response.status_code, 200)
+            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
+
             response = await stripe_webhook_view(mistimed_update_request)
             self.assertEqual(response.status_code, 200)
-
-            # Assert stripe_get was only called twice, as event will be discarded twice.
-            mock_stripe_get.assert_has_awaits(
-                [call("customers/cus_test"), call("customers/cus_test")]
-            )
-
-        # 5. Verify the StripeSubscription has correct status.
-        subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
-        self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
+            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
