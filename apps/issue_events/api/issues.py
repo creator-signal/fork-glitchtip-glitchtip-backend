@@ -57,7 +57,7 @@ EventStatusEnum = StrEnum("EventStatusEnum", EventStatus.labels)
 
 class UpdateIssueSchema(Schema):
     status: EventStatusEnum | None = None
-    merge: int | None
+    merge: int | None = None
 
 
 @router.get(
