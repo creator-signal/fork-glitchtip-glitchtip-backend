@@ -66,7 +66,7 @@ def auth_from_request(request: HttpRequest):
 
 # One letter codes to save cache memory and map to various event rejection type exceptions
 REJECTION_MAP: dict[Literal["v", "t"], Exception] = {
-    "v": AuthenticationError([{"message": "Invalid DSN"}]),
+    "v": AuthenticationError(message="Invalid DSN"),
     "t": ThrottleException(),
 }
 REJECTION_WAIT = 30

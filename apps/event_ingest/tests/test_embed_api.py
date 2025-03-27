@@ -16,7 +16,7 @@ class ErrorPageEmbedTestCase(EventIngestTestCase):
 
     def test_get_not_found(self):
         res = self.client.get(self.url)
-        # Slight deviation from OSS Sentry as it would 404, but better consistency with DRF
+        # Slight deviation from OSS Sentry as it would 404
         self.assertEqual(res.status_code, 401)
         params = {"dsn": "lol", "eventId": uuid.uuid4().hex}
         res = self.client.get(self.url, params)
