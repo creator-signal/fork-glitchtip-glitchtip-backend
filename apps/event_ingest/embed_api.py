@@ -33,9 +33,9 @@ async def embed_auth(request: HttpRequest):
             .aget()
         )
     except ValueError:
-        raise AuthenticationError([{"message": "Invalid DSN"}])
+        raise AuthenticationError(message="Invalid DSN")
     if project.organization.event_throttle_rate == 100:
-        raise AuthenticationError([{"message": "Invalid DSN"}])
+        raise AuthenticationError(message="Invalid DSN")
     return project
 
 
