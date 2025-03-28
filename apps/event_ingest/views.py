@@ -5,6 +5,7 @@ from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from ninja.errors import AuthenticationError
+from ninja.errors import ValidationError as NinjaValidationError
 from pydantic import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
@@ -58,6 +59,8 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         return response
     except AuthenticationError:
         return JsonResponse({"detail": "Denied"}, status=403)
+    except NinjaValidationError:
+        return JsonResponse({"detail": "Invalid DSN"}, status=403)
 
     if project is None:
         return JsonResponse({"detail": "Denied"}, status=403)
