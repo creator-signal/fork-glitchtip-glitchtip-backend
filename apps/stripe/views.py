@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 from pydantic import ValidationError
 
 from apps.organizations_ext.models import Organization
+from apps.organizations_ext.tasks import check_organization_throttle
 
 from .client import stripe_get
 from .constants import SubscriptionStatus
@@ -133,6 +134,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         ):
             organization.stripe_primary_subscription = primary_subscription
             await organization.asave(update_fields=["stripe_primary_subscription"])
+        check_organization_throttle.delay(organization.id)
 
 
 @csrf_exempt
