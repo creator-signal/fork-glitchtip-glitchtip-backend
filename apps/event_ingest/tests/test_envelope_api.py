@@ -81,10 +81,10 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertTrue(TransactionEvent.objects.exists())
 
     def test_invalid_dsn(self):
-        self.project.delete()
+        url = reverse("api:event_envelope", args=[self.project.id]) + "?sentry_key=aaaa"
         data = self.get_payload("events/test_data/transactions/django_simple.json")
         res = self.client.post(
-            self.url,
+            url,
             data,
             content_type="application/x-sentry-envelope",
         )
