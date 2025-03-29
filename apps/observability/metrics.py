@@ -3,7 +3,7 @@ from django.db.models import Count
 from prometheus_client import Gauge
 
 from apps.observability.constants import OBSERVABILITY_ORG_CACHE_KEY
-from apps.organizations_ext.models import Organization  # avoid circular import
+from apps.organizations_ext.models import Organization
 
 organizations_metric = Gauge("glitchtip_organizations", "Number of organizations")
 projects_metric = Gauge(
