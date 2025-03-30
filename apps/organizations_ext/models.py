@@ -17,7 +17,7 @@ from organizations.managers import OrgManager
 from organizations.signals import owner_changed, user_added
 from sql_util.utils import SubqueryCount, SubquerySum
 
-from apps.observability.metrics import clear_metrics_cache
+from apps.observability.utils import clear_metrics_cache
 
 from .constants import OrganizationUserRole
 from .fields import OrganizationSlugField

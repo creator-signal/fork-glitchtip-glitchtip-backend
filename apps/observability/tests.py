@@ -9,7 +9,8 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from glitchtip.test_utils import generators  # noqa: F401
 
-from .metrics import clear_metrics_cache, organizations_metric, projects_metric
+from .metrics import organizations_metric, projects_metric
+from .utils import clear_metrics_cache
 
 
 def get_sample_value(

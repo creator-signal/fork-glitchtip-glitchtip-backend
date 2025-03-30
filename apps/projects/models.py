@@ -10,7 +10,7 @@ from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
 from apps.issue_events.models import Issue, IssueEvent
-from apps.observability.metrics import clear_metrics_cache
+from apps.observability.utils import clear_metrics_cache
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 
 
