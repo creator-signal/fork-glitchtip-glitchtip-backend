@@ -1,8 +1,6 @@
 from django.conf import settings
 from django.contrib import admin
-from django.db.models import F, PositiveIntegerField
-from django.db.models.fields.json import KeyTextTransform
-from django.db.models.functions import Cast
+from django.db.models import F
 from django.utils.html import format_html
 from import_export.admin import ImportExportModelAdmin
 from organizations.base_admin import (
@@ -125,7 +123,9 @@ class IsOverListFilter(admin.SimpleListFilter):
 
     def queryset(self, request, queryset):
         if self.value() is not None:
-            queryset = queryset.filter(max_events__isnull=False)
+            queryset = queryset.filter(
+                stripe_primary_subscription__price__product__events__isnull=False
+            )
         if self.value() is False:
             return queryset.filter(total_event_count__lte=F("max_events"))
         if self.value() is True:
@@ -148,23 +148,14 @@ class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
     ]
 
     def max_events(self, obj):
-        return obj.max_events
+        return obj.stripe_primary_subscription.price.product.events
 
     def current_period_end(self, obj):
-        return obj.current_period_end
+        return obj.stripe_primary_subscription.current_period_end
 
     def get_queryset(self, request):
-        qs = Organization.objects.with_event_counts().annotate(
-            max_events=Cast(
-                KeyTextTransform(
-                    "events",
-                    "djstripe_customers__subscriptions__plan__product__metadata",
-                ),
-                output_field=PositiveIntegerField(),
-            ),
-            current_period_end=F(
-                "djstripe_customers__subscriptions__current_period_end"
-            ),
+        qs = Organization.objects.with_event_counts().select_related(
+            "stripe_primary_subscription__price__product"
         )
         # From super
         ordering = self.ordering or ()
