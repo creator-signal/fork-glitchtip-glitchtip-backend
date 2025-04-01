@@ -185,6 +185,7 @@ async def stripe_webhook_view(request: HttpRequest, event_type: str | None = Non
     elif event.type in [
         "customer.subscription.updated",
         "customer.subscription.created",
+        "customer.subscription.deleted",
     ]:
         await update_subscription(event.data.object, request)
     elif event.type in ["price.updated", "price.created"]:
