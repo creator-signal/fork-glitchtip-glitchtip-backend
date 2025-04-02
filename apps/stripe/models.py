@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.organizations_ext.models import Organization
 
-from .client import list_prices, list_products, list_subscriptions, fetch_subscription
+from .client import fetch_subscription, list_prices, list_products, list_subscriptions
 from .constants import CollectionMethod, SubscriptionStatus
 from .utils import unix_to_datetime
 
