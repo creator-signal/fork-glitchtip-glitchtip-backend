@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
-from django.test import override_settings, TestCase
+from django.test import TestCase, override_settings
 from model_bakery import baker
 
 from ..models import StripeProduct, StripeSubscription
