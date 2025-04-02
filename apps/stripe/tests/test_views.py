@@ -46,7 +46,9 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(response.content, b"Invalid signature")
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_incorrect_secret(self):
         """Test with an incorrect Stripe secret."""
@@ -68,7 +70,9 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(response.content, b"Invalid signature")
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_unsupported_event_type(self):
         """Test a valid signature, but with an unsupported event type."""
@@ -82,7 +86,9 @@ class TestStripeWebhookView(TestCase):
             mock_logger.warning.assert_called_once()
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_product_created(self):
         """Test the 'product.created' webhook."""
@@ -129,7 +135,9 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(product.events, 1)
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_price_created(self):
         """Test the 'price.created' webhook."""
@@ -185,7 +193,9 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(price.nickname, "Test Price")
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_subscription_created(self):
         """Test the 'customer.subscription.created' webhook."""
@@ -277,7 +287,9 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
 
     @override_settings(
-        STRIPE_WEBHOOK_SECRET="test_webhook_secret", STRIPE_WEBHOOK_TOLERANCE=300
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
     )
     async def test_webhook_ordering_and_deduplication(self):
         """Ensure mistimed and duplicated events are ignored."""
