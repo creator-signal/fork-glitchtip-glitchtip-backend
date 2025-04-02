@@ -202,3 +202,8 @@ async def create_subscription(customer: str, price: str) -> Subscription:
     params = {"customer": customer, "items[][price]": price}
     response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
+
+
+async def fetch_subscription(id: str) -> Subscription:
+    response = await stripe_get("subscriptions/" + id)
+    return Subscription.model_validate_json(response)

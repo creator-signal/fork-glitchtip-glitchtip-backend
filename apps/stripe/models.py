@@ -1,12 +1,14 @@
 import logging
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
 from django.db.models.expressions import OuterRef, Subquery
+from django.utils import timezone
 
 from apps.organizations_ext.models import Organization
 
-from .client import list_prices, list_products, list_subscriptions
+from .client import list_prices, list_products, list_subscriptions, fetch_subscription
 from .constants import CollectionMethod, SubscriptionStatus
 from .utils import unix_to_datetime
 
@@ -188,6 +190,35 @@ class StripeSubscription(StripeModel):
             )
 
     @classmethod
+    async def update_outdated_subscriptions(cls):
+        async for subscription in cls.objects.filter(
+            status=SubscriptionStatus.ACTIVE,
+            current_period_end__lt=(timezone.now() + timedelta(days=2)),
+        ):
+            fetched_sub = await fetch_subscription(subscription.stripe_id)
+            subscription.status = fetched_sub.status
+            subscription.created = unix_to_datetime(fetched_sub.created)
+            subscription.current_period_start = unix_to_datetime(
+                fetched_sub.current_period_start
+            )
+            subscription.current_period_end = unix_to_datetime(
+                fetched_sub.current_period_end
+            )
+            subscription.start_date = unix_to_datetime(fetched_sub.start_date)
+            subscription.collection_method = fetched_sub.collection_method
+            await subscription.asave()
+
+    @classmethod
+    async def remove_inactive_primary_subscriptions(cls):
+        await Organization.objects.filter(
+            stripe_primary_subscription__isnull=False
+        ).exclude(
+            stripe_primary_subscription__status=SubscriptionStatus.ACTIVE
+        ).aupdate(
+            stripe_primary_subscription=None
+        )
+
+    @classmethod
     async def sync_from_stripe(cls):
         organization_ids = set()
         active_organization_ids = set()
@@ -282,3 +313,5 @@ class StripeSubscription(StripeModel):
             )
 
         await cls.set_primary_subscriptions_for_organizations(active_organization_ids)
+        await cls.update_outdated_subscriptions()
+        await cls.remove_inactive_primary_subscriptions()

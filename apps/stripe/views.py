@@ -136,6 +136,11 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             await organization.asave(update_fields=["stripe_primary_subscription"])
         check_organization_throttle.delay(organization.id)
 
+    # Primary subscription should be removed if status is not active
+    elif stripe_subscription.stripe_id is organization.stripe_primary_subscription_id:
+        organization.stripe_primary_subscription = None
+        await organization.asave(update_fields=["stripe_primary_subscription"])
+
 
 @csrf_exempt
 @require_POST
