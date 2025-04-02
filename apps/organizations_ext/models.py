@@ -2,7 +2,7 @@ from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import F, OuterRef, Q
+from django.db.models import Count, F, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
@@ -15,9 +15,15 @@ from organizations.base import (
 )
 from organizations.managers import OrgManager
 from organizations.signals import owner_changed, user_added
-from sql_util.utils import SubqueryCount, SubquerySum
 
+from apps.difs.models import DebugInformationFile
 from apps.observability.utils import clear_metrics_cache
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.sourcecode.models import DebugSymbolBundle
+from apps.uptime.models import MonitorCheck
 
 from .constants import OrganizationUserRole
 from .fields import OrganizationSlugField
@@ -48,49 +54,126 @@ class OrganizationManager(OrgManager):
                     "stripe_primary_subscription__current_period_end"
                 ),
             )
-            # Do we need to filter out inactive subs?
 
-        queryset = queryset.annotate(
-            issue_event_count=Coalesce(
-                SubquerySum(
-                    "projects__issueeventprojecthourlystatistic__count",
-                    filter=event_subscription_filter,
-                ),
-                0,
-            ),
-            transaction_count=Coalesce(
-                SubquerySum(
-                    "projects__transactioneventprojecthourlystatistic__count",
-                    filter=event_subscription_filter,
-                ),
-                0,
-            ),
-            uptime_check_event_count=SubqueryCount(
-                "monitor__checks", filter=checks_subscription_filter
-            ),
-            file_size=(
-                Coalesce(
-                    SubquerySum(
-                        "debugsymbolbundle__file__blob__size",
-                        filter=subscription_filter,
-                    ),
-                    0,
-                )
-                + Coalesce(
-                    SubquerySum(
-                        "projects__debuginformationfile__file__blob__size",
-                        filter=subscription_filter,
-                    ),
-                    0,
-                )
+        # Subquery for Issue Events Sum
+        issue_event_subquery = Subquery(
+            IssueEventProjectHourlyStatistic.objects.filter(
+                Q(project__organization=OuterRef("pk")),  # Link to outer Organization
+                event_subscription_filter,  # Apply date filtering
             )
-            / 1000000,
+            .values(
+                "project__organization"  # Group by organization (required for annotate)
+            )
+            .annotate(
+                sum_count=Sum("count")  # Calculate sum for this group
+            )
+            .values(
+                "sum_count"  # Select only the calculated sum
+            )
+            .order_by(),  # Prevent potential default ordering issues in subquery
+            output_field=models.BigIntegerField(),  # Define output type
+        )
+
+        # Subquery for Transaction Events Sum
+        transaction_subquery = Subquery(
+            TransactionEventProjectHourlyStatistic.objects.filter(
+                Q(project__organization=OuterRef("pk")), event_subscription_filter
+            )
+            .values("project__organization")
+            .annotate(sum_count=Sum("count"))
+            .values("sum_count")
+            .order_by(),
+            output_field=models.BigIntegerField(),
+        )
+
+        # Subquery for Uptime Checks Count
+        # Assumes MonitorCheck relates to Monitor which relates to Organization
+        uptime_check_subquery = Subquery(
+            MonitorCheck.objects.filter(
+                Q(monitor__organization=OuterRef("pk")),  # Link Monitor -> Organization
+                Q(checks_subscription_filter),  # Apply date filtering
+            )
+            .values(
+                "monitor__organization"  # Group by organization
+            )
+            .annotate(
+                check_count=Count("pk")  # Count checks for this group
+            )
+            .values(
+                "check_count"  # Select only the count
+            )
+            .order_by(),
+            output_field=models.IntegerField(),
+        )
+
+        # Subquery for Debug Symbol Bundle File Size Sum
+        # Assumes DebugSymbolBundle relates directly to Organization
+        debugsymbol_size_subquery = Subquery(
+            DebugSymbolBundle.objects.filter(
+                Q(organization=OuterRef("pk")),  # Direct link to Organization
+                Q(subscription_filter),  # Apply created date filtering
+            )
+            .values(
+                "organization"  # Group by organization
+            )
+            .annotate(
+                total_size=Sum("file__blob__size")  # Sum blob sizes
+            )
+            .values(
+                "total_size"  # Select the sum
+            )
+            .order_by(),
+            output_field=models.BigIntegerField(),
+        )
+
+        # Subquery for Debug Information File Size Sum
+        # Assumes DebugInformationFile relates to Project which relates to Organization
+        debuginfo_size_subquery = Subquery(
+            DebugInformationFile.objects.filter(
+                Q(project__organization=OuterRef("pk")),  # Link via Project
+                subscription_filter,  # Apply created date filtering
+            )
+            .values(
+                "project__organization"  # Group by organization
+            )
+            .annotate(
+                total_size=Sum("file__blob__size")  # Sum blob sizes
+            )
+            .values(
+                "total_size"  # Select the sum
+            )
+            .order_by(),
+            output_field=models.BigIntegerField(),
+        )
+        return queryset.annotate(
+            issue_event_count=Coalesce(issue_event_subquery, 0),
+            transaction_count=Coalesce(transaction_subquery, 0),
+            # Use Coalesce for count as well, safer if no checks exist
+            uptime_check_event_count=Coalesce(uptime_check_subquery, 0),
+            # Calculate total file size, Coalesce each part, sum, then convert/divide
+            # Use FloatField for output if division result can be non-integer
+            file_size=Coalesce(
+                models.ExpressionWrapper(
+                    (
+                        Coalesce(debugsymbol_size_subquery, 0)
+                        + Coalesce(debuginfo_size_subquery, 0)
+                    ),
+                    output_field=models.FloatField(),  # Cast sum before division
+                )
+                / 1000000.0,  # Divide by 1 million (ensure float division)
+                0.0,  # Coalesce the final division result
+                output_field=models.FloatField(),
+            ),
+        ).annotate(
+            # Calculate total using F expressions referring to the fields just annotated
             total_event_count=F("issue_event_count")
             + F("transaction_count")
             + F("uptime_check_event_count")
+            # Note: Adding file_size (in MB) directly to event counts might be conceptually odd.
+            # Verify if this addition is intended business logic.
+            # If file_size should not be part of 'total_event_count', remove it here.
             + F("file_size"),
         )
-        return queryset.distinct("pk")
 
 
 class Organization(SharedBaseModel, OrganizationBase):

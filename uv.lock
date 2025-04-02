@@ -1,5 +1,4 @@
 version = 1
-revision = 1
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version < '3.12'",
@@ -454,7 +453,7 @@ name = "click"
 version = "8.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "platform_system == 'Windows'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b9/2e/0090cbf739cee7d23781ad4b89a9894a41538e4fcf4c31dcdd705b78eb8b/click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a", size = 226593 }
 wheels = [
@@ -788,19 +787,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fa/e7/f39f489d08a28058095b8eea12caba288708349741a84ac47561a8c54650/django_rest_mfa-1.2.2.tar.gz", hash = "sha256:8b6f8e7ddab3ef22ec1a5beacfcf225192bb0995acfc6ca4425aa052eea0685c", size = 26444 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/1c/d492b68d08077c52de36809276a6e59c7a9dd999ee1abe109a035298ad69/django_rest_mfa-1.2.2-py3-none-any.whl", hash = "sha256:6e6aae5ec066214294a984307b2116aea58a86c156e8fdf88ef83fc5fad4e955", size = 38471 },
-]
-
-[[package]]
-name = "django-sql-utils"
-version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django" },
-    { name = "sqlparse" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/45/65af5fefdbee24221e50ec37eaa65d870c407171c5ba62aacbf338647f94/django_sql_utils-0.7.0.tar.gz", hash = "sha256:9371ff28eaf326836a7c52887259123cdd3fbffb7b738e42ae1a21258be0feb6", size = 15567 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/59/a5354087ece4b22465f9a31458ec182d1d54305994ecd6cc8bd8eedd7e43/django_sql_utils-0.7.0-py3-none-any.whl", hash = "sha256:fefc40c826896b60fcf33e35b6e30b523fc958955a16006438cd3ba6d795a532", size = 8073 },
 ]
 
 [[package]]
@@ -1151,7 +1137,6 @@ dependencies = [
     { name = "django-prometheus" },
     { name = "django-redis", extra = ["hiredis"] },
     { name = "django-rest-mfa" },
-    { name = "django-sql-utils" },
     { name = "django-storages", extra = ["azure", "boto3", "google"] },
     { name = "google-cloud-logging" },
     { name = "gunicorn" },
@@ -1206,7 +1191,6 @@ requires-dist = [
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-redis", extras = ["hiredis"], specifier = "~=5.2" },
     { name = "django-rest-mfa", specifier = "~=1.2" },
-    { name = "django-sql-utils", specifier = "~=0.7" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
     { name = "google-cloud-logging", specifier = "~=3.0" },
     { name = "gunicorn", specifier = "~=23.0" },
