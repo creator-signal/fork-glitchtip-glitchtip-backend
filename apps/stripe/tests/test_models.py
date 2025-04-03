@@ -197,7 +197,7 @@ class StripeTestCase(TestCase):
                 ],
             ),
             created=created_timestamp,
-            current_period_end=created_timestamp - 2592000,  # -3 days
+            current_period_end=created_timestamp - 259200,  # -3 days
             current_period_start=created_timestamp,
             status=SubscriptionStatus.CANCELED,
             livemode=False,
