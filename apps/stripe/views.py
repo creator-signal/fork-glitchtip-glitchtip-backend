@@ -17,9 +17,10 @@ from pydantic import ValidationError
 
 from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
+from glitchtip.utils import async_call_celery_task
 
 from .client import stripe_get
-from .constants import SubscriptionStatus
+from .constants import ACTIVE_SUBSCRIPTION_STATUSES
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import unix_to_datetime
@@ -123,7 +124,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             "collection_method": subscription.collection_method,
         },
     )
-    if stripe_subscription.status is SubscriptionStatus.ACTIVE:
+    if stripe_subscription.status in ACTIVE_SUBSCRIPTION_STATUSES:
         primary_subscription = await StripeSubscription.get_primary_subscription(
             organization
         )
@@ -134,7 +135,12 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         ):
             organization.stripe_primary_subscription = primary_subscription
             await organization.asave(update_fields=["stripe_primary_subscription"])
-        check_organization_throttle.delay(organization.id)
+        await async_call_celery_task(check_organization_throttle, organization.id)
+
+    # Primary subscription should be removed if status is not active
+    elif stripe_subscription.stripe_id is organization.stripe_primary_subscription_id:
+        organization.stripe_primary_subscription = None
+        await organization.asave(update_fields=["stripe_primary_subscription"])
 
 
 @csrf_exempt
