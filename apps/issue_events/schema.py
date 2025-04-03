@@ -362,3 +362,11 @@ class IssueTagSchema(CamelSchema):
     key: str
     name: str
     total_values: int
+
+
+class IssueHashSchema(CamelSchema):
+    id: str
+
+    @staticmethod
+    def resolve_id(obj):
+        return obj.value.hex
