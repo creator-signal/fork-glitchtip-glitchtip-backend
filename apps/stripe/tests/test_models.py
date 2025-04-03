@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
 
+from ..constants import SubscriptionStatus
 from ..models import StripeProduct, StripeSubscription
 from ..schema import (
     Customer,
@@ -118,7 +119,7 @@ class StripeTestCase(TestCase):
                 created=now_timestamp,
                 current_period_end=now_timestamp + 2592000,  # +30 days
                 current_period_start=now_timestamp,
-                status="active",
+                status=SubscriptionStatus.ACTIVE,
                 livemode=False,
                 metadata={},
                 cancel_at_period_end=False,
@@ -198,7 +199,7 @@ class StripeTestCase(TestCase):
             created=created_timestamp,
             current_period_end=created_timestamp - 2592000,  # -3 days
             current_period_start=created_timestamp,
-            status="canceled",
+            status=SubscriptionStatus.CANCELED,
             livemode=False,
             metadata={},
             cancel_at_period_end=False,
@@ -218,4 +219,4 @@ class StripeTestCase(TestCase):
         await subscription.arefresh_from_db()
         mock_fetch_subscription.assert_called_once()
         self.assertFalse(self.org.stripe_primary_subscription)
-        self.assertEqual(subscription.status, "canceled")
+        self.assertEqual(subscription.status, SubscriptionStatus.CANCELED)
