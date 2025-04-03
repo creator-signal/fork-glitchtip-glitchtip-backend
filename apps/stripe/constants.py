@@ -12,6 +12,13 @@ class SubscriptionStatus(models.TextChoices):
     PAUSED = "paused"
 
 
+ACTIVE_SUBSCRIPTION_STATUSES = (
+    SubscriptionStatus.ACTIVE,
+    SubscriptionStatus.PAST_DUE,
+    SubscriptionStatus.TRIALING,
+)
+
+
 class CollectionMethod(models.TextChoices):
     CHARGE_AUTOMATICALLY = "charge_automatically"
     SEND_INVOICE = "send_invoice"

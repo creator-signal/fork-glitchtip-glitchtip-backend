@@ -19,7 +19,7 @@ from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
 
 from .client import stripe_get
-from .constants import SubscriptionStatus
+from .constants import ACTIVE_SUBSCRIPTION_STATUSES
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import unix_to_datetime
@@ -123,7 +123,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
             "collection_method": subscription.collection_method,
         },
     )
-    if stripe_subscription.status is SubscriptionStatus.ACTIVE:
+    if stripe_subscription.status in ACTIVE_SUBSCRIPTION_STATUSES:
         primary_subscription = await StripeSubscription.get_primary_subscription(
             organization
         )

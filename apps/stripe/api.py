@@ -14,7 +14,11 @@ from .client import (
     create_session,
     create_subscription,
 )
-from .constants import CollectionMethod, SubscriptionStatus
+from .constants import (
+    ACTIVE_SUBSCRIPTION_STATUSES,
+    CollectionMethod,
+    SubscriptionStatus,
+)
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .utils import unix_to_datetime
 
@@ -121,7 +125,7 @@ async def get_stripe_subscription(request: AuthHttpRequest, organization_slug: s
         StripeSubscription.objects.filter(
             organization__users=request.auth.user_id,
             organization__slug=organization_slug,
-            status=SubscriptionStatus.ACTIVE,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
         )
         .select_related("price__product")
         .order_by("-created")
@@ -197,7 +201,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         customer = await create_customer(organization)
         customer_id = customer.id
     if await StripeSubscription.objects.filter(
-        organization=organization, status=SubscriptionStatus.ACTIVE
+        organization=organization, status__in=ACTIVE_SUBSCRIPTION_STATUSES
     ).aexists():
         return JsonResponse({"detail": "Customer already has subscription"}, status=400)
     subscription_resp = await create_subscription(customer_id, price.stripe_id)

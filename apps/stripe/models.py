@@ -9,7 +9,11 @@ from django.utils import timezone
 from apps.organizations_ext.models import Organization
 
 from .client import fetch_subscription, list_prices, list_products, list_subscriptions
-from .constants import CollectionMethod, SubscriptionStatus
+from .constants import (
+    ACTIVE_SUBSCRIPTION_STATUSES,
+    CollectionMethod,
+    SubscriptionStatus,
+)
 from .utils import unix_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -157,7 +161,7 @@ class StripeSubscription(StripeModel):
     async def get_primary_subscription(cls, organization: Organization):
         return (
             await cls.objects.filter(
-                organization=organization, status=SubscriptionStatus.ACTIVE
+                organization=organization, status__in=ACTIVE_SUBSCRIPTION_STATUSES
             )
             .order_by("-price__product__events", "-created")
             .afirst()
@@ -170,7 +174,7 @@ class StripeSubscription(StripeModel):
         # This subquery finds the primary subscription ID for each organization.
         primary_subscription_subquery = (
             cls.objects.filter(
-                organization_id=OuterRef("pk"), status=SubscriptionStatus.ACTIVE
+                organization_id=OuterRef("pk"), status__in=ACTIVE_SUBSCRIPTION_STATUSES
             )
             .order_by("-price__product__events", "-created")
             .values("pk")[:1]
@@ -192,7 +196,7 @@ class StripeSubscription(StripeModel):
     @classmethod
     async def update_outdated_subscriptions(cls):
         async for subscription in cls.objects.filter(
-            status=SubscriptionStatus.ACTIVE,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
             current_period_end__lt=(timezone.now() + timedelta(days=2)),
         ):
             fetched_sub = await fetch_subscription(subscription.stripe_id)
@@ -213,7 +217,7 @@ class StripeSubscription(StripeModel):
         await Organization.objects.filter(
             stripe_primary_subscription__isnull=False
         ).exclude(
-            stripe_primary_subscription__status=SubscriptionStatus.ACTIVE
+            stripe_primary_subscription__status__in=ACTIVE_SUBSCRIPTION_STATUSES
         ).aupdate(
             stripe_primary_subscription=None
         )
