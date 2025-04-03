@@ -7,6 +7,7 @@ from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
+from glitchtip.utils import async_call_celery_task
 
 from .client import (
     create_customer,
@@ -218,7 +219,7 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     )
     organization.stripe_primary_subscription = subscription
     await organization.asave(update_fields=["stripe_primary_subscription"])
-    check_organization_throttle.delay(organization.id)
+    await async_call_celery_task(check_organization_throttle, organization.id)
     return {
         "price": price.stripe_id,
         "organization": str(organization.id),

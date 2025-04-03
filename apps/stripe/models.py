@@ -197,7 +197,7 @@ class StripeSubscription(StripeModel):
     async def update_outdated_subscriptions(cls):
         async for subscription in cls.objects.filter(
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
-            current_period_end__lt=(timezone.now() + timedelta(days=2)),
+            current_period_end__lt=(timezone.now() - timedelta(days=2)),
         ):
             fetched_sub = await fetch_subscription(subscription.stripe_id)
             subscription.status = fetched_sub.status

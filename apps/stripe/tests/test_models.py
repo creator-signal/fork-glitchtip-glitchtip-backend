@@ -1,7 +1,9 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from model_bakery import baker
 
 from ..models import StripeProduct, StripeSubscription
@@ -82,15 +84,96 @@ class StripeTestCase(TestCase):
         STRIPE_REGION="",
     )
     @patch("apps.stripe.models.list_subscriptions")
+    async def test_sync_subscription(self, mock_list_subscriptions):
+        await sync_to_async(baker.make)("stripe.StripePrice", stripe_id=test_price.id)
+        await sync_to_async(baker.make)(
+            "stripe.StripeProduct", stripe_id=test_price.product
+        )
+
+        now = timezone.now()
+        now_timestamp = int(now.timestamp())
+        subscriptions_page_1 = [
+            SubscriptionExpandCustomer(
+                object="subscription",
+                id="sub_1",
+                customer=Customer(
+                    object="customer",
+                    id="cus_1",
+                    email="foo@example.com",
+                    metadata={},
+                    name="",
+                ),
+                items=Items(
+                    object="list",
+                    data=[
+                        {
+                            "price": {
+                                "id": test_price.id,
+                                "product": test_price.product,
+                                "unit_amount": test_price.unit_amount,
+                            }
+                        }
+                    ],
+                ),
+                created=now_timestamp,
+                current_period_end=now_timestamp + 2592000,  # +30 days
+                current_period_start=now_timestamp,
+                status="active",
+                livemode=False,
+                metadata={},
+                cancel_at_period_end=False,
+                start_date=now_timestamp,
+                collection_method="charge_automatically",
+            )
+        ]
+
+        async def mock_subscriptions_generator():
+            yield subscriptions_page_1
+
+        mock_list_subscriptions.return_value = mock_subscriptions_generator()
+        await StripeSubscription.sync_from_stripe()
+
+        # Subscription without valid organization_id in customer metadata should be skipped
+        self.assertEqual(await StripeSubscription.objects.acount(), 0)
+
+        subscriptions_page_1[0].customer.metadata = {
+            "organization_id": str(self.org.id)
+        }
+        mock_list_subscriptions.return_value = mock_subscriptions_generator()
+        await StripeSubscription.sync_from_stripe()
+
+        self.assertEqual(
+            await StripeSubscription.objects.acount(), len(subscriptions_page_1)
+        )
+
+    @override_settings(
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
+    )
+    @patch("apps.stripe.models.list_subscriptions")
     @patch("apps.stripe.models.fetch_subscription")
-    async def test_sync_subscription(
+    async def test_sync_removes_canceled_primary_subscriptions(
         self, mock_fetch_subscription, mock_list_subscriptions
     ):
         await sync_to_async(baker.make)("stripe.StripePrice", stripe_id=test_price.id)
         await sync_to_async(baker.make)(
             "stripe.StripeProduct", stripe_id=test_price.product
         )
-        subscription = SubscriptionExpandCustomer(
+
+        subscription = await sync_to_async(baker.make)(
+            "stripe.StripeSubscription",
+            stripe_id=test_price.product,
+            organization=self.org,
+            current_period_end=timezone.now() - timedelta(days=3)
+        )
+
+        self.org.stripe_primary_subscription = subscription
+        await self.org.asave()
+
+        created_timestamp = int(subscription.created.timestamp())
+
+        subscription_data = SubscriptionExpandCustomer(
             object="subscription",
             id="sub_1",
             customer=Customer(
@@ -112,35 +195,27 @@ class StripeTestCase(TestCase):
                     }
                 ],
             ),
-            created=1678886400,
-            current_period_end=1678886400 + 2592000,  # +30 days
-            current_period_start=1678886400,
-            status="active",
+            created=created_timestamp,
+            current_period_end=created_timestamp - 2592000,  # -3 days
+            current_period_start=created_timestamp,
+            status="canceled",
             livemode=False,
             metadata={},
             cancel_at_period_end=False,
-            start_date=1678886400,
+            start_date=created_timestamp,
             collection_method="charge_automatically",
         )
-        subscriptions_page_1 = [subscription]
 
         async def mock_subscriptions_generator():
-            yield subscriptions_page_1
+            yield []
 
         mock_list_subscriptions.return_value = mock_subscriptions_generator()
-        mock_fetch_subscription.return_value = subscription
+        mock_fetch_subscription.return_value = subscription_data
         await StripeSubscription.sync_from_stripe()
 
-        # Subscription without valid organization_id in customer metadata should be skipped
-        self.assertEqual(await StripeSubscription.objects.acount(), 0)
 
-        subscriptions_page_1[0].customer.metadata = {
-            "organization_id": str(self.org.id)
-        }
-        mock_list_subscriptions.return_value = mock_subscriptions_generator()
-        mock_fetch_subscription.return_value = subscription
-        await StripeSubscription.sync_from_stripe()
-
-        self.assertEqual(
-            await StripeSubscription.objects.acount(), len(subscriptions_page_1)
-        )
+        await self.org.arefresh_from_db()
+        await subscription.arefresh_from_db()
+        mock_fetch_subscription.assert_called_once()
+        self.assertFalse(self.org.stripe_primary_subscription)
+        self.assertEqual(subscription.status, "canceled")

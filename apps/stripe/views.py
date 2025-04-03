@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
+from glitchtip.utils import async_call_celery_task
 
 from .client import stripe_get
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
@@ -134,7 +135,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         ):
             organization.stripe_primary_subscription = primary_subscription
             await organization.asave(update_fields=["stripe_primary_subscription"])
-        check_organization_throttle.delay(organization.id)
+        await async_call_celery_task(check_organization_throttle, organization.id)
 
     # Primary subscription should be removed if status is not active
     elif stripe_subscription.stripe_id is organization.stripe_primary_subscription_id:
