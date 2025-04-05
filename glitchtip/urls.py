@@ -41,6 +41,8 @@ urlpatterns = [
 ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:
+    if settings.GLITCHTIP_INSTANCE_NAME:
+        admin.site.site_header = settings.GLITCHTIP_INSTANCE_NAME
     urlpatterns += [
         path("admin/", admin.site.urls),
     ]
