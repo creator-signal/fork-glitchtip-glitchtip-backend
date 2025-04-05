@@ -610,16 +610,16 @@ socialaccount = [
 
 [[package]]
 name = "django-anymail"
-version = "12.0"
+version = "13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/cd/34eca54757511df252ae8b56f5b75f3d137cc51ba53c7c5c74b8d449fa0d/django_anymail-12.0.tar.gz", hash = "sha256:65789c1b0f42915aa0450a4f173f77572d4c552979b748ddd8125af41972ad30", size = 95175 }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/8f/c5c8e0c952797247c763edfd02346a9f989489d54a3debd717ecb0abb55a/django_anymail-13.0.tar.gz", hash = "sha256:87f42d9ff12a9a029d5e88edaaf62a4b880aa9a6a7ef937042b7e96579e6db07", size = 94298 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/09/83c613d8781d56af7b8736c7c968f8dc0487763b2680ae9d726a7313c9de/django_anymail-12.0-py3-none-any.whl", hash = "sha256:de8458d713d0f9776da9ed04dcd3a0161be23e9ecbcb49dcf149219700ecd274", size = 131312 },
+    { url = "https://files.pythonhosted.org/packages/c5/32/c9691a478ca0460131c2f0bfadbb0e20cd316588aa24f809aebdaa7a79b2/django_anymail-13.0-py3-none-any.whl", hash = "sha256:6da4465eff18f679955f74332501a3a4299e34079015d91e1fce9c049d784d6c", size = 130285 },
 ]
 
 [[package]]
@@ -1166,7 +1166,7 @@ requires-dist = [
     { name = "celery", extras = ["redis"], specifier = "~=5.5" },
     { name = "django", specifier = "~=5.1" },
     { name = "django-allauth", extras = ["mfa", "socialaccount"], specifier = "~=65.0" },
-    { name = "django-anymail", specifier = "~=12.0" },
+    { name = "django-anymail", specifier = "~=13.0" },
     { name = "django-cors-headers", specifier = "~=4.0" },
     { name = "django-csp", specifier = "~=3.6" },
     { name = "django-environ", specifier = "~=0.11" },
