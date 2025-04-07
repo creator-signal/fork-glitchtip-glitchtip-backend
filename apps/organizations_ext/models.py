@@ -162,7 +162,7 @@ class OrganizationManager(OrgManager):
                 )
                 / 1000000.0,  # Divide by 1 million (ensure float division)
                 0.0,  # Coalesce the final division result
-                output_field=models.FloatField(),
+                output_field=models.BigIntegerField(),
             ),
         ).annotate(
             # Calculate total using F expressions referring to the fields just annotated
