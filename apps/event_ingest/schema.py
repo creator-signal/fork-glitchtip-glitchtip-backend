@@ -366,7 +366,16 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
 
 SupportedItemType = Literal["transaction", "event"]
 IgnoredItemType = Literal[
-    "session", "sessions", "client_report", "attachment", "user_report", "check_in"
+    "session",
+    "sessions",
+    "client_report",
+    "attachment",
+    "user_report",
+    "check_in",
+    "profile",
+    "replay_recording",
+    "replay_event",
+    "span",
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
