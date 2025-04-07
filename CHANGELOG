@@ -1,4 +1,4 @@
-# v4.2.8
+# v4.2.9
 
 - Remove djstripe and stripe module, which use excessive ram. Replaced by our own stripe sync implementation.
 - You may now set env var `GLITCHTIP_INSTANCE_NAME` to set a name that appears at login/register to help identify your server
