@@ -1,5 +1,12 @@
-# Unreleased
+# v4.2.8
 
+- Remove djstripe and stripe module, which use excessive ram. Replaced by our own stripe sync implementation.
+- You may now set env var `GLITCHTIP_INSTANCE_NAME` to set a name that appears at login/register to help identify your server
+- Celery 5.5
+- Django Ninja 1.4
+- Fix [bug](https://gitlab.com/glitchtip/glitchtip-backend/-/merge_requests/1454) in StatsV2Schema
+- Fix several sentry api incompatibility [issues](https://gitlab.com/glitchtip/glitchtip-backend/-/merge_requests/1421).
+- Add more content to issue search index
 - Add OrganizationSocialApp, configurable in django admin, that allows Organizations to be associated to SocialApps and automatically assign users who log in with the associated SocialApp to the Organization. Signals currently disabled.
 
 # v4.2.5
