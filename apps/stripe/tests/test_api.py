@@ -124,7 +124,7 @@ class StripeAPITestCase(TestCase):
             )
             baker.make(
                 "sourcecode.DebugSymbolBundle",
-                file__blob__size=1000000,
+                file__blob__size=1234567,
                 organization=self.organization,
                 release__organization=self.organization,
                 _quantity=2,
