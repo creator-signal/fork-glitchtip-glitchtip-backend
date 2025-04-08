@@ -10,10 +10,11 @@ from ..constants import SubscriptionStatus
 from ..models import StripeProduct, StripeSubscription
 from ..schema import (
     Customer,
-    Items,
     Price,
     ProductExpandedPrice,
     SubscriptionExpandCustomer,
+    SubscriptionItem,
+    SubscriptionItems,
 )
 
 test_price = Price(
@@ -104,21 +105,42 @@ class StripeTestCase(TestCase):
                     metadata={},
                     name="",
                 ),
-                items=Items(
+                items=SubscriptionItems(
                     object="list",
                     data=[
-                        {
-                            "price": {
-                                "id": test_price.id,
-                                "product": test_price.product,
-                                "unit_amount": test_price.unit_amount,
-                            }
-                        }
+                        SubscriptionItem(
+                            id="test_subscription_item",
+                            object="subscription_item",
+                            created=now_timestamp,
+                            current_period_end=now_timestamp + 2592000,  # +30 days
+                            current_period_start=now_timestamp,
+                            metadata={},
+                            price=Price(
+                                object="price",
+                                active=True,
+                                billing_scheme=None,
+                                created=0,
+                                currency="",
+                                livemode=False,
+                                lookup_key=None,
+                                nickname=None,
+                                recurring=None,
+                                tax_behavior=None,
+                                tiers_mode=None,
+                                type="",
+                                unit_amount_decimal=str(test_price.unit_amount),
+                                metadata={},
+                                id=test_price.id,
+                                product=test_price.product,
+                                unit_amount=test_price.unit_amount,
+                            ),
+                            quantity=1,
+                            subscription="subscription_id",
+                            tax_rates=[],
+                        )
                     ],
                 ),
                 created=now_timestamp,
-                current_period_end=now_timestamp + 2592000,  # +30 days
-                current_period_start=now_timestamp,
                 status=SubscriptionStatus.ACTIVE,
                 livemode=False,
                 metadata={},
@@ -166,7 +188,7 @@ class StripeTestCase(TestCase):
             "stripe.StripeSubscription",
             stripe_id=test_price.product,
             organization=self.org,
-            current_period_end=timezone.now() - timedelta(days=3)
+            current_period_end=timezone.now() - timedelta(days=3),
         )
 
         self.org.stripe_primary_subscription = subscription
@@ -184,21 +206,42 @@ class StripeTestCase(TestCase):
                 metadata={},
                 name="",
             ),
-            items=Items(
+            items=SubscriptionItems(
                 object="list",
                 data=[
-                    {
-                        "price": {
-                            "id": test_price.id,
-                            "product": test_price.product,
-                            "unit_amount": test_price.unit_amount,
-                        }
-                    }
+                    SubscriptionItem(
+                        id="test_subscription_item",
+                        object="subscription_item",
+                        created=created_timestamp,
+                        current_period_end=created_timestamp - 259200,  # -3 days
+                        current_period_start=created_timestamp,
+                        metadata={},
+                        price=Price(
+                            object="price",
+                            active=True,
+                            billing_scheme=None,
+                            created=0,
+                            currency="",
+                            livemode=False,
+                            lookup_key=None,
+                            nickname=None,
+                            recurring=None,
+                            tax_behavior=None,
+                            tiers_mode=None,
+                            type="",
+                            unit_amount_decimal=str(test_price.unit_amount),
+                            metadata={},
+                            id=test_price.id,
+                            product=test_price.product,
+                            unit_amount=test_price.unit_amount,
+                        ),
+                        quantity=1,
+                        subscription="subscription_id",
+                        tax_rates=[],
+                    )
                 ],
             ),
             created=created_timestamp,
-            current_period_end=created_timestamp - 259200,  # -3 days
-            current_period_start=created_timestamp,
             status=SubscriptionStatus.CANCELED,
             livemode=False,
             metadata={},
@@ -213,7 +256,6 @@ class StripeTestCase(TestCase):
         mock_list_subscriptions.return_value = mock_subscriptions_generator()
         mock_fetch_subscription.return_value = subscription_data
         await StripeSubscription.sync_from_stripe()
-
 
         await self.org.arefresh_from_db()
         await subscription.arefresh_from_db()

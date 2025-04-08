@@ -5,10 +5,20 @@ from unittest.mock import AsyncMock, patch
 
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.organizations_ext.models import Organization
 from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripePrice, StripeProduct, StripeSubscription
+from apps.stripe.schema import (
+    EventData,
+    Price,
+    StripeEvent,
+    StripeEventRequest,
+    Subscription,
+    SubscriptionItem,
+    SubscriptionItems,
+)
 from apps.stripe.views import stripe_webhook_view
 
 
@@ -32,6 +42,78 @@ class TestStripeWebhookView(TestCase):
         return self.factory.post(
             self.url, data=payload_bytes, content_type="application/json", **headers
         )
+
+    def generate_subscription_event_data(
+        self,
+        type,
+        event_id,
+        subscription_id,
+        current_period_start,
+        current_period_end,
+        price_id,
+        product_id,
+        status=SubscriptionStatus.ACTIVE,
+        event_created_timestamp=None,
+    ):
+        data = StripeEvent(
+            type=type,
+            id=event_id,
+            data=EventData(
+                object=Subscription(
+                    object="subscription",
+                    id=subscription_id,
+                    customer="cus_test",
+                    items=SubscriptionItems(
+                        object="list",
+                        data=[
+                            SubscriptionItem(
+                                id="test_subscription_item",
+                                object="subscription_item",
+                                created=current_period_start,
+                                current_period_end=current_period_end,
+                                current_period_start=current_period_start,
+                                metadata={},
+                                price=Price(
+                                    object="price",
+                                    active=True,
+                                    billing_scheme=None,
+                                    created=0,
+                                    currency="",
+                                    livemode=False,
+                                    lookup_key=None,
+                                    nickname=None,
+                                    recurring=None,
+                                    tax_behavior=None,
+                                    tiers_mode=None,
+                                    type="",
+                                    unit_amount_decimal="1",
+                                    metadata={},
+                                    id=price_id,
+                                    product=product_id,
+                                    unit_amount=1,
+                                ),
+                                quantity=1,
+                                subscription="subscription_id",
+                                tax_rates=[],
+                            )
+                        ],
+                    ),
+                    created=current_period_start,
+                    status=status,
+                    livemode=False,
+                    metadata={},
+                    cancel_at_period_end=False,
+                    start_date=current_period_start,
+                    collection_method="charge_automatically",
+                )
+            ),
+            api_version="",
+            created=event_created_timestamp or current_period_start,
+            livemode=False,
+            pending_webhooks=1,
+            request=StripeEventRequest(id="req_test", idempotency_key="test_key"),
+        )
+        return data.model_dump()
 
     @override_settings(STRIPE_WEBHOOK_SECRET=None)
     async def test_webhook_no_secret(self):
@@ -118,7 +200,7 @@ class TestStripeWebhookView(TestCase):
                     "url": None,
                 }
             },
-            "api_version": "2022-08-01",
+            "api_version": "",
             "created": 1678886401,
             "livemode": False,
             "pending_webhooks": 1,
@@ -175,7 +257,7 @@ class TestStripeWebhookView(TestCase):
                     "metadata": {},
                 }
             },
-            "api_version": "2022-08-01",
+            "api_version": "",
             "created": 1678886401,
             "livemode": False,
             "pending_webhooks": 1,
@@ -219,45 +301,20 @@ class TestStripeWebhookView(TestCase):
             stripe_id="price_test", product=product, price=10.00, nickname="Test Price"
         )
 
-        # 4. Construct the payload.
-        payload = {
-            "type": "customer.subscription.created",
-            "id": "evt_test_subscription",
-            "data": {
-                "object": {
-                    "object": "subscription",
-                    "id": "sub_test",
-                    "customer": "cus_test",  # Mocked later
-                    "items": {
-                        "object": "list",
-                        "data": [
-                            {
-                                "id": "si_test",
-                                "price": {
-                                    "id": price.stripe_id,
-                                    "product": price.product_id,
-                                },
-                                "plan": {"product": "prod_test_sub"},
-                            }
-                        ],
-                    },
-                    "created": 1678886400,
-                    "current_period_start": 1678886400,
-                    "current_period_end": 1681564800,
-                    "status": "active",
-                    "livemode": False,
-                    "metadata": {},
-                    "cancel_at_period_end": False,
-                    "start_date": 1678886400,
-                    "collection_method": "charge_automatically",
-                }
-            },
-            "api_version": "2022-08-01",
-            "created": 1678886401,
-            "livemode": False,
-            "pending_webhooks": 1,
-            "request": {"id": "req_test", "idemoptency_key": "test_key"},
-        }
+        now = timezone.now()
+        now_timestamp = int(now.timestamp())
+        subscription_id = "sub_test"
+
+        payload = self.generate_subscription_event_data(
+            type="customer.subscription.created",
+            event_id="evt_created_test",
+            subscription_id=subscription_id,
+            current_period_start=now_timestamp,
+            current_period_end=now_timestamp + 2592000,
+            price_id=price.stripe_id,
+            product_id=product.stripe_id,
+        )
+
         # Mock Customer data for stripe_get.
         mock_customer_data = {
             "object": "customer",
@@ -283,7 +340,7 @@ class TestStripeWebhookView(TestCase):
             mock_stripe_get.assert_awaited_once_with("customers/cus_test")
 
         # 5. Verify the StripeSubscription was created.
-        subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+        subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
         self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
 
     @override_settings(
@@ -322,45 +379,22 @@ class TestStripeWebhookView(TestCase):
             "name": None,
         }
 
+        now = timezone.now()
+        now_timestamp = int(now.timestamp())
+        subscription_id = "sub_webhook_ordering_test"
+
         # 4. Create test requests
-        payload = {
-            "type": "customer.subscription.created",
-            "id": "evt_test_subscription_create",
-            "data": {
-                "object": {
-                    "object": "subscription",
-                    "id": "sub_test",
-                    "customer": "cus_test",  # Mocked later
-                    "items": {
-                        "object": "list",
-                        "data": [
-                            {
-                                "id": "si_test",
-                                "price": {
-                                    "id": price.stripe_id,
-                                    "product": price.product_id,
-                                },
-                                "plan": {"product": "prod_test_sub"},
-                            }
-                        ],
-                    },
-                    "created": 1678886400,
-                    "current_period_start": 1678886400,
-                    "current_period_end": 1681564800,
-                    "status": "incomplete",
-                    "livemode": False,
-                    "metadata": {},
-                    "cancel_at_period_end": False,
-                    "start_date": 1678886400,
-                    "collection_method": "charge_automatically",
-                }
-            },
-            "api_version": "2022-08-01",
-            "created": 1678886401,
-            "livemode": False,
-            "pending_webhooks": 1,
-            "request": {"id": "req_test", "idemoptency_key": "test_key"},
-        }
+        payload = self.generate_subscription_event_data(
+            type="customer.subscription.created",
+            event_id="evt_oredering_test",
+            subscription_id=subscription_id,
+            current_period_start=now_timestamp,
+            current_period_end=now_timestamp + + 2592000,
+            price_id=price.stripe_id,
+            product_id=price.product_id,
+            status=SubscriptionStatus.INCOMPLETE,
+            event_created_timestamp=now_timestamp + 1,
+        )
 
         create_request = self.generate_stripe_request(payload)
 
@@ -370,13 +404,13 @@ class TestStripeWebhookView(TestCase):
 
         payload["id"] = "evt_test_subscription_update"
         payload["type"] = "customer.subscription.updated"
-        payload["created"] = 1678886402
+        payload["created"] = now_timestamp + 2
         payload["data"]["object"]["status"] = "active"
         update_request = self.generate_stripe_request(payload)
 
         # Separate event created prior to last received event for same Stripe object, should be ignored
         payload["id"] = "evt_test_subscription_update2"
-        payload["created"] = 1678886400
+        payload["created"] = now_timestamp
         payload["data"]["object"]["status"] = "incomplete"
         mistimed_update_request = self.generate_stripe_request(payload)
 
@@ -391,20 +425,20 @@ class TestStripeWebhookView(TestCase):
             # 5. Verify no changes to status for events that should be ignored
             response = await stripe_webhook_view(create_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
             self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
 
             response = await stripe_webhook_view(duplicate_create_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
             self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
 
             response = await stripe_webhook_view(update_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
             self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
 
             response = await stripe_webhook_view(mistimed_update_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id="sub_test")
+            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
             self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
