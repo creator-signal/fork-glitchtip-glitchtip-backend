@@ -14,11 +14,11 @@ from glitchtip.api.exceptions import ThrottleException
 from .api import get_ip_address, get_issue_event_class
 from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
+    SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
     IngestIssueEvent,
     InterchangeIssueEvent,
     ItemHeaderSchema,
-    SUPPORTED_ITEMS,
     TransactionEventSchema,
 )
 from .tasks import ingest_event, ingest_transaction
@@ -39,7 +39,9 @@ def handle_supported_payload_error(
         # Try to get a preview, limit size
         context["payload_preview"] = orjson.loads(payload_bytes[:1024])
     except orjson.JSONDecodeError:
-        context["payload_preview"] = payload_bytes[:100].hex()  # Show hex if not JSON
+        context["payload_preview"] = {
+            "hex": payload_bytes[:100].hex()
+        }  # Show hex if not JSON
     set_context("incoming event error", context)
     capture_exception(e)
     logger.warning(
@@ -56,7 +58,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         project = event_auth(request)
     except ThrottleException as e:
         response = HttpResponse("Too Many Requests", status=429)
-        response["Retry-After"] = e.retry_after
+        response["Retry-After"] = str(e.retry_after)
         return response
     except AuthenticationError:
         return JsonResponse({"detail": "Denied"}, status=403)
@@ -69,7 +71,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     request.auth = project  # Assuming event_auth returns the project object
     client_ip = get_ip_address(request)
 
-    # 1. Read and validate Envelope Header
+    # Read and validate Envelope Header
     header_line = request.readline()
     if not header_line:
         return JsonResponse({"detail": "Empty request body"}, status=400)
@@ -85,14 +87,14 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         # Return 400 Bad Request for malformed envelope structure
         return JsonResponse({"detail": "Invalid envelope header"}, status=400)
 
-    # 2. Loop through items
+    # Loop through items
     while True:
-        # 3. Read Item Header line
+        # Read Item Header line
         item_header_line = request.readline()
         if not item_header_line:
             break  # End of stream, normal exit
 
-        # 4. Validate Item Header
+        # Validate Item Header
         try:
             item_header = ItemHeaderSchema.model_validate_json(item_header_line)
         except ValidationError as e:
@@ -111,7 +113,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
             # Safest might be to stop processing this envelope.
             break  # Exit the loop
 
-        # 5. Read Payload (conditionally depends on type)
+        # Read Payload (conditionally depends on type)
         payload_bytes = b""
         read_failed = False
         try:
@@ -124,11 +126,10 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     )
                     read_failed = True  # Treat as read failure
                 else:
-                    # Consume the trailing newline AFTER length-specified payload
+                    # Consume the trailing newline after length-specified payload
                     request.readline()
             else:
                 # Read newline-terminated payload (common for JSON items without length)
-                # Note: readline() includes the newline if present
                 payload_bytes = request.readline()
         except Exception as e:  # Catch potential read errors
             set_level("error")
@@ -142,7 +143,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         if read_failed:
             break  # Stop processing envelope on read error or incomplete read
 
-        # 6. Handle Payload based on Type
+        # Handle Payload based on Type
         if item_header.type in SUPPORTED_ITEMS:
             try:
                 if item_header.type == "event":
@@ -212,7 +213,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
             # No logging, no processing. Silently continue.
             pass
 
-    # 7. Final Response
+    # Final Response
     # Return event_id from envelope header if it exists, as it might relate
     # to the overall submission even if items have their own IDs.
     if envelope_header.event_id:
