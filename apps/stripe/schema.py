@@ -71,19 +71,29 @@ class ProductExpandedPrice(Product):
 ProductExpandedPriceListResponse = StripeListResponse[ProductExpandedPrice]
 
 
-class Items(BaseModel):
-    object: Literal["list"]
-    data: list[dict]
-
-
-class Subscription(BaseModel):
-    object: Literal["subscription"]
+class SubscriptionItem(BaseModel):
     id: str
-    customer: str | dict | None  # Can be a string ID or a nested Customer object
-    items: Items
+    object: Literal["subscription_item"]
     created: int
     current_period_end: int
     current_period_start: int
+    metadata: dict[str, str]
+    price: Price
+    quantity: int
+    subscription: str
+    tax_rates: list
+
+
+class SubscriptionItems(BaseModel):
+    object: Literal["list"]
+    data: list[SubscriptionItem]
+
+
+class SubscriptionBase(BaseModel):
+    object: Literal["subscription"]
+    id: str
+    items: SubscriptionItems
+    created: int
     status: str
     livemode: bool
     metadata: dict[str, str] | None
@@ -92,7 +102,11 @@ class Subscription(BaseModel):
     collection_method: str
 
 
-class SubscriptionExpandCustomer(Subscription):
+class Subscription(SubscriptionBase):
+    customer: str
+
+
+class SubscriptionExpandCustomer(SubscriptionBase):
     customer: Customer
 
 

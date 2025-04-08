@@ -203,10 +203,10 @@ class StripeSubscription(StripeModel):
             subscription.status = fetched_sub.status
             subscription.created = unix_to_datetime(fetched_sub.created)
             subscription.current_period_start = unix_to_datetime(
-                fetched_sub.current_period_start
+                fetched_sub.items.data[0].current_period_start
             )
             subscription.current_period_end = unix_to_datetime(
-                fetched_sub.current_period_end
+                fetched_sub.items.data[0].current_period_end
             )
             subscription.start_date = unix_to_datetime(fetched_sub.start_date)
             subscription.collection_method = fetched_sub.collection_method
@@ -214,12 +214,12 @@ class StripeSubscription(StripeModel):
 
     @classmethod
     async def remove_inactive_primary_subscriptions(cls):
-        await Organization.objects.filter(
-            stripe_primary_subscription__isnull=False
-        ).exclude(
-            stripe_primary_subscription__status__in=ACTIVE_SUBSCRIPTION_STATUSES
-        ).aupdate(
-            stripe_primary_subscription=None
+        await (
+            Organization.objects.filter(stripe_primary_subscription__isnull=False)
+            .exclude(
+                stripe_primary_subscription__status__in=ACTIVE_SUBSCRIPTION_STATUSES
+            )
+            .aupdate(stripe_primary_subscription=None)
         )
 
     @classmethod
@@ -248,18 +248,18 @@ class StripeSubscription(StripeModel):
                     continue  # Skip if no organization ID in metadata
 
                 items = subscription.items.data
-                if not items or not items[0].get("price"):
+                if not items or not items[0].price:
                     continue  # Skip
 
-                price = items[0]["price"]
-                price_id = price["id"]
+                price = items[0].price
+                price_id = price.id
                 if price_id not in known_price_ids:
                     await StripePrice.objects.aupdate_or_create(
                         stripe_id=price_id,
                         defaults={
-                            "product_id": price["product"],
-                            "nickname": price.get("nickname") or "",
-                            "price": price["unit_amount"] / 100,
+                            "product_id": price.product,
+                            "nickname": price.nickname or "",
+                            "price": price.unit_amount / 100,
                         },
                     )
                     known_price_ids.add(price_id)
@@ -284,10 +284,10 @@ class StripeSubscription(StripeModel):
                             stripe_id=subscription.id,
                             created=unix_to_datetime(subscription.created),
                             current_period_start=unix_to_datetime(
-                                subscription.current_period_start
+                                subscription.items.data[0].current_period_start
                             ),
                             current_period_end=unix_to_datetime(
-                                subscription.current_period_end
+                                subscription.items.data[0].current_period_end
                             ),
                             price_id=price_id,
                             organization_id=organization_id,
