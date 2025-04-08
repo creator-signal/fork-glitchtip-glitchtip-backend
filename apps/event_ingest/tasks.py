@@ -1,8 +1,8 @@
 import logging
 
 from celery import shared_task
-
 from celery_batches import Batches
+
 from glitchtip.celery import app
 
 from .process_event import process_issue_events, process_transaction_events
