@@ -123,8 +123,18 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         mock_log.assert_called_once()
 
     def test_no_content_type(self):
+        """
+        Test minimal but valid event payload without a content type
+        This is a unexpected but possible sdk behavior
+        """
+        minimal_payload = {
+            "event_id": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+            "timestamp": "2025-04-08T12:00:00Z",
+            "platform": "other",
+        }
         data = (
-            b'{"event_id": "5a337086bc1545448e29ed938729cba3"}\n{"type": "event"}\n{}'
+            b'{"event_id": "5a337086bc1545448e29ed938729cba3"}\n{"type": "event"}\n'
+            + json.dumps(minimal_payload).encode()
         )
         parsed = urlparse(self.url)  # path can be lazy
         r = {
@@ -183,3 +193,99 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         }
         res = self.client.post(self.url, event, content_type="application/json")
         self.assertEqual(res.status_code, 200)
+
+    def test_item_with_explicit_length(self):
+        """
+        Verify that an envelope item with a correctly specified 'length'
+        in its header is parsed and processed successfully.
+        """
+        payload_dict = {
+            "event_id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            "timestamp": "2025-04-08T13:01:00Z",
+            "platform": "python",
+            "message": "Event with explicit length",
+        }
+
+        payload_bytes = json.dumps(payload_dict).encode()
+        payload_length = len(payload_bytes)
+
+        envelope_header_dict = {"event_id": payload_dict["event_id"]}
+        item_header_dict = {
+            "type": "event",
+            "length": payload_length,
+        }
+
+        envelope_header_bytes = json.dumps(envelope_header_dict).encode()
+        item_header_bytes = json.dumps(item_header_dict).encode()
+
+        data = (
+            envelope_header_bytes
+            + b"\n"
+            + item_header_bytes
+            + b"\n"
+            + payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(self.url, data, content_type="application/json")
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(self.project.issues.count(), 1)
+
+    def test_envelope_ignores_unsupported_item_with_length(self):
+        """
+        Verify that the envelope view correctly uses the 'length' attribute
+        to read and discard an unsupported item type (e.g., attachment)
+        with a non-JSON payload, and then successfully processes a subsequent
+        valid event item in the same envelope.
+        """
+        envelope_header_dict = {"sent_at": "2025-04-08T13:09:00Z"}
+        envelope_header_bytes = json.dumps(envelope_header_dict).encode()
+
+        # Unhandled data to skip
+        attachment_payload_bytes = b"This is some log content.\n" + b"End."
+        actual_attachment_length = len(attachment_payload_bytes)
+        attachment_header_dict = {
+            "type": "attachment",
+            "length": actual_attachment_length,
+            "filename": "debug.log",
+            "content_type": "text/plain",
+        }
+        attachment_header_bytes = json.dumps(attachment_header_dict).encode()
+
+        # The valid event
+        event_payload_dict = {
+            "event_id": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+            "timestamp": "2025-04-08T13:09:01Z",
+            "platform": "java",
+            "message": "Processing after ignored item",
+        }
+        event_payload_bytes = json.dumps(event_payload_dict).encode()
+        event_payload_length = len(event_payload_bytes)
+        event_header_dict = {
+            "type": "event",
+            "length": event_payload_length,
+        }
+        event_header_bytes = json.dumps(event_header_dict).encode()
+
+        data = (
+            envelope_header_bytes
+            + b"\n"
+            + attachment_header_bytes
+            + b"\n"
+            + attachment_payload_bytes
+            + b"\n"
+            + event_header_bytes
+            + b"\n"
+            + event_payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(self.url, data, content_type="application/json")
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            self.project.issues.count(),
+            1,
+            "Should have processed the valid event after ignoring the attachment.",
+        )
