@@ -55,7 +55,7 @@ async def update_price(price: Price):
         stripe_id=price.id,
         defaults={
             "product_id": price.product,
-            "nickname": price.nickname,
+            "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
         },
     )
@@ -109,14 +109,14 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
     if not organization:
         return
 
-    if (price_id := subscription.items.data[0]["price"]["id"]) is None:
+    if (price_id := subscription.items.data[0].price.id) is None:
         return
     stripe_subscription, created = await StripeSubscription.objects.aupdate_or_create(
         stripe_id=subscription.id,
         defaults={
             "created": unix_to_datetime(subscription.created),
-            "current_period_start": unix_to_datetime(subscription.current_period_start),
-            "current_period_end": unix_to_datetime(subscription.current_period_end),
+            "current_period_start": unix_to_datetime(subscription.items.data[0].current_period_start),
+            "current_period_end": unix_to_datetime(subscription.items.data[0].current_period_end),
             "price_id": price_id,
             "organization_id": organization.id,
             "status": subscription.status,

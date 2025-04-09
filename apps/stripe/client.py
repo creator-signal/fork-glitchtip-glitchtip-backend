@@ -24,7 +24,7 @@ STRIPE_URL = "https://api.stripe.com/v1"
 HEADERS = {
     "Authorization": f"Bearer {settings.STRIPE_SECRET_KEY}",
     "Content-Type": "application/x-www-form-urlencoded",
-    "Stripe-Version": "2025-01-27.acacia",
+    "Stripe-Version": "2025-03-31.basil",
 }
 
 AIOTupleParams: TypeAlias = list[tuple[str, str]]
