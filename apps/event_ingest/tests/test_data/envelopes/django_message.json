@@ -11,7 +11,7 @@
       "sampled": "false"
     }
   },
-  { "type": "event", "content_type": "application/json" },
+  { "type": "event", "content_type": "application/json", "length": 3021 },
   {
     "message": "Page not found!",
     "level": "info",
