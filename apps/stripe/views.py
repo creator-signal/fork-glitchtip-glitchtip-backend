@@ -55,7 +55,7 @@ async def update_price(price: Price):
         stripe_id=price.id,
         defaults={
             "product_id": price.product,
-            "nickname": price.nickname,
+            "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
         },
     )
