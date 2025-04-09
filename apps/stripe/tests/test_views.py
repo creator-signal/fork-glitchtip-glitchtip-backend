@@ -93,7 +93,7 @@ class TestStripeWebhookView(TestCase):
                                     unit_amount=1,
                                 ),
                                 quantity=1,
-                                subscription="subscription_id",
+                                subscription=subscription_id,
                                 tax_rates=[],
                             )
                         ],
@@ -386,7 +386,7 @@ class TestStripeWebhookView(TestCase):
         # 4. Create test requests
         payload = self.generate_subscription_event_data(
             type="customer.subscription.created",
-            event_id="evt_oredering_test",
+            event_id="evt_ordering_test",
             subscription_id=subscription_id,
             current_period_start=now_timestamp,
             current_period_end=now_timestamp + + 2592000,
