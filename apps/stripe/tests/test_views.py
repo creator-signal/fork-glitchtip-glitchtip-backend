@@ -3,6 +3,7 @@ import json
 import time
 from unittest.mock import AsyncMock, patch
 
+from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +25,7 @@ from apps.stripe.views import stripe_webhook_view
 
 class TestStripeWebhookView(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
         self.url = reverse("stripe_webhook")
         self.webhook_secret = "test_webhook_secret"  # Use a test secret
