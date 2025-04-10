@@ -13,7 +13,14 @@ class IssueAPITestCase(GlitchTestCase):
         self.client.force_login(self.user)
 
     def test_list_issue_hashes(self):
-        issue_hash = baker.make("issue_events.IssueHash", issue__project=self.project)
+        issue_hash = baker.make(
+            "issue_events.IssueHash", project=self.project, issue__project=self.project
+        )
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issue_hash.issue,
+            data={"hashes": [issue_hash.value.hex]},
+        )
         list_url = reverse(
             "api:list_issue_hashes",
             kwargs={
@@ -22,4 +29,4 @@ class IssueAPITestCase(GlitchTestCase):
             },
         )
         res = self.client.get(list_url)
-        self.assertEqual(res.json(), [{"id": issue_hash.value.hex}])
+        self.assertEqual(res.json()[0]["id"], issue_hash.value.hex)

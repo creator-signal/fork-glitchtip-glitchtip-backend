@@ -366,6 +366,7 @@ class IssueTagSchema(CamelSchema):
 
 class IssueHashSchema(CamelSchema):
     id: str
+    latest_event: IssueEventSchema | None
 
     @staticmethod
     def resolve_id(obj):

@@ -732,6 +732,19 @@ wheels = [
 ]
 
 [[package]]
+name = "django-ninja-cursor-pagination"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "django-ninja" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/53/a47b21deef6b755369d7fc483ee7d51c058de34eb7d0ac33005e27ffccce/django_ninja_cursor_pagination-0.1.0.tar.gz", hash = "sha256:dd0e67abc58db3f7638cdbeaf95d64780fe7eb8efd7bac8b0d03cdd2d3f9c91d", size = 8603 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/82/e5175c26cd41e2db9093458bfdf3e191648da4843a825c95e1b66e9368e1/django_ninja_cursor_pagination-0.1.0-py3-none-any.whl", hash = "sha256:1f35f55d419086f18c28e6bdc007c2c4b2f936354990dfabab8daf19da1d8b6c", size = 8766 },
+]
+
+[[package]]
 name = "django-organizations"
 version = "2.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1106,6 +1119,7 @@ dependencies = [
     { name = "django-import-export" },
     { name = "django-ipware" },
     { name = "django-ninja" },
+    { name = "django-ninja-cursor-pagination" },
     { name = "django-organizations" },
     { name = "django-prometheus" },
     { name = "django-redis", extra = ["hiredis"] },
@@ -1159,6 +1173,7 @@ requires-dist = [
     { name = "django-import-export", specifier = "~=4.1" },
     { name = "django-ipware", specifier = "~=7.0" },
     { name = "django-ninja", specifier = "~=1.4" },
+    { name = "django-ninja-cursor-pagination", specifier = ">=0.1.0" },
     { name = "django-organizations", specifier = "~=2.3" },
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-redis", extras = ["hiredis"], specifier = "~=5.2" },

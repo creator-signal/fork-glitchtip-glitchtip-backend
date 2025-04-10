@@ -2,13 +2,32 @@ from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja.pagination import paginate
 
-from apps.issue_events.models import IssueHash
+from apps.issue_events.models import IssueEvent, IssueHash
 from apps.issue_events.schema import IssueHashSchema
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.pagination import AsyncLinkHeaderPagination
 from glitchtip.api.permissions import has_permission
 
 from . import router
+
+
+class IssueHashPagination(AsyncLinkHeaderPagination):
+    async def get_results(self, queryset, cursor, limit):
+        result = await super().get_results(queryset, cursor, limit)
+        # There is no foreign key connecting a hash to an event.
+        # So we must query once per hash
+        for issue_hash in result:
+            issue_hash.latest_event = (
+                await IssueEvent.objects.filter(
+                    data__hashes__contains=issue_hash.value.hex,
+                    issue__project_id=issue_hash.project_id,
+                )
+                .select_related("issue")
+                .order_by("-timestamp")
+                .afirst()
+            )
+        return result
 
 
 @router.get(
@@ -17,7 +36,7 @@ from . import router
     by_alias=True,
 )
 @has_permission(["event:read"])
-@paginate
+@paginate(IssueHashPagination)
 async def list_issue_hashes(
     request: AuthHttpRequest,
     response: HttpResponse,
