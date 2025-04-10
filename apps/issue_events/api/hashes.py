@@ -1,5 +1,8 @@
+from uuid import UUID
+
 from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
+from ninja import Query, Schema
 from ninja.pagination import paginate
 
 from apps.issue_events.models import IssueEvent, IssueHash
@@ -49,3 +52,29 @@ async def list_issue_hashes(
     return IssueHash.objects.filter(
         issue_id=issue_id, issue__project__organization=organization
     ).order_by("value")
+
+
+class IssueHashQuerySchema(Schema):
+    id: list[UUID]
+
+
+@router.delete(
+    "/organizations/{slug:organization_slug}/issues/{int:issue_id}/hashes/",
+    response={202: None},
+)
+@has_permission(["event:admin"])
+async def delete_hash(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    issue_id: int,
+    query: Query[IssueHashQuerySchema],
+):
+    organization = await aget_object_or_404(
+        Organization, users=request.auth.user_id, slug=organization_slug
+    )
+    await IssueHash.objects.filter(
+        value__in=query.id,
+        issue_id=issue_id,
+        issue__project__organization=organization,
+    ).adelete()
+    return 202, None
