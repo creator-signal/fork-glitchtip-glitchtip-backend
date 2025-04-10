@@ -13,7 +13,10 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("releases", "0002_auto_20201227_1518"),
+        (
+            "releases",
+            "0001_squashed_0004_alter_release_id_alter_releasefile_id_and_more",
+        ),
         (
             "projects",
             "0001_squashed_0009_alter_project_id_alter_projectcounter_id_and_more",

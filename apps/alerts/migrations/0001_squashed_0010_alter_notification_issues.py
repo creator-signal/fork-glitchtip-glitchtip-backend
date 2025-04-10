@@ -5,16 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    replaces = [
-        (
-            "alerts",
-            "0001_squashed_0007_alter_alertrecipient_id_alter_notification_id_and_more",
-        ),
-        ("alerts", "0008_alter_alertrecipient_recipient_type"),
-        ("alerts", "0009_alter_alertrecipient_recipient_type"),
-        ("alerts", "0010_alter_notification_issues"),
-    ]
-
     initial = True
 
     dependencies = [

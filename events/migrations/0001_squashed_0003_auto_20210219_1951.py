@@ -8,17 +8,14 @@ import uuid
 
 
 class Migration(migrations.Migration):
-    replaces = [
-        ("events", "0001_squashed_0003_auto_20210116_2110"),
-        ("events", "0002_auto_20210122_1836"),
-        ("events", "0003_auto_20210219_1951"),
-    ]
-
     initial = True
 
     dependencies = [
         ("issues", "0002_auto_20210219_1931"),
-        ("releases", "0002_auto_20201227_1518"),
+        (
+            "releases",
+            "0001_squashed_0004_alter_release_id_alter_releasefile_id_and_more",
+        ),
         ("issues", "0001_squashed_0010_auto_20210117_1543"),
     ]
 
