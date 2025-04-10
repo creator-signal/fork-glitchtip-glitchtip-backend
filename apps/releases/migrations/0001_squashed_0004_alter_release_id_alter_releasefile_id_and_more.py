@@ -6,13 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    replaces = [
-        ("releases", "0001_initial"),
-        ("releases", "0002_auto_20201227_1518"),
-        ("releases", "0003_auto_20210509_1658"),
-        ("releases", "0004_alter_release_id_alter_releasefile_id_and_more"),
-    ]
-
     initial = True
 
     dependencies = [
@@ -20,10 +13,6 @@ class Migration(migrations.Migration):
         (
             "organizations_ext",
             "0001_squashed_0003_alter_organization_id_alter_organization_users_and_more",
-        ),
-        (
-            "projects",
-            "0001_squashed_0009_alter_project_id_alter_projectcounter_id_and_more",
         ),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

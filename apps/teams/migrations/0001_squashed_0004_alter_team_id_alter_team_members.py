@@ -12,13 +12,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    replaces = [
-        ("teams", "0001_initial"),
-        ("teams", "0002_team_members_new"),
-        ("teams", "0003_auto_20200613_2156"),
-        ("teams", "0004_alter_team_id_alter_team_members"),
-    ]
-
     initial = True
 
     dependencies = [

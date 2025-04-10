@@ -236,7 +236,6 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.openid_connect",
     "allauth.socialaccount.providers.okta",
     "anymail",
-    "django_rest_mfa",
     "corsheaders",
     "django_extensions",
 ]
