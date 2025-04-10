@@ -18,6 +18,7 @@ import environ
 import sentry_sdk
 from celery.schedules import crontab
 from corsheaders.defaults import default_headers
+from csp.constants import NONCE, SELF, UNSAFE_INLINE
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import UnreadablePostError
@@ -237,6 +238,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.okta",
     "anymail",
     "corsheaders",
+    "csp",
     "django_extensions",
 ]
 if DEBUG_TOOLBAR:
@@ -357,43 +359,52 @@ CHATWOOT_IDENTITY_TOKEN = env.str("CHATWOOT_IDENTITY_TOKEN", None)
 
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", str, [])
 SECURE_BROWSER_XSS_FILTER = True
-CSP_DEFAULT_SRC = env.list("CSP_DEFAULT_SRC", str, ["'self'"])
-# https://github.com/swimlane/ngx-charts/issues/1937
-CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str, ["'self'", "'unsafe-inline'"])
-# Use this once unsafe-inline is removed (blame is ngx-charts)
-# if "CSP_STYLE_SRC" in os.environ:
-#     CSP_STYLE_SRC = env.list("CSP_STYLE_SRC", str)
-if "CSP_STYLE_SRC_ELEM" in os.environ:
-    CSP_STYLE_SRC_ELEM = env.list("CSP_STYLE_SRC_ELEM", str)
-CSP_FONT_SRC = env.list("CSP_FONT_SRC", str, ["'self'", "data:"])
-if "CSP_WORKER_SRC" in os.environ:
-    CSP_WORKER_SRC = env.list("CSP_WORKER_SRC", str)
 
+# Consider tracking CSP reports with GlitchTip itself
 # Enable Chatwoot only when configured
-default_connect_src = ["'self'", "https://*.glitchtip.com"]
+default_connect_src = [SELF, "https://*.glitchtip.com"]
 if CHATWOOT_WEBSITE_TOKEN:
     default_connect_src.append("https://app.chatwoot.com")
-CSP_CONNECT_SRC = env.list("CSP_CONNECT_SRC", str, default_connect_src)
-
 # Enable stripe by default only when configured
 stripe_domain = "https://js.stripe.com"
 default_script_src = [
-    "'self'",
+    SELF,
     "https://*.glitchtip.com",
     "'sha256-iRcDQ27XiXX4k+jbJ8nGeQFBnBOjmII7FdMlixb6QE4='",  # Theme picker inline JS
 ]
-default_frame_src = ["'self'"]
+default_frame_src = [SELF]
 if BILLING_ENABLED:
     default_script_src.append(stripe_domain)
     default_frame_src.append(stripe_domain)
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": env.list("CSP_DEFAULT_SRC", str, [SELF]) + [NONCE],
+        # https://github.com/swimlane/ngx-charts/issues/1937
+        # Use this once unsafe-inline is removed
+        "style-src": env.list("CSP_STYLE_SRC", str, [SELF, UNSAFE_INLINE]),
+        "font-src": env.list("CSP_FONT_SRC", str, [SELF, "data:"]),
+        "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
+        "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [NONCE],
+        "img-src": env.list("CSP_IMG_SRC", str, [SELF]),
+        "frame-src": env.list("CSP_FRAME_SRC", str, default_frame_src),
+        "report-uri": env.tuple("CSP_REPORT_URI", str, None),
+    },
+    "REPORT_PERCENTAGE": env.float("CSP_REPORT_PERCENTAGE", 10.0),
+}
+if "CSP_STYLE_SRC_ELEM" in os.environ:
+    CONTENT_SECURITY_POLICY["DIRECTIVES"]["style-src-elem"] = env.list(
+        "CSP_STYLE_SRC_ELEM", str
+    )
+if "CSP_WORKER_SRC" in os.environ:
+    CONTENT_SECURITY_POLICY["DIRECTIVES"]["worker-src"] = env.list(
+        "CSP_WORKER_SRC", str
+    )
+csp_report_only = env.bool("CSP_REPORT_ONLY", False)
+if csp_report_only:
+    CONTENT_SECURITY_POLICY_REPORT_ONLY = CONTENT_SECURITY_POLICY
+    CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
 
-CSP_SCRIPT_SRC = env.list("CSP_SCRIPT_SRC", str, default_script_src)
-CSP_IMG_SRC = env.list("CSP_IMG_SRC", str, ["'self'"])
-CSP_FRAME_SRC = env.list("CSP_FRAME_SRC", str, default_frame_src)
-# Consider tracking CSP reports with GlitchTip itself
-CSP_INCLUDE_NONCE_IN = ["default-src", "script-src"]
-CSP_REPORT_URI = env.tuple("CSP_REPORT_URI", str, None)
-CSP_REPORT_ONLY = env.bool("CSP_REPORT_ONLY", False)
+
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
 SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", False)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
