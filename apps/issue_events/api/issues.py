@@ -34,7 +34,7 @@ async def get_queryset(
     project_slug: Optional[str] = None,
 ):
     user_id = request.auth.user_id
-    qs = Issue.objects.all()
+    qs = Issue.undeleted_objects
 
     if organization_slug:
         organization = await aget_object_or_404(
@@ -46,10 +46,9 @@ async def get_queryset(
 
     if project_slug:
         qs = qs.filter(project__slug=project_slug)
-    qs = qs.annotate(
+    return qs.annotate(
         num_comments=Count("comments", distinct=True),
-    )
-    return qs.select_related("project")
+    ).select_related("project")
 
 
 EventStatusEnum = StrEnum("EventStatusEnum", EventStatus.labels)
