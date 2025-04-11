@@ -294,6 +294,7 @@ class IngestRequest(BaseRequest):
 
 
 class IngestIssueEvent(BaseIssueEvent):
+    event_id: uuid.UUID | None = None
     timestamp: datetime = Field(default_factory=now)
     level: str | None = "error"
     logentry: EventMessage | None = None
