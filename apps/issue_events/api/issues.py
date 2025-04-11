@@ -2,7 +2,7 @@ import re
 import shlex
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from django.db.models import Count, Sum
@@ -30,11 +30,11 @@ from . import router
 
 async def get_queryset(
     request: AuthHttpRequest,
-    organization_slug: Optional[str] = None,
-    project_slug: Optional[str] = None,
+    organization_slug: str | None = None,
+    project_slug: str | None = None,
 ):
     user_id = request.auth.user_id
-    qs = Issue.undeleted_objects
+    qs = Issue.objects
 
     if organization_slug:
         organization = await aget_object_or_404(
@@ -170,8 +170,8 @@ class IssueFilters(Schema):
     first_seen__gte: RelativeDateTime = Field(None, alias="start")
     first_seen__lte: RelativeDateTime = Field(None, alias="end")
     project__in: list[str] = Field(None, alias="project")
-    environment: Optional[list[str]] = None
-    query: Optional[str] = None
+    environment: list[str] | None = None
+    query: str | None = None
 
 
 sort_options = Literal[
@@ -189,8 +189,8 @@ sort_options = Literal[
 def filter_issue_list(
     qs: QuerySet,
     filters: Query[IssueFilters],
-    sort: Optional[sort_options] = None,
-    event_id: Optional[UUID] = None,
+    sort: sort_options | None = None,
+    event_id: UUID | None = None,
 ):
     qs_filters = filters.dict(exclude_none=True)
     query = qs_filters.pop("query", None)
@@ -258,8 +258,8 @@ async def list_issues(
     filters: Query[IssueFilters],
     sort: sort_options = "-last_seen",
 ):
-    qs = await get_queryset(request, organization_slug=organization_slug)
-    event_id: Optional[UUID] = None
+    qs = (await get_queryset(request, organization_slug=organization_slug)).filter(is_deleted=False)
+    event_id: UUID | None = None
     if filters.query:
         try:
             event_id = UUID(filters.query)
@@ -339,7 +339,7 @@ async def list_project_issues(
     qs = await get_queryset(
         request, organization_slug=organization_slug, project_slug=project_slug
     )
-    event_id: Optional[UUID] = None
+    event_id: UUID | None = None
     if filters.query:
         try:
             event_id = UUID(filters.query)
@@ -355,7 +355,7 @@ async def list_project_issues(
 )
 @has_permission(["event:read", "event:write", "event:admin"])
 async def list_issue_tags(
-    request: AuthHttpRequest, issue_id: int, key: Optional[str] = None
+    request: AuthHttpRequest, issue_id: int, key: str | None = None
 ):
     qs = await get_queryset(request)
     try:
