@@ -581,7 +581,7 @@ class IssueAPITestCase(GlitchTestCase):
         """Bulk delete Issues with ids"""
         issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
-        res = self.client.delete(url)
+        self.client.delete(url)
         issues = Issue.objects.count()
         self.assertEqual(issues, 0)
 
