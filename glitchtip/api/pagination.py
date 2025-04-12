@@ -1,11 +1,9 @@
 from typing import TYPE_CHECKING
 from urllib import parse
 
-from asgiref.sync import sync_to_async
 from django.http import HttpRequest, HttpResponse
 from ninja.conf import settings as ninja_settings
-
-from .cursor_pagination import CursorPagination, _clamp, _reverse_order
+from ninja_cursor_pagination import CursorPagination, _clamp, _reverse_order
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -16,6 +14,11 @@ class AsyncLinkHeaderPagination(CursorPagination):
 
     # Remove Output schema because we only want to return a list of items
     Output = None
+
+    async def get_results(self, queryset: "QuerySet", cursor, limit):
+        return [
+            obj async for obj in queryset[cursor.offset : cursor.offset + limit + 1]
+        ]
 
     async def apaginate_queryset(
         self,
@@ -52,11 +55,7 @@ class AsyncLinkHeaderPagination(CursorPagination):
             else:
                 queryset = queryset.filter(**{f"{order_attr}__gt": cursor.position})
 
-        @sync_to_async
-        def get_results():
-            return list(queryset[cursor.offset : cursor.offset + limit + 1])
-
-        results = await get_results()
+        results = await self.get_results(queryset, cursor, limit)
         page = list(results[:limit])
 
         if len(results) > len(page):
@@ -81,14 +80,14 @@ class AsyncLinkHeaderPagination(CursorPagination):
 
         next = (
             self.next_link(
-                base_url,
-                page,
-                cursor,
-                order,
-                has_previous,
-                limit,
-                next_position,
-                previous_position,
+                base_url=base_url,
+                page=page,
+                cursor=cursor,
+                order=order,
+                has_previous=has_previous,
+                limit=limit,
+                next_position=next_position,
+                previous_position=previous_position,
             )
             if has_next
             else None
@@ -96,14 +95,14 @@ class AsyncLinkHeaderPagination(CursorPagination):
 
         previous = (
             self.previous_link(
-                base_url,
-                page,
-                cursor,
-                order,
-                has_next,
-                limit,
-                next_position,
-                previous_position,
+                base_url=base_url,
+                page=page,
+                cursor=cursor,
+                order=order,
+                has_next=has_next,
+                limit=limit,
+                next_position=next_position,
+                previous_position=previous_position,
             )
             if has_previous
             else None

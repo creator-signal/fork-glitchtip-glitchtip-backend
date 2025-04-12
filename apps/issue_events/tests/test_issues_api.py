@@ -532,7 +532,6 @@ class IssueAPITestCase(GlitchTestCase):
 
     def test_issue_update(self):
         issue = baker.make("issue_events.Issue", project=self.project)
-        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         data = {"status": "resolved"}
         res = self.client.put(
             get_issue_url(issue.pk),
@@ -583,8 +582,20 @@ class IssueAPITestCase(GlitchTestCase):
         issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
         self.client.delete(url)
-        issues = Issue.objects.all().count()
+        issues = Issue.objects.count()
         self.assertEqual(issues, 0)
+
+    def test_issue_merge(self):
+        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+        url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
+        data = {"merge": 1}
+        res = self.client.put(
+            url,
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(Issue.objects.filter(is_deleted=False).count(), 1)
 
     def test_bulk_delete_via_search(self):
         """Bulk delete Issues via search string"""
