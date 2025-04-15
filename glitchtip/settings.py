@@ -687,8 +687,7 @@ if os.getenv(
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_ADAPTER = "glitchtip.adapters.CustomDefaultAccountAdapter"
 ACCOUNT_LOGIN_METHODS = {"email"}
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_REAUTHENTICATION_TIMEOUT = SESSION_COOKIE_AGE  # Disabled for now
 LOGIN_REDIRECT_URL = "/"
