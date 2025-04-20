@@ -760,6 +760,20 @@ wheels = [
 ]
 
 [[package]]
+name = "django-postgres-partition"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "psycopg" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bb/14/b5bab7b4f33654e5dd5f66f87000972bdda335b41e25ecbd67fae4f8bc52/django_postgres_partition-0.1.1.tar.gz", hash = "sha256:294ae09df5175b245ead6e1daad5593bd6eee631d89c771538883def0ebde515", size = 54651 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/76/79/0e636cdc26f3c207d52e72537df838fd5d74e6ddf1f8807efab4290aace2/django_postgres_partition-0.1.1-py3-none-any.whl", hash = "sha256:e397977b07c2dd8c0b267255b441bca030dc2e596cd04741b0b9216f4476be7e", size = 82583 },
+]
+
+[[package]]
 name = "django-prometheus"
 version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1123,6 +1137,7 @@ dependencies = [
     { name = "django-ninja" },
     { name = "django-ninja-cursor-pagination" },
     { name = "django-organizations" },
+    { name = "django-postgres-partition" },
     { name = "django-prometheus" },
     { name = "django-redis", extra = ["hiredis"] },
     { name = "django-storages", extra = ["azure", "boto3", "google"] },
@@ -1177,6 +1192,7 @@ requires-dist = [
     { name = "django-ninja", specifier = "~=1.4" },
     { name = "django-ninja-cursor-pagination", specifier = ">=0.1.0" },
     { name = "django-organizations", specifier = "~=2.3" },
+    { name = "django-postgres-partition", specifier = ">=0.1.1" },
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-redis", extras = ["hiredis"], specifier = "~=5.2" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },

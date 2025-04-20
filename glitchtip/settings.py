@@ -220,7 +220,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.humanize",
-    "psqlextra",
+    "psql_partition",
     "django_prometheus",
     "allauth",
     "allauth.account",
@@ -466,7 +466,7 @@ if DATABASE_HOST and DATABASE_PASSWORD:
         "CONN_MAX_AGE": env.int("DATABASE_CONN_MAX_AGE", 0),
         "CONN_HEALTH_CHECKS": env.bool("DATABASE_CONN_HEALTH_CHECKS", False),
     }
-DATABASES["default"]["ENGINE"] = "psqlextra.backend"
+DATABASES["default"]["ENGINE"] = "psql_partition.backend"
 if not DATABASES["default"].get("OPTIONS"):
     DATABASES["default"]["OPTIONS"] = {}
 # Enable pool by default, if there is no conn_max_age

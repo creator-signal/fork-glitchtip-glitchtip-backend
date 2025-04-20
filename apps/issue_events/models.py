@@ -7,8 +7,8 @@ from django.db import models
 from django.utils import timezone
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
-from psqlextra.models import PostgresPartitionedModel
-from psqlextra.types import PostgresPartitioningMethod
+from psql_partition.models import PostgresPartitionedModel
+from psql_partition.types import PostgresPartitioningMethod
 from sentry.constants import MAX_CULPRIT_LENGTH
 
 from .constants import EventStatus, IssueEventType, LogLevel

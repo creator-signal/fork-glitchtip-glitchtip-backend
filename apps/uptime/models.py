@@ -10,8 +10,8 @@ from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
 
 from glitchtip.base_models import CreatedModel
-from psqlextra.models import PostgresPartitionedModel
-from psqlextra.types import PostgresPartitioningMethod
+from psql_partition.models import PostgresPartitionedModel
+from psql_partition.types import PostgresPartitioningMethod
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 

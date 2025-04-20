@@ -8,12 +8,12 @@ from apps.projects.models import (
     TransactionEventProjectHourlyStatistic,
 )
 from apps.uptime.models import MonitorCheck
-from psqlextra.partitioning import (
+from psql_partition.partitioning import (
     PostgresCurrentTimePartitioningStrategy,
     PostgresPartitioningManager,
     PostgresTimePartitionSize,
 )
-from psqlextra.partitioning.config import PostgresPartitioningConfig
+from psql_partition.partitioning.config import PostgresPartitioningConfig
 
 issue_strategy = PostgresCurrentTimePartitioningStrategy(
     size=PostgresTimePartitionSize(days=1),
