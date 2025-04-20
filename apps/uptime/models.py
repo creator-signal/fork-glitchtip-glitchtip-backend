@@ -8,10 +8,10 @@ from django.db.models import OuterRef, Subquery
 from django.urls import reverse
 from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
-
-from glitchtip.base_models import CreatedModel
 from psql_partition.models import PostgresPartitionedModel
 from psql_partition.types import PostgresPartitioningMethod
+
+from glitchtip.base_models import CreatedModel
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 

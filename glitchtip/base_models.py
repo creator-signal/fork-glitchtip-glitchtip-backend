@@ -1,5 +1,4 @@
 from django.db import models
-
 from psql_partition.models import PostgresPartitionedModel
 from psql_partition.types import PostgresPartitioningMethod
 

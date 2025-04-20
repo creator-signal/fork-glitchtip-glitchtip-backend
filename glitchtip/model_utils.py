@@ -3,7 +3,6 @@ from typing import Union
 
 from django.conf import settings
 from django.db import models
-
 from psql_partition.backend.migrations.operations.add_default_partition import (
     PostgresAddDefaultPartition,
 )

@@ -2,10 +2,10 @@ import uuid
 
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
-
-from glitchtip.base_models import CreatedModel
 from psql_partition.models import PostgresPartitionedModel
 from psql_partition.types import PostgresPartitioningMethod
+
+from glitchtip.base_models import CreatedModel
 
 
 class TransactionGroup(CreatedModel):

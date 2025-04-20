@@ -258,7 +258,9 @@ async def list_issues(
     filters: Query[IssueFilters],
     sort: sort_options = "-last_seen",
 ):
-    qs = (await get_queryset(request, organization_slug=organization_slug)).filter(is_deleted=False)
+    qs = (await get_queryset(request, organization_slug=organization_slug)).filter(
+        is_deleted=False
+    )
     event_id: UUID | None = None
     if filters.query:
         try:

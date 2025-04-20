@@ -115,8 +115,12 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         stripe_id=subscription.id,
         defaults={
             "created": unix_to_datetime(subscription.created),
-            "current_period_start": unix_to_datetime(subscription.items.data[0].current_period_start),
-            "current_period_end": unix_to_datetime(subscription.items.data[0].current_period_end),
+            "current_period_start": unix_to_datetime(
+                subscription.items.data[0].current_period_start
+            ),
+            "current_period_end": unix_to_datetime(
+                subscription.items.data[0].current_period_end
+            ),
             "price_id": price_id,
             "organization_id": organization.id,
             "status": subscription.status,
