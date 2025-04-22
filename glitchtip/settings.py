@@ -571,11 +571,11 @@ else:  # Default to REDIS when unset
     }
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
     try:
-        cache_sentinel_host, cache_sentinel_port = cache_sentinel_url.split(":")
-        SENTINELS = [(cache_sentinel_host, int(cache_sentinel_port))]
+        # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
+        SENTINELS = [(host, int(port)) for host, port in (hostport.split(":", 1)  for hostport in cache_sentinel_url.split(","))]
     except ValueError as err:
         raise ImproperlyConfigured(
-            "Invalid cache redis sentinel url, format is host:port"
+            "Invalid cache redis sentinel url, format is host:port,host2:port2,..."
         ) from err
     DJANGO_REDIS_CONNECTION_FACTORY = "django_redis.pool.SentinelConnectionFactory"
     CACHES["default"]["OPTIONS"]["SENTINELS"] = SENTINELS
