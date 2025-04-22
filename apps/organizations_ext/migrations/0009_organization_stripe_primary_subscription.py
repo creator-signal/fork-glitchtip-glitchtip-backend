@@ -5,16 +5,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations_ext', '0008_merge_20250210_1625'),
-        ('stripe', '0008_remove_stripesubscription_unique_primary_subscription_per_organization_and_more'),
+        ("organizations_ext", "0008_merge_20250210_1625"),
+        (
+            "stripe",
+            "0008_remove_stripesubscription_unique_primary_subscription_per_organization_and_more",
+        ),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='organization',
-            name='stripe_primary_subscription',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='stripe.stripesubscription'),
+            model_name="organization",
+            name="stripe_primary_subscription",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="stripe.stripesubscription",
+            ),
         ),
     ]

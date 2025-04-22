@@ -36,8 +36,7 @@ class MakeSampleCommand(BaseCommand):
         project = Project.objects.filter(organization=self.organization).first()
         if not project:
             project = Project.objects.create(
-                name="sample project",
-                organization=self.organization
+                name="sample project", organization=self.organization
             )
         return project
 

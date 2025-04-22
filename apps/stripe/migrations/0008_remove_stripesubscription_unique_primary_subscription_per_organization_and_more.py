@@ -4,18 +4,17 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('stripe', '0007_remove_stripeproduct_price_alter_stripeproduct_name_and_more'),
+        ("stripe", "0007_remove_stripeproduct_price_alter_stripeproduct_name_and_more"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='stripesubscription',
-            name='unique_primary_subscription_per_organization',
+            model_name="stripesubscription",
+            name="unique_primary_subscription_per_organization",
         ),
         migrations.RemoveField(
-            model_name='stripesubscription',
-            name='is_primary',
+            model_name="stripesubscription",
+            name="is_primary",
         ),
     ]

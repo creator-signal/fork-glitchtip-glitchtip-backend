@@ -9,9 +9,7 @@ class StatsAPIPermissionTests(APIPermissionTestCase):
     def setUp(self):
         self.create_org_team_project()
         self.set_client_credentials(self.auth_token.token)
-        self.event = baker.make(
-            "issue_events.IssueEvent", issue__project=self.project
-        )
+        self.event = baker.make("issue_events.IssueEvent", issue__project=self.project)
         self.url = reverse("api:stats_v2", args=[self.organization.slug])
 
     def test_get(self):

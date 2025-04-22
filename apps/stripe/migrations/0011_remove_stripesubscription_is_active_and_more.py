@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("stripe", "0010_remove_stripesubscription_product_and_more"),
     ]

@@ -391,7 +391,7 @@ class TestStripeWebhookView(TestCase):
             event_id="evt_ordering_test",
             subscription_id=subscription_id,
             current_period_start=now_timestamp,
-            current_period_end=now_timestamp + + 2592000,
+            current_period_end=now_timestamp + +2592000,
             price_id=price.stripe_id,
             product_id=price.product_id,
             status=SubscriptionStatus.INCOMPLETE,
@@ -427,20 +427,28 @@ class TestStripeWebhookView(TestCase):
             # 5. Verify no changes to status for events that should be ignored
             response = await stripe_webhook_view(create_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
+            subscription = await StripeSubscription.objects.aget(
+                stripe_id=subscription_id
+            )
             self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
 
             response = await stripe_webhook_view(duplicate_create_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
+            subscription = await StripeSubscription.objects.aget(
+                stripe_id=subscription_id
+            )
             self.assertEqual(subscription.status, SubscriptionStatus.INCOMPLETE)
 
             response = await stripe_webhook_view(update_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
+            subscription = await StripeSubscription.objects.aget(
+                stripe_id=subscription_id
+            )
             self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
 
             response = await stripe_webhook_view(mistimed_update_request)
             self.assertEqual(response.status_code, 200)
-            subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
+            subscription = await StripeSubscription.objects.aget(
+                stripe_id=subscription_id
+            )
             self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)

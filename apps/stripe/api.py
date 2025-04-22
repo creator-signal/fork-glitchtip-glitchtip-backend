@@ -210,8 +210,12 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         stripe_id=subscription_resp.id,
         status=SubscriptionStatus.ACTIVE,
         created=unix_to_datetime(subscription_resp.created),
-        current_period_start=unix_to_datetime(subscription_resp.items.data[0].current_period_start),
-        current_period_end=unix_to_datetime(subscription_resp.items.data[0].current_period_end),
+        current_period_start=unix_to_datetime(
+            subscription_resp.items.data[0].current_period_start
+        ),
+        current_period_end=unix_to_datetime(
+            subscription_resp.items.data[0].current_period_end
+        ),
         start_date=unix_to_datetime(subscription_resp.start_date),
         collection_method=subscription_resp.collection_method,
         price=price,

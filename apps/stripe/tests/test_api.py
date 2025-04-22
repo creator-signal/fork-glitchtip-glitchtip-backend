@@ -35,7 +35,9 @@ class StripeAPITestCase(TestCase):
 
     def test_get_stripe_subscription(self):
         sub = baker.make(
-            "stripe.StripeSubscription", organization=self.organization, status=SubscriptionStatus.ACTIVE
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
         )
         url = reverse("api:get_stripe_subscription", args=[self.organization.slug])
         res = self.client.get(url)
@@ -81,7 +83,7 @@ class StripeAPITestCase(TestCase):
         baker.make(
             "stripe.StripeSubscription",
             organization=self.organization,
-            status=SubscriptionStatus.CANCELED
+            status=SubscriptionStatus.CANCELED,
         )
         # Active subscription has a set time period to match events
         baker.make(

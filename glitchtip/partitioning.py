@@ -1,5 +1,11 @@
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
+from psql_partition.partitioning import (
+    PostgresCurrentTimePartitioningStrategy,
+    PostgresPartitioningManager,
+    PostgresTimePartitionSize,
+)
+from psql_partition.partitioning.config import PostgresPartitioningConfig
 
 from apps.issue_events.models import IssueEvent, IssueTag
 from apps.performance.models import TransactionEvent
@@ -8,12 +14,6 @@ from apps.projects.models import (
     TransactionEventProjectHourlyStatistic,
 )
 from apps.uptime.models import MonitorCheck
-from psqlextra.partitioning import (
-    PostgresCurrentTimePartitioningStrategy,
-    PostgresPartitioningManager,
-    PostgresTimePartitionSize,
-)
-from psqlextra.partitioning.config import PostgresPartitioningConfig
 
 issue_strategy = PostgresCurrentTimePartitioningStrategy(
     size=PostgresTimePartitionSize(days=1),
