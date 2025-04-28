@@ -273,7 +273,7 @@ class CommentUserSchema(CamelSchema, ModelSchema):
 class CommentSchema(CamelSchema, ModelSchema):
     data: dict[str, str]
     type: str | None = "note"
-    date_created: datetime = Field(validation_alias="created")
+    date_created: datetime
     user: CommentUserSchema | None
 
     class Config:
@@ -285,6 +285,10 @@ class CommentSchema(CamelSchema, ModelSchema):
         return {
             "text": obj.text,
         }
+
+    @staticmethod
+    def resolve_date_created(obj: Comment):
+        return obj.created
 
 
 class IssueEventDetailSchema(IssueEventSchema):
