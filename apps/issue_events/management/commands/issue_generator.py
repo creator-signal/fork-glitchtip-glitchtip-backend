@@ -103,7 +103,7 @@ BROWSER_TAGS = [
     },
 ]
 CULPRITS = [
-    "/src/Controller/FunController.php in App\Controller\FunController::showFun",
+    "/src/Controller/FunController.php in App\\Controller\\FunController::showFun",
     "blarg.php in ?",
     "subscriber.contract.view.modal.block.unblock",
 ]
@@ -122,7 +122,7 @@ TITLE_CHOICES = [
     "ErrorException: Notice: Trying to access array offset on value of type null",
     "WorkerLostError: Worker exited prematurely: signal 15 (SIGTERM) Job: 1.",
     "ErrorException: Warning: filesize(): stat failed for /var/www/vhosts/example.com/private/me/data/1",
-    "Project\Database\QueryException: SQLSTATE[22P02]: Invalid text representation: 7 ERROR:  invalid input syntax for type uuid: 12345",
+    "Project\\Database\\QueryException: SQLSTATE[22P02]: Invalid text representation: 7 ERROR:  invalid input syntax for type uuid: 12345",
     "OperationalError: ERROR:  no more connections allowed (max_client_conn)",
 ]
 
