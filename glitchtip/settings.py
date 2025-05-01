@@ -249,8 +249,6 @@ INSTALLED_APPS += [
     "apps.alerts",
     "apps.environments",
     "apps.organizations_ext",
-    "events",
-    "issues",
     "apps.users",
     "apps.importer",
     "apps.uptime",

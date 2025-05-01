@@ -197,15 +197,6 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         check_organization_throttle.delay(project.organization_id)
     return project
 
-    # Check throttle needs every 1 out of X requests
-    if (
-        settings.BILLING_ENABLED
-        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
-    ):
-        check_organization_throttle.delay(project.organization_id)
-
-    return project
-
 
 def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
     """
