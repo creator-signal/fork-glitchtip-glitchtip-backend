@@ -44,6 +44,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 2)
+        self.assertEqual(
+            IssueHash.objects.first().value.hex,
+            IssueEvent.objects.first().data["hashes"][0],
+            "Hash should be stored on event",
+        )
         self.assertTrue(
             IssueEventProjectHourlyStatistic.objects.filter(
                 count=2, project=self.project
