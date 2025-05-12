@@ -44,11 +44,14 @@ class APITokenIn(ModelSchema):
 
 
 class APITokenSchema(ModelSchema):
+    id: int
+    label: str
     scopes: list[str]
+    token: str
 
     class Meta:
         model = APIToken
-        fields = ("label", "created", "token", "id")
+        fields = ("created",)
 
     @staticmethod
     def resolve_scopes(obj) -> list[str]:
