@@ -1,6 +1,5 @@
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from ninja import Field, ModelSchema
 from pydantic import RootModel
@@ -21,7 +20,7 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
 
 
 class ProjectIn(NameSlugProjectSchema):
-    platform: Optional[str] = None  # This shouldn't be needed, but is.
+    platform: str | None = None  # This shouldn't be needed, but is.
     event_throttle_rate: int = 0  # This shouldn't be needed, but is.
 
     class Meta(NameSlugProjectSchema.Meta):
@@ -43,7 +42,7 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     """
 
     id: str
-    avatar: dict[str, Optional[str]] = {"avatarType": "", "avatarUuid": None}
+    avatar: dict[str, str | None] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
     features: list = []
     has_access: bool = True
@@ -52,8 +51,8 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     is_member: bool
     is_public: bool = False
     scrub_ip_addresses: bool = Field(serialization_alias="scrubIPAddresses")
-    created: datetime = Field(serialization_alias="dateCreated")
-    platform: Optional[str] = None
+    date_created: datetime
+    platform: str | None = None
 
     class Meta(NameSlugProjectSchema.Meta):
         fields = [
@@ -62,7 +61,6 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
             "name",
             "scrub_ip_addresses",
             "slug",
-            "created",
             "platform",
             "event_throttle_rate",  # Not in Sentry OSS
         ]
@@ -70,6 +68,10 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     @staticmethod
     def resolve_id(obj):
         return str(obj.id)
+
+    @staticmethod
+    def resolve_date_created(obj: Project):
+        return obj.created
 
     class Config(CamelSchema.Config):
         pass
@@ -81,8 +83,8 @@ class KeyRateLimit(CamelSchema):
 
 
 class ProjectKeyIn(CamelSchema, ModelSchema):
-    name: Optional[str] = None
-    rate_limit: Optional[KeyRateLimit] = None
+    name: str | None = None
+    rate_limit: KeyRateLimit | None = None
 
     class Meta:
         model = ProjectKey
@@ -90,7 +92,7 @@ class ProjectKeyIn(CamelSchema, ModelSchema):
 
 
 class ProjectKeyUpdate(ProjectKeyIn):
-    rate_limit: Optional[KeyRateLimit] = None
+    rate_limit: KeyRateLimit | None = None
 
     class Meta(ProjectKeyIn.Meta):
         fields = ["name", "is_active"]
@@ -105,7 +107,7 @@ class ProjectKeySchema(ProjectKeyUpdate):
     date_created: datetime = Field(validation_alias="created")
     id: uuid.UUID = Field(validation_alias="public_key")
     dsn: dict[str, str]
-    label: Optional[str] = Field(validation_alias="name")
+    label: str | None = Field(validation_alias="name")
     public: uuid.UUID = Field(validation_alias="public_key")
     project_id: int = Field(validation_alias="project_id")
 
