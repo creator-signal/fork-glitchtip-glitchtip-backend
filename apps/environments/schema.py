@@ -1,4 +1,4 @@
-from ninja import Field, ModelSchema
+from ninja import ModelSchema
 
 from glitchtip.schema import CamelSchema
 
@@ -17,8 +17,12 @@ class EnvironmentProjectIn(CamelSchema):
 
 
 class EnvironmentProjectSchema(CamelSchema, ModelSchema):
-    name: str = Field(validation_alias="environment.name")
+    name: str
 
     class Meta:
         model = EnvironmentProject
         fields = ["id", "is_hidden"]
+
+    @staticmethod
+    def resolve_name(obj):
+        return obj.environment.name

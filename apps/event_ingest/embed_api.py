@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -81,14 +80,14 @@ class EmbedGetSchema(EmbedSchema):
     error_generic: str = GENERIC_ERROR
     error_form_entry: str = FORM_ERROR
     success_message: str = SENT_MESSAGE
-    name: Optional[str] = None
-    email: Optional[str] = None
+    name: str | None = None
+    email: str | None = None
 
 
 class UserReportFormInput(CamelSchema):
-    name: Optional[str]
-    email: Optional[str]
-    comments: Optional[str]
+    name: str | None
+    email: str | None
+    comments: str | None
 
 
 @router.get("/error-page/")
