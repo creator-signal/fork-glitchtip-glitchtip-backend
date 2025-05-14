@@ -21,7 +21,7 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
 
 class ProjectIn(NameSlugProjectSchema):
     platform: str | None = None  # This shouldn't be needed, but is.
-    event_throttle_rate: int = 0  # This shouldn't be needed, but is.
+    event_throttle_rate: int | None = None  # This shouldn't be needed, but is.
 
     class Meta(NameSlugProjectSchema.Meta):
         model = Project
