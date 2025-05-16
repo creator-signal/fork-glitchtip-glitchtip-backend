@@ -65,7 +65,7 @@ async def create_project_alert(
         organization__slug=organization_slug,
         slug=project_slug,
     )
-    data = payload.dict()
+    data = payload.dict(exclude_unset=True)
     recipients = data.pop("alert_recipients")
     project_alert = await project.projectalert_set.acreate(**data)
     await AlertRecipient.objects.abulk_create(

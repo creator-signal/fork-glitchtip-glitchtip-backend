@@ -36,7 +36,7 @@ class AlertRecipientSchema(CamelSchema, ModelSchema):
 
 
 class ProjectAlertIn(CamelSchema, ModelSchema):
-    name: str = Field(default="")
+    name: str | None = None
     alert_recipients: list[AlertRecipientIn] | None = Field(default_factory=list)
 
     class Meta:
@@ -50,9 +50,11 @@ class ProjectAlertIn(CamelSchema, ModelSchema):
 
 
 class ProjectAlertSchema(CamelSchema, ModelSchema):
-    alert_recipients: list[AlertRecipientSchema] = Field(
-        validation_alias="alertrecipient_set"
-    )
+    alert_recipients: list[AlertRecipientSchema]
 
     class Meta(ProjectAlertIn.Meta):
         fields = ["id"] + ProjectAlertIn.Meta.fields
+
+    @staticmethod
+    def resolve_alert_recipients(obj):
+        return obj.alertrecipient_set
