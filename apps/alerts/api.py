@@ -95,7 +95,7 @@ async def update_project_alert(
         id=alert_id,
     )
 
-    data = payload.dict()
+    data = payload.dict(exclude_unset=True)
     alert_recipients = data.pop("alert_recipients")
     for attr, value in data.items():
         setattr(alert, attr, value)
