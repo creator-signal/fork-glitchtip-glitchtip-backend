@@ -66,7 +66,7 @@ async def create_project_alert(
         slug=project_slug,
     )
     data = payload.dict(exclude_unset=True)
-    recipients = data.pop("alert_recipients")
+    recipients = data.pop("alert_recipients", [])
     project_alert = await project.projectalert_set.acreate(**data)
     await AlertRecipient.objects.abulk_create(
         [AlertRecipient(alert=project_alert, **recipient) for recipient in recipients]
@@ -96,7 +96,7 @@ async def update_project_alert(
     )
 
     data = payload.dict(exclude_unset=True)
-    alert_recipients = data.pop("alert_recipients")
+    alert_recipients = data.pop("alert_recipients", [])
     for attr, value in data.items():
         setattr(alert, attr, value)
     await alert.asave()
