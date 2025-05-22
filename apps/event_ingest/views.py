@@ -86,6 +86,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         # Consider adding context about the invalid line if possible
         # Return 400 Bad Request for malformed envelope structure
         return JsonResponse({"detail": "Invalid envelope header"}, status=400)
+    envelope_header_event_id = envelope_header.event_id
 
     # Loop through items
     while True:
@@ -162,7 +163,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         "project_id": project_id,
                         "organization_id": project.organization_id,
                         "payload": issue_event_class(**item.dict()),
-                        "event_id": item.event_id,  # Get event_id from parsed item
+                        "event_id": item.event_id or envelope_header_event_id,  # Get event_id from parsed item
                     }
                     interchange_event = InterchangeIssueEvent(
                         **interchange_event_kwargs
@@ -176,7 +177,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         "project_id": project_id,
                         "organization_id": project.organization_id,  # Use project from auth
                         "payload": TransactionEventSchema(**item.dict()),
-                        "event_id": item.event_id,  # Get event_id from parsed item
+                        "event_id": item.event_id or envelope_header_event_id,  # Get event_id from parsed item
                     }
                     interchange_event = InterchangeIssueEvent(
                         **interchange_event_kwargs
