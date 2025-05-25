@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
@@ -178,6 +179,7 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
         choices=LogLevel.choices, default=LogLevel.ERROR
     )
     data = models.JSONField()
+    hashes = ArrayField(models.CharField(max_length=32), db_default=[])
     # This could be HStore, but jsonb is just as good and removes need for
     # 'django.contrib.postgres' which makes several unnecessary SQL calls
     tags = models.JSONField()
@@ -186,7 +188,10 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
     )
 
     class Meta:
-        indexes = [models.Index(fields=["issue", "-received"])]
+        indexes = [
+            models.Index(fields=["issue", "-received"]),
+            GinIndex(fields=["hashes"])
+        ]
 
     class PartitioningMeta:
         method = PostgresPartitioningMethod.RANGE

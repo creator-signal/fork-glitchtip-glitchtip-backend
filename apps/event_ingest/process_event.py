@@ -555,7 +555,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             culprit = event.csp.effective_directive
             event_data["csp"] = event.csp.dict()
         issue_hash = generate_hash(title, culprit, event.type, event.fingerprint)
-        event_data["hashes"] = [issue_hash]
         if metadata:
             event_data["metadata"] = metadata
         if platform := event.platform:
@@ -698,6 +697,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 title=processing_event.title,
                 transaction=processing_event.transaction,
                 data=remove_bad_chars(processing_event.event_data),
+                hashes=[processing_event.issue_hash],
                 tags=processing_event.event_tags,
                 release_id=processing_event.release_id,
             )
