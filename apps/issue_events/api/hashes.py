@@ -23,11 +23,11 @@ class IssueHashPagination(AsyncLinkHeaderPagination):
         for issue_hash in result:
             issue_hash.latest_event = (
                 await IssueEvent.objects.filter(
-                    data__hashes__contains=issue_hash.value.hex,
+                    hashes__contains=[issue_hash.value.hex],
                     issue__project_id=issue_hash.project_id,
                 )
                 .select_related("issue")
-                .order_by("-timestamp")
+                .order_by("-received")
                 .afirst()
             )
         return result

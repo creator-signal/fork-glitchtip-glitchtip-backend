@@ -21,7 +21,7 @@ class IssueAPITestCase(GlitchTestCase):
         baker.make(
             "issue_events.IssueEvent",
             issue=self.issue_hash.issue,
-            data={"hashes": [self.issue_hash.value.hex]},
+            hashes=[self.issue_hash.value.hex],
         )
         list_url = reverse(
             "api:list_issue_hashes",
