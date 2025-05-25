@@ -9,7 +9,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('issue_events', '0001_initial'),
-        ('releases', '0007_alter_release_files'),
     ]
 
     operations = [
