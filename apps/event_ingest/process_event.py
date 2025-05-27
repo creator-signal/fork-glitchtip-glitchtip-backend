@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
 from typing import Any
-from urllib.parse import urlparse, ParseResult
+from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
@@ -53,7 +53,7 @@ from ..shared.schema.contexts import (
     OSContext,
 )
 from .javascript_event_processor import JavascriptEventProcessor
-from .model_functions import PGAppendAndLimitTsVector, PipeConcat
+from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
     ErrorIssueEventSchema,
     EventException,
