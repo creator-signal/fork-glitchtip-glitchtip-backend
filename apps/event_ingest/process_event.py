@@ -53,7 +53,7 @@ from ..shared.schema.contexts import (
     OSContext,
 )
 from .javascript_event_processor import JavascriptEventProcessor
-from .model_functions import PipeConcat
+from .model_functions import PGAppendAndLimitTsVector, PipeConcat
 from .schema import (
     ErrorIssueEventSchema,
     EventException,
@@ -193,28 +193,30 @@ def update_issues(processing_events: list[ProcessingEvent]):
     """
     issues_to_update: dict[int, IssueUpdate] = {}
     for processing_event in processing_events:
-        if processing_event.issue_created:
-            break
-
         issue_id = processing_event.issue_id
+        if processing_event.issue_created or not issue_id:
+            continue
+
+        vector = get_search_vector(processing_event)
         if issue_id in issues_to_update:
             issues_to_update[issue_id].added_count += 1
-            issues_to_update[
-                issue_id
-            ].search_vector += f" {get_search_vector(processing_event)}"
+            issues_to_update[issue_id].search_vector += f" {vector}"
             if issues_to_update[issue_id].last_seen < processing_event.event.received:
                 issues_to_update[issue_id].last_seen = processing_event.event.received
-        elif issue_id:
+        else:
             issues_to_update[issue_id] = IssueUpdate(
                 last_seen=processing_event.event.received,
-                search_vector=get_search_vector(processing_event),
+                search_vector=vector,
             )
 
     for issue_id, value in issues_to_update.items():
         Issue.objects.filter(id=issue_id).update(
             count=F("count") + value.added_count,
-            search_vector=PipeConcat(
-                F("search_vector"), SearchVector(Value(value.search_vector))
+            search_vector=PGAppendAndLimitTsVector(
+                F("search_vector"),
+                Value(value.search_vector),
+                Value(4000),
+                Value("english"),
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),
         )

@@ -39,7 +39,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(9):
             self.process_events([{}, {}])
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
@@ -125,7 +125,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(14):
+        with self.assertNumQueries(15):
             self.process_events([event1, {}])
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)
