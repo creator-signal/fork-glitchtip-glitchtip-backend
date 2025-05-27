@@ -96,6 +96,7 @@ def _truncate_string(s: str | None, max_len: int) -> str:
     return s[:max_len]
 
 
+# Search settings
 MAX_SEARCH_PART_LENGTH = 250
 MAX_FILENAME_LEN = 100
 MAX_TOTAL_FILENAMES = 5
