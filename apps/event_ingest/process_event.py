@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse, ParseResult
 
 from django.conf import settings
@@ -76,10 +76,10 @@ class ProcessingEvent:
     metadata: dict[str, Any]
     event_data: dict[str, Any]
     event_tags: dict[str, str]
-    level: Optional[LogLevel] = None
-    issue_id: Optional[int] = None
+    level: LogLevel | None = None
+    issue_id: int | None = None
     issue_created = False
-    release_id: Optional[int] = None
+    release_id: int | None = None
 
 
 @dataclass
@@ -266,7 +266,7 @@ def generate_contexts(event: IngestIssueEvent) -> Contexts:
 
 def generate_tags(event: IngestIssueEvent) -> dict[str, str]:
     """Generate key-value tags based on context and other event data"""
-    tags: dict[str, Optional[str]] = event.tags if isinstance(event.tags, dict) else {}
+    tags: dict[str, str | None] = event.tags if isinstance(event.tags, dict) else {}
 
     if contexts := event.contexts:
         if browser := contexts.get("browser"):
