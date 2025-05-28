@@ -185,7 +185,7 @@ def get_search_vector(event: ProcessingEvent) -> str:
         else:
             final_vector_string = final_vector_string[:limit_idx]
 
-    return final_vector_string
+    return remove_bad_chars(final_vector_string)
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
@@ -767,7 +767,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 else LogLevel.ERROR,
                 timestamp=processing_event.event.payload.timestamp,
                 received=processing_event.event.received,
-                title=processing_event.title,
+                title=remove_bad_chars(processing_event.title),
                 transaction=processing_event.transaction,
                 data=remove_bad_chars(processing_event.event_data),
                 hashes=[processing_event.issue_hash],
