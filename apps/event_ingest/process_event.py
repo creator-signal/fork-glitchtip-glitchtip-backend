@@ -216,7 +216,7 @@ def update_issues(processing_events: list[ProcessingEvent]):
             search_vector=PGAppendAndLimitTsVector(
                 F("search_vector"),
                 Value(value.search_vector),
-                Value(4000),
+                Value(settings.SEARCH_MAX_LEXEMES),
                 Value("english"),
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),

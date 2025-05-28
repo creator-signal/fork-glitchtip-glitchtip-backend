@@ -116,6 +116,7 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
 
 # Check if a throttle is needed 1 out of every 5000 event requests
 GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
+SEARCH_MAX_LEXEMES = 4000  # Postgres search vectors will truncate after
 
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
@@ -570,7 +571,12 @@ else:  # Default to REDIS when unset
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
     try:
         # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
-        SENTINELS = [(host, int(port)) for host, port in (hostport.split(":", 1)  for hostport in cache_sentinel_url.split(","))]
+        SENTINELS = [
+            (host, int(port))
+            for host, port in (
+                hostport.split(":", 1) for hostport in cache_sentinel_url.split(",")
+            )
+        ]
     except ValueError as err:
         raise ImproperlyConfigured(
             "Invalid cache redis sentinel url, format is host:port,host2:port2,..."

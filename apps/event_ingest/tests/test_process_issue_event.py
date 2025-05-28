@@ -3,6 +3,7 @@ import shutil
 import uuid
 
 from django.urls import reverse
+from django.test import override_settings
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import generate_event
@@ -10,6 +11,7 @@ from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
+from glitchtip.utils import get_random_string
 
 from ..process_event import process_issue_events
 from ..schema import (
@@ -395,6 +397,22 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         issue = Issue.objects.filter(search_vector=word).first()
         self.assertTrue(issue)
         self.assertEqual(len(issue.search_vector.split(" ")), 1)
+
+    @override_settings(SEARCH_MAX_LEXEMES=3)
+    def test_search_vector_truncate(self):
+        """Trucate both max lexemes and size of each lexeme"""
+        events = [
+            {
+                "message": get_random_string(),
+                "fingerprint": ["79054025255fb1a26e4bc422aef54eb4"],
+            }
+            for _ in range(4)
+        ]
+        self.process_events(events)
+        issue = Issue.objects.get()
+        self.assertEqual(
+            len(issue.search_vector.split(" ")), 3, "truncate number of lexemes"
+        )
 
     def test_search_vector_content(self):
         event_data = generate_event()
