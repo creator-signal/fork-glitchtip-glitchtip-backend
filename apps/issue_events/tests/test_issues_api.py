@@ -144,6 +144,11 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + "?sort=-priority")
         self.assertEqual(res.json()[0]["id"], str(issue2.id))
 
+    def test_priority_environment(self):
+        baker.make("issue_events.Issue", project=self.project)
+        res = self.client.get(self.list_url + "?sort=-priority&environment=env")
+        self.assertEqual(res.status_code, 200)
+
     def test_search(self):
         issue = baker.make(
             "issue_events.Issue",

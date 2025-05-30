@@ -5,8 +5,9 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from django.db.models import Count, Sum
-from django.db.models.expressions import RawSQL
+from django.db.models import Count, F, FloatField, Sum, Value
+from django.db.models.expressions import ExpressionWrapper
+from django.db.models.functions import Extract, Log
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -233,11 +234,12 @@ def filter_issue_list(
 
     if sort:
         if sort.endswith("priority"):
-            # Raw SQL must be added when sorting by priority
             # Inspired by https://stackoverflow.com/a/43788975/443457
             qs = qs.annotate(
-                priority=RawSQL(
-                    "LOG10(count) + EXTRACT(EPOCH FROM last_seen)/300000", ()
+                priority=ExpressionWrapper(
+                    Log(10, F("count"))
+                    + Extract(F("last_seen"), "epoch") / Value(300000.0),
+                    output_field=FloatField(),
                 )
             )
         qs = qs.order_by(sort)
