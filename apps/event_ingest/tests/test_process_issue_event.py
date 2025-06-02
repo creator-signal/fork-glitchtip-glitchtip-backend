@@ -2,8 +2,8 @@ import os
 import shutil
 import uuid
 
-from django.urls import reverse
 from django.test import override_settings
+from django.urls import reverse
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import generate_event
