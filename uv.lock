@@ -613,13 +613,13 @@ wheels = [
 
 [[package]]
 name = "django-allauth"
-version = "65.8.1"
+version = "65.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "django" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/3a/b9f572de1decadc668c7d73d0751ff05ff282d3c2cd17d7f74d17afd1fc4/django_allauth-65.8.1.tar.gz", hash = "sha256:38f54708eb06e542af33beeb553e0abb0d7524fded43a5e42c078f20d8e9fc18", size = 1681310, upload-time = "2025-05-21T19:21:41.878Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/a3/00aa9d5bb5df4f7464495675074dc11107c08b3eea3462fb3edc059d71e1/django_allauth-65.9.0.tar.gz", hash = "sha256:a06bca9974df44321e94c33bcf770bb6f924d1a44b57defbce4d7ec54a55483e", size = 1710514, upload-time = "2025-06-01T19:21:07.771Z" }
 
 [package.optional-dependencies]
 mfa = [
