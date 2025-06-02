@@ -59,7 +59,7 @@ def transform_parameterized_message(message: str | EventMessage) -> str:
 
 
 Replacable = str | dict | list
-KNOWN_BADS = ["\u0000", "\x00"]
+KNOWN_BADS = ["\u0000"]
 
 
 def _clean_string(s: str) -> str:

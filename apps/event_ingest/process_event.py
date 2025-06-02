@@ -1,9 +1,10 @@
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any, Optional
-from urllib.parse import urlparse
+from typing import Any
+from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
@@ -52,9 +53,10 @@ from ..shared.schema.contexts import (
     OSContext,
 )
 from .javascript_event_processor import JavascriptEventProcessor
-from .model_functions import PipeConcat
+from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
     ErrorIssueEventSchema,
+    EventException,
     IngestIssueEvent,
     InterchangeIssueEvent,
     InterchangeTransactionEvent,
@@ -74,10 +76,10 @@ class ProcessingEvent:
     metadata: dict[str, Any]
     event_data: dict[str, Any]
     event_tags: dict[str, str]
-    level: Optional[LogLevel] = None
-    issue_id: Optional[int] = None
+    level: LogLevel | None = None
+    issue_id: int | None = None
     issue_created = False
-    release_id: Optional[int] = None
+    release_id: int | None = None
 
 
 @dataclass
@@ -87,34 +89,103 @@ class IssueUpdate:
     added_count: int = 1
 
 
+def _truncate_string(s: str | None, max_len: int) -> str:
+    """Safely truncates a string if it's not None."""
+    if not s:
+        return ""
+    return s[:max_len]
+
+
+# Search settings
+MAX_SEARCH_PART_LENGTH = 250
+MAX_FILENAME_LEN = 100
+MAX_TOTAL_FILENAMES = 5
+MAX_FRAMES_PER_STACKTRACE = 3
+MAX_STACKTRACES_TO_PROCESS = 2
+MAX_VECTOR_STRING_SEGMENT_LEN = 4096  # 4KB
+
+
 def get_search_vector(event: ProcessingEvent) -> str:
     """
     Get string for postgres search vector. The string must be short to ensure
     performance.
     """
-    vector = f"{event.title} {event.transaction}"
+    parts: set[str] = set()
+
+    if title := event.title:
+        parts.add(_truncate_string(title, MAX_SEARCH_PART_LENGTH))
+    if transaction := event.transaction:
+        parts.add(_truncate_string(transaction, MAX_SEARCH_PART_LENGTH))
+
     payload = event.event.payload
     if request := payload.request:
-        if request.url:
-            vector += f" {request.url}"
+        # Simplify URL to keep concise
+        if url := request.url:
+            try:
+                parsed_url: ParseResult = urlparse(url)
+                truncated_path = _truncate_string(
+                    parsed_url.path, MAX_SEARCH_PART_LENGTH
+                )
+                scheme_netloc = ""
+                if parsed_url.scheme and parsed_url.netloc:
+                    scheme_netloc = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                elif parsed_url.netloc:  # Fallback
+                    scheme_netloc = parsed_url.netloc
+                if scheme_netloc or truncated_path:  # Only add if we have something
+                    simplified_url = f"{scheme_netloc}{truncated_path}"
+                    parts.add(_truncate_string(simplified_url, MAX_SEARCH_PART_LENGTH))
+            except ValueError:
+                parts.add(_truncate_string(url, MAX_SEARCH_PART_LENGTH))
 
-    # Get filenames of first three frames from first three stacktraces
-    if isinstance(payload, ErrorIssueEventSchema):
-        if exception := payload.exception:
-            if isinstance(exception, ValueEventException):
-                filenames = [
-                    frame.filename
-                    for value in (
-                        exception.values[:3]
-                        if len(exception.values) > 3
-                        else exception.values
+    # Add stacktrace filenames
+    filenames_to_add: list[str] = []
+    exception_values_list: list[EventException] | None = None
+    if (
+        isinstance(payload, ErrorIssueEventSchema)
+        and payload.exception
+        and isinstance(payload.exception, ValueEventException)
+    ):
+        exception_values_list = payload.exception.values
+
+    if exception_values_list:
+        processed_stacktraces_count = 0
+        for exc_data in exception_values_list:
+            if processed_stacktraces_count >= MAX_STACKTRACES_TO_PROCESS:
+                break
+            if not exc_data.stacktrace:
+                continue
+            frames_list = exc_data.stacktrace.frames
+            frames_from_this_stacktrace = 0
+            for frame in reversed(frames_list):
+                if frames_from_this_stacktrace >= MAX_FRAMES_PER_STACKTRACE:
+                    break
+                filename_val = frame.filename
+                if frame.filename:
+                    basename = _truncate_string(
+                        os.path.basename(str(filename_val)), MAX_FILENAME_LEN
                     )
-                    if value.stacktrace
-                    for frame in value.stacktrace.frames
-                    if frame.filename
-                ][-3:]
-                vector += f" {' '.join(filenames)}"
-    return vector
+                    if basename:
+                        filenames_to_add.append(basename)
+                        frames_from_this_stacktrace += 1
+
+            if frames_from_this_stacktrace > 0:
+                processed_stacktraces_count += 1
+
+    for fname in filenames_to_add[:MAX_TOTAL_FILENAMES]:
+        parts.add(fname)
+
+    final_vector_string_parts = sorted([p for p in parts if p])
+    final_vector_string = " ".join(final_vector_string_parts)
+
+    if len(final_vector_string) > MAX_VECTOR_STRING_SEGMENT_LEN:
+        # Try to cut at a space to avoid breaking words mid-lexeme
+        limit_idx = final_vector_string.rfind(" ", 0, MAX_VECTOR_STRING_SEGMENT_LEN)
+        if limit_idx == -1:  # No space found, hard truncate
+            final_vector_string = final_vector_string[:MAX_VECTOR_STRING_SEGMENT_LEN]
+        else:
+            final_vector_string = final_vector_string[:limit_idx]
+
+    return remove_bad_chars(final_vector_string)
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
@@ -123,28 +194,30 @@ def update_issues(processing_events: list[ProcessingEvent]):
     """
     issues_to_update: dict[int, IssueUpdate] = {}
     for processing_event in processing_events:
-        if processing_event.issue_created:
-            break
-
         issue_id = processing_event.issue_id
+        if processing_event.issue_created or not issue_id:
+            continue
+
+        vector = get_search_vector(processing_event)
         if issue_id in issues_to_update:
             issues_to_update[issue_id].added_count += 1
-            issues_to_update[
-                issue_id
-            ].search_vector += f" {get_search_vector(processing_event)}"
+            issues_to_update[issue_id].search_vector += f" {vector}"
             if issues_to_update[issue_id].last_seen < processing_event.event.received:
                 issues_to_update[issue_id].last_seen = processing_event.event.received
-        elif issue_id:
+        else:
             issues_to_update[issue_id] = IssueUpdate(
                 last_seen=processing_event.event.received,
-                search_vector=get_search_vector(processing_event),
+                search_vector=vector,
             )
 
     for issue_id, value in issues_to_update.items():
         Issue.objects.filter(id=issue_id).update(
             count=F("count") + value.added_count,
-            search_vector=PipeConcat(
-                F("search_vector"), SearchVector(Value(value.search_vector))
+            search_vector=PGAppendAndLimitTsVector(
+                F("search_vector"),
+                Value(value.search_vector),
+                Value(settings.SEARCH_MAX_LEXEMES),
+                Value("english"),
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),
         )
@@ -196,7 +269,7 @@ def generate_contexts(event: IngestIssueEvent) -> Contexts:
 
 def generate_tags(event: IngestIssueEvent) -> dict[str, str]:
     """Generate key-value tags based on context and other event data"""
-    tags: dict[str, Optional[str]] = event.tags if isinstance(event.tags, dict) else {}
+    tags: dict[str, str | None] = event.tags if isinstance(event.tags, dict) else {}
 
     if contexts := event.contexts:
         if browser := contexts.get("browser"):
@@ -694,7 +767,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 else LogLevel.ERROR,
                 timestamp=processing_event.event.payload.timestamp,
                 received=processing_event.event.received,
-                title=processing_event.title,
+                title=remove_bad_chars(processing_event.title),
                 transaction=processing_event.transaction,
                 data=remove_bad_chars(processing_event.event_data),
                 hashes=[processing_event.issue_hash],

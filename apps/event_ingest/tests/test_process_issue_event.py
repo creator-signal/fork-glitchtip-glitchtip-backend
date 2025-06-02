@@ -2,6 +2,7 @@ import os
 import shutil
 import uuid
 
+from django.test import override_settings
 from django.urls import reverse
 from model_bakery import baker
 
@@ -10,6 +11,7 @@ from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
+from glitchtip.utils import get_random_string
 
 from ..process_event import process_issue_events
 from ..schema import (
@@ -39,7 +41,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(9):
             self.process_events([{}, {}])
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
@@ -125,7 +127,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(14):
+        with self.assertNumQueries(15):
             self.process_events([event1, {}])
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)
@@ -395,6 +397,22 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         issue = Issue.objects.filter(search_vector=word).first()
         self.assertTrue(issue)
         self.assertEqual(len(issue.search_vector.split(" ")), 1)
+
+    @override_settings(SEARCH_MAX_LEXEMES=3)
+    def test_search_vector_truncate(self):
+        """Trucate both max lexemes and size of each lexeme"""
+        events = [
+            {
+                "message": get_random_string(),
+                "fingerprint": ["79054025255fb1a26e4bc422aef54eb4"],
+            }
+            for _ in range(4)
+        ]
+        self.process_events(events)
+        issue = Issue.objects.get()
+        self.assertEqual(
+            len(issue.search_vector.split(" ")), 3, "truncate number of lexemes"
+        )
 
     def test_search_vector_content(self):
         event_data = generate_event()
