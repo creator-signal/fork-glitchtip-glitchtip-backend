@@ -108,11 +108,19 @@ class EmailAddressIn(CamelSchema, ModelSchema):
 
 
 class EmailAddressSchema(CamelSchema, ModelSchema):
-    isPrimary: bool = Field(validation_alias="primary")
-    isVerified: bool = Field(validation_alias="verified")
+    is_primary: bool
+    is_verified: bool
 
     class Meta(EmailAddressIn.Meta):
         pass
+
+    @staticmethod
+    def resolve_is_primary(obj):
+        return obj.primary
+
+    @staticmethod
+    def resolve_is_verified(obj):
+        return obj.verified
 
 
 class UserNotificationsSchema(CamelSchema, ModelSchema):
