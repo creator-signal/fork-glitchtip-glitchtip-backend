@@ -149,8 +149,8 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     event_id: str
     project_id: int = Field(validation_alias="issue.project_id")
     group_id: str
-    date_created: datetime = Field(validation_alias="timestamp")
-    date_received: datetime = Field(validation_alias="received")
+    date_created: datetime
+    date_received: datetime
     dist: str | None = None
     culprit: str | None = Field(validation_alias="transaction", default=None)
     packages: dict[str, str | None] | None = Field(
@@ -166,14 +166,39 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
             Field(..., discriminator="type"),
         ]
     ] = Field(default_factory=list)
-    contexts: Contexts | None = Field(validation_alias="data.contexts", default=None)
-    context: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
-    user: Any | None = Field(validation_alias="data.user", default=None)
+    contexts: Contexts | None = None
+    context: dict[str, Any] | None = None
+    user: Any | None = None
+    sdk: dict[str, Any] | None = None
 
     class Config:
         model = IssueEvent
         model_fields = ["id", "type", "title"]
         populate_by_name = True
+
+    @staticmethod
+    def resolve_date_created(obj: IssueEvent):
+        return obj.timestamp
+
+    @staticmethod
+    def resolve_date_received(obj: IssueEvent):
+        return obj.received
+
+    @staticmethod
+    def resolve_contexts(obj: IssueEvent):
+        return obj.data.get("contexts")
+
+    @staticmethod
+    def resolve_context(obj: IssueEvent):
+        return obj.data.get("extra")
+
+    @staticmethod
+    def resolve_user(obj: IssueEvent):
+        return obj.data.get("user")
+
+    @staticmethod
+    def resolve_sdk(obj: IssueEvent):
+        return obj.data.get("sdk")
 
     @staticmethod
     def resolve_group_id(obj: IssueEvent):

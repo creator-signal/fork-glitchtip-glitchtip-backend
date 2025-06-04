@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import WrapValidator
 
@@ -10,15 +10,15 @@ Level = Literal["fatal", "error", "warning", "info", "debug"]
 
 
 class EventBreadcrumb(LaxIngestSchema):
-    type: Optional[str] = "default"
-    category: Optional[str] = None
-    message: Optional[str] = None
-    data: Optional[dict[str, Any]] = None
-    level: Annotated[Optional[Level], WrapValidator(invalid_to_none)] = "info"
-    timestamp: Optional[datetime] = None
+    type: str | None = "default"
+    category: str | None = None
+    message: str | None = None
+    data: dict[str, Any] | None = None
+    level: Annotated[Level | None, WrapValidator(invalid_to_none)] = "info"
+    timestamp: datetime | None = None
 
 
-ListKeyValue = list[list[Optional[str]]]
+ListKeyValue = list[list[str | None]]
 """
 dict[str, list[str]] but stored as a list[list[:2]] for OSS Sentry compatibility
 [["animal", "cat"], ["animal", "dog"], ["thing": "kettle"]]
@@ -29,17 +29,15 @@ This format is often used for http needs including headers and querystrings
 class BaseRequest(LaxIngestSchema):
     """Base Request class for event ingest and issue event API"""
 
-    api_target: Optional[str] = None
-    body_size: Optional[int] = None
-    cookies: Optional[
-        Union[str, list[list[Optional[str]]], dict[str, Optional[str]]]
-    ] = None
-    data: Optional[Union[str, dict, list, Any]] = None
-    env: Optional[dict[str, Any]] = None
-    fragment: Optional[str] = None
-    method: Optional[str] = None
-    protocol: Optional[str] = None
-    url: Optional[str] = None
+    api_target: str | None = None
+    body_size: int | None = None
+    cookies: str | list[list[str | None]] | dict[str, str | None] | None = None
+    data: str | dict | list | Any | None = None
+    env: dict[str, Any] | None = None
+    fragment: str | None = None
+    method: str | None = None
+    protocol: str | None = None
+    url: str | None = None
 
 
 class BaseIssueEvent(LaxIngestSchema):
@@ -47,4 +45,4 @@ class BaseIssueEvent(LaxIngestSchema):
     Base Issue Event for fields present from the SDK data, json event, and api event
     """
 
-    platform: Optional[str] = None
+    platform: str | None = None
