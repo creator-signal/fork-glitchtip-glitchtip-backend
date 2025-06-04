@@ -50,8 +50,8 @@ class IssueSchema(ModelSchema):
     level: str = Field(validation_alias="get_level_display")
     status: str = Field(validation_alias="get_status_display")
     project: ProjectReference = Field(validation_alias="project")
-    short_id: str = Field(validation_alias="short_id_display")
-    num_comments: int
+    shortId: str = Field(validation_alias="short_id_display")
+    numComments: int = Field(validation_alias="num_comments")
     stats: dict[str, list[list[float]]] | None = {"24h": []}
     share_id: int | None = None
     logger: str | None = None
@@ -62,6 +62,8 @@ class IssueSchema(ModelSchema):
     matching_event_id: str | None = Field(
         default=None, serialization_alias="matchingEventId"
     )
+    firstSeen: datetime = Field(validation_alias="first_seen")
+    lastSeen: datetime = Field(validation_alias="last_seen")
 
     @staticmethod
     def resolve_culprit(obj: Issue):
@@ -72,14 +74,12 @@ class IssueSchema(ModelSchema):
         if event_id := context["request"].matching_event_id:
             return event_id.hex
 
-    class Config:
+    class Config(Schema.Config):
         model = Issue
         model_fields = [
             "title",
             "metadata",
             "culprit",
-            "first_seen",
-            "last_seen",
         ]
         alias_generator = to_camel_with_lower_id
         coerce_numbers_to_str = True
@@ -87,7 +87,7 @@ class IssueSchema(ModelSchema):
 
 
 class IssueDetailSchema(IssueSchema):
-    user_report_count: int
+    userReportCount: int = Field(validation_alias="user_report_count")
 
 
 class ExceptionEntryData(Schema):
