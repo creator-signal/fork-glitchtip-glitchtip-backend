@@ -263,13 +263,17 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 class UserReportSchema(CamelSchema, ModelSchema):
     event_id: str = Field(validation_alias="event_id.hex")
     event: dict[str, str]
-    date_created: datetime = Field(validation_alias="created")
+    date_created: datetime
     user: str | None = None
 
     class Config:
         model = UserReport
         model_fields = ["id", "name", "email", "comments"]
         populate_by_name = True
+
+    @staticmethod
+    def resolve_date_created(obj):
+        return obj.created
 
     @staticmethod
     def resolve_event(obj):
