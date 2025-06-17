@@ -41,7 +41,6 @@ class IssueTag(AggregationModel):
     """
 
     issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
-    date = models.DateTimeField()
     tag_key = models.ForeignKey(TagKey, on_delete=models.CASCADE)
     tag_value = models.ForeignKey(TagValue, on_delete=models.CASCADE)
     count = models.PositiveIntegerField(default=1)
@@ -51,6 +50,24 @@ class IssueTag(AggregationModel):
             models.UniqueConstraint(
                 fields=["issue", "date", "tag_key", "tag_value"],
                 name="issue_tag_key_value_unique",
+            )
+        ]
+
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
+
+
+class IssueAggregate(AggregationModel):
+    """Count the number of events for an issue per time unit"""
+
+    issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
+    count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["issue", "date"],
+                name="issue_date_unique",
             )
         ]
 
@@ -190,7 +207,7 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["issue", "-received"]),
-            GinIndex(fields=["hashes"])
+            GinIndex(fields=["hashes"]),
         ]
 
     class PartitioningMeta:
