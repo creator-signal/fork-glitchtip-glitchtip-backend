@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
@@ -103,6 +103,18 @@ MAX_TOTAL_FILENAMES = 5
 MAX_FRAMES_PER_STACKTRACE = 3
 MAX_STACKTRACES_TO_PROCESS = 2
 MAX_VECTOR_STRING_SEGMENT_LEN = 4096  # 4KB
+
+STATS_TABLE_CONFIG = {
+    "projects_issueeventprojecthourlystatistic": {"id_column": "project_id"},
+    "projects_transactioneventprojecthourlystatistic": {"id_column": "project_id"},
+    "issue_events_issueaggregate": {"id_column": "issue_id"},
+}
+
+StatsTableName = Literal[
+    "projects_issueeventprojecthourlystatistic",
+    "projects_transactioneventprojecthourlystatistic",
+    "issue_events_issueaggregate",
+]
 
 
 def _get_or_create_related_models(
@@ -724,6 +736,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )
+    issue_hourly_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
 
     for processing_event in processing_events:
         event_type = processing_event.event.payload.type
@@ -791,6 +806,9 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             minute=0, second=0, microsecond=0
         )
         data_stats[hour_received][processing_event.event.project_id] += 1
+        if processing_event.issue_id: # Only count if issue is known
+            issue_hourly_stats[hour_received][processing_event.issue_id] += 1
+
         issue_events.append(
             IssueEvent(
                 id=processing_event.event.event_id,
@@ -836,36 +854,51 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     IssueEvent.objects.bulk_create(issue_events, ignore_conflicts=True)
 
     update_tags(processing_events)
-    update_statistics(data_stats)
+    update_statistics(
+        data_stats,
+        table_name="projects_issueeventprojecthourlystatistic",
+    )
+    update_statistics(
+        issue_hourly_stats,
+        table_name="issue_events_issueaggregate",
+    )
 
 
 def update_statistics(
-    project_event_stats: defaultdict[datetime, defaultdict[int, int]], is_issue=True
+    stats_data: defaultdict[datetime, defaultdict[int, int]],
+    table_name: StatsTableName,
+    # The id_column_name parameter is now removed
 ):
-    # Flatten data for a sql param friendly format and sort to mitigate deadlocks
+    """
+    Generic function to bulk upsert hourly statistics.
+    """
+    # Runtime check for security
+    if table_name not in STATS_TABLE_CONFIG:
+        raise ValueError(f"Invalid table_name for statistics update: {table_name}")
+
+    # NEW: Look up the id_column_name from our config
+    id_column_name = STATS_TABLE_CONFIG[table_name]["id_column"]
+
+    # The rest of the function remains exactly the same
     data = sorted(
         [
-            [year, key, value]
-            for year, inner_dict in project_event_stats.items()
+            [date, key, value]
+            for date, inner_dict in stats_data.items()
             for key, value in inner_dict.items()
         ],
         key=itemgetter(0, 1),
     )
-    table = (
-        "projects_issueeventprojecthourlystatistic"
-        if is_issue
-        else "projects_transactioneventprojecthourlystatistic"
-    )
-    # Django ORM cannot support F functions in a bulk_update
-    # psycopg does not support execute_values
-    # https://github.com/psycopg/psycopg/issues/114
+
+    if not data:
+        return
+
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s)", x) for x in data)
         sql = (
-            f"INSERT INTO {table} (date, project_id, count)\n"
+            f"INSERT INTO {table_name} (date, {id_column_name}, count)\n"
             f"VALUES {args_str}\n"
-            "ON CONFLICT (project_id, date)\n"
-            f"DO UPDATE SET count = {table}.count + EXCLUDED.count;"
+            f"ON CONFLICT ({id_column_name}, date)\n"
+            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
 
@@ -1003,4 +1036,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             minute=0, second=0, microsecond=0
         )
         data_stats[hour_received][perf_transaction.group.project_id] += 1
-    update_statistics(data_stats, False)
+    update_statistics(
+        data_stats,
+        table_name="projects_transactioneventprojecthourlystatistic",
+    )

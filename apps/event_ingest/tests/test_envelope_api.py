@@ -49,7 +49,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         return "\n".join([json.dumps(line) for line in json_data])
 
     def test_envelope_api(self):
-        with self.assertNumQueries(16):
+        with self.assertNumQueries(17):
             res = self.client.post(
                 self.url,
                 list_to_envelope(self.django_event),
