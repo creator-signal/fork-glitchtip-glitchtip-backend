@@ -6,6 +6,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from glitchtip.settings import EMAIL_INVITE_THROTTLE_COUNT
+
 from ..constants import OrganizationUserRole
 from ..models import OrganizationUser
 
@@ -141,6 +143,19 @@ class OrganizationUsersTestCase(TestCase):
                 user=user, organization=self.organization
             ).exists()
         )
+
+
+    @override_settings(EMAIL_INVITE_THROTTLE_COUNT=1)
+    def test_organization_users_create_throttle(self):
+        data = {
+            "email": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
+        }
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 429)
 
     def test_closed_user_registration(self):
         data = {
