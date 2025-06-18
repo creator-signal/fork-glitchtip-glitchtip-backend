@@ -1,6 +1,6 @@
-{% load settings %}You are invited to GlitchTip
+{% load settings strip %}You are invited to GlitchTip
 
-{{ organization|striptags }} is using GlitchTip for software error reporting and wants you to be a part of the team.
+{{ organization|striptags|stripurlchars }} is using GlitchTip for software error reporting and wants you to be a part of the team.
 
 Follow this link to create your user account.
 
