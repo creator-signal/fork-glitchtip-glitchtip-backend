@@ -1,9 +1,11 @@
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.contrib.auth import aget_user
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import HttpError, Throttled, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
 from organizations.signals import owner_changed, user_added
@@ -204,12 +206,16 @@ async def get_organization_member(
 async def create_organization_member(
     request: AuthHttpRequest, organization_slug: str, payload: OrganizationUserIn
 ):
-    user_id = request.auth.user_id
+    user = await User.objects.aget(id=request.auth.user_id)
+
+    if settings.EMAIL_INVITE_REQUIRE_VERIFICATION and not await user.emailaddress_set.filter(verified=True).aexists():
+        raise HttpError(403, "User must have a verified email address")
+
     organization = await aget_object_or_404(
         get_organizations_queryset(
-            user_id, role_required=True, organization_slug=organization_slug
+            user.id, role_required=True, organization_slug=organization_slug
         )
-        .filter(organization_users__user=user_id)
+        .filter(organization_users__user=user)
         .prefetch_related("organization_users"),
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
@@ -225,6 +231,19 @@ async def create_organization_member(
             409,
             f"The user {email} is already a member",
         )
+
+    # Implement throttle using django cache
+    count = settings.EMAIL_INVITE_THROTTLE_COUNT
+    interval = settings.EMAIL_INVITE_THROTTLE_INTERVAL
+    cache_key = f"email_invite_throttle_{user.id}"
+    invite_attempts = cache.get(cache_key, 0)
+    if invite_attempts >= count:
+        raise Throttled(count)
+    if invite_attempts == 0:
+        cache.set(cache_key, 1, interval)
+    else:
+        cache.incr(cache_key)
+
     member, created = await OrganizationUser.objects.aget_or_create(
         email=email,
         organization=organization,
@@ -246,7 +265,7 @@ async def create_organization_member(
         await member.teams.aadd(*teams)
 
     await sync_to_async(invitation_backend().send_invitation)(member)
-    member = await get_organization_users_queryset(user_id, organization_slug).aget(
+    member = await get_organization_users_queryset(user.id, organization_slug).aget(
         id=member.id
     )
     return 201, member

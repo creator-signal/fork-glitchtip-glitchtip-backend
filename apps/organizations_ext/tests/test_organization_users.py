@@ -1,6 +1,7 @@
 import json
 
 from django.core import mail
+from django.core.cache import cache
 from django.db import transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -141,6 +142,47 @@ class OrganizationUsersTestCase(TestCase):
                 user=user, organization=self.organization
             ).exists()
         )
+
+
+    @override_settings(
+        EMAIL_INVITE_THROTTLE_COUNT=1,
+        EMAIL_INVITE_REQUIRE_VERIFICATION=True,
+    )
+    def test_organization_users_create_throttle(self):
+        cache_key = f"email_invite_throttle_{self.user.id}"
+        cache.delete(cache_key)
+        data = {
+            "email": "new@example.com",
+            "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+            "teamRoles": [],
+        }
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 403)
+
+        self.user.emailaddress_set.create(email="new@example.com", verified=True)
+
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        res = self.client.post(self.members_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 429)
+
+        def test_org_name_url_chars_stripped(self):
+            self.organization.name = "visit https://evilspam.com"
+            self.organization.save()
+
+            data = {
+                "email": "new@example.com",
+                "orgRole": OrganizationUserRole.MANAGER.label.lower(),
+                "teamRoles": [],
+            }
+            self.client.post(self.members_url, data, content_type="application/json")
+            body = mail.outbox[0].body
+            html_content = mail.outbox[0].alternatives[0][0]
+            self.assertFalse("visit https://evilspam.com" in body)
+            self.assertTrue("visit sevilspam" in body)
+            self.assertFalse("visit https://evilspam.com" in html_content)
+            self.assertTrue("visit sevilspam" in html_content)
+
 
     def test_closed_user_registration(self):
         data = {
