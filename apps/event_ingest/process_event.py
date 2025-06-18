@@ -105,6 +105,46 @@ MAX_STACKTRACES_TO_PROCESS = 2
 MAX_VECTOR_STRING_SEGMENT_LEN = 4096  # 4KB
 
 
+def _get_or_create_related_models(
+    release_set: set,
+    environment_set: set,
+    project_set: set,
+) -> tuple[list[tuple[str, int, int]], QuerySet]:
+    """
+    Given sets of release, environment, and project data,
+    creates them if they don't exist, and returns release data and project data.
+    """
+    release_version_set = {version for version, _, _ in release_set}
+    environment_name_set = {name for name, _, _ in environment_set}
+
+    projects_query = Project.objects.filter(id__in=project_set)
+    annotations = {
+        "release_id": Coalesce("releases__id", Value(None)),
+        "release_name": Coalesce("releases__version", Value(None)),
+        "environment_id": Coalesce("environment__id", Value(None)),
+        "environment_name": Coalesce("environment__name", Value(None)),
+    }
+    values_list = [
+        "id",
+        "release_id",
+        "release_name",
+        "environment_id",
+        "environment_name",
+    ]
+
+    projects_with_data = (
+        projects_query.annotate(**annotations)
+        .filter(release_name__in=release_version_set.union({None}))
+        .filter(environment_name__in=environment_name_set.union({None}))
+        .values(*values_list)
+    )
+
+    releases = get_and_create_releases(release_set, projects_with_data)
+    create_environments(environment_set, projects_with_data)
+
+    return releases, projects_with_data
+
+
 def get_search_vector(event: ProcessingEvent) -> str:
     """
     Get string for postgres search vector. The string must be short to ensure
@@ -467,31 +507,15 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     release_version_set = {version for version, _, _ in release_set}
     environment_name_set = {name for name, _, _ in environment_set}
 
-    projects_with_data = (
-        Project.objects.filter(id__in=project_set)
-        .annotate(
-            has_difs=Exists(
-                DebugInformationFile.objects.filter(project_id=OuterRef("pk"))
-            ),
-            release_id=Coalesce("releases__id", Value(None)),
-            release_name=Coalesce("releases__version", Value(None)),
-            environment_id=Coalesce("environment__id", Value(None)),
-            environment_name=Coalesce("environment__name", Value(None)),
+    releases, projects_with_data = _get_or_create_related_models(
+            release_set, environment_set, project_set
         )
-        .filter(release_name__in=release_version_set.union({None}))
-        .filter(environment_name__in=environment_name_set.union({None}))
-        .values(
-            "id",
-            "has_difs",
-            "release_id",
-            "release_name",
-            "environment_id",
-            "environment_name",
+
+    projects_with_data = projects_with_data.annotate(
+        has_difs=Exists(
+            DebugInformationFile.objects.filter(project_id=OuterRef("pk"))
         )
     )
-
-    releases = get_and_create_releases(release_set, projects_with_data)
-    create_environments(environment_set, projects_with_data)
 
     sourcemap_images = [
         image
@@ -696,6 +720,11 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     )
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
+    # Group events by time and project for event count statistics
+    data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
+
     for processing_event in processing_events:
         event_type = processing_event.event.payload.type
         project_id = processing_event.event.project_id
@@ -757,6 +786,11 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                 processing_event.issue_id = IssueHash.objects.get(
                     project_id=project_id, value=processing_event.issue_hash
                 ).issue_id
+
+        hour_received = processing_event.event.received.replace(
+            minute=0, second=0, microsecond=0
+        )
+        data_stats[hour_received][processing_event.event.project_id] += 1
         issue_events.append(
             IssueEvent(
                 id=processing_event.event.event_id,
@@ -800,16 +834,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
     IssueEvent.objects.bulk_create(issue_events, ignore_conflicts=True)
-
-    # Group events by time and project for event count statistics
-    data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
-    for processing_event in processing_events:
-        hour_received = processing_event.event.received.replace(
-            minute=0, second=0, microsecond=0
-        )
-        data_stats[hour_received][processing_event.event.project_id] += 1
 
     update_tags(processing_events)
     update_statistics(data_stats)
@@ -927,31 +951,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
     project_set = {project_id for _, project_id, _ in release_set}.union(
         {project_id for _, project_id, _ in environment_set}
     )
-    release_version_set = {version for version, _, _ in release_set}
-    environment_name_set = {name for name, _, _ in environment_set}
-
-    projects_with_data = (
-        Project.objects.filter(id__in=project_set)
-        .annotate(
-            release_id=Coalesce("releases__id", Value(None)),
-            release_name=Coalesce("releases__version", Value(None)),
-            environment_id=Coalesce("environment__id", Value(None)),
-            environment_name=Coalesce("environment__name", Value(None)),
-        )
-        .filter(release_name__in=release_version_set.union({None}))
-        .filter(environment_name__in=environment_name_set.union({None}))
-        .values(
-            "id",
-            "release_id",
-            "release_name",
-            "environment_id",
-            "environment_name",
-        )
-    )
-
-    get_and_create_releases(release_set, projects_with_data)
-    create_environments(environment_set, projects_with_data)
-
+    _get_or_create_related_models(release_set, environment_set, project_set)
     transactions = []
 
     for ingest_event in ingest_events:
