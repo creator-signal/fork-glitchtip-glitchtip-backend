@@ -1,6 +1,7 @@
 import json
 
 from django.core import mail
+from django.core.cache import cache
 from django.db import transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -143,8 +144,13 @@ class OrganizationUsersTestCase(TestCase):
         )
 
 
-    @override_settings(EMAIL_INVITE_THROTTLE_COUNT=1, EMAIL_INVITE_REQUIRE_VERIFICATION=True)
+    @override_settings(
+        EMAIL_INVITE_THROTTLE_COUNT=1,
+        EMAIL_INVITE_REQUIRE_VERIFICATION=True,
+    )
     def test_organization_users_create_throttle(self):
+        cache_key = f"email_invite_throttle_{self.user.id}"
+        cache.delete(cache_key)
         data = {
             "email": "new@example.com",
             "orgRole": OrganizationUserRole.MANAGER.label.lower(),
