@@ -517,7 +517,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         {project_id for _, project_id, _ in environment_set}
     )
     release_version_set = {version for version, _, _ in release_set}
-    environment_name_set = {name for name, _, _ in environment_set}
 
     releases, projects_with_data = _get_or_create_related_models(
             release_set, environment_set, project_set
