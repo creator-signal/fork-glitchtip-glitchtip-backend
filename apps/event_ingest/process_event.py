@@ -866,7 +866,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 def update_statistics(
     stats_data: defaultdict[datetime, defaultdict[int, int]],
     table_name: StatsTableName,
-    # The id_column_name parameter is now removed
 ):
     """
     Generic function to bulk upsert hourly statistics.
@@ -875,10 +874,8 @@ def update_statistics(
     if table_name not in STATS_TABLE_CONFIG:
         raise ValueError(f"Invalid table_name for statistics update: {table_name}")
 
-    # NEW: Look up the id_column_name from our config
     id_column_name = STATS_TABLE_CONFIG[table_name]["id_column"]
 
-    # The rest of the function remains exactly the same
     data = sorted(
         [
             [date, key, value]
