@@ -629,6 +629,79 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(issue1.status, status_to_set)
         self.assertEqual(issue2.status, EventStatus.UNRESOLVED)
 
+    @freeze_time("2025-06-19T17:47:00Z")
+    def test_issue_stats_endpoint(self):
+        """
+        Test retrieving 24-hour statistics for a set of issues.
+        """
+        # 1. Setup: Create test data
+        now = timezone.now()
+
+        # Issue with stats both inside and outside the 24h window
+        issue_with_stats = baker.make(
+            "issue_events.Issue", project=self.project, count=100
+        )
+        # This stat is recent and should be in the response
+        recent_stat = baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue_with_stats,
+            date=now - datetime.timedelta(hours=2),
+            count=5,
+        )
+        # This stat is old and should be filtered out
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue_with_stats,
+            date=now - datetime.timedelta(hours=25),
+            count=20,
+        )
+
+        # Issue with no recent statistics
+        issue_without_stats = baker.make(
+            "issue_events.Issue", project=self.project, count=50
+        )
+
+        # Issue belonging to another organization that should not appear
+        baker.make("issue_events.Issue")
+
+        # 2. Make the API request
+        # Construct the URL and query parameters
+        url = reverse(
+            "api:issue_stats", # Adjust the name based on your URL resolver
+            kwargs={"organization_slug": self.organization.slug},
+        )
+        query_params = f"?groups={issue_with_stats.id}&groups={issue_without_stats.id}"
+
+        res = self.client.get(url + query_params)
+
+        # 3. Assertions
+        self.assertEqual(res.status_code, 200)
+        response_data = res.json()
+        self.assertEqual(len(response_data), 2)
+
+        # Convert list to a dict keyed by ID for easier assertions
+        results_by_id = {item["id"]: item for item in response_data}
+
+        # --- Assertions for the issue WITH stats ---
+        self.assertIn(str(issue_with_stats.id), results_by_id)
+        stats_data = results_by_id[str(issue_with_stats.id)]
+
+        self.assertEqual(stats_data["count"], str(issue_with_stats.count))
+        self.assertEqual(len(stats_data["stats"]["24h"]), 1)
+
+        # Check the content of the stat point
+        stat_point = stats_data["stats"]["24h"][0]
+        self.assertEqual(stat_point[0], int(recent_stat.date.timestamp()))
+        self.assertEqual(stat_point[1], recent_stat.count)
+
+        # --- Assertions for the issue WITHOUT stats ---
+        self.assertIn(str(issue_without_stats.id), results_by_id)
+        no_stats_data = results_by_id[str(issue_without_stats.id)]
+
+        self.assertEqual(no_stats_data["count"], str(issue_without_stats.count))
+        self.assertEqual(len(no_stats_data["stats"]["24h"]), 0) # Should be an empty list
+
+
 
 class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
     def setUp(self):

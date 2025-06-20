@@ -1,5 +1,6 @@
 import re
 import shlex
+from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
@@ -23,8 +24,14 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 
 from ..constants import EventStatus, LogLevel
-from ..models import Issue, IssueEvent, IssueHash
-from ..schema import IssueDetailSchema, IssueSchema, IssueTagSchema
+from ..models import Issue, IssueAggregate, IssueEvent, IssueHash
+from ..schema import (
+    IssueDetailSchema,
+    IssueSchema,
+    IssueStatsResponse,
+    IssueTagSchema,
+    StatsDetailSchema,
+)
 from ..tasks import delete_issue_task
 from . import router
 
@@ -399,3 +406,78 @@ async def list_issue_tags(
         }
         for key in keys
     ]
+
+
+class IssueStatsFilters(Schema):
+    """Defines the query parameters for the endpoint."""
+    groups: list[int]
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/issues-stats/",
+    response=list[IssueStatsResponse],
+    tags=["Issues"],
+    summary="Retrieve Statistics for a Set of Issues",
+    by_alias=True,
+)
+async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters: Query[IssueStatsFilters]):
+    """
+    Retrieves aggregated statistics for a given list of issue groups.
+
+    This endpoint returns data for the last 24 hours, formatted as a series of
+    [timestamp, count] pairs.
+    """
+    # 1. Get the organization and filter issues to ensure they belong to it.
+    user_id = request.auth.user_id
+    organization = await aget_object_or_404(
+        Organization, users=user_id, slug=organization_slug
+    )
+    issues_qs = Issue.objects.filter(
+        project__organization_id=organization.id, id__in=filters.groups
+    )
+
+    issue_list = [issue async for issue in issues_qs]
+    issue_ids = [issue.id for issue in issue_list]
+
+    if not issue_ids:
+        return []
+
+    # 2. Efficiently fetch all required hourly stats in a single query.
+    start_date = timezone.now() - timedelta(hours=24)
+
+    # Define the stats queryset.
+    hourly_stats_qs = IssueAggregate.objects.filter(
+        issue_id__in=issue_ids,
+        date__gte=start_date
+    ).values('issue_id', 'date', 'count')
+
+    hourly_stats_list = [stat async for stat in hourly_stats_qs]
+
+    # 3. Group the stats by issue_id for quick lookups.
+    # This logic is pure Python and remains synchronous.
+    stats_map = defaultdict(list)
+    for stat in hourly_stats_list:
+        timestamp = int(stat['date'].timestamp())
+        stats_map[stat['issue_id']].append([timestamp, stat['count']])
+
+    # 4. Build the final response list.
+    # This loop is now over the in-memory `issue_list`, so it's fast and synchronous.
+    response_data = []
+    for issue in issue_list:
+        is_unhandled = issue.metadata.get("unhandled", False)
+
+        response_data.append(
+            IssueStatsResponse(
+                id=str(issue.id),
+                count=str(issue.count),
+                user_count=issue.count,
+                first_seen=issue.first_seen.isoformat(),
+                last_seen=issue.last_seen.isoformat(),
+                is_unhandled=is_unhandled,
+                stats=StatsDetailSchema(
+                    stats_24h=stats_map.get(issue.id, [])
+                ),
+            )
+        )
+
+    return response_data

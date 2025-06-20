@@ -404,3 +404,18 @@ class IssueHashSchema(CamelSchema):
     @staticmethod
     def resolve_id(obj):
         return obj.value.hex
+
+
+class StatsDetailSchema(Schema):
+    """Represents the 24-hour statistics block."""
+    stats_24h: list[list[int]] = Field(..., serialization_alias="24h")
+
+class IssueStatsResponse(CamelSchema):
+    """Defines the structure for a single issue's statistics in the response."""
+    id: str
+    count: str
+    user_count: int
+    first_seen: str
+    last_seen: str
+    is_unhandled: bool
+    stats: StatsDetailSchema
