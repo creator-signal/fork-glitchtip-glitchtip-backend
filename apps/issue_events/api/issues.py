@@ -409,14 +409,12 @@ async def list_issue_tags(
 
 
 class IssueStatsFilters(Schema):
-    """Defines the query parameters for the endpoint."""
     groups: list[int]
 
 
 @router.get(
     "organizations/{slug:organization_slug}/issues-stats/",
     response=list[IssueStatsResponse],
-    tags=["Issues"],
     summary="Retrieve Statistics for a Set of Issues",
     by_alias=True,
 )
@@ -427,14 +425,13 @@ async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters:
     This endpoint returns data for the last 24 hours, formatted as a series of
     [timestamp, count] pairs.
     """
-    # 1. Get the organization and filter issues to ensure they belong to it.
     user_id = request.auth.user_id
     organization = await aget_object_or_404(
         Organization, users=user_id, slug=organization_slug
     )
     issues_qs = Issue.objects.filter(
         project__organization_id=organization.id, id__in=filters.groups
-    )
+    )[:200]  # Sanity limit
 
     issue_list = [issue async for issue in issues_qs]
     issue_ids = [issue.id for issue in issue_list]
@@ -442,7 +439,7 @@ async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters:
     if not issue_ids:
         return []
 
-    # 2. Efficiently fetch all required hourly stats in a single query.
+    # Fetch all required hourly stats in a single query.
     start_date = timezone.now() - timedelta(hours=24)
 
     # Define the stats queryset.
@@ -453,31 +450,23 @@ async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters:
 
     hourly_stats_list = [stat async for stat in hourly_stats_qs]
 
-    # 3. Group the stats by issue_id for quick lookups.
-    # This logic is pure Python and remains synchronous.
+    # Group the stats by issue_id for quick lookups.
     stats_map = defaultdict(list)
     for stat in hourly_stats_list:
         timestamp = int(stat['date'].timestamp())
         stats_map[stat['issue_id']].append([timestamp, stat['count']])
 
-    # 4. Build the final response list.
-    # This loop is now over the in-memory `issue_list`, so it's fast and synchronous.
-    response_data = []
-    for issue in issue_list:
-        is_unhandled = issue.metadata.get("unhandled", False)
-
-        response_data.append(
-            IssueStatsResponse(
-                id=str(issue.id),
-                count=str(issue.count),
-                user_count=issue.count,
-                first_seen=issue.first_seen.isoformat(),
-                last_seen=issue.last_seen.isoformat(),
-                is_unhandled=is_unhandled,
-                stats=StatsDetailSchema(
-                    stats_24h=stats_map.get(issue.id, [])
-                ),
-            )
+    return [
+        IssueStatsResponse(
+            id=str(issue.id),
+            count=str(issue.count),
+            user_count=issue.count,
+            first_seen=issue.first_seen.isoformat(),
+            last_seen=issue.last_seen.isoformat(),
+            is_unhandled=issue.metadata.get("unhandled", False),
+            stats=StatsDetailSchema(
+                stats_24h=stats_map.get(issue.id, [])
+            ),
         )
-
-    return response_data
+        for issue in issue_list
+    ]
