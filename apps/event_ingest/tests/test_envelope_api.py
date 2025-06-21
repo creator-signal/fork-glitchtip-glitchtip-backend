@@ -289,3 +289,56 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             1,
             "Should have processed the valid event after ignoring the attachment.",
         )
+
+    def test_envelope_ignores_log_item_with_length(self):
+        """
+        Ensure that log items are skipped, but subsequent valid events are being processed.
+        """
+        envelope_header_dict = {"sent_at": "2025-06-19T12:00:00Z"}
+        envelope_header_bytes = json.dumps(envelope_header_dict).encode()
+
+        # Log data to skip
+        log_payload_bytes = b'{"msg": "some log content"}'
+        log_payload_length = len(log_payload_bytes)
+        log_header_dict = {
+            "type": "log",
+            "length": log_payload_length,
+        }
+        log_header_bytes = json.dumps(log_header_dict).encode()
+
+        # Valid event
+        event_payload_dict = {
+            "event_id": "abcdabcdabcdabcdabcdabcdabcdabcd",
+            "timestamp": "2025-04-08T13:09:01Z",
+            "platform": "node",
+            "message": "Logged event",
+        }
+        event_payload_bytes = json.dumps(event_payload_dict).encode()
+        event_payload_length = len(event_payload_bytes)
+        event_header_dict = {
+            "type": "event",
+            "length": event_payload_length,
+        }
+        event_header_bytes = json.dumps(event_header_dict).encode()
+
+        data = (
+            envelope_header_bytes
+            + b"\n"
+            + log_header_bytes
+            + b"\n"
+            + log_payload_bytes
+            + b"\n"
+            + event_header_bytes
+            + b"\n"
+            + event_payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(self.url, data, content_type="application/json")
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            self.project.issues.count(),
+            1,
+            "Should have processed the valid event after skipping the 'log' item.",
+        )

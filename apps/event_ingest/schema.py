@@ -367,6 +367,7 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
 
 SupportedItemType = Literal["transaction", "event"]
 IgnoredItemType = Literal[
+    "log",
     "session",
     "sessions",
     "client_report",
