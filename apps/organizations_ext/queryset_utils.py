@@ -14,7 +14,7 @@ def get_organizations_queryset(
     if organization_slug:
         qs = qs.filter(slug=organization_slug)
 
-    if role_required:
+    if role_required or add_details:
         qs = qs.annotate(
             actor_role=Subquery(
                 qs.filter(organization_users__user=user_id).values(

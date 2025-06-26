@@ -2,6 +2,7 @@ from datetime import datetime
 
 from ninja import Field, ModelSchema, Schema
 
+from apps.organizations_ext.constants import OrganizationUserRole, Scopes
 from apps.organizations_ext.schema import OrganizationSchema
 from apps.projects.schema import ProjectSchema
 from apps.shared.schema.fields import SlugStr
@@ -57,6 +58,11 @@ class ProjectTeamSchema(ProjectSchema):
 class OrganizationDetailSchema(OrganizationSchema, ModelSchema):
     projects: list[ProjectTeamSchema]
     teams: list[TeamSchema]
+    access: list[Scopes]
 
     class Meta(OrganizationSchema.Meta):
         fields = OrganizationSchema.Meta.fields + ["open_membership"]
+
+    @staticmethod
+    def resolve_access(obj):
+        return OrganizationUserRole.get_role(obj.actor_role)["scopes"]
