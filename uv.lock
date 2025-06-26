@@ -773,16 +773,16 @@ wheels = [
 
 [[package]]
 name = "django-postgres-partition"
-version = "0.1.1"
+version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "psycopg" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/14/b5bab7b4f33654e5dd5f66f87000972bdda335b41e25ecbd67fae4f8bc52/django_postgres_partition-0.1.1.tar.gz", hash = "sha256:294ae09df5175b245ead6e1daad5593bd6eee631d89c771538883def0ebde515", size = 54651, upload-time = "2025-04-20T19:25:27.971Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/c8/06b3694b24697a45be05989665a86aef715de2b58e3cb8664c207c3db0cd/django_postgres_partition-0.1.3.tar.gz", hash = "sha256:b5a3f1793ec220987f6a0f63379c2a6b1a84fd2edeeebdb329c7f30a264b5b5d", size = 35711, upload-time = "2025-06-23T22:05:53.631Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/79/0e636cdc26f3c207d52e72537df838fd5d74e6ddf1f8807efab4290aace2/django_postgres_partition-0.1.1-py3-none-any.whl", hash = "sha256:e397977b07c2dd8c0b267255b441bca030dc2e596cd04741b0b9216f4476be7e", size = 82583, upload-time = "2025-04-20T19:25:27.011Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/83/f9efbe1e5381eb36725c9e59d787fb5c9b545e8a4f53b61593b9ba77a2f8/django_postgres_partition-0.1.3-py3-none-any.whl", hash = "sha256:8d2f881dfc7e68c7ad8a44e3e874d5bc5eb52d63d873015dd63c5c54b556511e", size = 25292, upload-time = "2025-06-23T22:05:52.735Z" },
 ]
 
 [[package]]
