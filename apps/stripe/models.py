@@ -199,7 +199,11 @@ class StripeSubscription(StripeModel):
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
             current_period_end__lt=(timezone.now() - timedelta(days=2)),
         ):
-            fetched_sub = await fetch_subscription(subscription.stripe_id)
+            try:
+                fetched_sub = await fetch_subscription(subscription.stripe_id)
+            except Exception:
+                logger.warning(f"Unable to fetch subscription {subscription.stripe_id}")
+
             subscription.status = fetched_sub.status
             subscription.created = unix_to_datetime(fetched_sub.created)
             subscription.current_period_start = unix_to_datetime(
