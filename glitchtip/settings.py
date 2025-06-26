@@ -114,6 +114,13 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
 )
 
+# This must be set during initial setup. Changing later will break things.
+# Setting to True will disable Python-based partition management and delegate it to pg_partman.
+# It will also create a more complex declarative partitioning scheme that may benefit multi-tenant setups.
+# It's strongly advised to disable this for single-tenant or small to medium-sized deployments.
+# More partitions will not necessarily improve performance and may degrade smaller deployments.
+GLITCHTIP_ADVANCED_PARTITIONING = env.bool("GLITCHTIP_ADVANCED_PARTITIONING", False)
+
 # Check if a throttle is needed 1 out of every 5000 event requests
 GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
 SEARCH_MAX_LEXEMES = 4000  # Postgres search vectors will truncate after
@@ -688,7 +695,7 @@ if os.getenv(
     EMAIL_CONFIG = env.email_url("EMAIL_URL")
     vars().update(EMAIL_CONFIG)
 EMAIL_INVITE_THROTTLE_COUNT = env.int("EMAIL_THROTTLE_COUNT", 50)
-EMAIL_INVITE_THROTTLE_INTERVAL = env.int("EMAIL_THROTTLE_INTERVAL", 300) # 5 minutes
+EMAIL_INVITE_THROTTLE_INTERVAL = env.int("EMAIL_THROTTLE_INTERVAL", 300)  # 5 minutes
 EMAIL_INVITE_REQUIRE_VERIFICATION = env.bool("EMAIL_INVITE_REQUIRE_VERIFICATION", False)
 
 AUTH_USER_MODEL = "users.User"

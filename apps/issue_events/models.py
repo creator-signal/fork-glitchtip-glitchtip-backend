@@ -60,16 +60,11 @@ class IssueTag(AggregationModel):
 class IssueAggregate(AggregationModel):
     """Count the number of events for an issue per time unit"""
 
+    pk = models.CompositePrimaryKey("issue", "organization", "date")
     issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
-    count = models.PositiveIntegerField(default=1)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["issue", "date"],
-                name="issue_date_unique",
-            )
-        ]
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
 
     class PartitioningMeta(AggregationModel.PartitioningMeta):
         pass

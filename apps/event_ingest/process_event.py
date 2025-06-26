@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
@@ -87,6 +87,11 @@ class IssueUpdate:
     last_seen: datetime
     search_vector: str
     added_count: int = 1
+
+
+class IssueStats(TypedDict):
+    count: int
+    organization_id: int | None
 
 
 def _truncate_string(s: str | None, max_len: int) -> str:
@@ -519,13 +524,11 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     release_version_set = {version for version, _, _ in release_set}
 
     releases, projects_with_data = _get_or_create_related_models(
-            release_set, environment_set, project_set
-        )
+        release_set, environment_set, project_set
+    )
 
     projects_with_data = projects_with_data.annotate(
-        has_difs=Exists(
-            DebugInformationFile.objects.filter(project_id=OuterRef("pk"))
-        )
+        has_difs=Exists(DebugInformationFile.objects.filter(project_id=OuterRef("pk")))
     )
 
     sourcemap_images = [
@@ -735,8 +738,8 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )
-    issue_hourly_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
-        lambda: defaultdict(int)
+    issue_hourly_stats: defaultdict[datetime, defaultdict[int, IssueStats]] = (
+        defaultdict(lambda: defaultdict(lambda: {"count": 0, "organization_id": None}))
     )
 
     for processing_event in processing_events:
@@ -805,8 +808,11 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             minute=0, second=0, microsecond=0
         )
         data_stats[hour_received][processing_event.event.project_id] += 1
-        if processing_event.issue_id: # Only count if issue is known
-            issue_hourly_stats[hour_received][processing_event.issue_id] += 1
+        if processing_event.issue_id:  # Only count if issue is known
+            issue_hourly_stats[hour_received][processing_event.issue_id]["count"] += 1
+            issue_hourly_stats[hour_received][processing_event.issue_id][
+                "organization_id"
+            ] = processing_event.event.organization_id
 
         issue_events.append(
             IssueEvent(
@@ -857,7 +863,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         data_stats,
         table_name="projects_issueeventprojecthourlystatistic",
     )
-    update_statistics(
+    update_org_statistics(
         issue_hourly_stats,
         table_name="issue_events_issueaggregate",
     )
@@ -894,6 +900,50 @@ def update_statistics(
             f"INSERT INTO {table_name} (date, {id_column_name}, count)\n"
             f"VALUES {args_str}\n"
             f"ON CONFLICT ({id_column_name}, date)\n"
+            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
+        )
+        cursor.execute(sql)
+
+
+def update_org_statistics(
+    stats_data: defaultdict[datetime, defaultdict[int, IssueStats]],
+    table_name: StatsTableName,
+):
+    """
+    Bulk upserts hourly statistics for the IssueAggregate model.
+
+    This function is specifically designed to handle the data structure that
+    includes organization_id, for use with the new composite primary key on
+    the issues_issueaggregate table.
+    """
+    id_column_name = STATS_TABLE_CONFIG[table_name]["id_column"]
+    data = []
+
+    for date, inner_dict in stats_data.items():
+        for issue_id, stats_dict in inner_dict.items():
+            # Only include entries where the org_id was successfully set
+            if (organization_id := stats_dict.get("organization_id")) is not None:
+                data.append([date, organization_id, issue_id, stats_dict["count"]])
+
+    if not data:
+        return
+
+    # Sort by all key components to avoid deadlocks on concurrent writes
+    data.sort(key=itemgetter(0, 1, 2))
+
+    with connection.cursor() as cursor:
+        # Prepare the data for a single, bulk INSERT statement
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+
+        # The ON CONFLICT target must match the composite primary key
+        # of (organization_id, issue_id, date)
+        conflict_target = f"(organization_id, {id_column_name}, date)"
+
+        # Construct the final SQL query
+        sql = (
+            f"INSERT INTO {table_name} (date, organization_id, {id_column_name}, count)\n"
+            f"VALUES {args_str}\n"
+            f"ON CONFLICT {conflict_target}\n"
             f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
