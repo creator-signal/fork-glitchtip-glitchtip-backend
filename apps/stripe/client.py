@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from apps.organizations_ext.models import Organization
 
+from .exceptions import StripeResourceNotFound
 from .schema import (
     Customer,
     PortalSession,
@@ -58,6 +59,8 @@ async def stripe_get(
         ) as response:
             if response.status != 200:
                 error_data = await response.json()
+                if response.status == 404:
+                    raise StripeResourceNotFound()
                 raise Exception(
                     f"Stripe API Error: {response.status} - {error_data.get('error', {}).get('message', 'Unknown error')}"
                 )

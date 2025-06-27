@@ -14,6 +14,7 @@ from .constants import (
     CollectionMethod,
     SubscriptionStatus,
 )
+from .exceptions import StripeResourceNotFound
 from .utils import unix_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,11 @@ class StripeSubscription(StripeModel):
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
             current_period_end__lt=(timezone.now() - timedelta(days=2)),
         ):
-            fetched_sub = await fetch_subscription(subscription.stripe_id)
+            try:
+                fetched_sub = await fetch_subscription(subscription.stripe_id)
+            except StripeResourceNotFound:
+                logger.error(f"Stripe did not return subscription for {subscription.stripe_id}")
+                continue
             subscription.status = fetched_sub.status
             subscription.created = unix_to_datetime(fetched_sub.created)
             subscription.current_period_start = unix_to_datetime(
