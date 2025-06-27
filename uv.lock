@@ -1210,7 +1210,7 @@ requires-dist = [
     { name = "django-ninja", specifier = "~=1.4" },
     { name = "django-ninja-cursor-pagination", specifier = ">=0.1.0" },
     { name = "django-organizations", specifier = "~=2.3" },
-    { name = "django-postgres-partition", specifier = ">=0.1.1" },
+    { name = "django-postgres-partition", specifier = ">=0.1.4" },
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-redis", extras = ["hiredis"], specifier = "~=6.0" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
