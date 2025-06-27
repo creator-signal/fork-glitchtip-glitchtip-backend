@@ -41,20 +41,21 @@ issue_stat_strategy = PostgresCurrentTimePartitioningStrategy(
     max_age=relativedelta(days=14),  # stats support up to 14 days
 )
 
-manager = PostgresPartitioningManager(
-    [
-        PostgresPartitioningConfig(model=IssueEvent, strategy=issue_strategy),
-        PostgresPartitioningConfig(model=IssueTag, strategy=issue_strategy),
-        PostgresPartitioningConfig(
-            model=TransactionEvent, strategy=transaction_strategy
-        ),
-        PostgresPartitioningConfig(
-            model=IssueEventProjectHourlyStatistic, strategy=project_stat_strategy
-        ),
-        PostgresPartitioningConfig(
-            model=TransactionEventProjectHourlyStatistic, strategy=project_stat_strategy
-        ),
-        PostgresPartitioningConfig(model=MonitorCheck, strategy=uptime_strategy),
-        PostgresPartitioningConfig(model=IssueAggregate, strategy=issue_stat_strategy),
-    ]
-)
+manager_configs = [
+    PostgresPartitioningConfig(model=IssueEvent, strategy=issue_strategy),
+    PostgresPartitioningConfig(model=IssueTag, strategy=issue_strategy),
+    PostgresPartitioningConfig(
+        model=TransactionEvent, strategy=transaction_strategy
+    ),
+    PostgresPartitioningConfig(
+        model=IssueEventProjectHourlyStatistic, strategy=project_stat_strategy
+    ),
+    PostgresPartitioningConfig(
+        model=TransactionEventProjectHourlyStatistic, strategy=project_stat_strategy
+    ),
+    PostgresPartitioningConfig(model=MonitorCheck, strategy=uptime_strategy),
+]
+if not settings.GLITCHTIP_ADVANCED_PARTITIONING:
+    manager_configs.append(PostgresPartitioningConfig(model=IssueAggregate, strategy=issue_stat_strategy))
+
+manager = PostgresPartitioningManager(manager_configs)
