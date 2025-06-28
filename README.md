@@ -46,6 +46,17 @@ Run tests with `docker-compose run --rm web ./manage.py test`
 2. Edit the override file and set `command: ./manage.py runsslserver 0.0.0.0:8000`
 3. Restart docker compose services
 
+### Run with advanced partitioning
+
+Using pg_partman requires the extension to be installed in postgres. `docker-compose.part.yml` offers an alternative image. Swtiching between advanced and default partitioning is not supported.
+
+`docker compose -f docker-compose.yml -f docker-compose.part.yml up`
+
+This automatically configures pg_partman but you can update it manually with `./manage.py setup_advanced_partitions`.
+
+Default partitioning uses DATE partitions managed by Django.
+Advanced partitioning uses nested ORG_ID HASH > DATE partitions managed by pg_partman.
+
 ### VS Code (Optional)
 
 VS Code can do type checking and type inference. However, it requires setting up a virtual environment.
