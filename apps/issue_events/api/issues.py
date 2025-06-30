@@ -8,7 +8,7 @@ from uuid import UUID
 
 from django.db.models import Count, F, FloatField, Sum, Value
 from django.db.models.expressions import ExpressionWrapper
-from django.db.models.functions import Extract, Log
+from django.db.models.functions import Extract, Log, TruncDay
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -410,6 +410,7 @@ async def list_issue_tags(
 
 class IssueStatsFilters(Schema):
     groups: list[int]
+    statsPeriod: Literal["14d", "24h"] = "24h"
 
 
 @router.get(
@@ -418,7 +419,9 @@ class IssueStatsFilters(Schema):
     summary="Retrieve Statistics for a Set of Issues",
     by_alias=True,
 )
-async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters: Query[IssueStatsFilters]):
+async def issue_stats(
+    request: AuthHttpRequest, organization_slug: str, filters: Query[IssueStatsFilters]
+):
     """
     Retrieves aggregated statistics for a given list of issue groups.
 
@@ -439,22 +442,52 @@ async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters:
     if not issue_ids:
         return []
 
-    # Fetch all required hourly stats in a single query.
-    start_date = timezone.now() - timedelta(hours=24)
-
-    # Define the stats queryset.
-    hourly_stats_qs = IssueAggregate.objects.filter(
-        issue_id__in=issue_ids,
-        date__gte=start_date
-    ).values('issue_id', 'date', 'count')
-
-    hourly_stats_list = [stat async for stat in hourly_stats_qs]
-
-    # Group the stats by issue_id for quick lookups.
+    is_24h = filters.statsPeriod == "24h"
     stats_map = defaultdict(list)
-    for stat in hourly_stats_list:
-        timestamp = int(stat['date'].timestamp())
-        stats_map[stat['issue_id']].append([timestamp, stat['count']])
+
+    if is_24h:
+        # --- 24-Hour Period: Fetch hourly data ---
+        start_date = timezone.now() - timedelta(hours=24)
+
+        # Fetch pre-aggregated hourly stats from the last 24 hours.
+        stats_qs = IssueAggregate.objects.filter(
+            issue_id__in=issue_ids, date__gte=start_date
+        ).values("issue_id", "date", "count")
+
+        stats_list = [stat async for stat in stats_qs]
+
+        # Group the hourly stats by issue_id.
+        for stat in stats_list:
+            timestamp = int(stat["date"].timestamp())
+            stats_map[stat["issue_id"]].append([timestamp, stat["count"]])
+
+        # Define a function to return the correct stats argument for the response.
+        def get_stats_data(issue_id):
+            return {"stats_24h": stats_map.get(issue_id, [])}
+
+    else:
+        # --- 14-Day Period: Fetch and group data by day ---
+        start_date = timezone.now() - timedelta(days=14)
+
+        # Fetch stats and aggregate them by day.
+        daily_stats_qs = (
+            IssueAggregate.objects.filter(issue_id__in=issue_ids, date__gte=start_date)
+            .annotate(day=TruncDay("date"))
+            .values("issue_id", "day")
+            .annotate(daily_count=Sum("count"))
+            .order_by("day")
+        )
+
+        daily_stats_list = [stat async for stat in daily_stats_qs]
+
+        # Group the daily stats by issue_id.
+        for stat in daily_stats_list:
+            timestamp = int(stat["day"].timestamp())
+            stats_map[stat["issue_id"]].append([timestamp, stat["daily_count"]])
+
+        # Define a function to return the correct stats argument for the response.
+        def get_stats_data(issue_id):
+            return {"stats_14d": stats_map.get(issue_id, [])}
 
     return [
         IssueStatsResponse(
@@ -464,9 +497,7 @@ async def issue_stats(request: AuthHttpRequest, organization_slug: str, filters:
             first_seen=issue.first_seen.isoformat(),
             last_seen=issue.last_seen.isoformat(),
             is_unhandled=issue.metadata.get("unhandled", False),
-            stats=StatsDetailSchema(
-                stats_24h=stats_map.get(issue.id, [])
-            ),
+            stats=StatsDetailSchema(**get_stats_data(issue.id)),
         )
         for issue in issue_list
     ]
