@@ -1,8 +1,9 @@
 import copy
 import logging
 
+import cxxfilt
 from symbolic import Archive, ProguardMapper, SymCache, parse_addr
-from symbolic.demangle import demangle_name
+
 
 alternative_arch = {"x86": ["x86", "x86_64"]}
 
@@ -146,7 +147,13 @@ class StacktraceProcessor:
                     frame["resolved"] = True
                     frame["filename"] = digested_symbol.filename
                     frame["lineNo"] = digested_symbol.line
-                    frame["function"] = demangle_name(digested_symbol.symbol)
+                    try:
+                        frame["function"] = cxxfilt.demangle(digested_symbol.symbol)
+                    except cxxfilt.InvalidName:
+                        frame["function"] = (
+                            digested_symbol.symbol
+                        )  # Keep original if demangling fails
+                    # frame["function"] = demangle_name(digested_symbol.symbol)
                     score = score + 1
 
                 resolved_frames.append(frame)
