@@ -4,7 +4,6 @@ import logging
 import cxxfilt
 from symbolic import Archive, ProguardMapper, SymCache, parse_addr
 
-
 alternative_arch = {"x86": ["x86", "x86_64"]}
 
 
@@ -153,7 +152,6 @@ class StacktraceProcessor:
                         frame["function"] = (
                             digested_symbol.symbol
                         )  # Keep original if demangling fails
-                    # frame["function"] = demangle_name(digested_symbol.symbol)
                     score = score + 1
 
                 resolved_frames.append(frame)
