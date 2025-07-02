@@ -629,6 +629,161 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(issue1.status, status_to_set)
         self.assertEqual(issue2.status, EventStatus.UNRESOLVED)
 
+    @freeze_time("2025-06-19T17:47:00Z")
+    def test_issue_stats_endpoint(self):
+        """
+        Test retrieving 24-hour statistics for a set of issues.
+        """
+        now = timezone.now()
+
+        # Issue with stats both inside and outside the 24h window
+        issue_with_stats = baker.make(
+            "issue_events.Issue", project=self.project, count=100
+        )
+        # This stat is recent and should be in the response
+        recent_stat = baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue_with_stats,
+            date=now - datetime.timedelta(hours=2),
+            count=5,
+        )
+        # This stat is old and should be filtered out
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue_with_stats,
+            date=now - datetime.timedelta(hours=25),
+            count=20,
+        )
+
+        # Issue with no recent statistics
+        issue_without_stats = baker.make(
+            "issue_events.Issue", project=self.project, count=50
+        )
+
+        # Issue belonging to another organization that should not appear
+        baker.make("issue_events.Issue")
+
+        # Make the API request
+        # Construct the URL and query parameters
+        url = reverse(
+            "api:issue_stats",  # Adjust the name based on your URL resolver
+            kwargs={"organization_slug": self.organization.slug},
+        )
+        query_params = f"?groups={issue_with_stats.id}&groups={issue_without_stats.id}"
+
+        res = self.client.get(url + query_params)
+
+        # Assertions
+        self.assertEqual(res.status_code, 200)
+        response_data = res.json()
+        self.assertEqual(len(response_data), 2)
+
+        # Convert list to a dict keyed by ID for easier assertions
+        results_by_id = {item["id"]: item for item in response_data}
+
+        # --- Assertions for the issue WITH stats ---
+        self.assertIn(str(issue_with_stats.id), results_by_id)
+        stats_data = results_by_id[str(issue_with_stats.id)]
+
+        self.assertEqual(stats_data["count"], str(issue_with_stats.count))
+        self.assertEqual(len(stats_data["stats"]["24h"]), 1)
+
+        # Check the content of the stat point
+        stat_point = stats_data["stats"]["24h"][0]
+        self.assertEqual(stat_point[0], int(recent_stat.date.timestamp()))
+        self.assertEqual(stat_point[1], recent_stat.count)
+
+        # --- Assertions for the issue WITHOUT stats ---
+        self.assertIn(str(issue_without_stats.id), results_by_id)
+        no_stats_data = results_by_id[str(issue_without_stats.id)]
+
+        self.assertEqual(no_stats_data["count"], str(issue_without_stats.count))
+        self.assertEqual(
+            len(no_stats_data["stats"]["24h"]), 0
+        )  # Should be an empty list
+
+    @freeze_time("2025-06-19T17:47:00Z")
+    def test_issue_stats_endpoint_14d(self):
+        """
+        Test retrieving 14-day statistics, ensuring data is grouped by day.
+        """
+        now = timezone.now()
+
+        # Create an issue to test against
+        issue = baker.make("issue_events.Issue", project=self.project, count=250)
+
+        # Stat from 2 days ago (should be included)
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue,
+            date=now - datetime.timedelta(days=2, hours=5),
+            count=10,
+        )
+
+        # Two stats from 5 days ago (should be aggregated into one point)
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue,
+            date=now - datetime.timedelta(days=5, hours=8),
+            count=20,
+        )
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue,
+            date=now - datetime.timedelta(days=5, hours=12),
+            count=15,
+        )  # Total for this day should be 35
+
+        # Stat from 15 days ago (should be excluded from the result)
+        baker.make(
+            "issue_events.IssueAggregate",
+            issue=issue,
+            date=now - datetime.timedelta(days=15),
+            count=100,
+        )
+
+        url = reverse(
+            "api:issue_stats",
+            kwargs={"organization_slug": self.organization.slug},
+        )
+        query_params = f"?groups={issue.id}&statsPeriod=14d"
+
+        res = self.client.get(url + query_params)
+
+        self.assertEqual(res.status_code, 200)
+        response_data = res.json()
+        self.assertEqual(len(response_data), 1)
+
+        stats_data = response_data[0]
+        self.assertEqual(stats_data["id"], str(issue.id))
+        self.assertEqual(stats_data["count"], str(issue.count))
+
+        # The key should be "14d" for the daily stats
+        self.assertIn("14d", stats_data["stats"])
+        daily_stats = stats_data["stats"]["14d"]
+
+        # Expecting 2 data points: one for 2 days ago, one for 5 days ago
+        self.assertEqual(len(daily_stats), 2)
+
+        # Sort results by timestamp to ensure consistent order for assertions
+        daily_stats.sort(key=lambda x: x[0])
+
+        # --- Assertions for the data point from 5 days ago ---
+        day_minus_5_stat = daily_stats[0]
+        expected_day_5_ts = (now - datetime.timedelta(days=5)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        self.assertEqual(day_minus_5_stat[0], int(expected_day_5_ts.timestamp()))
+        self.assertEqual(day_minus_5_stat[1], 35)  # 20 + 15
+
+        # --- Assertions for the data point from 2 days ago ---
+        day_minus_2_stat = daily_stats[1]
+        expected_day_2_ts = (now - datetime.timedelta(days=2)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        self.assertEqual(day_minus_2_stat[0], int(expected_day_2_ts.timestamp()))
+        self.assertEqual(day_minus_2_stat[1], 10)
+
 
 class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
     def setUp(self):

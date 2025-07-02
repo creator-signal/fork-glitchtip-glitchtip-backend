@@ -177,6 +177,7 @@ class OrganizationManager(OrgManager):
 
 
 class Organization(SharedBaseModel, OrganizationBase):
+    id = models.AutoField(primary_key=True)  # BIGINT is unnecessary
     slug = OrganizationSlugField(
         max_length=200,
         blank=False,

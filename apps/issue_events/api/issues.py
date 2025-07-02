@@ -1,5 +1,6 @@
 import re
 import shlex
+from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
@@ -7,7 +8,7 @@ from uuid import UUID
 
 from django.db.models import Count, F, FloatField, Sum, Value
 from django.db.models.expressions import ExpressionWrapper
-from django.db.models.functions import Extract, Log
+from django.db.models.functions import Extract, Log, TruncDay
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -23,8 +24,14 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.utils import async_call_celery_task
 
 from ..constants import EventStatus, LogLevel
-from ..models import Issue, IssueEvent, IssueHash
-from ..schema import IssueDetailSchema, IssueSchema, IssueTagSchema
+from ..models import Issue, IssueAggregate, IssueEvent, IssueHash
+from ..schema import (
+    IssueDetailSchema,
+    IssueSchema,
+    IssueStatsResponse,
+    IssueTagSchema,
+    StatsDetailSchema,
+)
 from ..tasks import delete_issue_task
 from . import router
 
@@ -398,4 +405,99 @@ async def list_issue_tags(
             ),
         }
         for key in keys
+    ]
+
+
+class IssueStatsFilters(Schema):
+    groups: list[int]
+    statsPeriod: Literal["14d", "24h"] = "24h"
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/issues-stats/",
+    response=list[IssueStatsResponse],
+    summary="Retrieve Statistics for a Set of Issues",
+    by_alias=True,
+)
+async def issue_stats(
+    request: AuthHttpRequest, organization_slug: str, filters: Query[IssueStatsFilters]
+):
+    """
+    Retrieves aggregated statistics for a given list of issue groups.
+
+    This endpoint returns data for the last 24 hours, formatted as a series of
+    [timestamp, count] pairs.
+    """
+    user_id = request.auth.user_id
+    organization = await aget_object_or_404(
+        Organization, users=user_id, slug=organization_slug
+    )
+    issues_qs = Issue.objects.filter(
+        project__organization_id=organization.id, id__in=filters.groups
+    )[:200]  # Sanity limit
+
+    issue_list = [issue async for issue in issues_qs]
+    issue_ids = [issue.id for issue in issue_list]
+
+    if not issue_ids:
+        return []
+
+    is_24h = filters.statsPeriod == "24h"
+    stats_map = defaultdict(list)
+
+    if is_24h:
+        # --- 24-Hour Period: Fetch hourly data ---
+        start_date = timezone.now() - timedelta(hours=24)
+
+        # Fetch pre-aggregated hourly stats from the last 24 hours.
+        stats_qs = IssueAggregate.objects.filter(
+            issue_id__in=issue_ids, date__gte=start_date
+        ).values("issue_id", "date", "count")
+
+        stats_list = [stat async for stat in stats_qs]
+
+        # Group the hourly stats by issue_id.
+        for stat in stats_list:
+            timestamp = int(stat["date"].timestamp())
+            stats_map[stat["issue_id"]].append([timestamp, stat["count"]])
+
+        # Define a function to return the correct stats argument for the response.
+        def get_stats_data(issue_id):
+            return {"stats_24h": stats_map.get(issue_id, [])}
+
+    else:
+        # --- 14-Day Period: Fetch and group data by day ---
+        start_date = timezone.now() - timedelta(days=14)
+
+        # Fetch stats and aggregate them by day.
+        daily_stats_qs = (
+            IssueAggregate.objects.filter(issue_id__in=issue_ids, date__gte=start_date)
+            .annotate(day=TruncDay("date"))
+            .values("issue_id", "day")
+            .annotate(daily_count=Sum("count"))
+            .order_by("day")
+        )
+
+        daily_stats_list = [stat async for stat in daily_stats_qs]
+
+        # Group the daily stats by issue_id.
+        for stat in daily_stats_list:
+            timestamp = int(stat["day"].timestamp())
+            stats_map[stat["issue_id"]].append([timestamp, stat["daily_count"]])
+
+        # Define a function to return the correct stats argument for the response.
+        def get_stats_data(issue_id):
+            return {"stats_14d": stats_map.get(issue_id, [])}
+
+    return [
+        IssueStatsResponse(
+            id=str(issue.id),
+            count=str(issue.count),
+            user_count=issue.count,
+            first_seen=issue.first_seen.isoformat(),
+            last_seen=issue.last_seen.isoformat(),
+            is_unhandled=issue.metadata.get("unhandled", False),
+            stats=StatsDetailSchema(**get_stats_data(issue.id)),
+        )
+        for issue in issue_list
     ]

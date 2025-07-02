@@ -1,9 +1,10 @@
+DROP FUNCTION IF EXISTS get_project_auth_info(bigint,uuid);
 CREATE OR REPLACE FUNCTION get_project_auth_info(p_project_id BIGINT, p_sentry_key UUID)
 RETURNS TABLE (
     project_id BIGINT,
     project_scrub_ip_addresses BOOLEAN,
     project_event_throttle_rate SMALLINT,
-    organization_id BIGINT,
+    organization_id INT,
     organization_is_accepting_events BOOLEAN,
     organization_event_throttle_rate SMALLINT,
     organization_scrub_ip_addresses BOOLEAN
