@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Avg
 
-from .models import TransactionEvent, TransactionGroup
+from .models import TransactionGroup
 
 
 class TransactionGroupAdmin(admin.ModelAdmin):
@@ -21,34 +21,4 @@ class TransactionGroupAdmin(admin.ModelAdmin):
         )
 
 
-# class SpanInline(admin.TabularInline):
-#     model = Span
-#     extra = 0
-#     readonly_fields = [
-#         "span_id",
-#         "parent_span_id",
-#         "op",
-#         "description",
-#         "start_timestamp",
-#         "timestamp",
-#         "tags",
-#         "data",
-#     ]
-
-#     def has_add_permission(self, request, *args, **kwargs):
-#         return False
-
-
-class TransactionEventAdmin(admin.ModelAdmin):
-    search_fields = [
-        "trace_id",
-        "group__transaction",
-        "group__project__organization__name",
-    ]
-    list_display = ["trace_id", "group", "timestamp", "duration"]
-    # inlines = [SpanInline]
-    can_delete = False
-
-
 admin.site.register(TransactionGroup, TransactionGroupAdmin)
-admin.site.register(TransactionEvent, TransactionEventAdmin)

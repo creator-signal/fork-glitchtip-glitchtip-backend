@@ -5,10 +5,10 @@ from django.db import models
 from psql_partition.models import PostgresPartitionedModel
 from psql_partition.types import PostgresPartitioningMethod
 
-from glitchtip.base_models import CreatedModel
+from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 
 
-class TransactionGroup(CreatedModel):
+class TransactionGroup(CreatedModel, SoftDeleteModel):
     transaction = models.CharField(max_length=1024)
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
     op = models.CharField(max_length=255)
@@ -24,7 +24,11 @@ class TransactionGroup(CreatedModel):
 
 
 class TransactionEvent(PostgresPartitionedModel, models.Model):
-    event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pk = models.CompositePrimaryKey("event_id", "organization", "start_timestamp")
+    event_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
     trace_id = models.UUIDField(db_index=True)
     start_timestamp = models.DateTimeField(
@@ -51,3 +55,28 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
 
     def __str__(self):
         return str(self.trace_id)
+
+
+class TransactionGroupAggregate(AggregationModel):
+    """Count the number of events for a transaction group per time unit"""
+
+    pk = models.CompositePrimaryKey("group", "organization", "date")
+    group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    total_duration = models.FloatField(
+        default=0.0,
+        help_text="Sum of all transaction durations (in ms) for calculating the mean.",
+    )
+    sum_of_squares_duration = models.FloatField(
+        default=0.0,
+        help_text="Sum of squares of durations, for calculating standard deviation.",
+    )
+    histogram = models.JSONField(
+        default=dict,
+        help_text="Stores a fixed-bucket histogram for percentile approximation.",
+    )
+
+    class PartitioningMeta(AggregationModel.PartitioningMeta):
+        pass
