@@ -8,7 +8,7 @@ from psql_partition.partitioning import (
 from psql_partition.partitioning.config import PostgresPartitioningConfig
 
 from apps.issue_events.models import IssueAggregate, IssueEvent, IssueTag
-from apps.performance.models import TransactionEvent
+from apps.performance.models import TransactionEvent, TransactionGroupAggregate
 from apps.projects.models import (
     IssueEventProjectHourlyStatistic,
     TransactionEventProjectHourlyStatistic,
@@ -45,9 +45,6 @@ manager_configs = [
     PostgresPartitioningConfig(model=IssueEvent, strategy=issue_strategy),
     PostgresPartitioningConfig(model=IssueTag, strategy=issue_strategy),
     PostgresPartitioningConfig(
-        model=TransactionEvent, strategy=transaction_strategy
-    ),
-    PostgresPartitioningConfig(
         model=IssueEventProjectHourlyStatistic, strategy=project_stat_strategy
     ),
     PostgresPartitioningConfig(
@@ -56,6 +53,14 @@ manager_configs = [
     PostgresPartitioningConfig(model=MonitorCheck, strategy=uptime_strategy),
 ]
 if not settings.GLITCHTIP_ADVANCED_PARTITIONING:
-    manager_configs.append(PostgresPartitioningConfig(model=IssueAggregate, strategy=issue_stat_strategy))
+    manager_configs += [
+        PostgresPartitioningConfig(model=IssueAggregate, strategy=issue_stat_strategy),
+        PostgresPartitioningConfig(
+            model=TransactionEvent, strategy=transaction_strategy
+        ),
+        PostgresPartitioningConfig(
+            model=TransactionGroupAggregate, strategy=transaction_strategy
+        ),
+    ]
 
 manager = PostgresPartitioningManager(manager_configs)
