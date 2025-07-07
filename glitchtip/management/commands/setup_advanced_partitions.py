@@ -14,13 +14,20 @@ PARTMAN_CONFIG = {
         "retention": "14 days",
         "offset_days": 0,  # No offset, creates partitions on day 0, 2, 4...
     },
-    # "events_event": {
-    #     "control_column": "created_at",
-    #     "interval": "2 days",
-    #     "premake": 4,
-    #     "retention": "90 days",
-    #     "offset_days": 1,      # Offset by 1 day, creates partitions on day 1, 3, 5...
-    # },
+    "transactions_transactionevent": {
+        "control_column": "start_timestamp",
+        "interval": "2 days",
+        "premake": 4,
+        "retention": "90 days",
+        "offset_days": 1,  # Offset by 1 day, creates partitions on day 1, 3, 5...
+    },
+    "transactions_transactiongroupaggregate": {
+        "control_column": "date",
+        "interval": "2 days",
+        "premake": 4,
+        "retention": "90 days",
+        "offset_days": 0,  # Even days
+    },
 }
 
 

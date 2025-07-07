@@ -1059,6 +1059,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
         transactions.append(
             TransactionEvent(
                 group=group,
+                organization_id=ingest_event.organization_id,
                 data={
                     "request": request.dict() if request else None,
                     "sdk": event.sdk.dict() if event.sdk else None,
