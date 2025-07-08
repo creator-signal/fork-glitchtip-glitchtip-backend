@@ -1,40 +1,64 @@
+# your_app/management/commands/setup_advanced_partitions.py
 import logging
-
-from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
+from django.conf import settings
+from django.db.utils import ProgrammingError
 
 logger = logging.getLogger(__name__)
 
+# Define the configuration for all pg_partman managed tables in one place.
 PARTMAN_CONFIG = {
     "issues_issueaggregate": {
         "control_column": "date",
-        "interval": "2 days",  # Updated interval
-        "premake": 3,  # Keep 3 * 2 days = 6 days of future partitions
+        "interval": "2 days",
+        "premake": 4,
         "retention": "14 days",
-        "offset_days": 0,  # No offset, creates partitions on day 0, 2, 4...
+        "offset_days": 0,
     },
-    "transactions_transactionevent": {
+    "performance_transactionevent": {
         "control_column": "start_timestamp",
         "interval": "2 days",
         "premake": 4,
         "retention": "90 days",
-        "offset_days": 1,  # Offset by 1 day, creates partitions on day 1, 3, 5...
+        "offset_days": 1,
     },
-    "transactions_transactiongroupaggregate": {
+    "performance_transactiongroupaggregate": {
         "control_column": "date",
         "interval": "2 days",
         "premake": 4,
         "retention": "90 days",
-        "offset_days": 0,  # Even days
+        "offset_days": 0,
     },
 }
+
+# The SQL script that an administrator needs to run if the command fails.
+ADMIN_SETUP_SQL = """
+-- 1. Create the schema and the extension.
+CREATE SCHEMA IF NOT EXISTS partman;
+CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;
+
+-- 2. Grant USAGE on the schema to your application's user.
+GRANT USAGE ON SCHEMA partman TO your_application_user;
+
+-- 3. Grant EXECUTE permission on all functions and procedures in the schema.
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA partman TO your_application_user;
+GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA partman TO your_application_user;
+
+-- 4. Grant permissions on the pg_partman configuration tables.
+GRANT ALL ON TABLE partman.part_config TO your_application_user;
+GRANT ALL ON TABLE partman.part_config_sub TO your_application_user;
+GRANT USAGE, SELECT ON SEQUENCE partman.part_config_part_id_seq TO your_application_user;
+
+-- 5. Grant permission for the user to create objects in the public schema.
+GRANT CREATE ON SCHEMA public TO your_application_user;
+"""
 
 
 class Command(BaseCommand):
     help = (
         "Sets up and configures pg_partman for all tables defined in the PARTMAN_CONFIG. "
-        "This command is idempotent and requires SUPERUSER privileges."
+        "Will attempt to create the extension, but may require a superuser to run a manual SQL script if it fails."
     )
 
     def handle(self, *args, **options):
@@ -50,35 +74,34 @@ class Command(BaseCommand):
 
         try:
             with transaction.atomic():
+                # Step 1: Attempt to create the schema and extension.
+                # This will work in local dev but fail on managed DBs if not run as admin.
+                self.stdout.write("--> Attempting to create schema and extension...")
                 with connection.cursor() as cursor:
-                    # Ensure the extension is enabled.
-                    self.stdout.write("--> Ensuring pg_partman extension exists...")
                     cursor.execute("CREATE SCHEMA IF NOT EXISTS partman;")
                     cursor.execute(
                         "CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;"
                     )
+                self.stdout.write(
+                    self.style.SUCCESS("    ... Schema and extension setup successful.")
+                )
 
-                    # Loop through each configured table and set it up.
+                # Step 2: Proceed with table configuration.
+                with connection.cursor() as cursor:
                     for table_name, config in PARTMAN_CONFIG.items():
+                        # ... (The rest of the configuration logic remains the same) ...
                         self.stdout.write(f"--> Configuring table: {table_name}")
-
-                        # Loop through each of the HASH partitions (p0 to p3)
                         for i in range(4):
                             parent_partition_table = f"public.{table_name}_p{i}"
                             offset_interval = f"'{config['offset_days']} day'::interval"
-
-                            # Use named arguments for clarity in the format string
                             sql = f"""
                                 DO $$
-                                DECLARE
-                                    v_parent_table TEXT := %(parent_table)s;
                                 BEGIN
                                     IF NOT EXISTS (
-                                        SELECT 1 FROM partman.part_config
-                                        WHERE parent_table = v_parent_table
+                                        SELECT 1 FROM partman.part_config WHERE parent_table = %(parent_table)s
                                     ) THEN
                                         PERFORM partman.create_parent(
-                                            p_parent_table := v_parent_table,
+                                            p_parent_table := %(parent_table)s,
                                             p_control := %(control)s,
                                             p_type := 'native',
                                             p_interval := %(interval)s,
@@ -98,15 +121,7 @@ class Command(BaseCommand):
                                     "premake": config["premake"],
                                 },
                             )
-
-                        # Set the retention policy for the entire partition set.
-                        update_sql = """
-                            UPDATE partman.part_config
-                            SET
-                                retention = %(retention)s,
-                                retention_keep_table = false
-                            WHERE parent_table LIKE %(parent_like)s;
-                        """
+                        update_sql = "UPDATE partman.part_config SET retention = %(retention)s, retention_keep_table = false WHERE parent_table LIKE %(parent_like)s;"
                         cursor.execute(
                             update_sql,
                             {
@@ -127,10 +142,45 @@ class Command(BaseCommand):
                 )
             )
 
-        except Exception as e:
-            logger.exception("An error occurred during pg_partman setup.")
-            self.stderr.write(
-                self.style.ERROR(
-                    f"An error occurred: {e}\nAre you running this command as a database superuser?"
+        except ProgrammingError as e:
+            # Catch the specific permission error and provide helpful guidance.
+            if "permission denied" in str(e).lower():
+                self.stderr.write(
+                    self.style.ERROR(
+                        "\nPermission denied. This command must be run by a user with rights to CREATE SCHEMA and CREATE EXTENSION."
+                    )
                 )
-            )
+                self.stderr.write(
+                    self.style.ERROR(
+                        "This is common on managed database platforms like DigitalOcean or AWS RDS."
+                    )
+                )
+                self.stdout.write(
+                    "\n------------------------------------------------------------------"
+                )
+                self.stdout.write(self.style.SUCCESS("ACTION REQUIRED:"))
+                self.stdout.write(
+                    "Please ask your database administrator to run the following SQL script as a high-privilege user (e.g., 'doadmin'):"
+                )
+                self.stdout.write(
+                    "\n-- Please replace 'your_application_user' with the correct user name before running! --"
+                )
+                self.stdout.write(
+                    self.style.SQL_KEYWORD(
+                        ADMIN_SETUP_SQL.replace(
+                            "your_application_user", connection.settings_dict["USER"]
+                        )
+                    )
+                )
+                self.stdout.write(
+                    "\nAfter the script is run, you can re-run this management command."
+                )
+                self.stdout.write(
+                    "------------------------------------------------------------------"
+                )
+            else:
+                # Re-raise any other programming errors.
+                raise e
+        except Exception as e:
+            logger.exception("An unhandled error occurred during pg_partman setup.")
+            self.stderr.write(self.style.ERROR(f"An unexpected error occurred: {e}"))
