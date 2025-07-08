@@ -13,6 +13,7 @@ from pydantic import (
     BeforeValidator,
     JsonValue,
     RootModel,
+    ValidationError,
     WrapValidator,
     field_validator,
     model_validator,
@@ -160,8 +161,42 @@ class ValueEventException(LaxIngestSchema):
         return [e for e in v if e is not None]
 
 
+def truncate_str(v: Any) -> Any:
+    """
+    Truncates a string if its max_length is set.
+    """
+    if isinstance(v, str):
+        return v[:8192]
+    return v
+
+
+def truncate_on_error(v: Any, handler) -> str:
+    """
+    A WrapValidator that attempts to validate a string and, upon catching
+    a 'string_too_long' validation error, truncates the string and
+    returns it instead of raising the error.
+    """
+    try:
+        # Attempt to run the standard validation
+        return handler(v)
+    except ValidationError as e:
+        # Check if the error is the specific one we want to handle
+        error = e.errors()[0]
+        if error["type"] == "string_too_long" and "ctx" in error:
+            # Extract max_length from the error's context
+            max_length = error["ctx"]["max_length"]
+            # Return the truncated string
+            return v[:max_length]
+
+        # If it's a different validation error, re-raise it
+        raise
+
+
+TruncatedStr = Annotated[str, WrapValidator(truncate_on_error)]
+
+
 class EventMessage(LaxIngestSchema):
-    formatted: str = Field(max_length=8192, default="")
+    formatted: TruncatedStr = Field(max_length=8192, default="")
     message: str | None = None
     params: list[CoercedStr] | dict[str, str] | None = None
 
@@ -178,11 +213,11 @@ class EventMessage(LaxIngestSchema):
                     int(p) if isinstance(p, str) and p.isdigit() else p for p in params
                 )
                 try:
-                    self.formatted = self.message % tuple(formatted_params)
+                    self.formatted = self.message % tuple(formatted_params)[:8192]
                 except TypeError:
                     pass
             elif isinstance(params, dict):
-                self.formatted = self.message.format(**params)
+                self.formatted = self.message.format(**params)[:8192]
         return self
 
 

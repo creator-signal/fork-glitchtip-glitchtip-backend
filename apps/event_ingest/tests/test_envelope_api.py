@@ -342,3 +342,14 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             1,
             "Should have processed the valid event after skipping the 'log' item.",
         )
+
+    def test_long_message(self):
+        event = self.django_event
+        event[2]["message"] = {"formatted": "a" * 9000}
+        res = self.client.post(
+            self.url,
+            list_to_envelope(event),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(IssueEvent.objects.count(), 1)
