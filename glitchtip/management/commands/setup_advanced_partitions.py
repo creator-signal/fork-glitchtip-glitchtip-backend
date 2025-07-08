@@ -1,8 +1,9 @@
 # your_app/management/commands/setup_advanced_partitions.py
 import logging
+
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
-from django.conf import settings
 from django.db.utils import ProgrammingError
 
 logger = logging.getLogger(__name__)
