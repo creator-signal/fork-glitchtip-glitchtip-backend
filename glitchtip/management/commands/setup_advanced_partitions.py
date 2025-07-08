@@ -1,4 +1,3 @@
-# your_app/management/commands/setup_advanced_partitions.py
 import logging
 
 from django.conf import settings
@@ -73,24 +72,81 @@ class Command(BaseCommand):
 
         self.stdout.write("Configuring pg_partman for advanced partitioned tables...")
 
+        # --- Step 1: Check for and set up the pg_partman extension ---
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = 'partman');"
+                )
+                schema_exists = cursor.fetchone()[0]
+
+                if not schema_exists:
+                    self.stdout.write(
+                        "--> 'partman' schema not found. Attempting to create schema and extension..."
+                    )
+                    # This block will work in local dev but fail on managed DBs if not run as admin.
+                    with transaction.atomic():
+                        cursor.execute("CREATE SCHEMA IF NOT EXISTS partman;")
+                        cursor.execute(
+                            "CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;"
+                        )
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            "    ... Schema and extension setup successful."
+                        )
+                    )
+                else:
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            "--> 'partman' schema already exists. Skipping creation."
+                        )
+                    )
+
+        except ProgrammingError as e:
+            # Catch the specific permission error and provide helpful guidance.
+            if "permission denied" in str(e).lower():
+                self.stderr.write(
+                    self.style.ERROR(
+                        "\nPermission denied. This command must be run by a user with rights to CREATE SCHEMA and CREATE EXTENSION."
+                    )
+                )
+                self.stderr.write(
+                    self.style.ERROR(
+                        "This is common on managed database platforms like DigitalOcean or AWS RDS."
+                    )
+                )
+                self.stdout.write(
+                    "\n------------------------------------------------------------------"
+                )
+                self.stdout.write(self.style.SUCCESS("ACTION REQUIRED:"))
+                self.stdout.write(
+                    "Please ask your database administrator to run the following SQL script as a high-privilege user (e.g., 'doadmin'):"
+                )
+                self.stdout.write(
+                    "\n-- Please replace 'your_application_user' with the correct user name before running! --"
+                )
+                self.stdout.write(
+                    self.style.SQL_KEYWORD(
+                        ADMIN_SETUP_SQL.replace(
+                            "your_application_user", connection.settings_dict["USER"]
+                        )
+                    )
+                )
+                self.stdout.write(
+                    "\nAfter the script is run, you can re-run this management command."
+                )
+                self.stdout.write(
+                    "------------------------------------------------------------------"
+                )
+                return  # Halt execution if setup fails
+            else:
+                raise e  # Re-raise any other programming errors.
+
+        # --- Step 2: Proceed with table configuration ---
         try:
             with transaction.atomic():
-                # Step 1: Attempt to create the schema and extension.
-                # This will work in local dev but fail on managed DBs if not run as admin.
-                self.stdout.write("--> Attempting to create schema and extension...")
-                with connection.cursor() as cursor:
-                    cursor.execute("CREATE SCHEMA IF NOT EXISTS partman;")
-                    cursor.execute(
-                        "CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;"
-                    )
-                self.stdout.write(
-                    self.style.SUCCESS("    ... Schema and extension setup successful.")
-                )
-
-                # Step 2: Proceed with table configuration.
                 with connection.cursor() as cursor:
                     for table_name, config in PARTMAN_CONFIG.items():
-                        # ... (The rest of the configuration logic remains the same) ...
                         self.stdout.write(f"--> Configuring table: {table_name}")
                         for i in range(4):
                             parent_partition_table = f"public.{table_name}_p{i}"
@@ -143,45 +199,10 @@ class Command(BaseCommand):
                 )
             )
 
-        except ProgrammingError as e:
-            # Catch the specific permission error and provide helpful guidance.
-            if "permission denied" in str(e).lower():
-                self.stderr.write(
-                    self.style.ERROR(
-                        "\nPermission denied. This command must be run by a user with rights to CREATE SCHEMA and CREATE EXTENSION."
-                    )
-                )
-                self.stderr.write(
-                    self.style.ERROR(
-                        "This is common on managed database platforms like DigitalOcean or AWS RDS."
-                    )
-                )
-                self.stdout.write(
-                    "\n------------------------------------------------------------------"
-                )
-                self.stdout.write(self.style.SUCCESS("ACTION REQUIRED:"))
-                self.stdout.write(
-                    "Please ask your database administrator to run the following SQL script as a high-privilege user (e.g., 'doadmin'):"
-                )
-                self.stdout.write(
-                    "\n-- Please replace 'your_application_user' with the correct user name before running! --"
-                )
-                self.stdout.write(
-                    self.style.SQL_KEYWORD(
-                        ADMIN_SETUP_SQL.replace(
-                            "your_application_user", connection.settings_dict["USER"]
-                        )
-                    )
-                )
-                self.stdout.write(
-                    "\nAfter the script is run, you can re-run this management command."
-                )
-                self.stdout.write(
-                    "------------------------------------------------------------------"
-                )
-            else:
-                # Re-raise any other programming errors.
-                raise e
         except Exception as e:
-            logger.exception("An unhandled error occurred during pg_partman setup.")
-            self.stderr.write(self.style.ERROR(f"An unexpected error occurred: {e}"))
+            logger.exception("An error occurred during pg_partman table configuration.")
+            self.stderr.write(
+                self.style.ERROR(
+                    f"An error occurred during table configuration: {e}\nHave the necessary permissions been granted to the 'partman' schema?"
+                )
+            )

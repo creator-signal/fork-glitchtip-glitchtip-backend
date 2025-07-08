@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.db import migrations, models
 import django.db.models.deletion
+import psql_partition.manager.manager
 import psql_partition.backend.migrations.operations.create_partitioned_model
 import psql_partition.models.partitioned
 import psql_partition.types
@@ -184,6 +185,45 @@ base_operations = [
         ),
     ),
     TestDefaultPartition(model_name="TransactionGroupAggregate", name="default"),
+    migrations.AlterModelManagers(
+        name="transactionevent",
+        managers=[
+            ("objects", psql_partition.manager.manager.PostgresManager()),
+        ],
+    ),
+    migrations.AlterModelManagers(
+        name="transactiongroupaggregate",
+        managers=[
+            ("objects", psql_partition.manager.manager.PostgresManager()),
+        ],
+    ),
+    # Django bug? makemigrations will try to alter it like this, which is nonsensible.
+    migrations.AlterField(
+        model_name="transactionevent",
+        name="pk",
+        field=models.CompositePrimaryKey(
+            "event_id",
+            "organization",
+            "start_timestamp",
+            blank=True,
+            editable=False,
+            primary_key=True,
+            serialize=False,
+        ),
+    ),
+    migrations.AlterField(
+        model_name="transactiongroupaggregate",
+        name="pk",
+        field=models.CompositePrimaryKey(
+            "group",
+            "organization",
+            "date",
+            blank=True,
+            editable=False,
+            primary_key=True,
+            serialize=False,
+        ),
+    ),
 ]
 
 # --- Conditionally build the final operations list ---
