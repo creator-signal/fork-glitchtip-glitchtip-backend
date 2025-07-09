@@ -2,6 +2,7 @@
 
 - Fix: Return 400 status instead of 500 when wizard hash is empty
 - Fix: Unhandled RequestDataTooBig exception
+- Increase aiohttp header size allowance to 16380 bytes and handle errors around unexpected header size gracefully
 
 # v5.0.6
 

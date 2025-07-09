@@ -212,6 +212,7 @@ PROXY_ENV = env.bool("PROXY_ENV", False)
 AIOHTTP_CONFIG = {
     "headers": {"User-Agent": "GlitchTip/" + GLITCHTIP_VERSION},
     "trust_env": PROXY_ENV,
+    "max_field_size": 16380,  # 2x default
 }
 
 # Application definition
