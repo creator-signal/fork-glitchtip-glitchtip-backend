@@ -1,3 +1,11 @@
+# v5.0.7
+
+- Fix: Return 400 status instead of 500 when wizard hash is empty
+
+# v5.0.6
+
+- Better tsvector trim
+
 # v5.0.5
 
 - Implement throttling for organization invite by email
