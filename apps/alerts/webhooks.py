@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import requests
+from requests.exceptions import ReadTimeout
 from django.conf import settings
 from django.db.models import F
 
@@ -61,9 +62,16 @@ def send_webhook(
     data = WebhookPayload(
         alias="GlitchTip", text=message, attachments=attachments, sections=sections
     )
-    return requests.post(
-        url, json=asdict(data), headers={"Content-type": "application/json"}, timeout=10
-    )
+    try:
+        return requests.post(
+            url,
+            json=asdict(data),
+            headers={"Content-type": "application/json"},
+            timeout=10,
+        )
+    except ReadTimeout:
+        # Ignore timeout
+        return None
 
 
 def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
