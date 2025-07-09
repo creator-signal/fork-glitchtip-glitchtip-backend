@@ -69,7 +69,7 @@ async def setup_wizard_hash(request, wizard_hash: str, auth=None):
     if wizard_data is None:
         raise Http404
     elif wizard_data == SETUP_WIZARD_CACHE_EMPTY:
-        raise HttpError(400)
+        raise HttpError(400, "Hash is empty, set it first")
 
     return wizard_data
 
