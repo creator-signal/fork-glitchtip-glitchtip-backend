@@ -1060,11 +1060,13 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             TransactionEvent(
                 group=group,
                 organization_id=ingest_event.organization_id,
-                data={
-                    "request": request.dict() if request else None,
-                    "sdk": event.sdk.dict() if event.sdk else None,
-                    "platform": event.platform,
-                },
+                data=remove_bad_chars(
+                    {
+                        "request": request.dict() if request else None,
+                        "sdk": event.sdk.dict() if event.sdk else None,
+                        "platform": event.platform,
+                    }
+                ),
                 trace_id=trace_id,
                 event_id=event.event_id,
                 timestamp=event.timestamp,
