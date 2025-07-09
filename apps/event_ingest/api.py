@@ -84,7 +84,7 @@ def event_store(
     return result
 
 
-@router.post("/{project_id}/envelope/", response=EnvelopeIngestOut)
+@router.post("/{int:project_id}/envelope/", response=EnvelopeIngestOut)
 def event_envelope(
     request: EventAuthHttpRequest,
     payload: EnvelopeSchema,

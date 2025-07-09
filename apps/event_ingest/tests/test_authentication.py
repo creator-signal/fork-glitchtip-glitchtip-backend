@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.urls import reverse
+from django.urls.exceptions import NoReverseMatch
 from model_bakery import baker
 
 
@@ -24,3 +25,7 @@ class AuthenticationTestCase(TestCase):
         res = self.client.post(self.url, [{}], content_type="application/json")
         self.assertEqual(res.headers.get("Retry-After"), "600")
         self.assertEqual(res.status_code, 429)
+
+    def test_invalid_project_id(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("api:event_envelope", args=[f"{self.project.id}''"])
