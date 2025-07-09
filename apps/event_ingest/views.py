@@ -2,7 +2,8 @@ import logging
 
 import orjson
 from django.core.cache import cache
-from django.http import HttpResponse, JsonResponse
+from django.core.exceptions import RequestDataTooBig
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
@@ -119,7 +120,10 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         read_failed = False
         try:
             if item_header.length is not None and item_header.length >= 0:
-                payload_bytes = request.read(item_header.length)
+                try:
+                    payload_bytes = request.read(item_header.length)
+                except RequestDataTooBig as e:
+                    return HttpResponseForbidden(f"{e}", status=413)
                 if len(payload_bytes) != item_header.length:
                     logger.warning(
                         f"Read incomplete payload for type {item_header.type}. "
