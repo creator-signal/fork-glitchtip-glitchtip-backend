@@ -12,7 +12,7 @@ from psql_partition.types import PostgresPartitioningMethod
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 from sentry.constants import MAX_CULPRIT_LENGTH
 
-from .constants import EventStatus, IssueEventType, LogLevel
+from .constants import MAX_TAG_LENGTH, EventStatus, IssueEventType, LogLevel
 from .utils import base32_encode
 
 
@@ -27,11 +27,11 @@ class DeferedFieldManager(models.Manager):
 
 class TagKey(models.Model):
     id = models.AutoField(primary_key=True)
-    key = models.CharField(max_length=255, unique=True)
+    key = models.CharField(max_length=MAX_TAG_LENGTH, unique=True)
 
 
 class TagValue(models.Model):
-    value = models.CharField(max_length=255, unique=True)
+    value = models.CharField(max_length=MAX_TAG_LENGTH, unique=True)
 
 
 class IssueTag(AggregationModel):

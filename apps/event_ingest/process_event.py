@@ -29,7 +29,7 @@ from apps.alerts.models import Notification
 from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.environments.models import Environment, EnvironmentProject
-from apps.issue_events.constants import EventStatus, LogLevel
+from apps.issue_events.constants import MAX_TAG_LENGTH, EventStatus, LogLevel
 from apps.issue_events.models import (
     Issue,
     IssueEvent,
@@ -956,6 +956,12 @@ TagStats = defaultdict[
 
 
 def update_tags(processing_events: list[ProcessingEvent]):
+    # Truncate long values
+    for processing_event in processing_events:
+        processing_event.event_tags = {
+            str(key)[:MAX_TAG_LENGTH]: str(value)[:MAX_TAG_LENGTH]
+            for key, value in processing_event.event_tags.items()
+        }
     keys = sorted({key for d in processing_events for key in d.event_tags.keys()})
     values = sorted(
         {value for d in processing_events for value in d.event_tags.values()}

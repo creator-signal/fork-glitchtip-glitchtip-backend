@@ -56,11 +56,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
                 count=2, project=self.project
             ).exists()
         )
-        self.assertTrue(
-            IssueAggregate.objects.filter(
-                count=2
-            ).exists()
-        )
+        self.assertTrue(IssueAggregate.objects.filter(count=2).exists())
 
     def test_two_issues(self):
         self.process_events(
@@ -1033,3 +1029,13 @@ class SentryCompatTestCase(EventIngestTestCase):
         event["user"] = {"username": "user", "subscription": {"isActive": True}}
         result = self.submit_event(event)
         self.assertEqual(result.data["user"]["username"], "user")
+
+    def test_large_tag(self):
+        """User interface may contain some arbitrary data"""
+        event = generate_event()
+        long_tag_value = "a" * 300
+        event["tags"] = {
+            "key_with_long_value": long_tag_value,
+            "long_key_" + "b" * 280: "normal_value",
+        }
+        self.submit_event(event)

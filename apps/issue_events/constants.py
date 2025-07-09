@@ -20,3 +20,6 @@ class LogLevel(FromStringIntegerChoices):
     WARNING = 3, "warning"
     ERROR = 4, "error"
     FATAL = 5, "fatal"
+
+
+MAX_TAG_LENGTH = 255
