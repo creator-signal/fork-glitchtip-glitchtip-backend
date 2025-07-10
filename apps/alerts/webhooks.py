@@ -2,9 +2,9 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import requests
-from requests.exceptions import ReadTimeout
 from django.conf import settings
 from django.db.models import F
+from requests.exceptions import ReadTimeout
 
 from .constants import RecipientType
 

@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models
 from django.db.models.expressions import OuterRef, Subquery
 from django.utils import timezone
 
@@ -203,7 +203,9 @@ class StripeSubscription(StripeModel):
             try:
                 fetched_sub = await fetch_subscription(subscription.stripe_id)
             except StripeResourceNotFound:
-                logger.error(f"Stripe did not return subscription for {subscription.stripe_id}")
+                logger.error(
+                    f"Stripe did not return subscription for {subscription.stripe_id}"
+                )
                 continue
             subscription.status = fetched_sub.status
             subscription.created = unix_to_datetime(fetched_sub.created)
@@ -258,16 +260,6 @@ class StripeSubscription(StripeModel):
 
                 price = items[0].price
                 price_id = price.id
-                if price_id not in known_price_ids:
-                    await StripePrice.objects.aupdate_or_create(
-                        stripe_id=price_id,
-                        defaults={
-                            "product_id": price.product,
-                            "nickname": price.nickname or "",
-                            "price": price.unit_amount / 100,
-                        },
-                    )
-                    known_price_ids.add(price_id)
 
                 # If unseen organization id, check if it exists
                 if organization_id not in organization_ids:
@@ -284,6 +276,27 @@ class StripeSubscription(StripeModel):
                             )
                 # Only save subscriptions with organizations that exist
                 if organization_id in active_organization_ids:
+                    # Update price (just in case we're out of date)
+                    if price_id not in known_price_ids:
+                        try:
+                            await StripePrice.objects.aupdate_or_create(
+                                stripe_id=price_id,
+                                defaults={
+                                    "product_id": price.product,
+                                    "nickname": price.nickname or "",
+                                    "price": price.unit_amount / 100,
+                                },
+                            )
+                            known_price_ids.add(price_id)
+                        except IntegrityError:
+                            # Should not happen, notify, move on
+                            # Could happen if a customer has GT subscription and
+                            # other unrelated stripe subscription.
+                            logger.warning(
+                                f"Failed to create StripePrice {price_id}",
+                                exc_info=True,
+                            )
+                            continue
                     subscription_objects.append(
                         StripeSubscription(
                             stripe_id=subscription.id,
