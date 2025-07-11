@@ -1049,8 +1049,8 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             trace = contexts.get("trace", {})
             if isinstance(trace, dict):
                 op = str(trace.get("op", ""))
-        method: str | None = None
-        if request:
+        method = ""
+        if request and request.method:
             method = request.method
 
         # TODO tags
