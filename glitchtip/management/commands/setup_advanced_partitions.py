@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Define the configuration for all pg_partman managed tables in one place.
 PARTMAN_CONFIG = {
-    "issues_issueaggregate": {
+    "issue_events_issueaggregate": {
         "control_column": "date",
         "interval": "2 days",
         "premake": 4,
