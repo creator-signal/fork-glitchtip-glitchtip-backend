@@ -1,3 +1,7 @@
+# v
+
+- Fix: Performance transaction group method no longer nullable, which in rare conditions could lead to duplicate and invalid groups
+
 # v5.0.7
 
 - Fix: Return 400 status instead of 500 when wizard hash is empty
