@@ -123,7 +123,7 @@ GLITCHTIP_ADVANCED_PARTITIONING = env.bool("GLITCHTIP_ADVANCED_PARTITIONING", Fa
 
 # Check if a throttle is needed 1 out of every 5000 event requests
 GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
-SEARCH_MAX_LEXEMES = 4000  # Postgres search vectors will truncate after
+SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
 
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
