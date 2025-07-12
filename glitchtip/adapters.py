@@ -18,5 +18,5 @@ class CustomDefaultAccountAdapter(DefaultAccountAdapter):
         # Consider a signup a form of authentication
         user = super().save_user(request, user, form, commit)
         if commit:
-            record_authentication(request, method="signup")
+            record_authentication(request, user, method="signup")
         return user
