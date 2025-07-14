@@ -23,7 +23,8 @@ Backend code has high test coverage and all features and bug fixes require a uni
 We are not a Sentry fork. The older open source Sentry project had a vast code base including multiple programming languages and a custom search engine. We do not believe that a small team of interested contributors can maintain such a large codebase. Instead we reimplement Sentry's features and sometimes port Sentry's open source python code.
 
 - Use community solutions like django-ninja or Django Organizations over custom built code.
-- Prefer simple over complex - it's better to have less features that are more reliable and easier to maintain. We do not wish to build a custom search engine.
+- Prefer simple over complex - it's better to have less features that are more reliable and easier to maintain. Postgres full text search is a good enough and we do not wish to build a custom search engine.
+- Performance with purpose. While we prefer simple code, it must perform up to it's task. A solution that is too slow isn't simple. It's a dead end requiring rewrite. High throughput event ingest is an example of when this is important. 
 - Economical over completeness. Make running GlitchTip as easy and simple as possible, especially for small and medium sized projects. Be wary of introducing additional external dependencies. The entire project must be maintained on a budget of 4 person-hours per week. When introducing a large new feature, offer to help with maintenance in addition.
 
 GlitchTip backend is built with
@@ -35,7 +36,6 @@ GlitchTip backend is built with
 
 Avoid:
 
-- Django Rest Framework, port this code to django-ninja. We value type hinting, performance, and async first approach
 - Inefficient database calls - GlitchTip must work for both small self hosters and 100 million event projects. Always assume scale. If you need to edit every user, assume there are 100 million users and the queries much be chunked in batches. Neither one query per user nor one giant query that takes too long to execute.
 
 ## Formatting
@@ -62,7 +62,19 @@ This section describes the idealized approach to coding GlitchTip. You may notic
 
 ### Legacy Sentry SDK Client support
 
-The GlitchTip core team at this time is not interested in legacy sdk client support. Merge requests are accepted and welcome. Open legacy client feature requests along with the intention to implement or interest in funding development.
+The GlitchTip core team, at this time, is not interested in legacy sdk client support. Merge requests are accepted and welcome. Open legacy client feature requests along with the intention to implement or interest in funding development.
+
+## Submitting bugs/feature requests around supporting sentry sdk events
+
+Does GlitchTip not handle an event the way you expect? Here's how to contribute.
+
+1. Create a demonstration, by creating/forking an [error factory project](https://gitlab.com/glitchtip/error-factories/). Remember that the reviewer is not likely to be very familiar with your code language/framework.
+2. Open an issue in this repo. If you aren't able to create a clear issue with repeatable steps, then use Gitter instead to ask for help.
+3. Write a unit test that fails without a code change. [Examples](https://gitlab.com/glitchtip/glitchtip-backend/-/tree/master/apps/event_ingest/tests).
+4. Ideally, submit a merge request with a fix.
+
+Clear examples, with use case explanations and a failing test, are much more likely to be accepted and fixed. Help requests, where the problem isn't understood, will not be.
+If you don't have time to write a clear demonstration of the problem and propose fixes, we do offer [paid support](https://glitchtip.com/pricing).
 
 
 ## Security reports
