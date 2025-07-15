@@ -4,30 +4,36 @@ from django.db import migrations, models
 
 
 def delete_null_method_transaction_groups(apps, schema_editor):
-    TransactionGroup = apps.get_model('performance', 'TransactionGroup')
+    TransactionGroup = apps.get_model("performance", "TransactionGroup")
     TransactionGroup.objects.filter(method__isnull=True).delete()
 
 
 class Migration(migrations.Migration):
+    atomic = False  # Postgres transactions don't support editing data + schema at once.
 
     dependencies = [
-        ('performance', '0015_transactiongroup_is_deleted'),
-        ('projects', '0017_auto_20250627_1413'),
+        ("performance", "0015_transactiongroup_is_deleted"),
+        ("projects", "0017_auto_20250627_1413"),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='transactiongroup',
+            name="transactiongroup",
             unique_together=set(),
         ),
-        migrations.RunPython(delete_null_method_transaction_groups, migrations.RunPython.noop),
+        migrations.RunPython(
+            delete_null_method_transaction_groups, migrations.RunPython.noop
+        ),
         migrations.AlterField(
-            model_name='transactiongroup',
-            name='method',
+            model_name="transactiongroup",
+            name="method",
             field=models.CharField(blank=True, max_length=255),
         ),
         migrations.AddConstraint(
-            model_name='transactiongroup',
-            constraint=models.UniqueConstraint(fields=('transaction', 'project', 'op', 'method'), name='unique_transaction_project_op_method'),
+            model_name="transactiongroup",
+            constraint=models.UniqueConstraint(
+                fields=("transaction", "project", "op", "method"),
+                name="unique_transaction_project_op_method",
+            ),
         ),
     ]
