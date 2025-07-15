@@ -1,6 +1,7 @@
 # v
 
 - Fix: Performance transaction group method no longer nullable, which in rare conditions could lead to duplicate and invalid groups
+- Fix: Reject transaction events that are older than GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS
 
 # v5.0.7
 
