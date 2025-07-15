@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from django.core.cache import cache
 from django.test.client import FakePayload
 from django.urls import reverse
+from freezegun import freeze_time
 
 from apps.issue_events.models import IssueEvent
 from apps.performance.models import TransactionEvent
@@ -72,11 +73,23 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
     def test_accept_transaction(self):
         data = self.get_payload("events/test_data/transactions/django_simple.json")
-        res = self.client.post(
-            self.url,
-            data,
-            content_type="application/x-sentry-envelope",
-        )
+        # Should fail with warning about date being too old
+        with mock.patch("apps.event_ingest.views.logger.warning") as mock_warning:
+            res = self.client.post(
+                self.url,
+                data,
+                content_type="application/x-sentry-envelope",
+            )
+            mock_warning.assert_called_once()
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(TransactionEvent.objects.exists())
+
+        with freeze_time("2020-01-01"):
+            res = self.client.post(
+                self.url,
+                data,
+                content_type="application/x-sentry-envelope",
+            )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 

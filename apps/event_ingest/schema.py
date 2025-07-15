@@ -1,10 +1,11 @@
 import logging
 import typing
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, Union
 from urllib.parse import parse_qs, urlparse
 
+from django.conf import settings
 from django.utils.timezone import now
 from ninja import Field
 from pydantic import (
@@ -391,6 +392,15 @@ class TransactionEventSchema(LaxIngestSchema):
     release: str | None = None
     environment: str | None = None
     _meta: JsonValue | None
+
+    @field_validator('start_timestamp')
+    @classmethod
+    def ensure_time_is_recent(cls, v: datetime) -> datetime:
+        """Validator to ensure the datetime is recent"""
+        minimum_date = now() - timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS)
+        if v < minimum_date:
+            raise ValueError('Event time too old.')
+        return v
 
 
 class EnvelopeHeaderSchema(LaxIngestSchema):
