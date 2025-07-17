@@ -118,7 +118,7 @@ def difs_create_file_from_chunks(name, checksum, chunks):
 
 @contextlib.contextmanager
 def difs_concat_file_blobs_to_disk(blobs):
-    output = tempfile.NamedTemporaryFile(delete=False)
+    output = tempfile.NamedTemporaryFile()
     for blob in blobs:
         with open(blob.blob.path, "rb") as binary_file:
             content = binary_file.read()
