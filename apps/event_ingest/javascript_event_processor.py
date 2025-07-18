@@ -1,5 +1,6 @@
 import copy
 import itertools
+import logging
 import re
 from os.path import splitext
 from typing import TYPE_CHECKING
@@ -12,6 +13,8 @@ from sentry.utils.safe import get_path
 
 if TYPE_CHECKING:
     from .schema import IssueEventSchema, StackTrace, StackTraceFrame
+
+logger = logging.getLogger(__name__)
 
 UNKNOWN_MODULE = "<unknown module>"
 CLEAN_MODULE_RE = re.compile(
@@ -87,7 +90,7 @@ class JavascriptEventProcessor:
 
     def process_frame(self, frame, map_file, minified_source):
         # Required to determine source
-        if not frame.abs_path or not frame.lineno:
+        if not frame.abs_path or not frame.lineno or not frame.colno:
             return
 
         minified_source.blob.blob.seek(0)
@@ -164,11 +167,17 @@ class JavascriptEventProcessor:
         if source_result is not None:
             sourceview = sourcemap_view.get_sourceview(source_result[0])
             source = sourceview.get_source().splitlines()
-            pre_lines = max(0, token.src_line - 5)
-            past_lines = min(len(source), token.src_line + 5)
-            frame.context_line = source[token.src_line]
-            frame.pre_context = source[pre_lines : token.src_line]
-            frame.post_context = source[token.src_line + 1 : past_lines]
+            if token is not None and token.src_line < len(source):
+                pre_lines = max(0, token.src_line - 5)
+                past_lines = min(len(source), token.src_line + 5)
+                frame.context_line = source[token.src_line]
+                frame.pre_context = source[pre_lines : token.src_line]
+                frame.post_context = source[token.src_line + 1 : past_lines]
+            else:
+                logger.warning(
+                    "Invalid sourcemap token or line number out of range.",
+                    extra={"token": token, "source_lines": len(source) if 'source' in locals() else 'N/A'}
+                )
 
     def transform(self):
         stacktraces = self.get_stacktraces()
