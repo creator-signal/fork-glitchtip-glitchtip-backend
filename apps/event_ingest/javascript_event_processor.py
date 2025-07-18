@@ -167,7 +167,7 @@ class JavascriptEventProcessor:
         if source_result is not None:
             sourceview = sourcemap_view.get_sourceview(source_result[0])
             source = sourceview.get_source().splitlines()
-            if token is not None and token.src_line < len(source):
+            if token.src_line < len(source):
                 pre_lines = max(0, token.src_line - 5)
                 past_lines = min(len(source), token.src_line + 5)
                 frame.context_line = source[token.src_line]
