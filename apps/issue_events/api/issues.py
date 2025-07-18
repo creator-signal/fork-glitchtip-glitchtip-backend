@@ -174,10 +174,10 @@ RelativeDateTime = Annotated[datetime, BeforeValidator(relative_to_datetime)]
 
 
 class IssueFilters(Schema):
-    id__in: list[int] = Field(None, alias="id")
-    first_seen__gte: RelativeDateTime = Field(None, alias="start")
-    first_seen__lte: RelativeDateTime = Field(None, alias="end")
-    project__in: list[str] = Field(None, alias="project")
+    id__in: list[int] | None = Field(None, alias="id")
+    first_seen__gte: RelativeDateTime | None = Field(None, alias="start")
+    first_seen__lte: RelativeDateTime | None = Field(None, alias="end")
+    project__in: list[int] | None = Field(None, alias="project")
     environment: list[str] | None = None
     query: str | None = None
 
