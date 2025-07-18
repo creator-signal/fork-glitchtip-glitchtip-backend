@@ -163,7 +163,8 @@ class Command(BaseCommand):
                                             p_type := 'native',
                                             p_interval := %(interval)s,
                                             p_premake := %(premake)s,
-                                            p_start_partition := (CURRENT_TIMESTAMP - {offset_interval})::text
+                                            p_start_partition := (CURRENT_TIMESTAMP - {offset_interval})::text,
+                                            p_default_table := false
                                         );
                                     END IF;
                                 END;
