@@ -11,6 +11,7 @@ class AlertEmail(GlitchTipEmail):
     text_template_name = "alerts/issue.txt"
     subject_template_name = "alerts/issue-subject.txt"
     notification = None
+    metadata_fields = []
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -33,12 +34,21 @@ class AlertEmail(GlitchTipEmail):
         context["project_link"] = (
             f"{base_url}/{org_slug}/issues?project={first_issue.project.id}"
         )
+
+        metadata_values = {}
+        if first_issue.metadata and self.metadata_fields:
+            for key in self.metadata_fields:
+                if key in first_issue.metadata:
+                    metadata_values[key] = first_issue.metadata[key]
+        context["metadata_values"] = metadata_values
+        
         return context
 
 
-def send_email_notification(notification):
+def send_email_notification(notification, metadata_fields=None):
     email = AlertEmail()
     email.notification = notification
+    email.metadata_fields = metadata_fields if metadata_fields is not None else []
     users = User.objects.alert_notification_recipients(notification)
     if not users.exists():
         return
