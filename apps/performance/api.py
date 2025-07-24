@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from django.db.models import Avg, Count
+from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Query, Router, Schema
@@ -22,14 +22,15 @@ def get_transaction_group_queryset(
     qs = TransactionGroup.objects.filter(project__organization__slug=organization_slug)
     filter_kwargs: dict[str, Any] = {}
     if start:
-        filter_kwargs["transactionevent__start_timestamp__gte"] = start
+        filter_kwargs["transactiongroupaggregate__date__gte"] = start
     if end:
-        filter_kwargs["transactionevent__start_timestamp__lte"] = end
+        filter_kwargs["transactiongroupaggregate__date__lte"] = end
     if filter_kwargs:
         qs = qs.filter(**filter_kwargs)
 
     return qs.annotate(
-        avg_duration=Avg("transactionevent__duration"),
+        avg_duration=Sum('transactiongroupaggregate__total_duration') /
+                         Sum('transactiongroupaggregate__count'),
         transaction_count=Count("transactionevent"),
     )
 
