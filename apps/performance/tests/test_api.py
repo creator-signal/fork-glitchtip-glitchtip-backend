@@ -1,3 +1,4 @@
+from collections import defaultdict
 import datetime
 
 from django.urls import reverse
@@ -5,6 +6,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from apps.event_ingest.process_event import update_transaction_group_stats
 from glitchtip.test_utils.test_case import GlitchTestCase
 
 
@@ -35,6 +37,39 @@ class TransactionGroupAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+
+    def create_transaction_and_update_stats(
+        self, group, organization, duration, timestamp
+    ):
+        """
+        Test helper to create a transaction event and immediately call the
+        production aggregation logic to populate the stats model.
+        """
+        # Create the raw event for completeness.
+        event = baker.make(
+            "performance.TransactionEvent",
+            group=group,
+            organization=organization,
+            start_timestamp=timestamp,
+            duration=duration,
+        )
+
+        # Now, call the production stats function with data for this single event.
+        minute_timestamp = timestamp.replace(second=0, microsecond=0)
+        stats_data = defaultdict(lambda: defaultdict(lambda: {
+            "count": 0, "total_duration": 0.0, "sum_of_squares_duration": 0.0
+        }))
+
+        stats_bucket = stats_data[minute_timestamp][group.id]
+        stats_bucket["organization_id"] = organization.id
+        stats_bucket["count"] = 1
+        stats_bucket["total_duration"] = duration
+        stats_bucket["sum_of_squares_duration"] = duration ** 2
+
+        # This is the key: we are directly calling the real database writer.
+        update_transaction_group_stats(stats_data)
+
+        return event
 
     def test_list(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
@@ -133,32 +168,36 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         self.assertContains(res, group1.transaction)
         self.assertNotContains(res, group2.transaction)
 
+
     def test_filter_then_average(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
+        organization = self.project.organization
         now = timezone.now()
         last_minute = now - datetime.timedelta(minutes=1)
-        with freeze_time(last_minute):
-            baker.make(
-                "performance.TransactionEvent",
-                group=group,
-                start_timestamp=last_minute,
-                timestamp=last_minute + datetime.timedelta(seconds=5),
-                duration=5000,
-            )
-        transaction2 = baker.make(
-            "performance.TransactionEvent",
+
+        # Use the new helper to create events and update stats
+        self.create_transaction_and_update_stats(
             group=group,
-            start_timestamp=now,
-            timestamp=now + datetime.timedelta(seconds=1),
-            duration=1000,
+            organization=organization,
+            duration=5000,
+            timestamp=last_minute,
         )
+        transaction2 = self.create_transaction_and_update_stats(
+            group=group,
+            organization=organization,
+            duration=1000,
+            timestamp=now,
+        )
+
+        # This assertion now works because the view is reading from the populated stats table
         res = self.client.get(self.list_url)
         self.assertEqual(res.json()[0]["avgDuration"], 3000)
 
+        # This filtered assertion also works correctly
         res = self.client.get(
             self.list_url
             + "?start="
-            + transaction2.start_timestamp.replace(microsecond=0)
+            + transaction2.start_timestamp.replace(second=0,microsecond=0)
             .replace(tzinfo=None)
             .isoformat()
             + "Z"
