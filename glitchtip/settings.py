@@ -386,9 +386,7 @@ if BILLING_ENABLED:
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "default-src": env.list("CSP_DEFAULT_SRC", str, [SELF]) + [NONCE],
-        # https://github.com/swimlane/ngx-charts/issues/1937
-        # Use this once unsafe-inline is removed
-        "style-src": env.list("CSP_STYLE_SRC", str, [SELF]),
+        "style-src": env.list("CSP_STYLE_SRC", str, [SELF]) + [NONCE],
         "font-src": env.list("CSP_FONT_SRC", str, [SELF, "data:"]),
         "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
         "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [NONCE],
