@@ -31,6 +31,11 @@ class AlertRecipient(models.Model):
         default=list, blank=True, 
         help_text="List of metadata fields to include in the alert"
     )
+    tags_to_add = models.JSONField(
+        default=list, blank=True,
+        help_text="List of additional tags to include in the alert"
+    )
+
 
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
@@ -47,7 +52,7 @@ class AlertRecipient(models.Model):
         if self.recipient_type == RecipientType.EMAIL:
             send_email_notification(notification, metadata_fields=self.metadata_fields)
         elif self.is_webhook:
-            send_webhook_notification(notification, self.url, self.recipient_type, metadata_fields=self.metadata_fields)
+            send_webhook_notification(notification, self.url, self.recipient_type, metadata_fields=self.metadata_fields, tags_to_add=self.tags_to_add)
 
 
 class Notification(CreatedModel):
