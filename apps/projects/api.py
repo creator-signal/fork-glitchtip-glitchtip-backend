@@ -189,7 +189,9 @@ async def create_project(
         users=user_id,
         organization_users__role__gte=OrganizationUserRole.ADMIN,
     )
-    project = await Project.objects.acreate(organization=organization, **payload.dict(exclude_unset=True))
+    project = await Project.objects.acreate(
+        organization=organization, **payload.dict(exclude_unset=True)
+    )
     await project.teams.aadd(team)
     project = await get_projects_queryset(user_id).aget(id=project.id)
     return 201, project

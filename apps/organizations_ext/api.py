@@ -208,7 +208,10 @@ async def create_organization_member(
 ):
     user = await User.objects.aget(id=request.auth.user_id)
 
-    if settings.EMAIL_INVITE_REQUIRE_VERIFICATION and not await user.emailaddress_set.filter(verified=True).aexists():
+    if (
+        settings.EMAIL_INVITE_REQUIRE_VERIFICATION
+        and not await user.emailaddress_set.filter(verified=True).aexists()
+    ):
         raise HttpError(403, "User must have a verified email address")
 
     organization = await aget_object_or_404(

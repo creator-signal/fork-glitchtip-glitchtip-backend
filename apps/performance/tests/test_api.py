@@ -39,32 +39,45 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         self.client.force_login(self.user)
 
     def create_transaction_and_update_stats(
-        self, group, organization, duration, timestamp
+        self, group, duration, start_timestamp=None, timestamp=None
     ):
         """
         Test helper to create a transaction event and immediately call the
         production aggregation logic to populate the stats model.
         """
+
+        if start_timestamp is None:
+            start_timestamp = timezone.now()
+        if timestamp is None:
+            timestamp = start_timestamp + datetime.timedelta(milliseconds=duration)
         # Create the raw event for completeness.
+        organization = group.project.organization
         event = baker.make(
             "performance.TransactionEvent",
             group=group,
             organization=organization,
-            start_timestamp=timestamp,
+            start_timestamp=start_timestamp,
+            timestamp=timestamp,
             duration=duration,
         )
 
         # Now, call the production stats function with data for this single event.
-        minute_timestamp = timestamp.replace(second=0, microsecond=0)
-        stats_data = defaultdict(lambda: defaultdict(lambda: {
-            "count": 0, "total_duration": 0.0, "sum_of_squares_duration": 0.0
-        }))
+        minute_timestamp = start_timestamp.replace(second=0, microsecond=0)
+        stats_data = defaultdict(
+            lambda: defaultdict(
+                lambda: {
+                    "count": 0,
+                    "total_duration": 0.0,
+                    "sum_of_squares_duration": 0.0,
+                }
+            )
+        )
 
         stats_bucket = stats_data[minute_timestamp][group.id]
         stats_bucket["organization_id"] = organization.id
         stats_bucket["count"] = 1
         stats_bucket["total_duration"] = duration
-        stats_bucket["sum_of_squares_duration"] = duration ** 2
+        stats_bucket["sum_of_squares_duration"] = duration**2
 
         # This is the key: we are directly calling the real database writer.
         update_transaction_group_stats(stats_data)
@@ -79,30 +92,28 @@ class TransactionGroupAPITestCase(GlitchTestCase):
     def test_list_relative_datetime_filter(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
         now = timezone.now()
-        last_minute = now - datetime.timedelta(minutes=1)
-        baker.make(
-            "performance.TransactionEvent",
+        last_minute = now.replace(second=0, microsecond=0) - datetime.timedelta(
+            minutes=1
+        )
+        self.create_transaction_and_update_stats(
             group=group,
+            duration=5000,
             start_timestamp=last_minute,
             timestamp=last_minute + datetime.timedelta(seconds=5),
-            duration=5000,
         )
         two_minutes_ago = now - datetime.timedelta(minutes=2)
-        baker.make(
-            "performance.TransactionEvent",
+        self.create_transaction_and_update_stats(
             group=group,
+            duration=1000,
             start_timestamp=two_minutes_ago,
             timestamp=two_minutes_ago + datetime.timedelta(seconds=1),
-            duration=1000,
         )
-
         yesterday = now - datetime.timedelta(days=1)
-        baker.make(
-            "performance.TransactionEvent",
+        self.create_transaction_and_update_stats(
             group=group,
+            duration=1000,
             start_timestamp=yesterday,
             timestamp=yesterday + datetime.timedelta(seconds=1),
-            duration=1000,
         )
 
         with freeze_time(now):
@@ -168,25 +179,21 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         self.assertContains(res, group1.transaction)
         self.assertNotContains(res, group2.transaction)
 
-
     def test_filter_then_average(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
-        organization = self.project.organization
         now = timezone.now()
         last_minute = now - datetime.timedelta(minutes=1)
 
         # Use the new helper to create events and update stats
         self.create_transaction_and_update_stats(
             group=group,
-            organization=organization,
             duration=5000,
-            timestamp=last_minute,
+            start_timestamp=last_minute,
         )
         transaction2 = self.create_transaction_and_update_stats(
             group=group,
-            organization=organization,
             duration=1000,
-            timestamp=now,
+            start_timestamp=now,
         )
 
         # This assertion now works because the view is reading from the populated stats table
@@ -197,7 +204,7 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         res = self.client.get(
             self.list_url
             + "?start="
-            + transaction2.start_timestamp.replace(second=0,microsecond=0)
+            + transaction2.start_timestamp.replace(second=0, microsecond=0)
             .replace(tzinfo=None)
             .isoformat()
             + "Z"
