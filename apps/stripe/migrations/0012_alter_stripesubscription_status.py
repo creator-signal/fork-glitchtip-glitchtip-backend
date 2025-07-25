@@ -4,15 +4,28 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('stripe', '0001_squashed_0011_remove_stripesubscription_is_active_and_more'),
+        ("stripe", "0001_squashed_0011_remove_stripesubscription_is_active_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='stripesubscription',
-            name='status',
-            field=models.CharField(choices=[('incomplete', 'Incomplete'), ('incomplete_expired', 'Incomplete Expired'), ('trialing', 'Trialing'), ('active', 'Active'), ('past_due', 'Past Due'), ('canceled', 'Canceled'), ('unpaid', 'Unpaid'), ('paused', 'Paused')], db_index=True, default='active', max_length=18),
+            model_name="stripesubscription",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("incomplete", "Incomplete"),
+                    ("incomplete_expired", "Incomplete Expired"),
+                    ("trialing", "Trialing"),
+                    ("active", "Active"),
+                    ("past_due", "Past Due"),
+                    ("canceled", "Canceled"),
+                    ("unpaid", "Unpaid"),
+                    ("paused", "Paused"),
+                ],
+                db_index=True,
+                default="active",
+                max_length=18,
+            ),
         ),
     ]

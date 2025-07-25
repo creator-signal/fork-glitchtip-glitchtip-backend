@@ -38,7 +38,11 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
-from apps.performance.models import TransactionEvent, TransactionGroup, TransactionGroupAggregate
+from apps.performance.models import (
+    TransactionEvent,
+    TransactionGroup,
+    TransactionGroupAggregate,
+)
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
@@ -948,6 +952,7 @@ def update_org_statistics(
         )
         cursor.execute(sql)
 
+
 def update_transaction_group_stats(
     stats_data: defaultdict[datetime, defaultdict[int, dict]],
 ):
@@ -969,7 +974,7 @@ def update_transaction_group_stats(
                         stats["count"],
                         stats["total_duration"],
                         stats["sum_of_squares_duration"],
-                        '{}'
+                        "{}",
                     )
                 )
 
@@ -980,9 +985,7 @@ def update_transaction_group_stats(
     data.sort(key=itemgetter(0, 1, 2))
 
     with connection.cursor() as cursor:
-        args_str = ",".join(
-            cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data
-        )
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
 
         # The ON CONFLICT target must match the composite PK
         conflict_target = "(date, organization_id, group_id)"

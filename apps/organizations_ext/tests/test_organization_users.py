@@ -143,7 +143,6 @@ class OrganizationUsersTestCase(TestCase):
             ).exists()
         )
 
-
     @override_settings(
         EMAIL_INVITE_THROTTLE_COUNT=1,
         EMAIL_INVITE_REQUIRE_VERIFICATION=True,
@@ -182,7 +181,6 @@ class OrganizationUsersTestCase(TestCase):
             self.assertTrue("visit sevilspam" in body)
             self.assertFalse("visit https://evilspam.com" in html_content)
             self.assertTrue("visit sevilspam" in html_content)
-
 
     def test_closed_user_registration(self):
         data = {

@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('organizations_ext', '0009_organization_stripe_primary_subscription'),
+        ("organizations_ext", "0009_organization_stripe_primary_subscription"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='organization',
-            name='id',
+            model_name="organization",
+            name="id",
             field=models.AutoField(primary_key=True, serialize=False),
         ),
     ]

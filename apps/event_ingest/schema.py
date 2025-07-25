@@ -393,13 +393,15 @@ class TransactionEventSchema(LaxIngestSchema):
     environment: str | None = None
     _meta: JsonValue | None
 
-    @field_validator('start_timestamp')
+    @field_validator("start_timestamp")
     @classmethod
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
         """Validator to ensure the datetime is recent"""
-        minimum_date = now() - timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS)
+        minimum_date = now() - timedelta(
+            days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS
+        )
         if v < minimum_date:
-            raise ValueError('Event time too old.')
+            raise ValueError("Event time too old.")
         return v
 
 

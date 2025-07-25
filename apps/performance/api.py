@@ -29,8 +29,8 @@ def get_transaction_group_queryset(
         qs = qs.filter(**filter_kwargs)
 
     return qs.annotate(
-        avg_duration=Sum('transactiongroupaggregate__total_duration') /
-                         Sum('transactiongroupaggregate__count'),
+        avg_duration=Sum("transactiongroupaggregate__total_duration")
+        / Sum("transactiongroupaggregate__count"),
         transaction_count=Count("transactionevent"),
     )
 
