@@ -46,6 +46,7 @@ class ProjectAlertIn(CamelSchema, ModelSchema):
             "timespan_minutes",
             "quantity",
             "uptime",
+            "tags_to_add"
         ]
 
 
