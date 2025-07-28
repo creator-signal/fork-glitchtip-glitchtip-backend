@@ -91,10 +91,8 @@ class TransactionGroupAPITestCase(GlitchTestCase):
 
     def test_list_relative_datetime_filter(self):
         group = baker.make("performance.TransactionGroup", project=self.project)
-        now = timezone.now()
-        last_minute = now.replace(second=0, microsecond=0) - datetime.timedelta(
-            minutes=1
-        )
+        now = timezone.now().replace(second=0, microsecond=0)
+        last_minute = now - datetime.timedelta(minutes=1)
         self.create_transaction_and_update_stats(
             group=group,
             duration=5000,
