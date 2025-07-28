@@ -12,6 +12,7 @@ from .models import AlertRecipient, ProjectAlert
 class EmailAlertRecipientIn(CamelSchema):
     recipient_type: Literal[RecipientType.EMAIL]
     url: HttpUrl | Literal[""] | None = Field(default="")
+    tags_to_add: list[str] | None = Field(default_factory=list)
 
 
 class WebhookAlertRecipientIn(CamelSchema):
@@ -21,6 +22,7 @@ class WebhookAlertRecipientIn(CamelSchema):
         RecipientType.GOOGLE_CHAT,
     ]
     url: HttpUrl
+    tags_to_add: list[str] | None = Field(default_factory=list)
 
 
 AlertRecipientIn = Annotated[
@@ -45,8 +47,7 @@ class ProjectAlertIn(CamelSchema, ModelSchema):
             "name",
             "timespan_minutes",
             "quantity",
-            "uptime",
-            "tags_to_add"
+            "uptime"
         ]
 
 
