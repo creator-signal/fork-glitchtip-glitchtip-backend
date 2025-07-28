@@ -80,7 +80,7 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1, **kwargs):
     url: Webhook URL
     issues: This should be only the issues to send as attachment
     issue_count - total issues, may be greater than len(issues)
-    kwargs: Additional parameters, including metadata_fields
+    kwargs: Additional parameters
     """
     attachments: list[WebhookAttachment] = []
     sections: list[MSTeamsSection] = []
@@ -131,18 +131,6 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1, **kwargs):
                     short=False,
                 )
             )
-            
-        metadata = issue.metadata
-        if metadata:
-            for key, value in metadata.items():
-                if key in kwargs.get("metadata_fields", []):
-                    fields.append(
-                        WebhookAttachmentField(
-                            title=key,
-                            value=value,
-                            short=False,
-                        )
-                    )
 
         tags_to_add = kwargs.get("tags_to_add", [])
         if tags_to_add:
@@ -205,10 +193,7 @@ class DiscordWebhookPayload:
     embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1, metadata_fields: list[str] | None = None, tags_to_add: list[str] | None = None, tags_to_remove: list[str] | None = None, **kwargs):
-    if metadata_fields is None:
-        metadata_fields = []
-
+def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1, tags_to_add: list[str] | None = None):
     if tags_to_add is None:
         tags_to_add = []
 
@@ -261,18 +246,6 @@ def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1, metad
                     inline=False,
                 )
             )
-
-        metadata = issue.metadata
-        if metadata:
-            for key, value in metadata.items():
-                if key in metadata_fields:
-                    fields.append(
-                        DiscordField(
-                            name=key,
-                            value=value,
-                            inline=False,
-                        )
-                    )
 
         if tags_to_add:
             for tag in tags_to_add:
@@ -340,10 +313,7 @@ class GoogleChatCard:
         ]
         return self
 
-    def construct_issue_card(self, title: str, issue, metadata_fields=None, tags_to_add: list[str] | None = None):
-        if metadata_fields is None:
-            metadata_fields = []
-
+    def construct_issue_card(self, title: str, issue, tags_to_add: list[str] | None = None):
         if tags_to_add is None:
             tags_to_add = []
             
@@ -388,14 +358,6 @@ class GoogleChatCard:
             widgets.append(
                 dict(decoratedText=dict(topLabel="Release", text=release["value"]))
             )
-            
-        metadata = issue.metadata
-        if metadata:
-            for key, value in metadata.items():
-                if key in metadata_fields:
-                    widgets.append(
-                        dict(decoratedText=dict(topLabel=key, text=str(value)))
-                    )
 
         if tags_to_add:
             for tag in tags_to_add:
@@ -447,24 +409,22 @@ def send_issue_as_googlechat_webhook(url, issues: list, **kwargs):
     cards = []
     for issue in issues:
         card = GoogleChatCard().construct_issue_card(
-            title="GlitchTip Alert", issue=issue, metadata_fields=kwargs.get("metadata_fields", []), tags_to_add=kwargs.get("tags_to_add", [])
+            title="GlitchTip Alert", issue=issue, tags_to_add=kwargs.get("tags_to_add", [])
         )
         cards.append(card)
     return send_googlechat_webhook(url, cards)
 
 
 def send_webhook_notification(
-    notification: "Notification", url: str, recipient_type: str, metadata_fields: list[str] | None = None, tags_to_add: list[str] | None = None
+    notification: "Notification", url: str, recipient_type: str, tags_to_add: list[str] | None = None
 ):
     issue_count = notification.issues.count()
     issues = notification.issues.all()[: settings.MAX_ISSUES_PER_ALERT]
-    
-    if metadata_fields is None:
-        metadata_fields = []
+
 
     if recipient_type == RecipientType.DISCORD:
-        send_issue_as_discord_webhook(url, issues, issue_count, metadata_fields=metadata_fields, tags_to_add=tags_to_add)
+        send_issue_as_discord_webhook(url, issues, issue_count, tags_to_add=tags_to_add)
     elif recipient_type == RecipientType.GOOGLE_CHAT:
-        send_issue_as_googlechat_webhook(url, issues, metadata_fields=metadata_fields, tags_to_add=tags_to_add)
+        send_issue_as_googlechat_webhook(url, issues, tags_to_add=tags_to_add)
     else:
-        send_issue_as_webhook(url, issues, issue_count, metadata_fields=metadata_fields, tags_to_add=tags_to_add)
+        send_issue_as_webhook(url, issues, issue_count, tags_to_add=tags_to_add)

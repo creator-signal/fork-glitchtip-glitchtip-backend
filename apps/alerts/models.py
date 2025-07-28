@@ -27,10 +27,6 @@ class AlertRecipient(models.Model):
     alert = models.ForeignKey(ProjectAlert, on_delete=models.CASCADE)
     recipient_type = models.CharField(max_length=16, choices=RecipientType.choices)
     url = models.URLField(max_length=2000, blank=True)
-    metadata_fields = models.JSONField(
-        default=list, blank=True, 
-        help_text="List of metadata fields to include in the alert"
-    )
     tags_to_add = models.JSONField(
         default=list, blank=True,
         help_text="List of additional tags to include in the alert"
@@ -50,9 +46,9 @@ class AlertRecipient(models.Model):
 
     def send(self, notification):
         if self.recipient_type == RecipientType.EMAIL:
-            send_email_notification(notification, metadata_fields=self.metadata_fields)
+            send_email_notification(notification)
         elif self.is_webhook:
-            send_webhook_notification(notification, self.url, self.recipient_type, metadata_fields=self.metadata_fields, tags_to_add=self.tags_to_add)
+            send_webhook_notification(notification, self.url, self.recipient_type, tags_to_add=self.tags_to_add)
 
 
 class Notification(CreatedModel):
@@ -65,6 +61,6 @@ class Notification(CreatedModel):
             recipient.send(self)
         # Temp backwards compat hack - no recipients means not set up yet
         if self.project_alert.alertrecipient_set.all().exists() is False:
-            send_email_notification(self, metadata_fields=[])
+            send_email_notification(self)
         self.is_sent = True
         self.save()
