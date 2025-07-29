@@ -45,7 +45,6 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
         null=True,
         help_text="Datetime reported by client as the time the measurement finished",
     )
-    duration = models.PositiveIntegerField(db_index=True, help_text="Milliseconds")
     data = models.JSONField(help_text="General event data that is searchable")
     # This could be HStore, but jsonb is just as good and removes need for
     # 'django.contrib.postgres' which makes several unnecessary SQL calls
@@ -61,6 +60,21 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
     def __str__(self):
         return str(self.trace_id)
 
+    @property
+    def duration(self):
+        if self.timestamp:
+            return self.timestamp - self.start_timestamp
+
+    @property
+    def duration_ms(self):
+        """Optimized method for getting duration in milliseconds"""
+        if duration := self.duration:
+            return (
+                (duration.days * 86_400_000)
+                + (duration.seconds * 1000)
+                + duration.microseconds // 1000
+            )
+
 
 class TransactionGroupAggregate(AggregationModel):
     """Count the number of events for a transaction group per time unit"""
@@ -70,12 +84,12 @@ class TransactionGroupAggregate(AggregationModel):
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    total_duration = models.FloatField(
-        default=0.0,
+    total_duration = models.PositiveBigIntegerField(
+        default=0,
         help_text="Sum of all transaction durations (in ms) for calculating the mean.",
     )
-    sum_of_squares_duration = models.FloatField(
-        default=0.0,
+    sum_of_squares_duration = models.PositiveBigIntegerField(
+        default=0,
         help_text="Sum of squares of durations, for calculating standard deviation.",
     )
     histogram = models.JSONField(
