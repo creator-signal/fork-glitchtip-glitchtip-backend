@@ -1134,8 +1134,6 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
                 event_id=event.event_id,
                 timestamp=event.timestamp,
                 start_timestamp=event.start_timestamp,
-                duration=(event.timestamp - event.start_timestamp).total_seconds()
-                * 1000,
             )
         )
     TransactionEvent.objects.bulk_create(transactions, ignore_conflicts=True)
@@ -1155,7 +1153,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             second=0, microsecond=0
         )
         group_id = perf_transaction.group_id
-        duration = perf_transaction.duration
+        duration = perf_transaction.duration_ms
 
         stats_bucket = group_stats[minute_timestamp][group_id]
 
