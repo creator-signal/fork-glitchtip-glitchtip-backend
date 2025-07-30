@@ -176,7 +176,10 @@ class JavascriptEventProcessor:
             else:
                 logger.warning(
                     "Invalid sourcemap token or line number out of range.",
-                    extra={"token": token, "source_lines": len(source) if 'source' in locals() else 'N/A'}
+                    extra={
+                        "token": token,
+                        "source_lines": len(source) if "source" in locals() else "N/A",
+                    },
                 )
 
     def transform(self):

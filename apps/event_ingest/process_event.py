@@ -38,7 +38,11 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
-from apps.performance.models import TransactionEvent, TransactionGroup
+from apps.performance.models import (
+    TransactionEvent,
+    TransactionGroup,
+    TransactionGroupAggregate,
+)
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
@@ -910,7 +914,7 @@ def update_org_statistics(
     table_name: StatsTableName,
 ):
     """
-    Bulk upserts hourly statistics for the IssueAggregate model.
+    Bulk upserts hourly statistics for the XAggregate model.
 
     This function is specifically designed to handle the data structure that
     includes organization_id, for use with the new composite primary key on
@@ -946,6 +950,59 @@ def update_org_statistics(
             f"ON CONFLICT {conflict_target}\n"
             f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
         )
+        cursor.execute(sql)
+
+
+def update_transaction_group_stats(
+    stats_data: defaultdict[datetime, defaultdict[int, dict]],
+):
+    """
+    Bulk upserts 1-minute statistics for the TransactionGroupAggregate model.
+    """
+    table_name = TransactionGroupAggregate._meta.db_table
+    data = []
+
+    for date, inner_dict in stats_data.items():
+        for group_id, stats in inner_dict.items():
+            # Ensure organization_id is present before appending
+            if (organization_id := stats.get("organization_id")) is not None:
+                data.append(
+                    (
+                        date,
+                        organization_id,
+                        group_id,
+                        stats["count"],
+                        stats["total_duration"],
+                        stats["sum_of_squares_duration"],
+                        "{}",
+                    )
+                )
+
+    if not data:
+        return
+
+    # Sort by the primary key to avoid potential deadlocks on concurrent writes
+    data.sort(key=itemgetter(0, 1, 2))
+
+    with connection.cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
+
+        # The ON CONFLICT target must match the composite PK
+        conflict_target = "(date, organization_id, group_id)"
+
+        # Construct the final SQL query for an atomic "upsert"
+        sql = f"""
+            INSERT INTO {table_name} (
+                date, organization_id, group_id, count,
+                total_duration, sum_of_squares_duration, histogram
+            )
+            VALUES {args_str}
+            ON CONFLICT {conflict_target}
+            DO UPDATE SET
+                count = {table_name}.count + EXCLUDED.count,
+                total_duration = {table_name}.total_duration + EXCLUDED.total_duration,
+                sum_of_squares_duration = {table_name}.sum_of_squares_duration + EXCLUDED.sum_of_squares_duration;
+        """
         cursor.execute(sql)
 
 
@@ -1077,11 +1134,38 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
                 event_id=event.event_id,
                 timestamp=event.timestamp,
                 start_timestamp=event.start_timestamp,
-                duration=(event.timestamp - event.start_timestamp).total_seconds()
-                * 1000,
             )
         )
     TransactionEvent.objects.bulk_create(transactions, ignore_conflicts=True)
+
+    group_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
+        lambda: defaultdict(
+            lambda: {
+                "count": 0,
+                "total_duration": 0.0,
+                "sum_of_squares_duration": 0.0,
+            }
+        )
+    )
+    for perf_transaction in transactions:
+        # Truncate the timestamp to the minute for our 1-minute aggregation buckets.
+        minute_timestamp = perf_transaction.start_timestamp.replace(
+            second=0, microsecond=0
+        )
+        group_id = perf_transaction.group_id
+        duration = perf_transaction.duration_ms
+
+        stats_bucket = group_stats[minute_timestamp][group_id]
+
+        # Set organization_id once per bucket, as it's part of the key.
+        if "organization_id" not in stats_bucket:
+            stats_bucket["organization_id"] = perf_transaction.organization_id
+
+        stats_bucket["count"] += 1
+        stats_bucket["total_duration"] += duration
+        stats_bucket["sum_of_squares_duration"] += duration**2
+    update_transaction_group_stats(group_stats)
+
     data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )

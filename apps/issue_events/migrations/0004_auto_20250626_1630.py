@@ -84,12 +84,15 @@ if settings.GLITCHTIP_ADVANCED_PARTITIONING:
         migrations.SeparateDatabaseAndState(
             state_operations=base_operations,
             database_operations=[
-                migrations.RunSQL(CREATE_ADVANCED_PARTITION_SQL, reverse_sql=DROP_TABLE_SQL),
-            ]
+                migrations.RunSQL(
+                    CREATE_ADVANCED_PARTITION_SQL, reverse_sql=DROP_TABLE_SQL
+                ),
+            ],
         ),
     ]
 else:
     operations = base_operations
+
 
 class Migration(migrations.Migration):
     dependencies = [
