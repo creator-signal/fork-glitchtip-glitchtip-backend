@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.postgres.fields import ArrayField
 
 from glitchtip.base_models import CreatedModel
 
@@ -27,8 +28,8 @@ class AlertRecipient(models.Model):
     alert = models.ForeignKey(ProjectAlert, on_delete=models.CASCADE)
     recipient_type = models.CharField(max_length=16, choices=RecipientType.choices)
     url = models.URLField(max_length=2000, blank=True)
-    tags_to_add = models.JSONField(
-        default=list, blank=True,
+    tags_to_add = ArrayField(
+        models.CharField(max_length=255), default=list, blank=True, null=True,
         help_text="List of additional tags to include in the alert"
     )
 
