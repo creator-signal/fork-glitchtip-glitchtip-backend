@@ -74,12 +74,13 @@ def send_webhook(
         return None
 
 
-def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
+def send_issue_as_webhook(url, issues: list, issue_count: int = 1, **kwargs):
     """
     Notification about issues via webhook.
     url: Webhook URL
     issues: This should be only the issues to send as attachment
     issue_count - total issues, may be greater than len(issues)
+    kwargs: Additional parameters
     """
     attachments: list[WebhookAttachment] = []
     sections: list[MSTeamsSection] = []
@@ -104,6 +105,19 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
                     short=True,
                 )
             )
+        server_name = (
+            issue.issuetag_set.filter(tag_key__key="server_name")
+            .values(value=F("tag_value__value"))
+            .first()
+        )
+        if server_name:
+            fields.append(
+                WebhookAttachmentField(
+                    title="Server Name",
+                    value=server_name["value"],
+                    short=True,
+                )
+            )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
             .values(value=F("tag_value__value"))
@@ -117,6 +131,24 @@ def send_issue_as_webhook(url, issues: list, issue_count: int = 1):
                     short=False,
                 )
             )
+
+        tags_to_add = kwargs.get("tags_to_add", [])
+        if tags_to_add:
+            for tag in tags_to_add:
+                tag_content = (
+                    issue.issuetag_set.filter(tag_key__key=tag)
+                    .values(value=F("tag_value__value"))
+                    .first()
+                )
+                if tag_content:
+                    fields.append(
+                        WebhookAttachmentField(
+                            title=tag.capitalize(),
+                            value=tag_content["value"],
+                            short=False,
+                        )
+                    )
+
         attachments.append(
             WebhookAttachment(
                 mrkdown_in=["text"],
@@ -161,7 +193,10 @@ class DiscordWebhookPayload:
     embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
+def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1, tags_to_add: list[str] | None = None):
+    if tags_to_add is None:
+        tags_to_add = []
+
     embeds: list[DiscordEmbed] = []
 
     for issue in issues:
@@ -198,6 +233,35 @@ def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1):
                     inline=False,
                 )
             )
+        server_name = (
+            issue.issuetag_set.filter(tag_key__key="server_name")
+            .values(value=F("tag_value__value"))
+            .first()
+        )
+        if server_name:
+            fields.append(
+                DiscordField(
+                    name="Server name",
+                    value=server_name["value"],
+                    inline=False,
+                )
+            )
+
+        if tags_to_add:
+            for tag in tags_to_add:
+                tag_content = (
+                    issue.issuetag_set.filter(tag_key__key=tag)
+                    .values(value=F("tag_value__value"))
+                    .first()
+                )
+                if tag_content:
+                    fields.append(
+                        DiscordField(
+                            name=tag.capitalize(),
+                            value=tag_content["value"],
+                            inline=False,
+                        )
+                    )
 
         embeds.append(
             DiscordEmbed(
@@ -249,7 +313,10 @@ class GoogleChatCard:
         ]
         return self
 
-    def construct_issue_card(self, title: str, issue):
+    def construct_issue_card(self, title: str, issue, tags_to_add: list[str] | None = None):
+        if tags_to_add is None:
+            tags_to_add = []
+            
         self.header = dict(title=title, subtitle=issue.project.name)
         section_header = "<font color='{}'>{}</font>".format(
             issue.get_hex_color(), str(issue)
@@ -269,6 +336,19 @@ class GoogleChatCard:
                     )
                 )
             )
+        server_name = (
+            issue.issuetag_set.filter(tag_key__key="server_name")
+            .values(value=F("tag_value__value"))
+            .first()
+        )
+        if server_name:
+            widgets.append(
+                dict(
+                    decoratedText=dict(
+                        topLabel="Server Name", text=server_name["value"]
+                    )
+                )
+            )
         release = (
             issue.issuetag_set.filter(tag_key__key="release")
             .values(value=F("tag_value__value"))
@@ -278,6 +358,19 @@ class GoogleChatCard:
             widgets.append(
                 dict(decoratedText=dict(topLabel="Release", text=release["value"]))
             )
+
+        if tags_to_add:
+            for tag in tags_to_add:
+                tag_content = (
+                    issue.issuetag_set.filter(tag_key__key=tag)
+                    .values(value=F("tag_value__value"))
+                    .first()
+                )
+                if tag_content:
+                    widgets.append(
+                        dict(decoratedText=dict(topLabel=tag.capitalize(), text=tag_content["value"]))
+                    )
+
         widgets.append(
             dict(
                 buttonList=dict(
@@ -312,25 +405,26 @@ def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
     return requests.post(url, json=asdict(payload), timeout=10)
 
 
-def send_issue_as_googlechat_webhook(url, issues: list):
+def send_issue_as_googlechat_webhook(url, issues: list, **kwargs):
     cards = []
     for issue in issues:
         card = GoogleChatCard().construct_issue_card(
-            title="GlitchTip Alert", issue=issue
+            title="GlitchTip Alert", issue=issue, tags_to_add=kwargs.get("tags_to_add", [])
         )
         cards.append(card)
     return send_googlechat_webhook(url, cards)
 
 
 def send_webhook_notification(
-    notification: "Notification", url: str, recipient_type: str
+    notification: "Notification", url: str, recipient_type: str, tags_to_add: list[str] | None = None
 ):
     issue_count = notification.issues.count()
     issues = notification.issues.all()[: settings.MAX_ISSUES_PER_ALERT]
 
+
     if recipient_type == RecipientType.DISCORD:
-        send_issue_as_discord_webhook(url, issues, issue_count)
+        send_issue_as_discord_webhook(url, issues, issue_count, tags_to_add=tags_to_add)
     elif recipient_type == RecipientType.GOOGLE_CHAT:
-        send_issue_as_googlechat_webhook(url, issues)
+        send_issue_as_googlechat_webhook(url, issues, tags_to_add=tags_to_add)
     else:
-        send_issue_as_webhook(url, issues, issue_count)
+        send_issue_as_webhook(url, issues, issue_count, tags_to_add=tags_to_add)

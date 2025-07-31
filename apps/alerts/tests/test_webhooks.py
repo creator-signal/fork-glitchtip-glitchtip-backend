@@ -52,6 +52,10 @@ class WebhookTestCase(GlitchTipTestCase):
 
         key_release = baker.make("issue_events.TagKey", key="release")
         release_value = baker.make("issue_events.TagValue", value=self.release_name)
+
+        key_custom = baker.make("issue_events.TagKey", key="custom_tag")
+        custom_value = baker.make("issue_events.TagValue", value="custom_value")
+        
         issue = baker.make("issue_events.Issue", level=LogLevel.ERROR)
         baker.make(
             "issue_events.IssueTag",
@@ -64,6 +68,12 @@ class WebhookTestCase(GlitchTipTestCase):
             issue=issue,
             tag_key=key_release,
             tag_value=release_value,
+        )
+        baker.make(
+            "issue_events.IssueTag",
+            issue=issue,
+            tag_key=key_custom,
+            tag_value=custom_value,
         )
         return issue
 
@@ -95,6 +105,16 @@ class WebhookTestCase(GlitchTipTestCase):
         self.assertIn(
             f'"title": "Release", "value": "{self.release_name}"', first_issue_json_data
         )
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_webhook_with_tags_to_add(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_webhook(TEST_URL, [issue], 1, tags_to_add=["custom_tag"])
+
+        mock_post.assert_called_once()
+        
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn('"title": "Custom_tag", "value": "custom_value"', json_data)
 
     @mock.patch("requests.post")
     def test_trigger_webhook(self, mock_post):
@@ -131,6 +151,34 @@ class WebhookTestCase(GlitchTipTestCase):
         )
 
     @mock.patch("requests.post")
+    def test_trigger_webhook_with_tags_to_add(self, mock_post):
+        project = baker.make("projects.Project")
+        alert = baker.make(
+            "alerts.ProjectAlert",
+            project=project,
+            timespan_minutes=1,
+            quantity=2,
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.GENERAL_WEBHOOK,
+            url="example.com",
+            tags_to_add=["custom_tag"],
+        )
+        issue = self.generate_issue_with_tags()
+        issue.project = project
+        issue.save()
+
+        baker.make("issue_events.IssueEvent", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue)
+        process_event_alerts()
+        
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn('"title": "Custom_tag", "value": "custom_value"', json_data)
+
+    @mock.patch("requests.post")
     def test_send_issue_with_tags_as_discord_webhook(self, mock_post):
         issue = self.generate_issue_with_tags()
         send_issue_as_discord_webhook(DISCORD_TEST_URL, [issue])
@@ -142,6 +190,16 @@ class WebhookTestCase(GlitchTipTestCase):
             f'"name": "Environment", "value": "{self.environment_name}"', json_data
         )
         self.assertIn(f'"name": "Release", "value": "{self.release_name}"', json_data)
+
+    @mock.patch("requests.post")
+    def test_send_issue_with_tags_as_discord_webhook_with_tags_to_add(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_discord_webhook(DISCORD_TEST_URL, [issue], 1, tags_to_add=["custom_tag"])
+
+        mock_post.assert_called_once()
+        
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn('"name": "Custom_tag", "value": "custom_value"', json_data)
 
     @mock.patch("requests.post")
     def test_send_issue_with_tags_as_googlechat_webhook(self, mock_post):
@@ -158,6 +216,38 @@ class WebhookTestCase(GlitchTipTestCase):
             f'"topLabel": "Environment", "text": "{self.environment_name}"',
             json_data,
         )
+
+    @mock.patch("requests.post")
+    def test_send_issue_with_tags_as_googlechat_webhook_with_tags_to_add(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_googlechat_webhook(GOOGLE_CHAT_TEST_URL, [issue], tags_to_add=["custom_tag"])
+
+        mock_post.assert_called_once()
+        
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn('"topLabel": "Custom_tag", "text": "custom_value"', json_data)
+
+    def test_alert_recipient_tags_to_add_default(self):
+        alert = baker.make("alerts.ProjectAlert", project=self.project)
+        recipient = baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.GENERAL_WEBHOOK,
+            url="https://example.com/webhook"
+        )
+        self.assertEqual(recipient.tags_to_add, [])
+
+    def test_alert_recipient_tags_to_add_custom(self):
+        alert = baker.make("alerts.ProjectAlert", project=self.project)
+        tags = ["environment", "custom_tag"]
+        recipient = baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.GENERAL_WEBHOOK,
+            url="https://example.com/webhook",
+            tags_to_add=tags
+        )
+        self.assertEqual(recipient.tags_to_add, tags)
 
     @mock.patch("requests.post")
     def test_send_uptime_events_generic_webhook(self, mock_post):
