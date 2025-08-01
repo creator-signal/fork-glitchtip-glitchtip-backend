@@ -164,7 +164,8 @@ class Command(BaseCommand):
                                             p_interval := %(interval)s,
                                             p_premake := %(premake)s,
                                             p_start_partition := (CURRENT_TIMESTAMP - {offset_interval})::text,
-                                            p_default_table := false
+                                            p_default_table := false,
+                                            p_infinite_time_partitions := true
                                         );
                                     END IF;
                                 END;
@@ -179,7 +180,7 @@ class Command(BaseCommand):
                                     "premake": config["premake"],
                                 },
                             )
-                        update_sql = "UPDATE partman.part_config SET retention = %(retention)s, retention_keep_table = false WHERE parent_table LIKE %(parent_like)s;"
+                        update_sql = "UPDATE partman.part_config SET retention = %(retention)s, retention_keep_table = false, infinite_time_partitions = true WHERE parent_table LIKE %(parent_like)s;"
                         cursor.execute(
                             update_sql,
                             {
