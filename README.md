@@ -38,19 +38,19 @@ See [API Documentation](https://app.glitchtip.com/api/docs)
 2. `docker compose up`
 3. `docker compose run --rm web ./manage.py migrate`
 
-Run tests with `docker-compose run --rm web ./manage.py test`
+Run tests with `docker compose run --rm web ./manage.py test`
 
 ### Run HTTPS locally for testing FIDO2 keys
 
-1. `cp docker-compose.yml docker-compose.override.yml`
+1. `cp compose.yml compose.override.yml`
 2. Edit the override file and set `command: ./manage.py runsslserver 0.0.0.0:8000`
 3. Restart docker compose services
 
 ### Run with advanced partitioning
 
-Using pg_partman requires the extension to be installed in postgres. `docker-compose.part.yml` offers an alternative image. Swtiching between advanced and default partitioning is not supported.
+Using pg_partman requires the extension to be installed in postgres. `compose.part.yml` offers an alternative image. Swtiching between advanced and default partitioning is not supported.
 
-`docker compose -f docker-compose.yml -f docker-compose.part.yml up`
+`docker compose -f compose.yml -f compose.part.yml up`
 
 This automatically configures pg_partman but you can update it manually with `./manage.py setup_advanced_partitions`.
 
@@ -69,10 +69,10 @@ VS Code can do type checking and type inference. However, it requires setting up
 
 ### Load testing
 
-First set the env var IS_LOAD_TEST to true in docker-compose.yml
+First set the env var IS_LOAD_TEST to true in compose.yml
 
 Locust is built into the dev dependencies. To run with Locust run
-`docker compose -f docker-compose.yml -f docker-compose.locust.yml up`
+`docker compose -f compose.yml -f compose.locust.yml up`
 
 Now go to localhost:8089 to run the test.
 
@@ -89,7 +89,7 @@ Then run `memray flamegraph file.bin` on the above file output.
 ### Observability metrics with Prometheus
 
 1. Edit monitoring/prometheus/prometheus.yml and set credentials to a GlitchTip auth token
-2. `docker compose -f docker-compose.yml -f docker-compose.metrics.yml up`
+2. `docker compose -f compose.yml -f compose.metrics.yml up`
 
 # GCP Logging
 
