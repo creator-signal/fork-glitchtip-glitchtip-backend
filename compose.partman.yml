@@ -1,10 +1,10 @@
 # docker-compose.advanced-partitioning.yml
 #
-# This file extends the base docker-compose.yml to set up an environment
+# This file extends the base compose.yml to set up an environment
 # for testing advanced partitioning with pg_partman.
 #
 # To use, run:
-# docker-compose -f docker-compose.yml -f docker-compose.advanced-partitioning.yml up --build
+# docker compose -f compose.yml -f compose.advanced-partitioning.yml up --build
 
 # Define anchors that are referenced within this file to make it self-contained.
 # These values will be merged with/override the base compose file's values.
