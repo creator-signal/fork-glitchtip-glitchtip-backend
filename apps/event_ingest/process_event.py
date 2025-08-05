@@ -1153,7 +1153,7 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             second=0, microsecond=0
         )
         group_id = perf_transaction.group_id
-        duration = perf_transaction.duration_ms
+        duration: int | None = perf_transaction.duration_ms
 
         stats_bucket = group_stats[minute_timestamp][group_id]
 
@@ -1162,8 +1162,9 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
             stats_bucket["organization_id"] = perf_transaction.organization_id
 
         stats_bucket["count"] += 1
-        stats_bucket["total_duration"] += duration
-        stats_bucket["sum_of_squares_duration"] += duration**2
+        if duration:
+            stats_bucket["total_duration"] += duration
+            stats_bucket["sum_of_squares_duration"] += duration**2
     update_transaction_group_stats(group_stats)
 
     data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(

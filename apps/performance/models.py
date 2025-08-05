@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
@@ -61,12 +62,12 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
         return str(self.trace_id)
 
     @property
-    def duration(self):
+    def duration(self) -> timedelta | None:
         if self.timestamp:
             return self.timestamp - self.start_timestamp
 
     @property
-    def duration_ms(self):
+    def duration_ms(self) -> int | None:
         """Optimized method for getting duration in milliseconds"""
         if duration := self.duration:
             return (
