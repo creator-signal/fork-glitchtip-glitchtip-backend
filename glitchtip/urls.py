@@ -10,10 +10,11 @@ from apps.event_ingest.views import event_envelope_view
 from apps.stripe.views import stripe_webhook_view
 
 from .api.api import api
-from .views import health, index
+from .views import health, index, internal_health
 
 urlpatterns = [
     path("_health/", health),
+    path("api/0/internal/health", internal_health),
     re_path(
         r"^favicon\.ico$",
         RedirectView.as_view(url=settings.STATIC_URL + "favicon.ico", permanent=True),
