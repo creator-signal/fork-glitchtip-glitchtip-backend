@@ -8,9 +8,10 @@ from symbolic import Archive
 
 from apps.difs.models import DebugInformationFile
 from apps.difs.stacktrace_processor import StacktraceProcessor
-from apps.event_ingest.schema import ErrorIssueEventSchema, StackTraceFrame
+from apps.event_ingest.schema import ErrorIssueEventSchema
 from apps.files.models import File, FileBlob
 from apps.projects.models import Project
+from apps.shared.schema.exception import StackTraceFrame
 
 
 def getLogger():

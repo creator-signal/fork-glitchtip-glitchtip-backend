@@ -4,6 +4,7 @@ import uuid
 
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import generate_event
@@ -17,8 +18,8 @@ from ..process_event import process_issue_events
 from ..schema import (
     CSPIssueEventSchema,
     ErrorIssueEventSchema,
-    InterchangeIssueEvent,
     IssueEventSchema,
+    IssueTaskMessage,
     SecuritySchema,
 )
 from .utils import EventIngestTestCase
@@ -139,7 +140,6 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         issue = Issue.objects.first()
         issue.status = EventStatus.RESOLVED
         issue.save()
-        event.event_id = uuid.uuid4()
         self.process_events(event.dict())
         issue.refresh_from_db()
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
@@ -216,10 +216,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         data = self.get_json_data("events/test_data/py_hi_event.json")
         data["environment"] = "dev"
         event_list.append(
-            InterchangeIssueEvent(
+            IssueTaskMessage(
                 project_id=self.project.id,
                 organization_id=self.organization.id,
                 payload=IssueEventSchema(**data),
+                received=timezone.now(),
             )
         )
 
@@ -229,10 +230,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         data = self.get_json_data("events/test_data/py_hi_event.json")
         data["environment"] = "prod"
         event_list.append(
-            InterchangeIssueEvent(
+            IssueTaskMessage(
                 project_id=org_b_project.id,
                 organization_id=org_b.id,
                 payload=IssueEventSchema(**data),
+                received=timezone.now(),
             )
         )
 
@@ -258,10 +260,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         data = self.get_json_data("events/test_data/py_hi_event.json")
         data["release"] = "v2.0"
         event_list.append(
-            InterchangeIssueEvent(
+            IssueTaskMessage(
                 project_id=self.project.id,
                 organization_id=self.organization.id,
                 payload=IssueEventSchema(**data),
+                received=timezone.now(),
             )
         )
 
@@ -271,10 +274,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         data = self.get_json_data("events/test_data/py_hi_event.json")
         data["release"] = "v1.0"
         event_list.append(
-            InterchangeIssueEvent(
+            IssueTaskMessage(
                 project_id=org_b_project.id,
                 organization_id=org_b.id,
                 payload=IssueEventSchema(**data),
+                received=timezone.now(),
             )
         )
 
@@ -366,25 +370,25 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.process_events(data)
         # Show that colno changes
         self.assertEqual(
-            IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][0][
-                "colno"
-            ],
+            IssueEvent.objects.first().data["exception"]["values"][0]["stacktrace"][
+                "frames"
+            ][0]["colno"],
             13,
         )
         # Show that pre and post context is included
         self.assertEqual(
             len(
-                IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][
-                    0
-                ]["pre_context"]
+                IssueEvent.objects.first().data["exception"]["values"][0]["stacktrace"][
+                    "frames"
+                ][0]["pre_context"]
             ),
             5,
         )
         self.assertEqual(
             len(
-                IssueEvent.objects.first().data["exception"][0]["stacktrace"]["frames"][
-                    0
-                ]["post_context"]
+                IssueEvent.objects.first().data["exception"]["values"][0]["stacktrace"][
+                    "frames"
+                ][0]["post_context"]
             ),
             1,
         )
@@ -417,17 +421,17 @@ class IssueEventIngestTestCase(EventIngestTestCase):
 
     def test_search_vector_content(self):
         event_data = generate_event()
-        event = InterchangeIssueEvent(
-            event_id=event_data["event_id"],
+        event = IssueTaskMessage(
             organization_id=self.organization.id,
             project_id=self.project.id,
             payload=ErrorIssueEventSchema(**event_data),
+            received=timezone.now(),
         )
         process_issue_events([event])
         file_name = event_data["exception"]["values"][0]["stacktrace"]["frames"][0][
             "filename"
         ]
-        issue_event = IssueEvent.objects.get(pk=event.event_id)
+        issue_event = IssueEvent.objects.get(pk=event.payload.event_id)
         self.assertIn(file_name, issue_event.issue.search_vector)
         self.assertIn(
             event_data["request"]["url"].split("//")[-1],
@@ -456,10 +460,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         event = CSPIssueEventSchema(csp=data.csp_report.dict(by_alias=True))
         process_issue_events(
             [
-                InterchangeIssueEvent(
+                IssueTaskMessage(
                     project_id=self.project.id,
                     organization_id=self.organization.id,
                     payload=event.dict(by_alias=True),
+                    received=timezone.now(),
                 )
             ]
         )
@@ -575,14 +580,14 @@ class SentryCompatTestCase(EventIngestTestCase):
 
         if event_type == "default":
             event_class = IssueEventSchema
-        event = InterchangeIssueEvent(
-            event_id=event_data["event_id"],
+        event = IssueTaskMessage(
             organization_id=self.organization.id if self.organization else None,
             project_id=self.project.id,
             payload=event_class(**event_data),
+            received=timezone.now(),
         )
         process_issue_events([event])
-        return IssueEvent.objects.get(pk=event.event_id)
+        return IssueEvent.objects.get(pk=event.payload.event_id)
 
     def upgrade_data(self, data):
         """A recursive replace function"""
@@ -1001,7 +1006,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         event = self.submit_event(sdk_error, event_type="default")
         event_json = self.get_event_json(event)
         self.assertCompareData(
-            event_json["exception"][0],
+            event_json["exception"]["values"][0],
             sentry_json["exception"]["values"][0],
             ["type", "values", "exception", "abs_path"],
         )

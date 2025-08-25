@@ -177,7 +177,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(
             IssueEvent.objects.filter(
-                data__exception=[{"type": "fun", "value": "this is a fun error"}]
+                data__exception__values=[
+                    {"type": "fun", "value": "this is a fun error"}
+                ]
             ).exists()
         )
 

@@ -1,6 +1,4 @@
 # pylint: disable=attribute-defined-outside-init,invalid-name
-from typing import Optional
-
 from django.test import TestCase
 from model_bakery import baker
 
@@ -21,7 +19,7 @@ class GlitchTestCase(TestCase):
         self.client.force_login(self.user)  # Must run every test
     """
 
-    organization: Optional[Organization] = None
+    organization: Organization | None = None
 
     @classmethod
     def create_project(cls):
@@ -48,7 +46,7 @@ class GlitchTestCase(TestCase):
 
 
 class GlitchTipTestCaseMixin:
-    organization: Optional[Organization] = None
+    organization: Organization | None = None
 
     def create_project(self):
         """Create project, dsn, and organization"""
@@ -86,7 +84,7 @@ class GlitchTipTestCase(GlitchTipTestCaseMixin, TestCase):
 class APIPermissionTestCase(TestCase):
     """Base class for testing views with permissions"""
 
-    token: Optional[str] = None
+    token: str | None = None
 
     def create_user_org(self):
         self.user = baker.make("users.user")

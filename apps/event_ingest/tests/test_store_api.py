@@ -1,6 +1,7 @@
 from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
+from model_bakery import baker
 
 from apps.issue_events.constants import IssueEventType
 from apps.issue_events.models import IssueEvent
@@ -67,11 +68,14 @@ class StoreAPITestCase(EventIngestTestCase):
         )
 
     @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=1)
-    async def test_check_throttle(self):
-        data = self.get_json_data("events/test_data/py_error.json")
-        res = await self.async_client.post(
-            self.url, data, content_type="application/json"
+    def test_check_throttle(self):
+        baker.make(
+            "organizations_ext.OrganizationOwner",
+            organization=self.organization,
+            organization_user__user__email="t@example.com",
         )
+        data = self.get_json_data("events/test_data/py_error.json")
+        res = self.client.post(self.url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         # We know the throttle was checked when this simplistic lock is set
         self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))

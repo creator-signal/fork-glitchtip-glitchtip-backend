@@ -1,5 +1,4 @@
 import uuid
-from typing import Optional
 
 from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
@@ -15,9 +14,9 @@ from . import router
 
 def get_queryset(
     request: AuthHttpRequest,
-    issue_id: Optional[int] = None,
-    organization_slug: Optional[str] = None,
-    project_slug: Optional[str] = None,
+    issue_id: int | None = None,
+    organization_slug: str | None = None,
+    project_slug: str | None = None,
 ):
     user_id = request.auth.user_id
     qs = IssueEvent.objects.filter(issue__project__organization__users=user_id)
@@ -30,7 +29,7 @@ def get_queryset(
     return qs.select_related("issue")
 
 
-async def get_user_report(event_id: uuid.UUID) -> Optional[UserReport]:
+async def get_user_report(event_id: uuid.UUID) -> UserReport | None:
     return await UserReport.objects.filter(event_id=event_id).afirst()
 
 

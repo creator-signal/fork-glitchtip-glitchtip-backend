@@ -1,9 +1,8 @@
 import os
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from operator import itemgetter
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
@@ -56,46 +55,20 @@ from ..shared.schema.contexts import (
     DeviceContext,
     OSContext,
 )
+from .interfaces import IssueStats, IssueUpdate, ProcessingEvent
 from .javascript_event_processor import JavascriptEventProcessor
 from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
     ErrorIssueEventSchema,
     EventException,
     IngestIssueEvent,
-    InterchangeIssueEvent,
     InterchangeTransactionEvent,
     IssueEventSchema,
+    IssueTaskMessage,
     SourceMapImage,
     ValueEventException,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
-
-
-@dataclass
-class ProcessingEvent:
-    event: InterchangeIssueEvent
-    issue_hash: str
-    title: str
-    transaction: str
-    metadata: dict[str, Any]
-    event_data: dict[str, Any]
-    event_tags: dict[str, str]
-    level: LogLevel | None = None
-    issue_id: int | None = None
-    issue_created = False
-    release_id: int | None = None
-
-
-@dataclass
-class IssueUpdate:
-    last_seen: datetime
-    search_vector: str
-    added_count: int = 1
-
-
-class IssueStats(TypedDict):
-    count: int
-    organization_id: int | None
 
 
 def _truncate_string(s: str | None, max_len: int) -> str:
@@ -178,7 +151,7 @@ def get_search_vector(event: ProcessingEvent) -> str:
     if transaction := event.transaction:
         parts.add(_truncate_string(transaction, MAX_SEARCH_PART_LENGTH))
 
-    payload = event.event.payload
+    payload = event.payload
     if request := payload.request:
         # Simplify URL to keep concise
         if url := request.url:
@@ -263,11 +236,11 @@ def update_issues(processing_events: list[ProcessingEvent]):
         if issue_id in issues_to_update:
             issues_to_update[issue_id].added_count += 1
             issues_to_update[issue_id].search_vector += f" {vector}"
-            if issues_to_update[issue_id].last_seen < processing_event.event.received:
-                issues_to_update[issue_id].last_seen = processing_event.event.received
+            if issues_to_update[issue_id].last_seen < processing_event.received:
+                issues_to_update[issue_id].last_seen = processing_event.received
         else:
             issues_to_update[issue_id] = IssueUpdate(
-                last_seen=processing_event.event.received,
+                last_seen=processing_event.received,
                 search_vector=vector,
             )
 
@@ -282,19 +255,6 @@ def update_issues(processing_events: list[ProcessingEvent]):
             ),
             last_seen=Greatest(F("last_seen"), value.last_seen),
         )
-
-
-def devalue(obj: Schema | list[Schema]) -> dict | list[dict] | None:
-    """
-    Convert Schema like {"values": []} into list or dict without unnecessary 'values'
-    """
-    if isinstance(obj, Schema) and hasattr(obj, "values"):
-        return obj.dict(mode="json", exclude_none=True, exclude_defaults=True)["values"]
-    elif isinstance(obj, list):
-        return [
-            x.dict(mode="json", exclude_none=True, exclude_defaults=True) for x in obj
-        ]
-    return None
 
 
 def generate_contexts(event: IngestIssueEvent) -> Contexts:
@@ -378,7 +338,7 @@ def check_set_issue_id(
     for event in processing_events:
         if (
             event.issue_id is None
-            and event.event.project_id == project_id
+            and event.project_id == project_id
             and event.issue_hash == issue_hash
         ):
             event.issue_id = issue_id
@@ -498,7 +458,7 @@ def get_and_create_releases(
     ]
 
 
-def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
+def process_issue_events(messages: list[IssueTaskMessage]):
     """
     Accepts a list of events to ingest. Events should be:
     - Few enough to save in a single DB call
@@ -514,12 +474,12 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     # Get unique release/environment for each project_id
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)
-        for event in ingest_events
+        for event in messages
         if event.payload.release
     }
     environment_set = {
         (event.payload.environment[:255], event.project_id, event.organization_id)
-        for event in ingest_events
+        for event in messages
         if event.payload.environment
     }
     project_set = {project_id for _, project_id, _ in release_set}.union(
@@ -537,7 +497,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     sourcemap_images = [
         image
-        for event in ingest_events
+        for event in messages
         if isinstance(event.payload, ErrorIssueEventSchema) and event.payload.debug_meta
         for image in event.payload.debug_meta.images
         if isinstance(image, SourceMapImage)
@@ -548,7 +508,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     # IMO it's even harder to read unnested...
     filename_set = {
         frame.filename.split("/")[-1]
-        for event in ingest_events
+        for event in messages
         if isinstance(event.payload, (ErrorIssueEventSchema, IssueEventSchema))
         and event.payload.exception
         for exception in (
@@ -563,7 +523,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
     debug_files = (
         DebugSymbolBundle.objects.filter(
-            organization__in={event.organization_id for event in ingest_events}
+            organization__in={event.organization_id for event in messages}
         )
         .filter(
             Q(
@@ -584,8 +544,7 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     processing_events: list[ProcessingEvent] = []
     # Collect Q objects for bulk issue hash lookup
     q_objects = Q()
-    for ingest_event in ingest_events:
-        event_data: dict[str, Any] = {}
+    for ingest_event in messages:
         event = ingest_event.payload
         event.contexts = generate_contexts(event)
         event_tags = generate_tags(event)
@@ -644,6 +603,22 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         ):
             event_difs_resolve_stacktrace(event, ingest_event.project_id)
 
+        event_data = event.model_dump(
+            mode="json",
+            include={
+                "platform",
+                "modules",
+                "sdk",
+                "request",
+                "environment",
+                "extra",
+                "user",
+                "exception",
+                "breadcrumbs",
+            },
+            exclude_none=True,
+            exclude_defaults=True,
+        )
         if event.type in [IssueEventType.ERROR, IssueEventType.DEFAULT]:
             sentry_event = ErrorEvent()
             metadata = sentry_event.get_metadata(event.dict())
@@ -672,16 +647,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
         issue_hash = generate_hash(title, culprit, event.type, event.fingerprint)
         if metadata:
             event_data["metadata"] = metadata
-        if platform := event.platform:
-            event_data["platform"] = platform
-        if modules := event.modules:
-            event_data["modules"] = modules
-        if sdk := event.sdk:
-            event_data["sdk"] = sdk.dict(exclude_none=True)
-        if request := event.request:
-            event_data["request"] = request.dict(exclude_none=True)
-        if environment := event.environment:
-            event_data["environment"] = environment
 
         # Message is str
         # Logentry is {"params": etc} Message format
@@ -701,14 +666,6 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
             # If the title is truncated, store the full title
             event_data["message"] = full_title
 
-        if breadcrumbs := event.breadcrumbs:
-            event_data["breadcrumbs"] = devalue(breadcrumbs)
-        if exception := event.exception:
-            event_data["exception"] = devalue(exception)
-        if extra := event.extra:
-            event_data["extra"] = extra
-        if user := event.user:
-            event_data["user"] = user.dict(exclude_none=True)
         if contexts := event.contexts:
             # Contexts may contain dict or Schema
             event_data["contexts"] = {
@@ -720,7 +677,10 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
 
         processing_events.append(
             ProcessingEvent(
-                event=ingest_event,
+                project_id=ingest_event.project_id,
+                organization_id=ingest_event.organization_id,
+                received=ingest_event.received,
+                payload=ingest_event.payload,
                 issue_hash=issue_hash,
                 title=title,
                 level=LogLevel.from_string(event.level) if event.level else None,
@@ -747,14 +707,14 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
     )
 
     for processing_event in processing_events:
-        event_type = processing_event.event.payload.type
-        project_id = processing_event.event.project_id
+        event_type = processing_event.payload.type
+        project_id = processing_event.project_id
         issue_defaults = {
             "type": event_type,
             "title": remove_bad_chars(processing_event.title),
             "metadata": remove_bad_chars(processing_event.metadata),
-            "first_seen": processing_event.event.received,
-            "last_seen": processing_event.event.received,
+            "first_seen": processing_event.received,
+            "last_seen": processing_event.received,
         }
         if level := processing_event.level:
             issue_defaults["level"] = level
@@ -808,26 +768,26 @@ def process_issue_events(ingest_events: list[InterchangeIssueEvent]):
                     project_id=project_id, value=processing_event.issue_hash
                 ).issue_id
 
-        hour_received = processing_event.event.received.replace(
+        hour_received = processing_event.received.replace(
             minute=0, second=0, microsecond=0
         )
-        data_stats[hour_received][processing_event.event.project_id] += 1
+        data_stats[hour_received][processing_event.project_id] += 1
         if processing_event.issue_id:  # Only count if issue is known
             issue_hourly_stats[hour_received][processing_event.issue_id]["count"] += 1
             issue_hourly_stats[hour_received][processing_event.issue_id][
                 "organization_id"
-            ] = processing_event.event.organization_id
+            ] = processing_event.organization_id
 
         issue_events.append(
             IssueEvent(
-                id=processing_event.event.event_id,
+                id=processing_event.payload.event_id,
                 issue_id=processing_event.issue_id,
                 type=event_type,
                 level=processing_event.level
                 if processing_event.level
                 else LogLevel.ERROR,
-                timestamp=processing_event.event.payload.timestamp,
-                received=processing_event.event.received,
+                timestamp=processing_event.payload.timestamp,
+                received=processing_event.received,
                 title=remove_bad_chars(processing_event.title),
                 transaction=processing_event.transaction,
                 data=remove_bad_chars(processing_event.event_data),
@@ -1045,7 +1005,7 @@ def update_tags(processing_events: list[ProcessingEvent]):
             continue
         # Group by day. More granular allows for a better search
         # Less granular yields better tag filter performance
-        minute_received = processing_event.event.received.replace(
+        minute_received = processing_event.received.replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         for key, value in processing_event.event_tags.items():

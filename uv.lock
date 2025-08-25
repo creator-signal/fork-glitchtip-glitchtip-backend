@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version < '3.12'",
@@ -1230,7 +1230,7 @@ requires-dist = [
     { name = "gunicorn", specifier = "~=23.0" },
     { name = "orjson", specifier = "~=3.9" },
     { name = "psycopg", extras = ["c", "pool"], specifier = "~=3.1" },
-    { name = "pydantic", extras = ["email"], specifier = "~=2.7" },
+    { name = "pydantic", extras = ["email"], specifier = "~=2.11" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "sentry-sdk", specifier = "~=2.20" },
     { name = "symbolic", specifier = "~=12.16.0" },

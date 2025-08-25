@@ -4,11 +4,13 @@ from typing import Annotated, Any, Literal
 from ninja import Field, ModelSchema, Schema
 from pydantic import computed_field
 
-from apps.event_ingest.schema import CSPReportSchema, EventException
+from apps.event_ingest.schema import CSPReportSchema
 from apps.projects.models import Project
+from apps.shared.schema.csp import CSPEntry
+from apps.shared.schema.exception import EventException, ExceptionEntry
+from apps.shared.schema.message import MessageEntry
 from apps.users.models import User
 from glitchtip.schema import CamelSchema
-from sentry.interfaces.stacktrace import get_context
 
 from ..shared.schema.contexts import Contexts
 from ..shared.schema.event import (
@@ -18,8 +20,8 @@ from ..shared.schema.event import (
     ListKeyValue,
 )
 from ..shared.schema.user import EventUser
-from .constants import IssueEventType
 from .models import Comment, Issue, IssueEvent, UserReport
+from .utils import get_entries, to_camel_with_lower_id
 
 
 class ProjectReference(CamelSchema, ModelSchema):
@@ -35,12 +37,7 @@ class ProjectReference(CamelSchema, ModelSchema):
         return str(obj.id)
 
 
-# For Sentry compatibility
-def to_camel_with_lower_id(string: str) -> str:
-    return "".join(
-        word if i == 0 else "Id" if word == "id" else word.capitalize()
-        for i, word in enumerate(string.split("_"))
-    )
+
 
 
 class IssueSchema(ModelSchema):
@@ -90,25 +87,10 @@ class IssueDetailSchema(IssueSchema):
     userReportCount: int = Field(validation_alias="user_report_count")
 
 
-class ExceptionEntryData(Schema):
-    values: dict
-    exc_omitted: None = None
-    has_system_frames: bool
 
 
-class ExceptionEntry(Schema):
-    type: Literal["exception"]
-    data: dict
 
 
-class MessageEntry(Schema):
-    type: Literal["message"]
-    data: dict
-
-
-class CSPEntry(Schema):
-    type: Literal["csp"]
-    data: dict
 
 
 class APIEventBreadcrumb(EventBreadcrumb):
@@ -210,54 +192,7 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     @staticmethod
     def resolve_entries(obj: IssueEvent):
-        entries = []
-        data = obj.data
-        if exception := data.get("exception"):
-            exception = {"values": exception, "hasSystemFrames": False}
-            # https://gitlab.com/glitchtip/sentry-open-source/sentry/-/blob/master/src/sentry/interfaces/stacktrace.py#L487
-            # if any frame is "in_app" set this to True
-            for value in exception["values"]:
-                if (
-                    value.get("stacktrace", None) is not None
-                    and "frames" in value["stacktrace"]
-                ):
-                    for frame in value["stacktrace"]["frames"]:
-                        if frame.get("in_app") is True:
-                            exception["hasSystemFrames"] = True
-                        if "in_app" in frame:
-                            frame["inApp"] = frame.pop("in_app")
-                        if "abs_path" in frame:
-                            frame["absPath"] = frame.pop("abs_path")
-                        if "colno" in frame:
-                            frame["colNo"] = frame.pop("colno")
-                        if "lineno" in frame:
-                            frame["lineNo"] = frame.pop("lineno")
-                            pre_context = frame.pop("pre_context", None)
-                            post_context = frame.pop("post_context", None)
-                            if "context" not in frame:
-                                frame["context"] = get_context(
-                                    frame["lineNo"],
-                                    frame.get("context_line"),
-                                    pre_context,
-                                    post_context,
-                                )
-
-            entries.append({"type": "exception", "data": exception})
-
-        if breadcrumbs := data.get("breadcrumbs"):
-            entries.append({"type": "breadcrumbs", "data": {"values": breadcrumbs}})
-
-        if logentry := data.get("logentry"):
-            entries.append({"type": "message", "data": logentry})
-        elif message := data.get("message"):
-            entries.append({"type": "message", "data": {"formatted": message}})
-
-        if request := data.get("request"):
-            entries.append({"type": "request", "data": request})
-
-        if csp := data.get("csp"):
-            entries.append({"type": IssueEventType.CSP.label, "data": csp})
-        return entries
+        return get_entries(obj.data)
 
 
 class UserReportSchema(CamelSchema, ModelSchema):
