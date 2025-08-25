@@ -63,18 +63,22 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
 
     @property
     def duration(self) -> timedelta | None:
-        if self.timestamp:
-            return self.timestamp - self.start_timestamp
+        if self.timestamp is None:
+            return None
+        duration = self.timestamp - self.start_timestamp
+        return max(duration, timedelta(0))
 
     @property
     def duration_ms(self) -> int | None:
         """Optimized method for getting duration in milliseconds"""
-        if duration := self.duration:
-            return (
-                (duration.days * 86_400_000)
-                + (duration.seconds * 1000)
-                + duration.microseconds // 1000
-            )
+        duration = self.duration
+        if duration is None:
+            return None
+        return (
+            (duration.days * 86_400_000)
+            + (duration.seconds * 1000)
+            + duration.microseconds // 1000
+        )
 
 
 class TransactionGroupAggregate(AggregationModel):
