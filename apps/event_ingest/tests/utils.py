@@ -5,6 +5,7 @@ import uuid
 from typing import Union
 
 from django.test import TestCase
+from django.utils import timezone
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
@@ -12,8 +13,8 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..process_event import process_issue_events
 from ..schema import (
-    InterchangeIssueEvent,
     IssueEventSchema,
+    IssueTaskMessage,
 )
 
 
@@ -148,9 +149,10 @@ class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
             data = [data]
 
         events = [
-            InterchangeIssueEvent(
+            IssueTaskMessage(
                 project_id=self.project.id,
                 organization_id=self.organization.id if self.organization else None,
+                received=timezone.now(),
                 payload=IssueEventSchema(**dat),
             )
             for dat in data

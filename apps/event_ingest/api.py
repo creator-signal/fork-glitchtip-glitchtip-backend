@@ -1,21 +1,23 @@
+from dataclasses import asdict
+
 from anonymizeip import anonymize_ip
 from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse
+from django.utils import timezone
 from ipware import get_client_ip
 from ninja import Router, Schema
 from ninja.errors import ValidationError
+
+from apps.event_ingest.interfaces import IngestTaskMessage
+from apps.issue_events.constants import IssueEventType
 
 from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     CSPIssueEventSchema,
     EnvelopeSchema,
-    ErrorIssueEventSchema,
     EventIngestSchema,
     EventUser,
-    IngestIssueEvent,
-    InterchangeIssueEvent,
-    IssueEventSchema,
     SecuritySchema,
 )
 from .tasks import ingest_event
@@ -30,10 +32,6 @@ class EventIngestOut(Schema):
 
 class EnvelopeIngestOut(Schema):
     id: str | None = None
-
-
-def get_issue_event_class(event: IngestIssueEvent):
-    return ErrorIssueEventSchema if event.exception else IssueEventSchema
 
 
 def get_ip_address(request: EventAuthHttpRequest) -> str | None:
@@ -70,14 +68,14 @@ def event_store(
         else:
             payload.user = EventUser(ip_address=client_ip)
 
-    issue_event_class = get_issue_event_class(payload)
-    issue_event = InterchangeIssueEvent(
-        event_id=payload.event_id,
+    issue_type = IssueEventType.ERROR if payload.exception else IssueEventType.DEFAULT
+    issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
-        payload=issue_event_class(**payload.dict()),
+        payload=payload.dict() | {"type": issue_type},
+        received=timezone.now(),
     )
-    task_result = ingest_event.delay(issue_event.dict())
+    task_result = ingest_event.delay(asdict(issue_event))
     result = {"event_id": payload.event_id.hex}
     if settings.IS_LOAD_TEST:
         result["task_id"] = task_result.task_id
@@ -117,10 +115,11 @@ def event_security(
             event.user.ip_address = client_ip
         else:
             event.user = EventUser(ip_address=client_ip)
-    issue_event = InterchangeIssueEvent(
+    issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
         payload=event.dict(by_alias=True),
+        received=timezone.now(),
     )
-    ingest_event.delay(issue_event.dict(by_alias=True))
+    ingest_event.delay(asdict(issue_event))
     return HttpResponse(status=201)

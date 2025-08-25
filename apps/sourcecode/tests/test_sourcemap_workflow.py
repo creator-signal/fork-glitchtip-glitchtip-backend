@@ -164,5 +164,7 @@ class SourceCodeTestCase(GlitchTestCase):
         event = issue.issueevent_set.first()
         self.assertIn(
             "firstNumber",
-            event.data["exception"][0]["stacktrace"]["frames"][0]["context_line"],
+            event.data["exception"]["values"][0]["stacktrace"]["frames"][0][
+                "context_line"
+            ],
         )

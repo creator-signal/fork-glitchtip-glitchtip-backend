@@ -2,8 +2,8 @@ import logging
 import typing
 import uuid
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Literal, Union
-from urllib.parse import parse_qs, urlparse
+from typing import Annotated, Any, Literal
+from urllib.parse import parse_qs
 
 from django.conf import settings
 from django.utils.timezone import now
@@ -30,6 +30,10 @@ from ..shared.schema.event import (
     EventBreadcrumb,
     ListKeyValue,
 )
+from ..shared.schema.exception import (
+    EventException,
+    ValueEventException,
+)
 from ..shared.schema.user import EventUser
 from ..shared.schema.utils import invalid_to_none
 
@@ -47,119 +51,6 @@ Coerced Str that will coerce bool/list to str when found
 def coerce_list(v: Any) -> Any:
     """Wrap non-list dict into list: {"a": 1} to [{"a": 1}]"""
     return v if not isinstance(v, dict) else [v]
-
-
-class Signal(LaxIngestSchema):
-    number: int
-    code: int | None
-    name: str | None
-    code_name: str | None
-
-
-class MachException(LaxIngestSchema):
-    number: int
-    code: int
-    subcode: int
-    name: str | None
-
-
-class NSError(LaxIngestSchema):
-    code: int
-    domain: str
-
-
-class Errno(LaxIngestSchema):
-    number: int
-    name: str | None
-
-
-class MechanismMeta(LaxIngestSchema):
-    signal: Signal | None = None
-    match_exception: MachException | None = None
-    ns_error: NSError | None = None
-    errno: Errno | None = None
-
-
-class ExceptionMechanism(LaxIngestSchema):
-    type: str
-    description: str | None = None
-    help_link: str | None = None
-    handled: bool | None = None
-    synthetic: bool | None = None
-    meta: dict | None = None
-    data: dict | None = None
-
-
-class StackTraceFrame(LaxIngestSchema):
-    filename: str | None = None
-    function: str | None = None
-    raw_function: str | None = None
-    module: str | None = None
-    lineno: int | None = None
-    colno: int | None = None
-    abs_path: str | None = None
-    context_line: str | None = None
-    pre_context: list[str | None] | None = None
-    post_context: list[str | None] | None = None
-    source_link: str | None = None
-    in_app: bool | None = None
-    stack_start: bool | None = None
-    vars: dict[str, Union[str, dict, list]] | None = None
-    instruction_addr: str | None = None
-    addr_mode: str | None = None
-    symbol_addr: str | None = None
-    image_addr: str | None = None
-    package: str | None = None
-    platform: str | None = None
-
-    def is_url(self, filename: str) -> bool:
-        return filename.startswith(("file:", "http:", "https:", "applewebdata:"))
-
-    @model_validator(mode="after")
-    def normalize_files(self):
-        if not self.abs_path and self.filename:
-            self.abs_path = self.filename
-        if self.filename and self.is_url(self.filename):
-            self.filename = urlparse(self.filename).path
-        return self
-
-    @field_validator("pre_context", "post_context")
-    @classmethod
-    def replace_null(cls, context: list[str | None]) -> list[str | None] | None:
-        if context:
-            return [line if line else "" for line in context]
-        return None
-
-
-class StackTrace(LaxIngestSchema):
-    frames: list[StackTraceFrame]
-    registers: dict[str, str] | None = None
-
-
-class EventException(LaxIngestSchema):
-    type: str | None = None
-    value: Annotated[str | None, WrapValidator(invalid_to_none)] = None
-    module: str | None = None
-    thread_id: str | None = None
-    mechanism: Annotated[ExceptionMechanism | None, WrapValidator(invalid_to_none)] = (
-        None
-    )
-    stacktrace: Annotated[StackTrace | None, WrapValidator(invalid_to_none)] = None
-
-    @model_validator(mode="after")
-    def check_type_value(self):
-        if self.type is None and self.value is None:
-            return None
-        return self
-
-
-class ValueEventException(LaxIngestSchema):
-    values: list[EventException]
-
-    @field_validator("values")
-    @classmethod
-    def strip_null(cls, v: list[EventException]) -> list[EventException]:
-        return [e for e in v if e is not None]
 
 
 def truncate_str(v: Any) -> Any:
@@ -280,7 +171,7 @@ class RequestEnv(LaxIngestSchema):
 
 QueryString = str | ListKeyValue | dict[str, str | dict[str, Any] | None]
 """Raw URL querystring, list, or dict"""
-KeyValueFormat = Union[list[list[str | None]], dict[str, CoercedStr | None]]
+KeyValueFormat = list[list[str | None]] | dict[str, CoercedStr | None]
 """
 key-values in list or dict format. Example {browser: firefox} or [[browser, firefox]]
 """
@@ -307,7 +198,7 @@ class IngestRequest(BaseRequest):
     @field_validator("query_string", "headers")
     @classmethod
     def prefer_list_key_value(
-        cls, v: Union[QueryString, KeyValueFormat] | None
+        cls, v: QueryString | KeyValueFormat | None
     ) -> ListKeyValue | None:
         """Store all querystring, header formats in a list format"""
         result: ListKeyValue | None = None
@@ -329,6 +220,23 @@ class IngestRequest(BaseRequest):
         return result
 
 
+class IngestEventException(EventException):
+    @model_validator(mode="after")
+    def check_type_value(self):
+        if self.type is None and self.value is None:
+            return None
+        return self
+
+
+class IngestValueEventException(ValueEventException):
+    values: list[IngestEventException]  # type: ignore[assignment]
+
+    @field_validator("values")
+    @classmethod
+    def strip_null(cls, v: list[EventException]) -> list[EventException]:
+        return [e for e in v if e is not None]
+
+
 class IngestIssueEvent(BaseIssueEvent):
     event_id: uuid.UUID | None = None
     timestamp: datetime = Field(default_factory=now)
@@ -345,14 +253,14 @@ class IngestIssueEvent(BaseIssueEvent):
     environment: str | None = None
     modules: dict[str, str | None] | None = None
     extra: dict[str, Any] | None = None
-    fingerprint: list[Union[str, None]] | None = None
+    fingerprint: list[str | None] | None = None
     errors: list[Any] | None = None
 
-    exception: list[EventException] | ValueEventException | None = None
-    message: Union[str, EventMessage] | None = None
+    exception: IngestValueEventException | None = None
+    message: str | EventMessage | None = None
     template: EventTemplate | None = None
 
-    breadcrumbs: Union[list[EventBreadcrumb], ValueEventBreadcrumb] | None = None
+    breadcrumbs: ValueEventBreadcrumb | None = None
     sdk: ClientSDKInfo | None = None
     request: IngestRequest | None = None
     contexts: Contexts | None = None
@@ -366,9 +274,22 @@ class IngestIssueEvent(BaseIssueEvent):
             return {key: value for key, value in v if key is not None}
         return v
 
+    @field_validator("exception", "breadcrumbs", mode="before")
+    @classmethod
+    def normalize_values_format(cls, v: Any) -> dict | None:
+        """
+        Checks if the incoming exception/etc data is a direct list.
+        If it is, it wraps it in the standard {"values": [...]} object format.
+        """
+        if isinstance(v, list):
+            return {"values": v} if v else None
+        elif isinstance(v, dict) and "values" in v:
+            return v if v["values"] else None
+        return v
+
 
 class EventIngestSchema(IngestIssueEvent):
-    event_id: uuid.UUID
+    event_id: uuid.UUID  # type: ignore[assignment]
 
 
 class TransactionEventSchema(LaxIngestSchema):
@@ -431,7 +352,7 @@ SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
 class ItemHeaderSchema(LaxIngestSchema):
     content_type: str | None = None
-    type: Union[SupportedItemType, IgnoredItemType]
+    type: SupportedItemType | IgnoredItemType
     length: int | None = None
 
 
@@ -481,6 +402,7 @@ class ErrorIssueEventSchema(IngestIssueEvent):
 
 
 class CSPIssueEventSchema(IngestIssueEvent):
+    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)  # type: ignore[assignment]
     type: Literal[IssueEventType.CSP] = IssueEventType.CSP
     csp: CSPReportSchema
 
@@ -488,10 +410,9 @@ class CSPIssueEventSchema(IngestIssueEvent):
 class InterchangeEvent(LaxIngestSchema):
     """Normalized wrapper around issue event. Event should not contain repeat information."""
 
-    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     project_id: int
     organization_id: int
-    received: datetime = Field(default_factory=now)
+    received: datetime
     payload: (
         IssueEventSchema
         | ErrorIssueEventSchema
@@ -500,13 +421,10 @@ class InterchangeEvent(LaxIngestSchema):
     ) = Field(discriminator="type")
 
 
-class InterchangeIssueEvent(InterchangeEvent):
-    payload: (
-        IssueEventSchema
-        | ErrorIssueEventSchema
-        | CSPIssueEventSchema
-        | TransactionEventSchema
-    ) = Field(discriminator="type")
+class IssueTaskMessage(InterchangeEvent):
+    payload: IssueEventSchema | ErrorIssueEventSchema | CSPIssueEventSchema = Field(
+        discriminator="type"
+    )
 
 
 class InterchangeTransactionEvent(InterchangeEvent):

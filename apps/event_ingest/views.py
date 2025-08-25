@@ -1,24 +1,28 @@
 import logging
+import uuid
+from dataclasses import asdict
 
 import orjson
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 from pydantic import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
+from apps.event_ingest.interfaces import IngestTaskMessage
+from apps.issue_events.constants import IssueEventType
 from glitchtip.api.exceptions import ThrottleException
 
-from .api import get_ip_address, get_issue_event_class
+from .api import get_ip_address
 from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
     IngestIssueEvent,
-    InterchangeIssueEvent,
     ItemHeaderSchema,
     TransactionEventSchema,
 )
@@ -153,7 +157,12 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
             try:
                 if item_header.type == "event":
                     item = IngestIssueEvent.model_validate_json(payload_bytes)
-                    issue_event_class = get_issue_event_class(item)
+                    issue_type = (
+                        IssueEventType.ERROR
+                        if item.exception
+                        else IssueEventType.DEFAULT
+                    )
+
                     if hasattr(item, "user") and item.user:  # Check if user attr exists
                         # Assuming item.user is mutable or replace it
                         # Simplest: item.user = item.user.copy(update={'ip_address': client_ip}) if using Pydantic models properly
@@ -162,34 +171,30 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         if isinstance(item.user, dict):
                             item.user["ip_address"] = client_ip
                         # Else if Pydantic model: Need a way to update immutable field or ensure mutable schema
+                        # item.user.ip_address = client_ip
 
-                    interchange_event_kwargs = {
-                        "project_id": project_id,
-                        "organization_id": project.organization_id,
-                        "payload": issue_event_class(**item.dict()),
-                        "event_id": item.event_id
-                        or envelope_header_event_id,  # Get event_id from parsed item
-                    }
-                    interchange_event = InterchangeIssueEvent(
-                        **interchange_event_kwargs
+                    # Prefer event item uuid, then enveloper header uuid, then if all else fails, generate one
+                    if item.event_id is None:
+                        item.event_id = envelope_header_event_id or uuid.uuid4()
+                    interchange_event = IngestTaskMessage(
+                        project_id=project_id,
+                        organization_id=project.organization_id,
+                        payload=item.dict() | {"type": issue_type},
+                        received=timezone.now(),
                     )
-                    if cache.add("uuid" + interchange_event.event_id.hex, True):
-                        ingest_event.delay(interchange_event.dict())
+                    if cache.add("uuid" + item.event_id.hex, True):
+                        ingest_event.delay(asdict(interchange_event))
 
                 elif item_header.type == "transaction":
                     item = TransactionEventSchema.model_validate_json(payload_bytes)
-                    interchange_event_kwargs = {
-                        "project_id": project_id,
-                        "organization_id": project.organization_id,  # Use project from auth
-                        "payload": TransactionEventSchema(**item.dict()),
-                        "event_id": item.event_id
-                        or envelope_header_event_id,  # Get event_id from parsed item
-                    }
-                    interchange_event = InterchangeIssueEvent(
-                        **interchange_event_kwargs
+                    interchange_event = IngestTaskMessage(
+                        project_id=project_id,
+                        organization_id=project.organization_id,  # Use project from auth
+                        payload=item.dict(),
+                        received=timezone.now(),
                     )
-                    if cache.add("uuid" + interchange_event.event_id.hex, True):
-                        ingest_transaction.delay(interchange_event.dict())
+                    if cache.add("uuid" + item.event_id.hex, True):
+                        ingest_transaction.delay(asdict(interchange_event))
 
             except ValidationError as e:
                 # Payload validation failed for a supported type. Log it.

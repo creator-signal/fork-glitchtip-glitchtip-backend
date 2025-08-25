@@ -20,3 +20,4 @@ async def async_call_celery_task(task, *args):
         return await sync_to_async(task.delay)(*args)
     else:
         return task.delay(*args)
+
