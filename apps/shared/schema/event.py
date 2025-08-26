@@ -4,6 +4,7 @@ from typing import Annotated, Any, Literal
 from pydantic import WrapValidator
 
 from .base import LaxIngestSchema
+from .error import EventProcessingError
 from .utils import invalid_to_none
 
 Level = Literal["fatal", "error", "warning", "info", "debug"]
@@ -46,3 +47,4 @@ class BaseIssueEvent(LaxIngestSchema):
     """
 
     platform: str | None = None
+    errors: list[EventProcessingError] | None = None

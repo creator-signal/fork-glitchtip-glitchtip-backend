@@ -623,6 +623,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
                 "user",
                 "exception",
                 "breadcrumbs",
+                "errors",
             },
             exclude_none=True,
             exclude_defaults=True,

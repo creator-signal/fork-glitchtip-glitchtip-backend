@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from apps.issue_events.constants import IssueEventType
+from apps.shared.schema.error import EventProcessingError
 
 from ..shared.schema.base import LaxIngestSchema
 from ..shared.schema.contexts import Contexts
@@ -35,7 +36,11 @@ from ..shared.schema.exception import (
     ValueEventException,
 )
 from ..shared.schema.user import EventUser
-from ..shared.schema.utils import invalid_to_none
+from ..shared.schema.utils import (
+    ValidationErrorMarker,
+    invalid_to_none,
+    report_error_on_fail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +244,9 @@ class IngestValueEventException(ValueEventException):
 
 class IngestIssueEvent(BaseIssueEvent):
     event_id: uuid.UUID | None = None
-    timestamp: datetime = Field(default_factory=now)
+    timestamp: Annotated[
+        datetime | None | ValidationErrorMarker, WrapValidator(report_error_on_fail)
+    ] = Field(default_factory=now)
     level: str | None = "error"
     logentry: EventMessage | None = None
     logger: str | None = None
@@ -266,6 +273,37 @@ class IngestIssueEvent(BaseIssueEvent):
     contexts: Contexts | None = None
     user: Annotated[EventUser | None, WrapValidator(invalid_to_none)] = None
     debug_meta: DebugMeta | None = None
+
+    class Config(BaseIssueEvent.Config):
+        coerce_numbers_to_str = True
+        arbitrary_types_allowed = True
+
+    @model_validator(mode="after")
+    def process_validation_markers(self) -> "IngestIssueEvent":
+        """
+        Iterates through fields after initial validation, checks for
+        ValidationErrorMarker instances, populates the `errors` list,
+        and sets the invalid fields to None.
+        """
+        collected_errors: list[EventProcessingError] = []
+
+        # Iterate over the model's attributes.
+        for field_name, field_value in self.__dict__.items():
+            if isinstance(field_value, ValidationErrorMarker):
+                collected_errors.append(field_value.error)
+                # Nullify the field that contained the marker.
+                setattr(self, field_name, None)
+
+        if collected_errors:
+            if self.errors is None:
+                self.errors = []
+            self.errors.extend(collected_errors)
+
+        # It would be better to allow null in DB timestamps, but it's too much effort for ~0 benefit.
+        if self.timestamp is None:
+            self.timestamp = now()
+
+        return self
 
     @field_validator("tags")
     @classmethod
