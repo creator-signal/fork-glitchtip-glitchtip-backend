@@ -125,7 +125,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
 
-    @mock.patch("apps.event_ingest.views.logger.warning")
+    @mock.patch("apps.shared.schema.utils.logger.warning")
     def test_invalid_issue_event_warning(self, mock_log):
         res = self.client.post(
             self.url,
