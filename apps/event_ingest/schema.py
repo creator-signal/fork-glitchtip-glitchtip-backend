@@ -241,7 +241,9 @@ class IngestValueEventException(ValueEventException):
         return [e for e in v if e is not None]
 
 
-class IngestIssueEvent(BaseIssueEvent):
+class WebIngestIssueEvent(BaseIssueEvent):
+    """Heavy validation and normalization for web API ingest"""
+
     event_id: uuid.UUID | None = None
     timestamp: Annotated[
         datetime | None | dict, WrapValidator(report_error_on_fail)
@@ -274,7 +276,7 @@ class IngestIssueEvent(BaseIssueEvent):
     debug_meta: DebugMeta | None = None
 
     @model_validator(mode="after")
-    def process_validation_markers(self) -> "IngestIssueEvent":
+    def process_validation_markers(self) -> "WebIngestIssueEvent":
         """
         Iterates through fields after initial validation, checks for
         ValidationErrorMarker instances, populates the `errors` list,
@@ -321,7 +323,7 @@ class IngestIssueEvent(BaseIssueEvent):
         return v
 
 
-class EventIngestSchema(IngestIssueEvent):
+class EventIngestSchema(WebIngestIssueEvent):
     event_id: uuid.UUID  # type: ignore[assignment]
 
 
@@ -393,7 +395,7 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
     root: list[dict[str, Any]]
     _header: EnvelopeHeaderSchema
     _items: list[
-        tuple[ItemHeaderSchema, IngestIssueEvent | TransactionEventSchema]
+        tuple[ItemHeaderSchema, WebIngestIssueEvent | TransactionEventSchema]
     ] = []
 
 
@@ -420,7 +422,49 @@ class SecuritySchema(LaxIngestSchema):
 ## Normalized Interchange Issue Events
 
 
-class IssueEventSchema(IngestIssueEvent):
+class CeleryIssueEvent(BaseIssueEvent):
+    """
+    Lightweight schema for Celery - assumes data already validated
+    All fields used by process_event.py with simple types
+    """
+
+    event_id: uuid.UUID
+    timestamp: datetime | None = None
+    level: str | None = "error"
+
+    # Fields accessed by process_event.py
+    contexts: dict[str, Any] | None = None
+    request: dict[str, Any] | None = None
+    tags: dict[str, str | None] | None = None
+    user: dict[str, Any] | None = None
+    environment: str | None = None
+    release: str | None = None
+    server_name: str | None = None
+    debug_meta: dict[str, Any] | None = None
+    exception: dict[str, Any] | list[dict[str, Any]] | None = None
+    message: str | dict[str, Any] | None = None
+    logentry: dict[str, Any] | None = None
+    transaction: str | None = None
+    fingerprint: list[str | None] | None = None
+    type: str | None = None
+
+    # CSP-specific field
+    csp: dict[str, Any] | None = None
+
+
+class CeleryDefaultIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.DEFAULT] = IssueEventType.DEFAULT
+
+
+class CeleryErrorIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
+
+
+class CeleryCSPIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.CSP] = IssueEventType.CSP
+
+
+class IssueEventSchema(WebIngestIssueEvent):
     """
     Event storage and interchange format
     Used in json view and celery interchange
@@ -430,11 +474,11 @@ class IssueEventSchema(IngestIssueEvent):
     type: Literal[IssueEventType.DEFAULT] = IssueEventType.DEFAULT
 
 
-class ErrorIssueEventSchema(IngestIssueEvent):
+class ErrorIssueEventSchema(WebIngestIssueEvent):
     type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
 
 
-class CSPIssueEventSchema(IngestIssueEvent):
+class CSPIssueEventSchema(WebIngestIssueEvent):
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)  # type: ignore[assignment]
     type: Literal[IssueEventType.CSP] = IssueEventType.CSP
     csp: CSPReportSchema
