@@ -36,10 +36,7 @@ from ..shared.schema.exception import (
     ValueEventException,
 )
 from ..shared.schema.user import EventUser
-from ..shared.schema.utils import (
-    invalid_to_none,
-    report_error_on_fail,
-)
+from ..shared.schema.utils import report_error_on_fail
 
 logger = logging.getLogger(__name__)
 
@@ -268,12 +265,14 @@ class WebIngestIssueEvent(BaseIssueEvent):
     message: str | EventMessage | None = None
     template: EventTemplate | None = None
 
-    breadcrumbs: ValueEventBreadcrumb | None = None
-    sdk: ClientSDKInfo | None = None
-    request: IngestRequest | None = None
-    contexts: Contexts | None = None
-    user: Annotated[EventUser | None, WrapValidator(invalid_to_none)] = None
-    debug_meta: DebugMeta | None = None
+    breadcrumbs: Annotated[
+        ValueEventBreadcrumb | None, WrapValidator(report_error_on_fail)
+    ] = None
+    sdk: Annotated[ClientSDKInfo | None, WrapValidator(report_error_on_fail)] = None
+    request: Annotated[IngestRequest | None, WrapValidator(report_error_on_fail)] = None
+    contexts: Annotated[Contexts | None, WrapValidator(report_error_on_fail)] = None
+    user: Annotated[EventUser | None, WrapValidator(report_error_on_fail)] = None
+    debug_meta: Annotated[DebugMeta | None, WrapValidator(report_error_on_fail)] = None
 
     @model_validator(mode="after")
     def process_validation_markers(self) -> "WebIngestIssueEvent":
@@ -433,23 +432,23 @@ class CeleryIssueEvent(BaseIssueEvent):
     level: str | None = "error"
 
     # Fields accessed by process_event.py
-    contexts: dict[str, Any] | None = None
-    request: dict[str, Any] | None = None
+    contexts: Contexts | None = None
+    request: IngestRequest | None = None
     tags: dict[str, str | None] | None = None
-    user: dict[str, Any] | None = None
+    user: EventUser | None = None
     environment: str | None = None
     release: str | None = None
     server_name: str | None = None
-    debug_meta: dict[str, Any] | None = None
-    exception: dict[str, Any] | list[dict[str, Any]] | None = None
-    message: str | dict[str, Any] | None = None
-    logentry: dict[str, Any] | None = None
+    debug_meta: DebugMeta | None = None
+    exception: IngestValueEventException | None = None
+    message: str | EventMessage | None = None
+    logentry: EventMessage | None = None
     transaction: str | None = None
     fingerprint: list[str | None] | None = None
     type: str | None = None
 
     # CSP-specific field
-    csp: dict[str, Any] | None = None
+    csp: CSPReportSchema | None = None
 
 
 class CeleryDefaultIssueEvent(CeleryIssueEvent):
