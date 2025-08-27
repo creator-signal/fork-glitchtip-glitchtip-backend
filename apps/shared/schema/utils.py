@@ -16,16 +16,9 @@ def invalid_to_none(v: Any, handler: Callable[[Any], Any]) -> Any:
         return None
 
 
-class ValidationErrorMarker:
-    """A simple marker to indicate that validation failed for a field."""
-
-    def __init__(self, error: EventProcessingError):
-        self.error = error
-
-
 def report_error_on_fail(
     v: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
-) -> Any | ValidationErrorMarker:
+) -> Any | dict:
     """
     Pydantic WrapValidator that attempts to validate a field.
 
@@ -51,4 +44,4 @@ def report_error_on_fail(
             name=info.field_name,
             value=v,
         )
-        return ValidationErrorMarker(error=processing_error)
+        return {"__validation_error__": processing_error}

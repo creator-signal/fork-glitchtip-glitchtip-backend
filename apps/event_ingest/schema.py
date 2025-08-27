@@ -37,7 +37,6 @@ from ..shared.schema.exception import (
 )
 from ..shared.schema.user import EventUser
 from ..shared.schema.utils import (
-    ValidationErrorMarker,
     invalid_to_none,
     report_error_on_fail,
 )
@@ -245,7 +244,7 @@ class IngestValueEventException(ValueEventException):
 class IngestIssueEvent(BaseIssueEvent):
     event_id: uuid.UUID | None = None
     timestamp: Annotated[
-        datetime | None | ValidationErrorMarker, WrapValidator(report_error_on_fail)
+        datetime | None | dict, WrapValidator(report_error_on_fail)
     ] = Field(default_factory=now)
     level: str | None = "error"
     logentry: EventMessage | None = None
@@ -274,10 +273,6 @@ class IngestIssueEvent(BaseIssueEvent):
     user: Annotated[EventUser | None, WrapValidator(invalid_to_none)] = None
     debug_meta: DebugMeta | None = None
 
-    class Config(BaseIssueEvent.Config):
-        coerce_numbers_to_str = True
-        arbitrary_types_allowed = True
-
     @model_validator(mode="after")
     def process_validation_markers(self) -> "IngestIssueEvent":
         """
@@ -289,8 +284,8 @@ class IngestIssueEvent(BaseIssueEvent):
 
         # Iterate over the model's attributes.
         for field_name, field_value in self.__dict__.items():
-            if isinstance(field_value, ValidationErrorMarker):
-                collected_errors.append(field_value.error)
+            if isinstance(field_value, dict) and "__validation_error__" in field_value:
+                collected_errors.append(field_value["__validation_error__"])
                 # Nullify the field that contained the marker.
                 setattr(self, field_name, None)
 
