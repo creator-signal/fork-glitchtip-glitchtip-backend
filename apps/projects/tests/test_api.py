@@ -1,8 +1,11 @@
+from unittest import mock
+
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
 
+import apps.projects.tasks
 from apps.organizations_ext.constants import OrganizationUserRole
 
 from ..models import Project, ProjectKey
@@ -128,12 +131,21 @@ class ProjectsAPITestCase(TestCase):
         self.assertNotContains(res, project2.name)
 
     def test_project_delete(self):
-        team = baker.make("teams.Team", organization=self.organization)
-        self.project.teams.add(team)
+        """Projects should get soft deleted"""
+        project = baker.make(
+            "projects.Project",
+            organization=self.organization,
+            name="To Delete",
+            first_event=timezone.now(),
+        )
 
-        res = self.client.delete(self.detail_url)
+        url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
+        with mock.patch.object(apps.projects.tasks.delete_project, "delay") as delete_project_mock:
+            res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
-        self.assertEqual(Project.objects.all().count(), 0)
+        project.refresh_from_db()
+        self.assertTrue(project.is_deleted)
+        self.assertEqual(delete_project_mock.call_args, mock.call(project.pk))
 
     def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
