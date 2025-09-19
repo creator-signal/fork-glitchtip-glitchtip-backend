@@ -2917,17 +2917,17 @@ wheels = [
 
 [[package]]
 name = "symbolic"
-version = "12.16.2"
+version = "12.16.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "milksnake" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/ac/89cf5b812943b352128c0327e2c3a512ec12c9ee987150c462514a5a129b/symbolic-12.16.2.tar.gz", hash = "sha256:27396d37aba32304a929a2eba1c2fc42a61578eaf6ae721d27d7bc47168f6446", size = 3488032, upload-time = "2025-08-12T08:35:46.762Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/cf/1b7fac68cf4af7853b7399098a561ea543ac1032a37d998388004f54008a/symbolic-12.16.3.tar.gz", hash = "sha256:ca1025ddbc755811a4a81907eefad4ab2c39533d9abe28c1fdf33b1d3f8a69b4", size = 3490036, upload-time = "2025-09-18T14:42:11.306Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/f0/0db07115e7e1dbc0100339d679b73e762c65760b4bcd56a6d04b5f4edb3a/symbolic-12.16.2-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:6e78a4f24ba9d5d36a4bcc735a5dff7581fcb5445b6af75c8014a4a3708e57bd", size = 2494307, upload-time = "2025-08-12T08:35:39.943Z" },
-    { url = "https://files.pythonhosted.org/packages/8c/c4/385528577b454a88c50b4b7317f768912f1720bfac3116dcba375f47f5ea/symbolic-12.16.2-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:f74cad23af74a221c63f7f8cf357015a19ab6fea560a53082e3d0afa82149649", size = 2298408, upload-time = "2025-08-12T08:35:41.444Z" },
-    { url = "https://files.pythonhosted.org/packages/0c/34/dc712f9f0cd5b34145ab306260231e6c6b90f29a633bfdc3024f181f1b86/symbolic-12.16.2-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:16073cdf552b0d0a2c0532912decf7aed48555eb6ec8f0d0db7b5dbaa185038a", size = 15577984, upload-time = "2025-08-12T08:35:42.633Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/84/6f08604e58aadff7c05adc05f73ded69b24d17d0fdb46400654d439df0f4/symbolic-12.16.2-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:53ff3e96b054c0894bc0fc91e2254fc23cab9377a361fe74c16e986326c0f277", size = 16568429, upload-time = "2025-08-12T08:35:44.751Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/7f/906bbc138409c1d083830716051336db7bbcbc759503bee788cde5c61b08/symbolic-12.16.3-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:fca84aefa2a3f5cf7b8bae49e338dab09e296346677678663f9f505a0a5455a8", size = 2476146, upload-time = "2025-09-18T14:42:02.477Z" },
+    { url = "https://files.pythonhosted.org/packages/86/89/0a5918f824d03cc9cb3e66e38b8706d382b89be9ab7dad54c393eeb9aaef/symbolic-12.16.3-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:8115412c1c0b3cdbaa84f1feb0700d7f208557100b12382093e442b33d6c1509", size = 2291141, upload-time = "2025-09-18T14:42:04.878Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/43/900565ea6c5b2e2dbae3a7f592b0039cff1c02e1caa3621ea13b8bcc2eb4/symbolic-12.16.3-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:a38cf672e4950c295301313ccf02a6cd557814fe2b022eb9de63e20ede588711", size = 15591219, upload-time = "2025-09-18T14:42:06.806Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/18/b934de05185346894bb5d643c9d86379d5384c76a1d19ce995658107bbe4/symbolic-12.16.3-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:2686d1fedec0d1cf24985f09d5f78a374e93716cfc588776f19e37280579934f", size = 17590605, upload-time = "2025-09-18T14:42:09.274Z" },
 ]
 
 [[package]]
