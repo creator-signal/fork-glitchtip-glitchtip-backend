@@ -538,7 +538,15 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     now = timezone.now()
     # Update last used if older than 1 day, to minimize queries
     if debug_files:
-        debug_files.filter(last_used__gt=now - timedelta(days=1)).update(last_used=now)
+        update_threshold = now - timedelta(days=1)
+        ids_to_update = list(
+            debug_files.filter(last_used__lt=update_threshold).values_list(
+                "pk", flat=True
+            )
+        )
+        DebugSymbolBundle.objects.filter(pk__in=ids_to_update).select_for_update(
+            skip_locked=True
+        ).update(last_used=now)
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
