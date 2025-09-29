@@ -47,7 +47,7 @@ test:
       - PYTHON_VERSION: '3.11'
         POSTGRES_VERSION: '14'
       - PYTHON_VERSION: '3.13'
-        POSTGRES_VERSION: '17'
+        POSTGRES_VERSION: '18'
 
 lint:
   image: python:3.13-slim
