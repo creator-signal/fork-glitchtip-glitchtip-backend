@@ -75,7 +75,7 @@ def remove_bad_chars(obj: Replacable) -> Replacable:
         return {
             _clean_string(key): remove_bad_chars(value) for key, value in obj.items()
         }
-    elif isinstance(obj, list):
+    elif isinstance(obj, (list, tuple)):
         return [remove_bad_chars(item) for item in obj]
     elif isinstance(obj, str):
         return _clean_string(obj)
