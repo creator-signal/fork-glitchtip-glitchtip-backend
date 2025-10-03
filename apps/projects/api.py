@@ -133,16 +133,12 @@ async def update_project(
 async def delete_project(
     request: AuthHttpRequest, organization_slug: str, project_slug: str
 ):
-    result, _ = (
-        await get_projects_queryset(request.auth.user_id, organization_slug)
-        .filter(
-            slug=project_slug,
-            organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
-        )
-        .adelete()
+    project = await aget_object_or_404(
+        get_projects_queryset(request.auth.user_id, organization_slug),
+        slug=project_slug,
+        organization__organization_users__role__gte=OrganizationUserRole.ADMIN
     )
-    if not result:
-        raise Http404
+    await project.adelete()
     return 204, None
 
 
