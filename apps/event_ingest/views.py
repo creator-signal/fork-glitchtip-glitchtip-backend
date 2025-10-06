@@ -22,9 +22,9 @@ from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
-    IngestIssueEvent,
     ItemHeaderSchema,
     TransactionEventSchema,
+    WebIngestIssueEvent,
 )
 from .tasks import ingest_event, ingest_transaction
 
@@ -156,7 +156,8 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         if item_header.type in SUPPORTED_ITEMS:
             try:
                 if item_header.type == "event":
-                    item = IngestIssueEvent.model_validate_json(payload_bytes)
+                    # Heavy validation and normalization happens here
+                    item = WebIngestIssueEvent.model_validate_json(payload_bytes)
                     issue_type = (
                         IssueEventType.ERROR
                         if item.exception
@@ -176,6 +177,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     # Prefer event item uuid, then enveloper header uuid, then if all else fails, generate one
                     if item.event_id is None:
                         item.event_id = envelope_header_event_id or uuid.uuid4()
+
                     interchange_event = IngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,

@@ -125,7 +125,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
 
-    @mock.patch("apps.event_ingest.views.logger.warning")
+    @mock.patch("apps.shared.schema.utils.logger.warning")
     def test_invalid_issue_event_warning(self, mock_log):
         res = self.client.post(
             self.url,
@@ -368,3 +368,22 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(IssueEvent.objects.count(), 1)
+
+    def test_invalid_timestamp(self):
+        event = self.django_event
+        event[2]["timestamp"] = "invalid"
+        res = self.client.post(
+            self.url,
+            list_to_envelope(event),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        db_event = IssueEvent.objects.first()
+        self.assertTrue(db_event)
+        assert db_event.data["errors"] == [
+            {
+                "type": "datetime_from_date_parsing",
+                "name": "timestamp",
+                "value": "invalid",
+            }
+        ]

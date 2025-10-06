@@ -59,9 +59,9 @@ from .interfaces import IssueStats, IssueUpdate, ProcessingEvent
 from .javascript_event_processor import JavascriptEventProcessor
 from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
+    CeleryIssueEvent,
     ErrorIssueEventSchema,
     EventException,
-    IngestIssueEvent,
     InterchangeTransactionEvent,
     IssueEventSchema,
     IssueTaskMessage,
@@ -257,42 +257,55 @@ def update_issues(processing_events: list[ProcessingEvent]):
         )
 
 
-def generate_contexts(event: IngestIssueEvent) -> Contexts:
+def generate_contexts(event: CeleryIssueEvent) -> Contexts:
     """
     Add additional contexts if they aren't already set
     """
-    contexts = event.contexts if event.contexts else Contexts({})
+    contexts = event.contexts if event.contexts else {}
 
     if request := event.request:
-        if isinstance(request.headers, list):
-            if ua_string := next(
-                (x[1] for x in request.headers if x[0] == "User-Agent"), None
-            ):
-                user_agent = parse(ua_string)
-                if "browser" not in contexts:
-                    contexts["browser"] = BrowserContext(
-                        name=user_agent.browser.family,
-                        version=user_agent.browser.version_string,
-                    )
-                if "os" not in contexts:
-                    contexts["os"] = OSContext(
-                        name=user_agent.os.family, version=user_agent.os.version_string
-                    )
-                if "device" not in contexts:
-                    device = user_agent.device
-                    contexts["device"] = DeviceContext(
-                        family=device.family,
-                        model=device.model,
-                        brand=device.brand,
-                    )
+        # Handle both IngestRequest objects and raw dict data from Celery
+        if isinstance(request, dict):
+            headers = request.get("headers")
+        else:
+            # IngestRequest object - access headers attribute
+            headers = getattr(request, "headers", None)
+
+        ua_string = None
+
+        # Headers can be dict or list format
+        if isinstance(headers, list):
+            ua_string = next((x[1] for x in headers if x[0] == "User-Agent"), None)
+        elif isinstance(headers, dict):
+            ua_string = headers.get("User-Agent")
+
+        if ua_string:
+            user_agent = parse(ua_string)
+            if "browser" not in contexts:
+                contexts["browser"] = BrowserContext(
+                    name=user_agent.browser.family,
+                    version=user_agent.browser.version_string,
+                )
+            if "os" not in contexts:
+                contexts["os"] = OSContext(
+                    name=user_agent.os.family, version=user_agent.os.version_string
+                )
+            if "device" not in contexts:
+                device = user_agent.device
+                contexts["device"] = DeviceContext(
+                    family=device.family,
+                    model=device.model,
+                    brand=device.brand,
+                )
     return contexts
 
 
-def generate_tags(event: IngestIssueEvent) -> dict[str, str]:
+def generate_tags(event: CeleryIssueEvent) -> dict[str, str]:
     """Generate key-value tags based on context and other event data"""
     tags: dict[str, str | None] = event.tags if isinstance(event.tags, dict) else {}
 
     if contexts := event.contexts:
+        # Assume contexts are already normalized to typed objects
         if browser := contexts.get("browser"):
             if isinstance(browser, BrowserContext):
                 tags["browser.name"] = browser.name
@@ -623,6 +636,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
                 "user",
                 "exception",
                 "breadcrumbs",
+                "errors",
             },
             exclude_none=True,
             exclude_defaults=True,

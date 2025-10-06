@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from apps.issue_events.constants import IssueEventType
+from apps.shared.schema.error import EventProcessingError
 
 from ..shared.schema.base import LaxIngestSchema
 from ..shared.schema.contexts import Contexts
@@ -35,7 +36,7 @@ from ..shared.schema.exception import (
     ValueEventException,
 )
 from ..shared.schema.user import EventUser
-from ..shared.schema.utils import invalid_to_none
+from ..shared.schema.utils import report_error_on_fail
 
 logger = logging.getLogger(__name__)
 
@@ -237,9 +238,13 @@ class IngestValueEventException(ValueEventException):
         return [e for e in v if e is not None]
 
 
-class IngestIssueEvent(BaseIssueEvent):
+class WebIngestIssueEvent(BaseIssueEvent):
+    """Heavy validation and normalization for web API ingest"""
+
     event_id: uuid.UUID | None = None
-    timestamp: datetime = Field(default_factory=now)
+    timestamp: Annotated[
+        datetime | None | dict, WrapValidator(report_error_on_fail)
+    ] = Field(default_factory=now)
     level: str | None = "error"
     logentry: EventMessage | None = None
     logger: str | None = None
@@ -260,12 +265,41 @@ class IngestIssueEvent(BaseIssueEvent):
     message: str | EventMessage | None = None
     template: EventTemplate | None = None
 
-    breadcrumbs: ValueEventBreadcrumb | None = None
-    sdk: ClientSDKInfo | None = None
-    request: IngestRequest | None = None
-    contexts: Contexts | None = None
-    user: Annotated[EventUser | None, WrapValidator(invalid_to_none)] = None
-    debug_meta: DebugMeta | None = None
+    breadcrumbs: Annotated[
+        ValueEventBreadcrumb | None, WrapValidator(report_error_on_fail)
+    ] = None
+    sdk: Annotated[ClientSDKInfo | None, WrapValidator(report_error_on_fail)] = None
+    request: Annotated[IngestRequest | None, WrapValidator(report_error_on_fail)] = None
+    contexts: Annotated[Contexts | None, WrapValidator(report_error_on_fail)] = None
+    user: Annotated[EventUser | None, WrapValidator(report_error_on_fail)] = None
+    debug_meta: Annotated[DebugMeta | None, WrapValidator(report_error_on_fail)] = None
+
+    @model_validator(mode="after")
+    def process_validation_markers(self) -> "WebIngestIssueEvent":
+        """
+        Iterates through fields after initial validation, checks for
+        ValidationErrorMarker instances, populates the `errors` list,
+        and sets the invalid fields to None.
+        """
+        collected_errors: list[EventProcessingError] = []
+
+        # Iterate over the model's attributes.
+        for field_name, field_value in self.__dict__.items():
+            if isinstance(field_value, dict) and "__validation_error__" in field_value:
+                collected_errors.append(field_value["__validation_error__"])
+                # Nullify the field that contained the marker.
+                setattr(self, field_name, None)
+
+        if collected_errors:
+            if self.errors is None:
+                self.errors = []
+            self.errors.extend(collected_errors)
+
+        # It would be better to allow null in DB timestamps, but it's too much effort for ~0 benefit.
+        if self.timestamp is None:
+            self.timestamp = now()
+
+        return self
 
     @field_validator("tags")
     @classmethod
@@ -288,7 +322,7 @@ class IngestIssueEvent(BaseIssueEvent):
         return v
 
 
-class EventIngestSchema(IngestIssueEvent):
+class EventIngestSchema(WebIngestIssueEvent):
     event_id: uuid.UUID  # type: ignore[assignment]
 
 
@@ -360,7 +394,7 @@ class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
     root: list[dict[str, Any]]
     _header: EnvelopeHeaderSchema
     _items: list[
-        tuple[ItemHeaderSchema, IngestIssueEvent | TransactionEventSchema]
+        tuple[ItemHeaderSchema, WebIngestIssueEvent | TransactionEventSchema]
     ] = []
 
 
@@ -387,7 +421,49 @@ class SecuritySchema(LaxIngestSchema):
 ## Normalized Interchange Issue Events
 
 
-class IssueEventSchema(IngestIssueEvent):
+class CeleryIssueEvent(BaseIssueEvent):
+    """
+    Lightweight schema for Celery - assumes data already validated
+    All fields used by process_event.py with simple types
+    """
+
+    event_id: uuid.UUID
+    timestamp: datetime | None = None
+    level: str | None = "error"
+
+    # Fields accessed by process_event.py
+    contexts: Contexts | None = None
+    request: IngestRequest | None = None
+    tags: dict[str, str | None] | None = None
+    user: EventUser | None = None
+    environment: str | None = None
+    release: str | None = None
+    server_name: str | None = None
+    debug_meta: DebugMeta | None = None
+    exception: IngestValueEventException | None = None
+    message: str | EventMessage | None = None
+    logentry: EventMessage | None = None
+    transaction: str | None = None
+    fingerprint: list[str | None] | None = None
+    type: str | None = None
+
+    # CSP-specific field
+    csp: CSPReportSchema | None = None
+
+
+class CeleryDefaultIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.DEFAULT] = IssueEventType.DEFAULT
+
+
+class CeleryErrorIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
+
+
+class CeleryCSPIssueEvent(CeleryIssueEvent):
+    type: Literal[IssueEventType.CSP] = IssueEventType.CSP
+
+
+class IssueEventSchema(WebIngestIssueEvent):
     """
     Event storage and interchange format
     Used in json view and celery interchange
@@ -397,11 +473,11 @@ class IssueEventSchema(IngestIssueEvent):
     type: Literal[IssueEventType.DEFAULT] = IssueEventType.DEFAULT
 
 
-class ErrorIssueEventSchema(IngestIssueEvent):
+class ErrorIssueEventSchema(WebIngestIssueEvent):
     type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
 
 
-class CSPIssueEventSchema(IngestIssueEvent):
+class CSPIssueEventSchema(WebIngestIssueEvent):
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)  # type: ignore[assignment]
     type: Literal[IssueEventType.CSP] = IssueEventType.CSP
     csp: CSPReportSchema
