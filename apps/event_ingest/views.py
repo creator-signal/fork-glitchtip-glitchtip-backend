@@ -22,9 +22,9 @@ from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
-    WebIngestIssueEvent,
     ItemHeaderSchema,
     TransactionEventSchema,
+    WebIngestIssueEvent,
 )
 from .tasks import ingest_event, ingest_transaction
 
