@@ -454,42 +454,42 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = env.str("ACCOUNT_EMAIL_SUBJECT_PREFIX", "")
 
 # Database
 # https://docs.djangoproject.com/en/dev/ref/settings/#databases
-
+# Use either DATABASE_URL or individual components
 DATABASES = {
-    "default": env.db(default="postgres://postgres:postgres@postgres:5432/postgres")
+    "default": env.db(
+        "DATABASE_URL", default="postgres://postgres:postgres@postgres:5432/postgres"
+    )
 }
-# Support setting DATABASES in parts in order to get values from the postgresql helm chart
-DATABASE_HOST = env.str("DATABASE_HOST", None)
-DATABASE_PASSWORD = env.str("DATABASE_PASSWORD", None)
-if DATABASE_HOST and DATABASE_PASSWORD:
-    DATABASES["default"] = {
-        "NAME": env.str("DATABASE_NAME", "postgres"),
-        "USER": env.str("DATABASE_USER", "postgres"),
-        "PASSWORD": DATABASE_PASSWORD,
-        "HOST": DATABASE_HOST,
-        "PORT": env.str("DATABASE_PORT", "5432"),
-        "CONN_MAX_AGE": env.int("DATABASE_CONN_MAX_AGE", 0),
-        "CONN_HEALTH_CHECKS": env.bool("DATABASE_CONN_HEALTH_CHECKS", False),
-    }
+# If component variables like DATABASE_HOST are provided, update the base config
+if env.str("DATABASE_HOST", None):
+    DATABASES["default"].update(
+        {
+            "NAME": env.str("DATABASE_NAME", "postgres"),
+            "USER": env.str("DATABASE_USER", "postgres"),
+            "PASSWORD": env.str("DATABASE_PASSWORD"),
+            "HOST": env.str("DATABASE_HOST"),
+            "PORT": env.str("DATABASE_PORT", "5432"),
+        }
+    )
+# Add other settings that apply to both methods.
 DATABASES["default"]["ENGINE"] = "psql_partition.backend"
-if not DATABASES["default"].get("OPTIONS"):
-    DATABASES["default"]["OPTIONS"] = {}
-# Enable pool by default, if there is no conn_max_age
-if DATABASES["default"].get("CONN_MAX_AGE", 0) == 0:
-    if env.bool("DATABASE_POOL", True):
-        pool_options = {}
-        min_size = env.int("DATABASE_POOL_MIN_SIZE", 2)
-        max_size = env.int("DATABASE_POOL_MAX_SIZE", 6)
-
-        if min_size:
-            pool_options["min_size"] = min_size
-        if max_size:
-            pool_options["max_size"] = max_size
-
-        if pool_options:
-            DATABASES["default"]["OPTIONS"]["pool"] = pool_options
-        else:
-            DATABASES["default"]["OPTIONS"]["pool"] = True
+DATABASES["default"].setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
+DATABASES["default"].setdefault(
+    "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
+)
+DATABASES["default"].setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
+pooling_already_configured = "pool" in DATABASES["default"].get("OPTIONS", {})
+# Apply the default client-side pool ONLY IF connection reuse is not active
+if (
+    DATABASES["default"]["CONN_MAX_AGE"] == 0
+    and not pooling_already_configured
+    and env.bool("DATABASE_POOL", True)
+):
+    DATABASES["default"].setdefault("OPTIONS", {})
+    DATABASES["default"]["OPTIONS"]["pool"] = {
+        "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
+        "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
+    }
 
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
