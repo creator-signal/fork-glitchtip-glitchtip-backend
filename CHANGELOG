@@ -1,5 +1,6 @@
 #
 
+- DISABLE_SERVER_SIDE_CURSORS now defaults to True but setting to False will be respected
 
 # v5.1.0
 
