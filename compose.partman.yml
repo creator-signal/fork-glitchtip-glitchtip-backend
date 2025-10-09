@@ -27,7 +27,7 @@ x-volumes: &default-volumes
 services:
   postgres:
     # 1. Override the base postgres service to use the pg_partman image.
-    image: ghcr.io/dbsystel/postgresql-partman:17
+    image: ghcr.io/dbsystel/postgresql-partman:18
     environment:
       # This image requires this environment variable to work without a password.
       ALLOW_EMPTY_PASSWORD: "yes"
