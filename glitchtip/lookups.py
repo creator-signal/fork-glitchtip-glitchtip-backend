@@ -10,6 +10,5 @@ class Ilike(Lookup):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         params = lhs_params + rhs_params
-        print(params)
         # Use the native PostgreSQL case-insensitive LIKE operator
         return "%s ILIKE %s" % (lhs, rhs), params

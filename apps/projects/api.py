@@ -136,7 +136,7 @@ async def delete_project(
     project = await aget_object_or_404(
         get_projects_queryset(request.auth.user_id, organization_slug),
         slug=project_slug,
-        organization__organization_users__role__gte=OrganizationUserRole.ADMIN
+        organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
     )
     await project.adelete()
     return 204, None

@@ -38,9 +38,21 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         # Test all supported recipient types and tagsToAdd
         recipients = [
             {"recipientType": "email", "url": "", "tagsToAdd": ["tag1"]},
-            {"recipientType": "discord", "url": "https://discord.com/api/webhooks/123", "tagsToAdd": ["tag2"]},
-            {"recipientType": "webhook", "url": "https://example.com/webhook", "tagsToAdd": []},
-            {"recipientType": "googlechat", "url": "https://chat.googleapis.com/webhook/abc", "tagsToAdd": ["tag3"]},
+            {
+                "recipientType": "discord",
+                "url": "https://discord.com/api/webhooks/123",
+                "tagsToAdd": ["tag2"],
+            },
+            {
+                "recipientType": "webhook",
+                "url": "https://example.com/webhook",
+                "tagsToAdd": [],
+            },
+            {
+                "recipientType": "googlechat",
+                "url": "https://chat.googleapis.com/webhook/abc",
+                "tagsToAdd": ["tag3"],
+            },
         ]
         data = {
             "name": "foo",
@@ -82,9 +94,21 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
         recipients = [
-            {"recipientType": "discord", "url": "https://discord.com/api/webhooks/123", "tagsToAdd": ["tag2"]},
-            {"recipientType": "webhook", "url": "https://example.com/webhook", "tagsToAdd": []},
-            {"recipientType": "googlechat", "url": "https://chat.googleapis.com/webhook/abc", "tagsToAdd": ["tag3"]},
+            {
+                "recipientType": "discord",
+                "url": "https://discord.com/api/webhooks/123",
+                "tagsToAdd": ["tag2"],
+            },
+            {
+                "recipientType": "webhook",
+                "url": "https://example.com/webhook",
+                "tagsToAdd": [],
+            },
+            {
+                "recipientType": "googlechat",
+                "url": "https://chat.googleapis.com/webhook/abc",
+                "tagsToAdd": ["tag3"],
+            },
         ]
         data = {
             "timespanMinutes": 500,

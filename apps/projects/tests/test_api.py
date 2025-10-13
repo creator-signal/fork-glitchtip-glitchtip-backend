@@ -140,7 +140,9 @@ class ProjectsAPITestCase(TestCase):
         )
 
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
-        with mock.patch.object(apps.projects.tasks.delete_project, "delay") as delete_project_mock:
+        with mock.patch.object(
+            apps.projects.tasks.delete_project, "delay"
+        ) as delete_project_mock:
             res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
         project.refresh_from_db()

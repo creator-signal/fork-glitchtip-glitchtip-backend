@@ -89,7 +89,6 @@ class Issue(SoftDeleteModel):
     )
     short_id = models.PositiveIntegerField(null=True)
     search_vector = SearchVectorField(editable=False, default="")
-    # search_pattern_text = models.TextField(editable=False, default="")
     count = models.PositiveIntegerField(default=1, editable=False)
     first_seen = models.DateTimeField(default=timezone.now, db_index=True)
     last_seen = models.DateTimeField(default=timezone.now, db_index=True)
@@ -106,11 +105,11 @@ class Issue(SoftDeleteModel):
         ]
         indexes = [
             GinIndex(fields=["search_vector"]),
-            # GinIndex(
-            #     fields=["search_pattern_text"],
-            #     name="issue_pattern_text_trgm_idx",
-            #     opclasses=["gin_trgm_ops"],
-            # ),
+            GinIndex(
+                fields=["title"],
+                name="issue_title_trgm_idx",
+                opclasses=["gin_trgm_ops"],
+            ),
         ]
 
     def __str__(self):

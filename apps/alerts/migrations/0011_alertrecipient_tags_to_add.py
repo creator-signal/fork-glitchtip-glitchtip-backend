@@ -5,15 +5,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('alerts', '0001_squashed_0010_alter_notification_issues'),
+        ("alerts", "0001_squashed_0010_alter_notification_issues"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='alertrecipient',
-            name='tags_to_add',
-            field=django.contrib.postgres.fields.ArrayField(base_field=models.CharField(max_length=255), blank=True, default=list, help_text='List of additional tags to include in the alert', null=True, size=None),
+            model_name="alertrecipient",
+            name="tags_to_add",
+            field=django.contrib.postgres.fields.ArrayField(
+                base_field=models.CharField(max_length=255),
+                blank=True,
+                default=list,
+                help_text="List of additional tags to include in the alert",
+                null=True,
+                size=None,
+            ),
         ),
     ]

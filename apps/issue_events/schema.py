@@ -37,9 +37,6 @@ class ProjectReference(CamelSchema, ModelSchema):
         return str(obj.id)
 
 
-
-
-
 class IssueSchema(ModelSchema):
     id: str
     count: str
@@ -85,12 +82,6 @@ class IssueSchema(ModelSchema):
 
 class IssueDetailSchema(IssueSchema):
     userReportCount: int = Field(validation_alias="user_report_count")
-
-
-
-
-
-
 
 
 class APIEventBreadcrumb(EventBreadcrumb):
