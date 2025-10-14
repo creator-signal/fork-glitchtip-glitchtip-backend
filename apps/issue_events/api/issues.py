@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from django.db.models import Count, F, FloatField, Sum, Value
+from django.db.models import Count, F, FloatField, Q, Sum, Value
 from django.db.models.expressions import ExpressionWrapper
 from django.db.models.functions import Extract, Log, TruncDay
 from django.db.models.query import QuerySet
@@ -235,7 +235,13 @@ def filter_issue_list(
                     )
             if len(query_part) == 1:
                 search_query = " ".join(queries[i:])
-                qs = qs.filter(search_vector=search_query)
+                if "*" in search_query:
+                    qs = qs.filter(
+                        Q(title__ilike=f"%{search_query.replace('*', '%')}%")
+                        | Q(search_vector=search_query)
+                    )
+                else:
+                    qs = qs.filter(search_vector=search_query)
                 # Search queries must be at end of query string, finished when parsing
                 break
 

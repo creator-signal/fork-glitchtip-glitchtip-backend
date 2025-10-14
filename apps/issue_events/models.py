@@ -105,6 +105,11 @@ class Issue(SoftDeleteModel):
         ]
         indexes = [
             GinIndex(fields=["search_vector"]),
+            GinIndex(
+                fields=["title"],
+                name="issue_title_trgm_idx",
+                opclasses=["gin_trgm_ops"],
+            ),
         ]
 
     def __str__(self):

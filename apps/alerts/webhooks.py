@@ -193,7 +193,9 @@ class DiscordWebhookPayload:
     embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(url, issues: list, issue_count: int = 1, tags_to_add: list[str] | None = None):
+def send_issue_as_discord_webhook(
+    url, issues: list, issue_count: int = 1, tags_to_add: list[str] | None = None
+):
     if tags_to_add is None:
         tags_to_add = []
 
@@ -313,10 +315,12 @@ class GoogleChatCard:
         ]
         return self
 
-    def construct_issue_card(self, title: str, issue, tags_to_add: list[str] | None = None):
+    def construct_issue_card(
+        self, title: str, issue, tags_to_add: list[str] | None = None
+    ):
         if tags_to_add is None:
             tags_to_add = []
-            
+
         self.header = dict(title=title, subtitle=issue.project.name)
         section_header = "<font color='{}'>{}</font>".format(
             issue.get_hex_color(), str(issue)
@@ -368,7 +372,11 @@ class GoogleChatCard:
                 )
                 if tag_content:
                     widgets.append(
-                        dict(decoratedText=dict(topLabel=tag.capitalize(), text=tag_content["value"]))
+                        dict(
+                            decoratedText=dict(
+                                topLabel=tag.capitalize(), text=tag_content["value"]
+                            )
+                        )
                     )
 
         widgets.append(
@@ -409,18 +417,22 @@ def send_issue_as_googlechat_webhook(url, issues: list, **kwargs):
     cards = []
     for issue in issues:
         card = GoogleChatCard().construct_issue_card(
-            title="GlitchTip Alert", issue=issue, tags_to_add=kwargs.get("tags_to_add", [])
+            title="GlitchTip Alert",
+            issue=issue,
+            tags_to_add=kwargs.get("tags_to_add", []),
         )
         cards.append(card)
     return send_googlechat_webhook(url, cards)
 
 
 def send_webhook_notification(
-    notification: "Notification", url: str, recipient_type: str, tags_to_add: list[str] | None = None
+    notification: "Notification",
+    url: str,
+    recipient_type: str,
+    tags_to_add: list[str] | None = None,
 ):
     issue_count = notification.issues.count()
     issues = notification.issues.all()[: settings.MAX_ISSUES_PER_ALERT]
-
 
     if recipient_type == RecipientType.DISCORD:
         send_issue_as_discord_webhook(url, issues, issue_count, tags_to_add=tags_to_add)

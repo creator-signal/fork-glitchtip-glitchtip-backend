@@ -33,7 +33,7 @@ class AlertEmail(GlitchTipEmail):
         context["project_link"] = (
             f"{base_url}/{org_slug}/issues?project={first_issue.project.id}"
         )
-        
+
         return context
 
 

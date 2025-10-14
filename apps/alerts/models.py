@@ -29,10 +29,12 @@ class AlertRecipient(models.Model):
     recipient_type = models.CharField(max_length=16, choices=RecipientType.choices)
     url = models.URLField(max_length=2000, blank=True)
     tags_to_add = ArrayField(
-        models.CharField(max_length=255), default=list, blank=True, null=True,
-        help_text="List of additional tags to include in the alert"
+        models.CharField(max_length=255),
+        default=list,
+        blank=True,
+        null=True,
+        help_text="List of additional tags to include in the alert",
     )
-
 
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
@@ -49,7 +51,12 @@ class AlertRecipient(models.Model):
         if self.recipient_type == RecipientType.EMAIL:
             send_email_notification(notification)
         elif self.is_webhook:
-            send_webhook_notification(notification, self.url, self.recipient_type, tags_to_add=self.tags_to_add)
+            send_webhook_notification(
+                notification,
+                self.url,
+                self.recipient_type,
+                tags_to_add=self.tags_to_add,
+            )
 
 
 class Notification(CreatedModel):

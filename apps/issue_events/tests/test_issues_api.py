@@ -194,6 +194,19 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
         self.assertContains(res, event.issue.title)
 
+    def test_search_wildcard(self):
+        issue_str = "The foo want to the bar"
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            title=issue_str,
+            search_vector=SearchVector(Value(issue_str)),
+        )
+        res = self.client.get(self.list_url + "?query=is:unresolved f*o")
+        self.assertContains(res, issue.title)
+        res = self.client.get(self.list_url + "?query=is:unresolved f*x")
+        self.assertNotContains(res, issue.title)
+
     def test_list_relative_datetime_filter(self):
         now = timezone.now()
         last_minute = now - datetime.timedelta(minutes=1)
