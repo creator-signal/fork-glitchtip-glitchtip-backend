@@ -137,6 +137,33 @@ class Issue(SoftDeleteModel):
         return ""
 
 
+class IssueSearchIndex(SoftDeleteModel):
+    """This model is used to store the search data for an issue."""
+
+    pk = models.CompositePrimaryKey(
+        "issue",
+        "organization",
+    )
+    issue = models.ForeignKey(
+        Issue,
+        on_delete=models.CASCADE,
+        related_name="search_index_record",
+    )
+    organization = models.ForeignKey(
+        "organizations_ext.Organization",
+        on_delete=models.CASCADE,
+        related_name="search_index_records",
+    )
+    fts_document = SearchVectorField(default="", editable=False)
+    pattern_text = models.TextField(default="", blank=True, editable=False)
+
+    class Meta:
+        indexes = [
+            GinIndex(fields=["fts_document"]),
+            GinIndex(fields=["pattern_text"], name="issue_search_pattern_text_gin"),
+        ]
+
+
 class IssueHash(models.Model):
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE, related_name="hashes")
     # Redundant project allows for unique constraint
