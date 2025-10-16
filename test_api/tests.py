@@ -19,7 +19,7 @@ class TestAPITestCase(TestCase):
         self.assertEqual(Issue.objects.all().count(), 55)
 
         monitor = Monitor.objects.all().first()
-        self.assertEqual(monitor.name, "cytestmonitor")
+        self.assertEqual(monitor.name, "seeded-monitor")
 
     def test_disabled_test_api(self):
         with self.settings(ENABLE_TEST_API=False):
