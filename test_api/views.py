@@ -29,14 +29,11 @@ def seed_data(request: HttpRequest):
 
     e2e_object_identifier = "e2etestobj"
     organization_name = e2e_object_identifier + "-seeded-org"
-    
+
     team_slug = "seeded-team"
     project_name = "seeded-project"
     monitor_name = "seeded-monitor"
 
-    users = User.objects.filter(email__in=[user_email, other_user_email])
-    for user in users:
-        print(user.__dict__)
     User.objects.filter(email__in=[user_email, other_user_email]).delete()
     user = User.objects.create_user(email=user_email, password=user_password)
     other_user = User.objects.create_user(
