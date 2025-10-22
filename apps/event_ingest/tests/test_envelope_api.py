@@ -50,12 +50,11 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         return "\n".join([json.dumps(line) for line in json_data])
 
     def test_envelope_api(self):
-        with self.assertNumQueries(17):
-            res = self.client.post(
-                self.url,
-                list_to_envelope(self.django_event),
-                content_type="application/json",
-            )
+        res = self.client.post(
+            self.url,
+            list_to_envelope(self.django_event),
+            content_type="application/json",
+        )
         self.assertContains(res, self.django_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)

@@ -476,6 +476,15 @@ class IssueEventSchema(WebIngestIssueEvent):
 class ErrorIssueEventSchema(WebIngestIssueEvent):
     type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
 
+    def exception_most_recent(self) -> EventException | None:
+        """
+        Safely retrieves the most recent (and typically most relevant)
+        exception from the event payload's exception list.
+        """
+        if self.exception and self.exception.values:
+            return self.exception.values[-1]
+        return None
+
 
 class CSPIssueEventSchema(WebIngestIssueEvent):
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)  # type: ignore[assignment]

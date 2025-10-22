@@ -43,8 +43,8 @@ class ProcessingEvent:
 
 @dataclass
 class IssueUpdate:
+    organization_id: int
     last_seen: datetime
-    search_vector: str
     added_count: int = 1
 
 

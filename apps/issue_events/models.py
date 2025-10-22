@@ -137,6 +137,24 @@ class Issue(SoftDeleteModel):
         return ""
 
 
+class IssueSearchIndex(SoftDeleteModel):
+    """
+    This table is partitioned by organization_id HASH when advanced partitioning is enabled
+    """
+
+    pk = models.CompositePrimaryKey("issue_id", "organization_id")
+    issue = models.OneToOneField(
+        Issue, on_delete=models.CASCADE, related_name="search_index"
+    )
+    organization = models.ForeignKey(
+        "organizations_ext.Organization",
+        on_delete=models.CASCADE,
+        related_name="search_index",
+    )
+    fts_document = SearchVectorField(editable=False)
+    pattern_text = models.TextField(editable=False)
+
+
 class IssueHash(models.Model):
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE, related_name="hashes")
     # Redundant project allows for unique constraint
