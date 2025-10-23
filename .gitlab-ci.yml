@@ -28,14 +28,11 @@ test:
   services:
     - postgres:$POSTGRES_VERSION
   cache:
-    - key: ${CI_COMMIT_REF_SLUG}${VERSION}
-      files:
-        - uv.lock
+    - key:
+        files:
+          - uv.lock
       paths:
         - $UV_CACHE_DIR
-  cache:
-    paths:
-      - .cache/pip
   script:
     - uv sync --frozen --no-install-project
     - uv run ./manage.py test
@@ -116,7 +113,6 @@ build_arm_x86:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: '$CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/ && $CI_COMMIT_REF_PROTECTED == "true"'
-
 
 update_deps:
   image: renovate/renovate:41
