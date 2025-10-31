@@ -41,6 +41,24 @@ class UserRegistrationTestCase(TestCase):
             res = self.client.post(url, user2_data, content_type="application/json")
             self.assertEqual(res.status_code, 409)
 
+    def test_social_apps_only_registration(self):
+        """Only first user may register"""
+        url = "/_allauth/browser/v1/auth/signup"
+        user1_data = {
+            "email": "test1@example.com",
+            "password": "hunter222",
+        }
+        user2_data = {
+            "email": "test2@example.com",
+            "password": "hunter222",
+        }
+        with override_settings(ENABLE_USER_REGISTRATION=False, ENABLE_SOCIAL_APPS_USER_REGISTRATION=True):
+            res = self.client.post(url, user1_data, content_type="application/json")
+            self.assertEqual(res.status_code, 200)
+
+            res = self.client.post(url, user2_data, content_type="application/json")
+            self.assertEqual(res.status_code, 409)
+
 
 class UsersTestCase(GlitchTestCase):
     @classmethod
