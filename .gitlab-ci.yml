@@ -17,7 +17,19 @@ include:
 
 workflow:
   rules:
-    - when: always
+    # Run pipelines on pushes to default branch.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Run pipelines for merge request events.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    # Do not run pipelines for branch pushes if an MR exists.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    # Run pipelines for branches without MR (yet).
+    - if: $CI_COMMIT_BRANCH
+    # Run pipelines for pushed tags, web UI, and schedules.
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == 'web'
+    - if: $CI_PIPELINE_SOURCE == 'schedule'
 
 test:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
@@ -57,16 +69,17 @@ lint:
 build:
   image: docker:28
   rules:
-    # Run only on protected branches that are not tagged and not merge requests
-    - if: '$CI_PIPELINE_SOURCE != "merge_request_event" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ "/^$/"'
+    # Exclude merge requests and scheduled execution.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    # Run build only on tagged commits to protected branch.
+    - if: $CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED
   services:
     - docker:28-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN registry.gitlab.com
     - docker build -t ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-} --build-arg IS_CI="True" .
     - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-}
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
 
 buildx:
   image: docker:25-git
