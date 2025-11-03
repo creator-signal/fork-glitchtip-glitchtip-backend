@@ -2,7 +2,7 @@ import logging
 
 from allauth.account.signals import user_logged_in
 from allauth.socialaccount.models import SocialAccount, SocialApp
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.dispatch import receiver
 
 from apps.organizations_ext.models import (
@@ -17,10 +17,19 @@ def add_user_to_socialapp_organization(request, user, **kwargs):
     """
     Add user to organization if organization-social app exists
     """
+    user_providers = SocialAccount.objects.filter(user=user).values_list(
+        "provider", flat=True
+    )
     social_apps = (
         SocialApp.objects.filter(
-            provider__in=SocialAccount.objects.filter(user=user).values_list(
-                "provider", flat=True
+            # Check for provider_id or provider if the former is not set
+            (
+                ~(Q(provider_id__isnull=True) | Q(provider_id__exact=""))
+                & Q(provider_id__in=user_providers)
+            )
+            | (
+                (Q(provider_id__isnull=True) | Q(provider_id__exact=""))
+                & Q(provider__in=user_providers)
             )
         )
         .exclude(organizationsocialapp=None)
