@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 dependencies = [
     "Brotli==1.1.0",
     "django~=5.2",
-    "django-allauth[mfa,socialaccount]~=65.0",
+    "django-allauth[mfa,socialaccount,headless]~=65.0",
     "django-cors-headers~=4.0",
     "django-environ~=0.11",
     "django-extensions~=4.0",
@@ -44,9 +44,9 @@ dependencies = [
     "pyyaml>=6.0.2",                             # allauth openapi spec
 ]
 
-[tool.uv]
-dev-dependencies = [
-    "locust~=2.10",
+[dependency-groups]
+dev = [
+    "locust~=2.42.1",
     "freezegun~=1.1",
     "model_bakery~=1.1",
     "django-debug-toolbar~=6.0",
@@ -56,8 +56,9 @@ dev-dependencies = [
     "requests-mock~=1.9",
     "memray~=1.9",
     "ruff~=0.6",
-    "tblib~=3.0",                         # Needed for test --parallel
+    "tblib~=3.0", # Needed for test --parallel
     "ipython>=8.32.0",
+    "greenlet>=3.2.4", # This version needed for py 3.14
 ]
 
 [tool.ruff.lint]
