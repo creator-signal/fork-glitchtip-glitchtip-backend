@@ -34,7 +34,6 @@ from apps.uptime.api import router as uptime_router
 from apps.users.api import router as users_router
 from apps.users.models import User
 from apps.users.schema import UserSchema
-from apps.users.utils import ais_user_registration_open
 from apps.wizard.api import router as wizard_router
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
 
@@ -105,6 +104,7 @@ class SettingsOut(CamelSchema):
     billing_enabled: bool
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
     enable_user_registration: bool
+    enable_social_apps_user_registration: bool
     enable_organization_creation: bool
     stripe_public_key: str | None
     plausible_url: str | None
@@ -142,11 +142,19 @@ async def get_settings(request: HttpRequest):
 
     billing_enabled = settings.BILLING_ENABLED
 
+    enable_user_registration = settings.ENABLE_USER_REGISTRATION
+    enable_social_apps_user_registration = settings.ENABLE_SOCIAL_APPS_USER_REGISTRATION
+    if (not (enable_user_registration and enable_social_apps_user_registration)):
+        no_users = not await User.objects.aexists()
+        enable_user_registration = enable_user_registration or no_users
+        enable_social_apps_user_registration = enable_social_apps_user_registration or no_users
+
     return {
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
         "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
-        "enable_user_registration": await ais_user_registration_open(),
+        "enable_user_registration": enable_user_registration,
+        "enable_social_apps_user_registration": enable_social_apps_user_registration,
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,
         "stripe_public_key": settings.STRIPE_PUBLIC_KEY,
         "plausible_url": settings.PLAUSIBLE_URL,
