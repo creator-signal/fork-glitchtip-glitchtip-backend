@@ -1,5 +1,8 @@
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
+from pydantic.functional_validators import BeforeValidator
+from django.utils import timezone
 
 from ninja import Field, ModelSchema, Schema
 from pydantic import computed_field
@@ -353,3 +356,45 @@ class IssueStatsResponse(CamelSchema):
     last_seen: str
     is_unhandled: bool
     stats: StatsDetailSchema
+
+
+RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")
+
+
+def relative_to_datetime(v: Any) -> datetime:
+    """
+    Allow relative terms like now or now-1h. Only 0 or 1 subtraction operation is permitted.
+
+    Accepts
+    - now
+    - - (subtraction)
+    - m (minutes)
+    - h (hours)
+    - d (days)
+    """
+    result = timezone.now()
+    if v == "now":
+        return result
+    if RELATIVE_TIME_REGEX.match(v):
+        spaces_stripped = v.replace(" ", "")
+        numbers = int(re.findall(r"\d+", spaces_stripped)[0])
+        if spaces_stripped[-1] == "m":
+            result -= timedelta(minutes=numbers)
+        if spaces_stripped[-1] == "h":
+            result -= timedelta(hours=numbers)
+        if spaces_stripped[-1] == "d":
+            result -= timedelta(days=numbers)
+        return result
+    return v
+
+
+RelativeDateTime = Annotated[datetime, BeforeValidator(relative_to_datetime)]
+
+
+class IssueFilters(Schema):
+    id__in: list[int] | None = Field(None, alias="id")
+    first_seen__gte: RelativeDateTime | None = Field(None, alias="start")
+    first_seen__lte: RelativeDateTime | None = Field(None, alias="end")
+    project__in: list[int] | None = Field(None, alias="project")
+    environment: list[str] | None = None
+    query: str | None = None

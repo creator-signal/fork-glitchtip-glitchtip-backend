@@ -10,6 +10,7 @@ from model_bakery import baker
 from apps.event_ingest.tests.utils import generate_event
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueHash
+from apps.issue_events.filters import _get_text_search_filter
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
 from glitchtip.utils import get_random_string
@@ -434,6 +435,9 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         ]
         issue_event = IssueEvent.objects.get(pk=event.payload.event_id)
         self.assertIn(file_name, issue_event.issue.search_index.pattern_text)
+        self.assertTrue(
+            Issue.objects.filter(_get_text_search_filter(file_name)).exists()
+        )
         self.assertIn(
             event_data["request"]["url"].split("//")[-1],
             issue_event.issue.search_index.pattern_text,

@@ -1,4 +1,5 @@
 import os
+
 from .interfaces import ProcessingEvent
 from .schema import ErrorIssueEventSchema
 from .utils import remove_bad_chars
