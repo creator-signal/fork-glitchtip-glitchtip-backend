@@ -495,31 +495,33 @@ PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# We need to support both url and broken out host to support helm redis chart
-REDIS_HOST = env.str("REDIS_HOST", None)
-if REDIS_HOST:
-    REDIS_PORT = env.str("REDIS_PORT", "6379")
-    REDIS_DATABASE = env.str("REDIS_DATABASE", "0")
-    REDIS_PASSWORD = env.str("REDIS_PASSWORD", None)
-    if REDIS_PASSWORD:
-        REDIS_URL = (
-            f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DATABASE}"
+# Make a best attempt to support both Valkey and Redis. Support full auth string or parts.
+VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
+if VALKEY_HOST:
+    VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
+    VALKEY_DATABASE = env.str("VALKEY_DATABASE", env.str("REDIS_DATABASE", "0"))
+    VALKEY_PASSWORD = env.str("VALKEY_PASSWORD", env.str("REDIS_PASSWORD", None))
+    if VALKEY_PASSWORD:
+        VALKEY_URL = (
+            f"redis://:{VALKEY_PASSWORD}@{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
         )
     else:
-        REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DATABASE}"
+        VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
 else:
-    REDIS_URL = env.str("REDIS_URL", "redis://redis:6379/0")
-REDIS_RETRY = env.bool("REDIS_RETRY", True)
-REDIS_MAX_CONNECTIONS = env.int("REDIS_MAX_CONNECTIONS", 100)
-CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", REDIS_URL)
+    VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
+VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
+VALKEY_MAX_CONNECTIONS = env.int(
+    "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
+)
+CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", VALKEY_URL)
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     "fanout_prefix": True,
     "fanout_patterns": True,
-    "retry_on_timeout": REDIS_RETRY,
-    "max_connections": REDIS_MAX_CONNECTIONS,
+    "retry_on_timeout": VALKEY_RETRY,
+    "max_connections": VALKEY_MAX_CONNECTIONS,
 }
-CELERY_REDIS_RETRY_ON_TIMEOUT = REDIS_RETRY
-CELERY_REDIS_MAX_CONNECTIONS = REDIS_MAX_CONNECTIONS
+CELERY_REDIS_RETRY_ON_TIMEOUT = VALKEY_RETRY
+CELERY_REDIS_MAX_CONNECTIONS = VALKEY_MAX_CONNECTIONS
 if CELERY_BROKER_URL.startswith("sentinel"):
     CELERY_BROKER_TRANSPORT_OPTIONS["master_name"] = env.str(
         "CELERY_BROKER_MASTER_NAME", "mymaster"
@@ -527,7 +529,7 @@ if CELERY_BROKER_URL.startswith("sentinel"):
 IS_LOAD_TEST = env("IS_LOAD_TEST")
 # GlitchTip doesn't require a celery result backend
 if IS_LOAD_TEST:
-    CELERY_RESULT_BACKEND = REDIS_URL
+    CELERY_RESULT_BACKEND = VALKEY_URL
 if socket_timeout := env.int("CELERY_BROKER_SOCKET_TIMEOUT", None):
     CELERY_BROKER_TRANSPORT_OPTIONS["socket_timeout"] = socket_timeout
 if broker_sentinel_password := env.str("CELERY_BROKER_SENTINEL_KWARGS_PASSWORD", None):
@@ -560,17 +562,18 @@ if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
     }
-else:  # Default to REDIS when unset
+else:  # Default to VALKEY when unset
     CACHES = {
         "default": {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": REDIS_URL,
-            "PARSER_CLASS": "redis.connection.HiredisParser",
+            "BACKEND": "django_valkey.cache.ValkeyCache",
+            # "BACKEND": "django_valkey.async_cache.cache.AsyncValkeyCache",
+            "LOCATION": VALKEY_URL,
             "OPTIONS": {
+                "COMPRESSOR": "django_valkey.compressors.lz4.Lz4Compressor",
                 "CONNECTION_POOL_KWARGS": {
-                    "retry_on_timeout": REDIS_RETRY,
-                    "max_connections": REDIS_MAX_CONNECTIONS,
-                }
+                    "retry_on_timeout": VALKEY_RETRY,
+                    "max_connections": VALKEY_MAX_CONNECTIONS,
+                },
             },
         }
     }
@@ -587,7 +590,7 @@ if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
         raise ImproperlyConfigured(
             "Invalid cache redis sentinel url, format is host:port,host2:port2,..."
         ) from err
-    DJANGO_REDIS_CONNECTION_FACTORY = "django_redis.pool.SentinelConnectionFactory"
+    DJANGO_VALKEY_CONNECTION_FACTORY = "django_valkey.pool.SentinelConnectionFactory"
     CACHES["default"]["OPTIONS"]["SENTINELS"] = SENTINELS
 if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
     CACHES["default"]["OPTIONS"]["SENTINEL_KWARGS"] = {
@@ -733,7 +736,9 @@ if MICROSOFT_TENANT := env.str("SOCIALACCOUNT_PROVIDERS_microsoft_TENANT", None)
     SOCIALACCOUNT_PROVIDERS["microsoft"] = {"TENANT": MICROSOFT_TENANT}
 
 ENABLE_USER_REGISTRATION = env.bool("ENABLE_USER_REGISTRATION", True)
-ENABLE_SOCIAL_APPS_USER_REGISTRATION = env.bool("ENABLE_SOCIAL_APPS_USER_REGISTRATION", ENABLE_USER_REGISTRATION)
+ENABLE_SOCIAL_APPS_USER_REGISTRATION = env.bool(
+    "ENABLE_SOCIAL_APPS_USER_REGISTRATION", ENABLE_USER_REGISTRATION
+)
 ENABLE_ORGANIZATION_CREATION = env.bool(
     "ENABLE_OPEN_USER_REGISTRATION", env.bool("ENABLE_ORGANIZATION_CREATION", False)
 )
@@ -825,7 +830,7 @@ if CELERY_TASK_ALWAYS_EAGER:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
-CACHE_IS_REDIS = CACHES["default"]["BACKEND"] == "django_redis.cache.RedisCache"
+CACHE_IS_VALKEY = "valkey" in CACHES["default"]["BACKEND"]
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"
