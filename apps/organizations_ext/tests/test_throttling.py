@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from asgiref.sync import async_to_sync
 from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from freezegun import freeze_time
@@ -75,6 +76,15 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
         self.assertEqual(len(mail.outbox), 2)
+
+    def test_bypass_organization_throttle(self):
+        """Ensure bypassing the check org throttle cache works"""
+        check_organization_throttle(self.organization.id)
+        self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))
+        cache.clear()
+        check_organization_throttle(self.organization.id, True)
+        self.assertFalse(cache.get(f"org-throttle-{self.organization.id}"))
+        cache.clear()
 
     def test_check_all_organizations_throttle(self):
         org = self.organization

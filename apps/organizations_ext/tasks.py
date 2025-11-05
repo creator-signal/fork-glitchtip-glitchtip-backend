@@ -6,8 +6,8 @@ from .models import Organization
 
 
 @shared_task
-def check_organization_throttle(organization_id: int):
-    if not cache.add(f"org-throttle-{organization_id}", True):
+def check_organization_throttle(organization_id: int, bypass_cache: bool = False):
+    if not bypass_cache and not cache.add(f"org-throttle-{organization_id}", True):
         return  # Recent check already performed
 
     org = (
