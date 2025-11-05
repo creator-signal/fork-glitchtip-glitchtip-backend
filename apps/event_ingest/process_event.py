@@ -19,7 +19,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, Greatest
 from django.db.utils import IntegrityError
 from django.utils import timezone
-from django_redis import get_redis_connection
+from django_valkey import get_valkey_connection
 from ninja import Schema
 from user_agents import parse
 
@@ -821,9 +821,9 @@ def process_issue_events(messages: list[IssueTaskMessage]):
 
     update_issues(processing_events)
 
-    if settings.CACHE_IS_REDIS:
+    if settings.CACHE_IS_VALKEY:
         # Add set of issue_ids for alerts to process later
-        with get_redis_connection("default") as con:
+        with get_valkey_connection("default") as con:
             if (
                 con.sadd(
                     ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
@@ -831,7 +831,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
                 > 0
             ):
                 # Set a long expiration time when a key is added
-                # We want all keys to have a long "sanity check" TTL to avoid redis out
+                # We want all keys to have a long "sanity check" TTL to avoid valkey out
                 # of memory errors (we can't ensure end users use all keys lru eviction)
                 con.expire(ISSUE_IDS_KEY, 3600)
 

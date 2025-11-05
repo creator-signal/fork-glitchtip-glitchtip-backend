@@ -4,7 +4,7 @@ from celery import shared_task
 from django.conf import settings
 from django.db.models import Count
 from django.utils import timezone
-from django_redis import get_redis_connection
+from django_valkey import get_valkey_connection
 
 from apps.issue_events.models import Issue
 
@@ -31,12 +31,12 @@ def process_event_alerts():
     now = timezone.now()
 
     issue_ids: list[int] | None = None
-    # Support not having redis, in theory
-    if settings.CACHE_IS_REDIS:
+    # Support not having valkey, in theory
+    if settings.CACHE_IS_VALKEY:
         # Note all recent issue_ids at ingest time. Then we can filter by them here.
         issue_ids = [
             int(x)
-            for x in get_redis_connection("default").eval(LUA_SCRIPT, 1, ISSUE_IDS_KEY)
+            for x in get_valkey_connection("default").eval(LUA_SCRIPT, 1, ISSUE_IDS_KEY)
         ]
 
     project_alerts = ProjectAlert.objects.filter(

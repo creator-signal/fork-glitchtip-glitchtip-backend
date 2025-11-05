@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db.models import F, Q
 from django.utils import timezone
-from django_redis import get_redis_connection
+from django_valkey import get_valkey_connection
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
@@ -82,7 +82,7 @@ def dispatch_checks():
     """
     now = timezone.now()
     try:
-        with get_redis_connection() as con:
+        with get_valkey_connection() as con:
             tick = con.incr(UPTIME_COUNTER_KEY)
             if tick >= UPTIME_TICK_EXPIRE:
                 con.delete(UPTIME_COUNTER_KEY)
