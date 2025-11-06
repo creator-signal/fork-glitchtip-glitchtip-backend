@@ -1,5 +1,6 @@
 x-environment: &default-environment
   DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+  VALKEY_URL: redis://valkey:6379  # Set to empty string to disable valkey
   SECRET_KEY: change_me
   ENABLE_ORGANIZATION_CREATION: "true"
   ENABLE_TEST_API: "true"
@@ -14,7 +15,7 @@ x-environment: &default-environment
 
 x-depends_on: &default-depends_on
   - postgres
-  - redis
+  - valkey
 x-volumes: &default-volumes
   - .:/code
 services:
@@ -22,7 +23,7 @@ services:
     image: postgres:18
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
-  redis:
+  valkey:
     image: valkey/valkey:9
   web:
     # Uncomment for breakpoint
@@ -45,3 +46,8 @@ services:
     depends_on: *default-depends_on
     volumes: *default-volumes
     environment: *default-environment
+    # Work around https://github.com/celery/celery/issues/8306
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
