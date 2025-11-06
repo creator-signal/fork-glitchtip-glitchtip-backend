@@ -1,9 +1,11 @@
 """
 All-in-one GlitchTip process
-Do not scale this beyond 1 instance. Instead use bin/run-* scripts
+Fine to scale beyond 1 instance
+Larger instances should consider dedicated resources, using bin/run-* scripts
 """
 
 import contextlib
+import logging
 import os
 import signal
 import threading
@@ -11,12 +13,18 @@ import time
 
 import django
 import uvicorn
+from django.conf import settings
 from django.core.management import call_command
+from django.db import connections
 
 from glitchtip.celery import app
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "glitchtip.settings")
 django.setup()
+log = logging.getLogger(__name__)
+
+
+CELERY_BEAT_LOCK_ID = 4724754730  # A random unique number for GlitchTip
 
 
 class Server(uvicorn.Server):
@@ -59,7 +67,13 @@ def run_celery_worker(stop_event: threading.Event):
 
 
 def run_celery_beat():
-    app.Beat().run()
+    # Get a lock to ensure only one instance of Celery Beat runs at a time
+    connection = connections.create_connection("default")
+    connection.autocommit = True
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT pg_advisory_lock({CELERY_BEAT_LOCK_ID})")
+        log.info("Lock acquired. Starting Celery Beat...")
+    app.Beat().run(schedule="/tmp/celerybeat-schedule")
 
 
 def run_django_server(stop_event: threading.Event):
@@ -79,6 +93,8 @@ def run_django_server(stop_event: threading.Event):
 
 def run_init():
     call_command("migrate", no_input=True, skip_checks=True)
+    if "django.contrib.sessions" in settings.INSTALLED_APPS:
+        call_command("createcachetable")
 
 
 def run_pgpartition(stop_event: threading.Event):
