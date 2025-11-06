@@ -513,13 +513,20 @@ VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
 VALKEY_MAX_CONNECTIONS = env.int(
     "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
 )
-CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", VALKEY_URL)
-CELERY_BROKER_TRANSPORT_OPTIONS = {
-    "fanout_prefix": True,
-    "fanout_patterns": True,
-    "retry_on_timeout": VALKEY_RETRY,
-    "max_connections": VALKEY_MAX_CONNECTIONS,
-}
+db = DATABASES["default"]
+# Use Specified broker url, valkey url, or fallback to postgresql
+CELERY_BROKER_URL = env.str(
+    "CELERY_BROKER_URL",
+    VALKEY_URL
+    or f"sqlalchemy+postgresql+psycopg://{db['USER']}:{db['PASSWORD']}@{db['HOST']}:{db['PORT']}/{db['NAME']}",
+)
+if VALKEY_URL or "valkey" in CELERY_BROKER_URL:
+    CELERY_BROKER_TRANSPORT_OPTIONS = {
+        "fanout_prefix": True,
+        "fanout_patterns": True,
+        "retry_on_timeout": VALKEY_RETRY,
+        "max_connections": VALKEY_MAX_CONNECTIONS,
+    }
 CELERY_REDIS_RETRY_ON_TIMEOUT = VALKEY_RETRY
 CELERY_REDIS_MAX_CONNECTIONS = VALKEY_MAX_CONNECTIONS
 if CELERY_BROKER_URL.startswith("sentinel"):
@@ -562,11 +569,10 @@ if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
     }
-else:  # Default to VALKEY when unset
+elif VALKEY_URL:
     CACHES = {
         "default": {
             "BACKEND": "django_valkey.cache.ValkeyCache",
-            # "BACKEND": "django_valkey.async_cache.cache.AsyncValkeyCache",
             "LOCATION": VALKEY_URL,
             "OPTIONS": {
                 "COMPRESSOR": "django_valkey.compressors.lz4.Lz4Compressor",
@@ -577,6 +583,14 @@ else:  # Default to VALKEY when unset
             },
         }
     }
+else:  # Fallback to database cache
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+        }
+    }
+    INSTALLED_APPS.append("django.contrib.sessions")
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
     try:
         # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
@@ -596,9 +610,9 @@ if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
     CACHES["default"]["OPTIONS"]["SENTINEL_KWARGS"] = {
         "password": cache_sentinel_password
     }
+if "valkey" in CACHES["default"]["BACKEND"]:
+    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
-
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
 # Password validation
