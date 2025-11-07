@@ -1954,7 +1954,7 @@ wheels = [
 
 [[package]]
 name = "locust"
-version = "2.42.1"
+version = "2.42.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "configargparse" },
@@ -1972,18 +1972,17 @@ dependencies = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "pyzmq" },
     { name = "requests" },
-    { name = "setuptools" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
     { name = "werkzeug" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/da/6108cb1b5be2ede0f9501bed5a9e1b86f6c4cffe66e18cab1af66aca713a/locust-2.42.1.tar.gz", hash = "sha256:4510dfa92213a9b4965d4a7a9aa40f105b6f886695bd27655cd3a5ba13040a6d", size = 1416504, upload-time = "2025-10-27T20:49:16.964Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/44/cc8c2a79d5f8456fb8b04e607e79bf79fad91c17cf32f189baa2eccf2ac6/locust-2.42.2.tar.gz", hash = "sha256:bbb4da7e1ce41799158c3e77ec7f64c7a754f50ae63ec772d57fc4440775541e", size = 1416428, upload-time = "2025-11-06T10:31:02.776Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/84/d77612e9d2a8c03261c5e31335695ee2c1abf41c45bc483df5130b7d6548/locust-2.42.1-py3-none-any.whl", hash = "sha256:747085a2324f37164594c8063a1c6f3cdef870eea2588710361b45d5e5598e1e", size = 1435190, upload-time = "2025-10-27T20:49:14.268Z" },
+    { url = "https://files.pythonhosted.org/packages/96/dd/71b999cc9f23b0b657e273984dcb7ef1d829d2c8c8696c1af7f08b534ddc/locust-2.42.2-py3-none-any.whl", hash = "sha256:6596c99e9208284ae12c8d7830a360e8336f9f29bac17c80dfa4f89c30abe950", size = 1435143, upload-time = "2025-11-06T10:31:00.086Z" },
 ]
 
 [[package]]
 name = "locust-cloud"
-version = "1.27.12"
+version = "1.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "configargparse" },
@@ -1992,9 +1991,9 @@ dependencies = [
     { name = "python-engineio" },
     { name = "python-socketio", extra = ["client"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/df/40/5c640da49e70cdf6de761aba8838aab2fe301bb46e307ccf7d49a56d0d24/locust_cloud-1.27.12.tar.gz", hash = "sha256:d226fb74a1fdc9d3ed319ccbf328897310a2e04160ed31714322485531ad54e4", size = 457015, upload-time = "2025-10-31T11:44:35.544Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/11/c9b8ebef10a5dd3df11ebf371e1defddbf123cd798f2010dfaeece03c642/locust_cloud-1.28.1.tar.gz", hash = "sha256:c010a80dbd26fbd791a9c1202c63c59ddb96e9f3cc4ff5af48a9ee858057a56c", size = 457093, upload-time = "2025-11-06T11:26:13.558Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/72/be569b64324cda421a3fa1d7a4f7d00fe5a4bfb7c97011031065ca929a3a/locust_cloud-1.27.12-py3-none-any.whl", hash = "sha256:a7b9941b77ebfd99c765570885c3aa5e3e58ad5161d1799aa05a35f670fa51e3", size = 413050, upload-time = "2025-10-31T11:44:34.299Z" },
+    { url = "https://files.pythonhosted.org/packages/86/ca/9439688ed80ec97ff292e01863cca2bd1c27fc0acd40e6f8751edb0ad6d6/locust_cloud-1.28.1-py3-none-any.whl", hash = "sha256:fadfd423dd83057b96c4332e8fdb94ccacaecbb6b8ae837212c42276b8b5c22e", size = 413154, upload-time = "2025-11-06T11:26:12.068Z" },
 ]
 
 [[package]]
