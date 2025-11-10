@@ -230,8 +230,15 @@ class BrotliDecoder(StreamingDecompressorBase):
         return brotli.Decompressor()
 
     def _decompress_chunk(self, chunk):
+        # Brotli process allows setting a buffer limit, to prevent memory spikes
+        # Without this, we can see near 1GB memory spikes for a single request.
+        max_allowed_size = settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE
+        max_chunk_output = max_allowed_size - self.total_decompressed
+        if max_chunk_output < 0:
+            max_chunk_output = 0
+
         # Brotli process() handles internal state/buffering
-        return self.decompressor.process(chunk)
+        return self.decompressor.process(chunk, output_buffer_limit=max_chunk_output)
 
     def _flush_decompressor(self):
         # Brotli requires processing empty bytes at EOF to flush
