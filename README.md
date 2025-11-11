@@ -35,10 +35,13 @@ See [API Documentation](https://app.glitchtip.com/api/docs)
 ## Run local dev environment
 
 1. Ensure docker and docker-compose are installed
-2. `docker compose up`
-3. `docker compose run --rm web ./manage.py migrate`
+2. Execute `docker compose up` (or `make start`)
+3. Execute `docker compose run --rm web ./manage.py migrate` (or `make migrate`)
 
-Run tests with `docker compose run --rm web ./manage.py test`
+Run tests with `docker compose run --rm web ./manage.py test` (or `make test`) and see the logs with
+`docker compose logs -ft` (or `make logs`).
+
+Execute `make help` for more shortcuts.
 
 ### Run HTTPS locally for testing FIDO2 keys
 
@@ -48,14 +51,20 @@ Run tests with `docker compose run --rm web ./manage.py test`
 
 ### Run with advanced partitioning
 
-Using pg_partman requires the extension to be installed in postgres. `compose.part.yml` offers an alternative image. Swtiching between advanced and default partitioning is not supported.
+Using [`pg_partman`](https://github.com/pgpartman/pg_partman) requires the extension to be installed in postgres.
+`compose.part.yml` offers an alternative image. Switching between advanced and default partitioning is not supported.
 
-`docker compose -f compose.yml -f compose.part.yml up`
+Execute the containers by running:
 
-This automatically configures pg_partman but you can update it manually with `./manage.py setup_advanced_partitions`.
+```shell
+docker compose -f compose.yml -f compose.part.yml up
+# or: make partman-start
+```
 
-Default partitioning uses DATE partitions managed by Django.
-Advanced partitioning uses nested ORG_ID HASH > DATE partitions managed by pg_partman.
+This automatically configures `pg_partman` but you can update it manually with `./manage.py setup_advanced_partitions`.
+
+Default partitioning uses `DATE` partitions managed by Django. Advanced partitioning uses nested `ORG_ID HASH > DATE`
+partitions managed by `pg_partman`.
 
 ### VS Code (Optional)
 
@@ -69,27 +78,34 @@ VS Code can do type checking and type inference. However, it requires setting up
 
 ### Load testing
 
-First set the env var IS_LOAD_TEST to true in compose.yml
+We use [Locust](https://locust.io/) to load test. It's built into the dev dependencies.
 
-Locust is built into the dev dependencies. To run with Locust run
-`docker compose -f compose.yml -f compose.locust.yml up`
+First, set the env var `IS_LOAD_TEST` to true in `compose.yml`, then run:
 
-Now go to localhost:8089 to run the test.
+```shell
+docker compose -f compose.yml -f compose.locust.yml up
+# or: make locust-start
+```
 
-Locust will not be installed to production docker images and cannot be run from them.
+Now go to [localhost:8089](http://localhost:8089/) to run the test.
+
+> Note: Locust will not be installed to production docker images and cannot be run from them.
+
 
 ### Memory profiling
 
 Use memray to profile. For example we can profile celery beat (bin/run-beat.sh) with
 
-`exec memray run /usr/local/bin/celery -A glitchtip beat -s /tmp/celerybeat-schedule -l info --pidfile=`
+```shell
+exec memray run /usr/local/bin/celery -A glitchtip beat -s /tmp/celerybeat-schedule -l info --pidfile=
+```
 
 Then run `memray flamegraph file.bin` on the above file output.
 
 ### Observability metrics with Prometheus
 
-1. Edit monitoring/prometheus/prometheus.yml and set credentials to a GlitchTip auth token
-2. `docker compose -f compose.yml -f compose.metrics.yml up`
+1. Edit `monitoring/prometheus/prometheus.yml` and set credentials to a GlitchTip auth token
+2. Execute `docker compose -f compose.yml -f compose.metrics.yml up`
 
 # GCP Logging
 

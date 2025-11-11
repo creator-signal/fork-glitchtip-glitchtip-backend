@@ -24,15 +24,15 @@ We are not a Sentry fork. The older open source Sentry project had a vast code b
 
 - Use community solutions like django-ninja or Django Organizations over custom built code.
 - Prefer simple over complex - it's better to have less features that are more reliable and easier to maintain. Postgres full text search is a good enough and we do not wish to build a custom search engine.
-- Performance with purpose. While we prefer simple code, it must perform up to it's task. A solution that is too slow isn't simple. It's a dead end requiring rewrite. High throughput event ingest is an example of when this is important. 
+- Performance with purpose. While we prefer simple code, it must perform up to it's task. A solution that is too slow isn't simple. It's a dead end requiring rewrite. High throughput event ingest is an example of when this is important.
 - Economical over completeness. Make running GlitchTip as easy and simple as possible, especially for small and medium sized projects. Be wary of introducing additional external dependencies. The entire project must be maintained on a budget of 4 person-hours per week. When introducing a large new feature, offer to help with maintenance in addition.
 
-GlitchTip backend is built with
+GlitchTip backend is built with:
 
-- Django
-- Celery background task runner
-- django-ninja/Pydantic for async views
-- mypy for types
+- [Django](https://www.djangoproject.com/)
+- [Celery background task runner](https://docs.celeryq.dev/en/stable/)
+- [django-ninja/Pydantic](https://django-ninja.dev/) for async views
+- [mypy](https://mypy-lang.org/) for types
 
 Avoid:
 
@@ -40,7 +40,8 @@ Avoid:
 
 ## Formatting
 
-Use ruff and mypy. Use an editor plugin or run `ruff check glitchtip/ apps/`. Add --fix to auto fix.
+Use ruff and mypy. Use an editor plugin or run `ruff check glitchtip/ apps/`. Add --fix to auto fix. The shortcuts
+`make lint` and `make lint-check` are also provided.
 
 ## Terms
 
@@ -54,11 +55,11 @@ Use ruff and mypy. Use an editor plugin or run `ruff check glitchtip/ apps/`. Ad
 
 This section describes the idealized approach to coding GlitchTip. You may notice inconsistencies.
 
-- /glitchtip - Django app configuration and select number of globally shared code such as startup scripts, pagination classes, asgi, settings, etc.
-- /apps - All Django apps go here. These apps follow current best practices.
-- /apps/event_ingest - Accepts new issue and transaction events
-- /apps/issue_events - Issue event API and models
-- /apps/shared - Shared code between apps. For example, a Schema that is shared between issue_events and event_ingest
+- `/glitchtip` - Django app configuration and select number of globally shared code such as startup scripts, pagination classes, asgi, settings, etc.
+- `/apps` - All Django apps go here. These apps follow current best practices.
+- `/apps/event_ingest` - Accepts new issue and transaction events
+- `/apps/issue_events` - Issue event API and models
+- `/apps/shared` - Shared code between apps. For example, a Schema that is shared between issue_events and event_ingest
 
 ### Legacy Sentry SDK Client support
 
