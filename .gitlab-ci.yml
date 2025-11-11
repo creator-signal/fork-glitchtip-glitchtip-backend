@@ -67,7 +67,7 @@ lint:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
 build:
-  image: docker:28
+  image: docker:29
   rules:
     # Exclude merge requests and scheduled execution.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_PIPELINE_SOURCE == "schedule"
@@ -75,7 +75,7 @@ build:
     # Run build only on protected branches and tags (master or v0.0.0).
     - if: $CI_COMMIT_REF_PROTECTED
   services:
-    - docker:28-dind
+    - docker:29-dind
   script:
     - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN registry.gitlab.com
     - docker build -t ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-} --build-arg IS_CI="True" .
@@ -90,7 +90,7 @@ buildx:
       - buildx
     expire_in: 1 hour
   services:
-    - docker:28-dind
+    - docker:29-dind
   script:
     - export DOCKER_BUILDKIT=1
     - git clone https://github.com/docker/buildx.git ./docker-buildx
@@ -101,11 +101,11 @@ buildx:
     - if: $CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/
 
 build_arm_x86:
-  image: docker:28
+  image: docker:29
   needs:
     - buildx
   services:
-    - docker:28-dind
+    - docker:29-dind
   before_script:
     - mkdir -p ~/.docker/cli-plugins
     - mv buildx ~/.docker/cli-plugins/docker-buildx
