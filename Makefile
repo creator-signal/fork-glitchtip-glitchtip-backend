@@ -17,7 +17,7 @@ clean: stop				# Stop and clean orphan containers
 	$(COMPOSE) down -v --remove-orphans
 
 dbshell: 				# Connect to database shell using `web` container
-	$(COMPOSE_EXEC) web python manage.py dbshell
+	$(COMPOSE_EXEC) postgres psql postgres://postgres:postgres@127.0.0.1:5432/postgres
 
 help:					# List all make commands
 	@awk -F ':.*#' '/^[a-zA-Z_-]+:.*?#/ { printf "\033[36m%-15s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST) | sort
