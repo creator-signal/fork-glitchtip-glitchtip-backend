@@ -2,10 +2,10 @@
 
 from django.conf import settings
 import django.db.models.deletion
-import psql_partition.backend.migrations.operations.create_partitioned_model
-import psql_partition.manager.manager
-import psql_partition.models.partitioned
-import psql_partition.types
+import psqlextra.backend.migrations.operations.create_partitioned_model
+import psqlextra.manager.manager
+import psqlextra.models.partitioned
+import psqlextra.types
 from django.db import migrations, models
 
 from glitchtip.model_utils import TestDefaultPartition
@@ -29,7 +29,7 @@ CREATE_ADVANCED_PARTITION_SQL = """
 DROP_TABLE_SQL = 'DROP TABLE IF EXISTS "issue_events_issueaggregate";'
 
 base_operations = [
-    psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+    psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
         name="IssueAggregate",
         fields=[
             ("date", models.DateTimeField()),
@@ -65,12 +65,12 @@ base_operations = [
             "abstract": False,
         },
         partitioning_options={
-            "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
+            "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
             "key": ["date"],
         },
-        bases=(psql_partition.models.partitioned.PostgresPartitionedModel,),
+        bases=(psqlextra.models.partitioned.PostgresPartitionedModel,),
         managers=[
-            ("objects", psql_partition.manager.manager.PostgresManager()),
+            ("objects", psqlextra.manager.manager.PostgresManager()),
         ],
     ),
     TestDefaultPartition(

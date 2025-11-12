@@ -4,10 +4,10 @@ import django.core.validators
 import django.db.models.deletion
 import django_extensions.db.fields
 import glitchtip.model_utils
-import psql_partition.backend.migrations.operations.create_partitioned_model
-import psql_partition.manager.manager
-import psql_partition.models.partitioned
-import psql_partition.types
+import psqlextra.backend.migrations.operations.create_partitioned_model
+import psqlextra.manager.manager
+import psqlextra.models.partitioned
+import psqlextra.types
 import uuid
 from django.conf import settings
 from django.db import migrations, models
@@ -212,7 +212,7 @@ class Migration(migrations.Migration):
                 "unique_together": {("project", "date")},
             },
         ),
-        psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+        psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
             name="IssueEventProjectHourlyStatistic",
             fields=[
                 (
@@ -239,12 +239,12 @@ class Migration(migrations.Migration):
                 "unique_together": {("project", "date")},
             },
             partitioning_options={
-                "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
+                "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
                 "key": ["date"],
             },
-            bases=(psql_partition.models.partitioned.PostgresPartitionedModel,),
+            bases=(psqlextra.models.partitioned.PostgresPartitionedModel,),
             managers=[
-                ("objects", psql_partition.manager.manager.PostgresManager()),
+                ("objects", psqlextra.manager.manager.PostgresManager()),
             ],
         ),
         migrations.CreateModel(
@@ -274,7 +274,7 @@ class Migration(migrations.Migration):
                 "unique_together": {("project", "date")},
             },
             managers=[
-                ("objects", psql_partition.manager.manager.PostgresManager()),
+                ("objects", psqlextra.manager.manager.PostgresManager()),
             ],
         ),
         glitchtip.model_utils.TestDefaultPartition(
@@ -287,7 +287,7 @@ class Migration(migrations.Migration):
         migrations.DeleteModel(
             name="TransactionEventProjectHourlyStatistic",
         ),
-        psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+        psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
             name="TransactionEventProjectHourlyStatistic",
             fields=[
                 (
@@ -314,12 +314,12 @@ class Migration(migrations.Migration):
                 "unique_together": {("project", "date")},
             },
             partitioning_options={
-                "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
+                "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
                 "key": ["date"],
             },
-            bases=(psql_partition.models.partitioned.PostgresPartitionedModel,),
+            bases=(psqlextra.models.partitioned.PostgresPartitionedModel,),
             managers=[
-                ("objects", psql_partition.manager.manager.PostgresManager()),
+                ("objects", psqlextra.manager.manager.PostgresManager()),
             ],
         ),
         glitchtip.model_utils.TestDefaultPartition(

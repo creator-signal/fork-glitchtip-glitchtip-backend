@@ -229,7 +229,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.humanize",
-    "psql_partition",
+    "psqlextra",
     "django_prometheus",
     "allauth",
     "allauth.account",
@@ -472,7 +472,7 @@ if env.str("DATABASE_HOST", None):
         }
     )
 # Add other settings that apply to both methods.
-DATABASES["default"]["ENGINE"] = "psql_partition.backend"
+DATABASES["default"]["ENGINE"] = "psqlextra.backend"
 DATABASES["default"].setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
 DATABASES["default"].setdefault(
     "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)

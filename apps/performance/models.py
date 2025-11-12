@@ -3,8 +3,8 @@ from datetime import timedelta
 
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
+from psqlextra.models import PostgresPartitionedModel
+from psqlextra.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 

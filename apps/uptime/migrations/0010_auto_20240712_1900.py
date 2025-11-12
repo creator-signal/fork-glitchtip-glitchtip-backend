@@ -2,11 +2,11 @@
 
 import django.db.models.deletion
 import django.utils.timezone
-import psql_partition.backend.migrations.operations.add_default_partition
-import psql_partition.backend.migrations.operations.create_partitioned_model
-import psql_partition.manager.manager
-import psql_partition.models.partitioned
-import psql_partition.types
+import psqlextra.backend.migrations.operations.add_default_partition
+import psqlextra.backend.migrations.operations.create_partitioned_model
+import psqlextra.manager.manager
+import psqlextra.models.partitioned
+import psqlextra.types
 from django.db import migrations, models
 from glitchtip.model_utils import TestDefaultPartition
 
@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+        psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
             name="MonitorCheck",
             fields=[
                 (
@@ -92,12 +92,12 @@ class Migration(migrations.Migration):
                 ],
             },
             partitioning_options={
-                "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
+                "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
                 "key": ["start_check"],
             },
-            bases=(psql_partition.models.partitioned.PostgresPartitionedModel,),
+            bases=(psqlextra.models.partitioned.PostgresPartitionedModel,),
             managers=[
-                ("objects", psql_partition.manager.manager.PostgresManager()),
+                ("objects", psqlextra.manager.manager.PostgresManager()),
             ],
         ),
         TestDefaultPartition(

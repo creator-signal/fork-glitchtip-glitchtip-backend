@@ -875,17 +875,16 @@ wheels = [
 ]
 
 [[package]]
-name = "django-postgres-partition"
-version = "0.1.4"
+name = "django-postgres-extra"
+version = "2.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
-    { name = "psycopg" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/07/7a150f354b2108bbc937617e54e5827a95bfcc966ee596970cc7a9654fd1/django_postgres_partition-0.1.4.tar.gz", hash = "sha256:bf23b87e996916491006186ee761068238327a481df10d58ec3a414d6e43af1f", size = 70907, upload-time = "2025-06-26T13:48:35.678Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/b0/0275caa2ced7a3eae3ccbe7fefcc062374e76edfcd2bf882840069f08ea3/django_postgres_extra-2.0.9.tar.gz", hash = "sha256:9e47c436d033712d0e2611b8c1583566dd4f97700e5360001bf3623913a92046", size = 92055, upload-time = "2025-07-11T07:19:40.045Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/a0/5a9f2ceacc6e36bed539ab0093c9c77ef64214055ca9a5452454fb70d857/django_postgres_partition-0.1.4-py3-none-any.whl", hash = "sha256:fc9cf5d1a9c99fac8c69861654ae42769ebbe571476afc642d2ef77c024ab994", size = 84290, upload-time = "2025-06-26T13:48:34.435Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/0d/2e611d8977b6dad077296b6880e8ee2d7d320e55f834601c6ad5eb87b982/django_postgres_extra-2.0.9-py3-none-any.whl", hash = "sha256:0a4f9fd7f843e2ef5cfe7a291fcb883bd72d2ca8e4b369d0070866205e00b404", size = 90512, upload-time = "2025-07-11T07:19:39.035Z" },
 ]
 
 [[package]]
@@ -1331,7 +1330,7 @@ dependencies = [
     { name = "django-ninja" },
     { name = "django-ninja-cursor-pagination" },
     { name = "django-organizations" },
-    { name = "django-postgres-partition" },
+    { name = "django-postgres-extra" },
     { name = "django-prometheus" },
     { name = "django-storages", extra = ["azure", "boto3", "google"] },
     { name = "django-valkey", extra = ["libvalkey", "lz4", "msgpack"] },
@@ -1387,7 +1386,7 @@ requires-dist = [
     { name = "django-ninja", specifier = "~=1.4" },
     { name = "django-ninja-cursor-pagination", specifier = ">=0.1.0" },
     { name = "django-organizations", specifier = "~=2.3" },
-    { name = "django-postgres-partition", specifier = ">=0.1.4" },
+    { name = "django-postgres-extra", specifier = ">=2.0.9" },
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
     { name = "django-valkey", extras = ["libvalkey", "lz4", "msgpack"], specifier = ">=0.3.2" },
