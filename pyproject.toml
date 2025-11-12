@@ -39,9 +39,9 @@ dependencies = [
     "pydantic[email]~=2.11",
     "celery-batches>=0.10",
     "django-ninja-cursor-pagination>=0.1.0",
+    "django-postgres-partition>=0.1.4",
     "pyyaml>=6.0.2", # allauth openapi spec
     "django-valkey[libvalkey,lz4,msgpack]>=0.3.2",
-    "django-postgres-extra>=2.0.9",
 ]
 
 [tool.uv]

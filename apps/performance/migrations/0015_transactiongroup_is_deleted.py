@@ -3,10 +3,10 @@ import uuid
 from django.conf import settings
 from django.db import migrations, models
 import django.db.models.deletion
-import psqlextra.manager.manager
-import psqlextra.backend.migrations.operations.create_partitioned_model
-import psqlextra.models.partitioned
-import psqlextra.types
+import psql_partition.manager.manager
+import psql_partition.backend.migrations.operations.create_partitioned_model
+import psql_partition.models.partitioned
+import psql_partition.types
 from glitchtip.model_utils import TestDefaultPartition
 
 # --- SQL Definitions for the Advanced Path ---
@@ -66,7 +66,7 @@ always_run_operations = [
 
 # --- Define the operations for the simple path ---
 base_operations = [
-    psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+    psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
         name="TransactionEvent",
         fields=[
             (
@@ -118,16 +118,16 @@ base_operations = [
         ],
         options={"ordering": ["-start_timestamp"]},
         partitioning_options={
-            "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
+            "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
             "key": ["start_timestamp"],
         },
         bases=(
-            psqlextra.models.partitioned.PostgresPartitionedModel,
+            psql_partition.models.partitioned.PostgresPartitionedModel,
             models.Model,
         ),
     ),
     TestDefaultPartition(model_name="TransactionEvent", name="default"),
-    psqlextra.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+    psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
         name="TransactionGroupAggregate",
         fields=[
             (
@@ -176,11 +176,11 @@ base_operations = [
         ],
         options={"abstract": False},
         partitioning_options={
-            "method": psqlextra.types.PostgresPartitioningMethod["RANGE"],
+            "method": psql_partition.types.PostgresPartitioningMethod["RANGE"],
             "key": ["date"],
         },
         bases=(
-            psqlextra.models.partitioned.PostgresPartitionedModel,
+            psql_partition.models.partitioned.PostgresPartitionedModel,
             models.Model,
         ),
     ),
@@ -188,13 +188,13 @@ base_operations = [
     migrations.AlterModelManagers(
         name="transactionevent",
         managers=[
-            ("objects", psqlextra.manager.manager.PostgresManager()),
+            ("objects", psql_partition.manager.manager.PostgresManager()),
         ],
     ),
     migrations.AlterModelManagers(
         name="transactiongroupaggregate",
         managers=[
-            ("objects", psqlextra.manager.manager.PostgresManager()),
+            ("objects", psql_partition.manager.manager.PostgresManager()),
         ],
     ),
     # Django bug? makemigrations will try to alter it like this, which is nonsensible.

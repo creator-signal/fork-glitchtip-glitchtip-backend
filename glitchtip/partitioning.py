@@ -1,11 +1,11 @@
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
-from psqlextra.partitioning import (
+from psql_partition.partitioning import (
     PostgresCurrentTimePartitioningStrategy,
     PostgresPartitioningManager,
     PostgresTimePartitionSize,
 )
-from psqlextra.partitioning.config import PostgresPartitioningConfig
+from psql_partition.partitioning.config import PostgresPartitioningConfig
 
 from apps.issue_events.models import IssueAggregate, IssueEvent, IssueTag
 from apps.performance.models import TransactionEvent, TransactionGroupAggregate

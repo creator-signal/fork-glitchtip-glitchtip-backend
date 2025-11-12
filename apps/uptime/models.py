@@ -8,8 +8,8 @@ from django.db.models import OuterRef, Subquery
 from django.urls import reverse
 from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
-from psqlextra.models import PostgresPartitionedModel
-from psqlextra.types import PostgresPartitioningMethod
+from psql_partition.models import PostgresPartitionedModel
+from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import CreatedModel
 
