@@ -150,10 +150,18 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 200)
 
     def test_search(self):
+        issue_str = "apple sauce"
         issue = baker.make(
             "issue_events.Issue",
             project=self.project,
-            search_vector=SearchVector(Value("apple sauce")),
+            search_vector=SearchVector(Value(issue_str)),
+        )
+        baker.make(
+            "issue_events.IssueSearchIndex",
+            issue=issue,
+            organization=self.project.organization,
+            fts_document=issue_str,
+            pattern_text=issue_str,
         )
         event = baker.make("issue_events.IssueEvent", issue=issue)
         other_issue = baker.make("issue_events.Issue", project=self.project)
@@ -172,7 +180,7 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
-
+        breakpoint()
         res = self.client.get(self.list_url + "?query=" + event.id.hex)
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
@@ -201,6 +209,13 @@ class IssueAPITestCase(GlitchTestCase):
             project=self.project,
             title=issue_str,
             search_vector=SearchVector(Value(issue_str)),
+        )
+        baker.make(
+            "issue_events.IssueSearchIndex",
+            issue=issue,
+            organization=self.project.organization,
+            fts_document="",
+            pattern_text=issue_str,
         )
         res = self.client.get(self.list_url + "?query=is:unresolved f*o")
         self.assertContains(res, issue.title)

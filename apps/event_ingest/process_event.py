@@ -1,9 +1,8 @@
-import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 from operator import itemgetter
 from typing import Any, Literal
-from urllib.parse import ParseResult, urlparse
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
@@ -16,6 +15,7 @@ from django.db.models import (
     QuerySet,
     Value,
 )
+from django.db.models.fields import TextField
 from django.db.models.functions import Coalesce, Greatest
 from django.db.utils import IntegrityError
 from django.utils import timezone
@@ -28,12 +28,14 @@ from apps.alerts.models import Notification
 from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.environments.models import Environment, EnvironmentProject
+from apps.event_ingest.search_utils import build_fts_string, build_pattern_text_string
 from apps.issue_events.constants import MAX_TAG_LENGTH, EventStatus, LogLevel
 from apps.issue_events.models import (
     Issue,
     IssueEvent,
     IssueEventType,
     IssueHash,
+    IssueSearchIndex,
     TagKey,
     TagValue,
 )
@@ -61,12 +63,10 @@ from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
     CeleryIssueEvent,
     ErrorIssueEventSchema,
-    EventException,
     InterchangeTransactionEvent,
     IssueEventSchema,
     IssueTaskMessage,
     SourceMapImage,
-    ValueEventException,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
 
@@ -139,122 +139,114 @@ def _get_or_create_related_models(
     return releases, projects_with_data
 
 
-def get_search_vector(event: ProcessingEvent) -> str:
+def create_issue_from_event(
+    processing_event: ProcessingEvent,
+    project_id: int,
+    issue_defaults: dict,
+    processing_events: list[ProcessingEvent],
+):
     """
-    Get string for postgres search vector. The string must be short to ensure
-    performance.
+    Create a new Issue and its associated IssueSearchIndex record.
+    Handles race conditions where two workers attempt to create the same issue.
     """
-    parts: set[str] = set()
+    try:
+        with transaction.atomic():
+            issue = Issue.objects.create(
+                project_id=project_id,
+                **issue_defaults,
+            )
 
-    if title := event.title:
-        parts.add(_truncate_string(title, MAX_SEARCH_PART_LENGTH))
-    if transaction := event.transaction:
-        parts.add(_truncate_string(transaction, MAX_SEARCH_PART_LENGTH))
+            # Build search strings and create the associated IssueSearchIndex
+            fts_string = build_fts_string(processing_event)
+            pattern_string = build_pattern_text_string(processing_event)
+            IssueSearchIndex.objects.create(
+                issue=issue,
+                organization_id=issue.project.organization_id,
+                fts_document=SearchVector(Value(fts_string, output_field=TextField())),
+                pattern_text=pattern_string,
+            )
 
-    payload = event.payload
-    if request := payload.request:
-        # Simplify URL to keep concise
-        if url := request.url:
-            try:
-                parsed_url: ParseResult = urlparse(url)
-                truncated_path = _truncate_string(
-                    parsed_url.path, MAX_SEARCH_PART_LENGTH
-                )
-                scheme_netloc = ""
-                if parsed_url.scheme and parsed_url.netloc:
-                    scheme_netloc = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                elif parsed_url.netloc:  # Fallback
-                    scheme_netloc = parsed_url.netloc
-                if scheme_netloc or truncated_path:  # Only add if we have something
-                    simplified_url = f"{scheme_netloc}{truncated_path}"
-                    parts.add(_truncate_string(simplified_url, MAX_SEARCH_PART_LENGTH))
-            except ValueError:
-                parts.add(_truncate_string(url, MAX_SEARCH_PART_LENGTH))
+            # Create the IssueHash to prevent duplicates
+            new_issue_hash = IssueHash.objects.create(
+                issue=issue,
+                value=processing_event.issue_hash,
+                project_id=project_id,
+            )
 
-    # Add stacktrace filenames
-    filenames_to_add: list[str] = []
-    exception_values_list: list[EventException] | None = None
-    if (
-        isinstance(payload, ErrorIssueEventSchema)
-        and payload.exception
-        and isinstance(payload.exception, ValueEventException)
-    ):
-        exception_values_list = payload.exception.values
-
-    if exception_values_list:
-        processed_stacktraces_count = 0
-        for exc_data in exception_values_list:
-            if processed_stacktraces_count >= MAX_STACKTRACES_TO_PROCESS:
-                break
-            if not exc_data.stacktrace:
-                continue
-            frames_list = exc_data.stacktrace.frames
-            frames_from_this_stacktrace = 0
-            for frame in reversed(frames_list):
-                if frames_from_this_stacktrace >= MAX_FRAMES_PER_STACKTRACE:
-                    break
-                filename_val = frame.filename
-                if frame.filename:
-                    basename = _truncate_string(
-                        os.path.basename(str(filename_val)), MAX_FILENAME_LEN
-                    )
-                    if basename:
-                        filenames_to_add.append(basename)
-                        frames_from_this_stacktrace += 1
-
-            if frames_from_this_stacktrace > 0:
-                processed_stacktraces_count += 1
-
-    for fname in filenames_to_add[:MAX_TOTAL_FILENAMES]:
-        parts.add(fname)
-
-    final_vector_string_parts = sorted([p for p in parts if p])
-    final_vector_string = " ".join(final_vector_string_parts)
-
-    if len(final_vector_string) > MAX_VECTOR_STRING_SEGMENT_LEN:
-        # Try to cut at a space to avoid breaking words mid-lexeme
-        limit_idx = final_vector_string.rfind(" ", 0, MAX_VECTOR_STRING_SEGMENT_LEN)
-        if limit_idx == -1:  # No space found, hard truncate
-            final_vector_string = final_vector_string[:MAX_VECTOR_STRING_SEGMENT_LEN]
-        else:
-            final_vector_string = final_vector_string[:limit_idx]
-
-    return remove_bad_chars(final_vector_string)
+            # Update event in memory with the new issue ID
+            check_set_issue_id(
+                processing_events,
+                issue.project_id,
+                new_issue_hash.value,
+                issue.id,
+            )
+            processing_event.issue_id = issue.id
+            processing_event.issue_created = True
+    except IntegrityError:
+        # This occurs if another worker created the issue in a race condition.
+        # Fetch the existing issue_id and update the event in memory.
+        processing_event.issue_id = IssueHash.objects.get(
+            project_id=project_id, value=processing_event.issue_hash
+        ).issue_id
 
 
 def update_issues(processing_events: list[ProcessingEvent]):
     """
-    Update any existing issues based on new statistics
+    Update issues and their search indexes based on new statistics.
     """
-    issues_to_update: dict[int, IssueUpdate] = {}
-    for processing_event in processing_events:
-        issue_id = processing_event.issue_id
-        if processing_event.issue_created or not issue_id:
+    issue_updates: dict[int, IssueUpdate] = {}
+    search_updates: dict[int, dict] = {}
+
+    for event in processing_events:
+        issue_id = event.issue_id
+        if event.issue_created or not issue_id:
             continue
 
-        vector = get_search_vector(processing_event)
-        if issue_id in issues_to_update:
-            issues_to_update[issue_id].added_count += 1
-            issues_to_update[issue_id].search_vector += f" {vector}"
-            if issues_to_update[issue_id].last_seen < processing_event.received:
-                issues_to_update[issue_id].last_seen = processing_event.received
-        else:
-            issues_to_update[issue_id] = IssueUpdate(
-                last_seen=processing_event.received,
-                search_vector=vector,
+        # Aggregate updates for the main Issue table (count, last_seen)
+        if issue_id not in issue_updates:
+            issue_updates[issue_id] = IssueUpdate(
+                last_seen=event.received, organization_id=event.organization_id
             )
+        else:
+            issue_updates[issue_id].added_count += 1
+            if issue_updates[issue_id].last_seen < event.received:
+                issue_updates[issue_id].last_seen = event.received
 
-    for issue_id, value in issues_to_update.items():
+        # Aggregate text for the search index table
+        # For now, we only populate fts_document as part of the incremental move.
+        new_fts_string = build_fts_string(event)
+        if new_fts_string:
+            if issue_id not in search_updates:
+                # Store organization_id to later filter by the partition key.
+                # This assumes ProcessingEvent has access to organization_id.
+                search_updates[issue_id] = {
+                    "text_to_append": "",
+                    "organization_id": event.organization_id,
+                }
+            search_updates[issue_id]["text_to_append"] += f" {new_fts_string}"
+
+    # Perform update on main Issue table
+    for issue_id, value in issue_updates.items():
         Issue.objects.filter(id=issue_id).update(
             count=F("count") + value.added_count,
-            search_vector=PGAppendAndLimitTsVector(
-                F("search_vector"),
-                Value(value.search_vector),
-                Value(settings.SEARCH_MAX_LEXEMES),
-                Value("english"),
-            ),
-            last_seen=Greatest(F("last_seen"), value.last_seen),
+            last_seen=Greatest(F("last_seen"), Value(value.last_seen)),
         )
+
+    # Perform update on search index table
+    if search_updates:
+        # Note: This simple update assumes the IssueSearchIndex row already exists.
+        # Consider adding a more robust solution.
+        for issue_id, data in search_updates.items():
+            IssueSearchIndex.objects.filter(
+                issue_id=issue_id, organization_id=data["organization_id"]
+            ).update(
+                fts_document=PGAppendAndLimitTsVector(
+                    F("fts_document"),
+                    Value(data["text_to_append"]),
+                    Value(settings.SEARCH_MAX_LEXEMES),
+                    Value("english"),
+                )
+            )
 
 
 def generate_contexts(event: CeleryIssueEvent) -> Contexts:
@@ -763,32 +755,12 @@ def process_issue_events(messages: list[IssueTaskMessage]):
                     [project_id],
                 )
                 issue_defaults["short_id"] = cursor.fetchone()[0]
-            try:
-                with transaction.atomic():
-                    issue = Issue.objects.create(
-                        project_id=project_id,
-                        search_vector=SearchVector(
-                            Value(get_search_vector(processing_event))
-                        ),
-                        **issue_defaults,
-                    )
-                    new_issue_hash = IssueHash.objects.create(
-                        issue=issue,
-                        value=processing_event.issue_hash,
-                        project_id=project_id,
-                    )
-                    check_set_issue_id(
-                        processing_events,
-                        issue.project_id,
-                        new_issue_hash.value,
-                        issue.id,
-                    )
-                processing_event.issue_id = issue.id
-                processing_event.issue_created = True
-            except IntegrityError:
-                processing_event.issue_id = IssueHash.objects.get(
-                    project_id=project_id, value=processing_event.issue_hash
-                ).issue_id
+            create_issue_from_event(
+                processing_event,
+                project_id,
+                issue_defaults,
+                processing_events,
+            )
 
         hour_received = processing_event.received.replace(
             minute=0, second=0, microsecond=0

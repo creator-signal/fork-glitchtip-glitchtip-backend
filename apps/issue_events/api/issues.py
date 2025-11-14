@@ -1,5 +1,4 @@
 import re
-import shlex
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -32,7 +31,9 @@ from ..schema import (
     IssueTagSchema,
     StatsDetailSchema,
 )
+from ..filters import sort_options, filter_issue_list
 from ..tasks import delete_issue_task
+from ..schema import IssueFilters
 from . import router
 
 
@@ -138,125 +139,6 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
     obj.status = EventStatus.from_string(payload.status)
     await obj.asave()
     return obj
-
-
-RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")
-
-
-def relative_to_datetime(v: Any) -> datetime:
-    """
-    Allow relative terms like now or now-1h. Only 0 or 1 subtraction operation is permitted.
-
-    Accepts
-    - now
-    - - (subtraction)
-    - m (minutes)
-    - h (hours)
-    - d (days)
-    """
-    result = timezone.now()
-    if v == "now":
-        return result
-    if RELATIVE_TIME_REGEX.match(v):
-        spaces_stripped = v.replace(" ", "")
-        numbers = int(re.findall(r"\d+", spaces_stripped)[0])
-        if spaces_stripped[-1] == "m":
-            result -= timedelta(minutes=numbers)
-        if spaces_stripped[-1] == "h":
-            result -= timedelta(hours=numbers)
-        if spaces_stripped[-1] == "d":
-            result -= timedelta(days=numbers)
-        return result
-    return v
-
-
-RelativeDateTime = Annotated[datetime, BeforeValidator(relative_to_datetime)]
-
-
-class IssueFilters(Schema):
-    id__in: list[int] | None = Field(None, alias="id")
-    first_seen__gte: RelativeDateTime | None = Field(None, alias="start")
-    first_seen__lte: RelativeDateTime | None = Field(None, alias="end")
-    project__in: list[int] | None = Field(None, alias="project")
-    environment: list[str] | None = None
-    query: str | None = None
-
-
-sort_options = Literal[
-    "last_seen",
-    "first_seen",
-    "count",
-    "priority",
-    "-last_seen",
-    "-first_seen",
-    "-count",
-    "-priority",
-]
-
-
-def filter_issue_list(
-    qs: QuerySet,
-    filters: Query[IssueFilters],
-    sort: sort_options | None = None,
-    event_id: UUID | None = None,
-):
-    qs_filters = filters.dict(exclude_none=True)
-    query = qs_filters.pop("query", None)
-    if filters.environment:
-        qs_filters["issuetag__tag_key__key"] = "environment"
-        qs_filters["issuetag__tag_value__value__in"] = qs_filters.pop("environment")
-    if qs_filters:
-        qs = qs.filter(**qs_filters)
-
-    if event_id:
-        qs = qs.filter(issueevent__id=event_id)
-    elif query:
-        queries = shlex.split(query)
-        # First look for structured queries
-        for i, query in enumerate(queries):
-            query_part = query.split(":", 1)
-            if len(query_part) == 2:
-                query_name, query_value = query_part
-                query_value = query_value.strip('"')
-
-                if query_name == "is":
-                    qs = qs.filter(status=EventStatus.from_string(query_value))
-                elif query_name == "has":
-                    # Does not require distinct as we already have a group by from annotations
-                    qs = qs.filter(
-                        issuetag__tag_key__key=query_value,
-                    )
-                elif query_name == "level":
-                    qs = qs.filter(level=LogLevel.from_string(query_value))
-                else:
-                    qs = qs.filter(
-                        issuetag__tag_key__key=query_name,
-                        issuetag__tag_value__value=query_value,
-                    )
-            if len(query_part) == 1:
-                search_query = " ".join(queries[i:])
-                if "*" in search_query:
-                    qs = qs.filter(
-                        Q(title__ilike=f"%{search_query.replace('*', '%')}%")
-                        | Q(search_vector=search_query)
-                    )
-                else:
-                    qs = qs.filter(search_vector=search_query)
-                # Search queries must be at end of query string, finished when parsing
-                break
-
-    if sort:
-        if sort.endswith("priority"):
-            # Inspired by https://stackoverflow.com/a/43788975/443457
-            qs = qs.annotate(
-                priority=ExpressionWrapper(
-                    Log(10, F("count"))
-                    + Extract(F("last_seen"), "epoch") / Value(300000.0),
-                    output_field=FloatField(),
-                )
-            )
-        qs = qs.order_by(sort)
-    return qs
 
 
 @router.get(
