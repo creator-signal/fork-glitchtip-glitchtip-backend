@@ -116,21 +116,35 @@ build_arm_x86:
     - rm assets.zip
     - mv dist/glitchtip-frontend/browser/* dist/
     - rmdir dist/glitchtip-frontend/browser/
-    # Parse versions from tag (e.g., v5.0.1)
-    - VERSION=${CI_COMMIT_REF_NAME#*v}       # 5.0.1
-    - MINOR_VERSION=${VERSION%.*}       # 5.0
-    - MAJOR_VERSION=${VERSION%%.*}     # 5
-    # This line is single-quoted to prevent YAML from misinterpreting the colons
-    - 'echo "Building version $VERSION (Major: $MAJOR_VERSION, Minor: $MINOR_VERSION) for $CI_REGISTRY_IMAGE"'
+
+    # --- Updated Version Parsing ---
+    # Git tag (e.g., v5.0.1)
+    - VERSION_V_FULL=${CI_COMMIT_REF_NAME}
+    
+    # No-v versions (e.g., 5.0.1, 5.0, 5)
+    - VERSION_NO_V_FULL=${CI_COMMIT_REF_NAME#*v}
+    - VERSION_NO_V_MINOR=${VERSION_NO_V_FULL%.*}
+    - VERSION_NO_V_MAJOR=${VERSION_NO_V_FULL%%.*}
+    
+    # V-prefixed versions (e.g., v5.0, v5)
+    - VERSION_V_MINOR="v${VERSION_NO_V_MINOR}"
+    - VERSION_V_MAJOR="v${VERSION_NO_V_MAJOR}"
+
+    # Quoted to handle colons in echo
+    - 'echo "Building tags: latest, ${VERSION_NO_V_FULL}, ${VERSION_NO_V_MINOR}, ${VERSION_NO_V_MAJOR}, ${VERSION_V_FULL}, ${VERSION_V_MINOR}, ${VERSION_V_MAJOR}"'
+    
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
     - docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${MINOR_VERSION} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${MAJOR_VERSION} \
         -t ${DOCKER_CI_REGISTRY_IMAGE}:latest \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_FULL} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MINOR} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MAJOR} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_FULL} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MINOR} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MAJOR} \
         --build-arg IS_CI="True" \
-        --build-arg GLITCHTIP_VERSION=$VERSION \
+        --build-arg GLITCHTIP_VERSION=${VERSION_NO_V_FULL} \
         --build-arg COLLECT_STATIC="True" .
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
