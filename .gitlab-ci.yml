@@ -120,7 +120,8 @@ build_arm_x86:
     - VERSION=${CI_COMMIT_REF_NAME#*v}       # 5.0.1
     - MINOR_VERSION=${VERSION%.*}       # 5.0
     - MAJOR_VERSION=${VERSION%%.*}     # 5
-    - echo "Building version $VERSION (Major: $MAJOR_VERSION, Minor: $MINOR_VERSION) for $CI_REGISTRY_IMAGE"
+    # This line is single-quoted to prevent YAML from misinterpreting the colons
+    - 'echo "Building version $VERSION (Major: $MAJOR_VERSION, Minor: $MINOR_VERSION) for $CI_REGISTRY_IMAGE"'
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
     - docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
