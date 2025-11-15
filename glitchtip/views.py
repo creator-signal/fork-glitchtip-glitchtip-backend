@@ -9,12 +9,14 @@ from django.template.loader import render_to_string
 async def health(request):
     return HttpResponse("ok", content_type="text/plain")
 
+
 async def internal_health(request):
     """
     Internal health check in order to be API compatible with sentry servers deployed in self-hosted mode.
     """
-    
-    return JsonResponse({'healthy': {}, 'problems': [] })
+
+    return JsonResponse({"healthy": {}, "problems": []})
+
 
 def index(request, *args):
     if base_path := settings.FORCE_SCRIPT_NAME:

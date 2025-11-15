@@ -610,7 +610,12 @@ if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
     CACHES["default"]["OPTIONS"]["SENTINEL_KWARGS"] = {
         "password": cache_sentinel_password
     }
-if "valkey" in CACHES["default"]["BACKEND"]:
+CACHES["async"] = CACHES["default"].copy()
+if "redis" in CACHES["default"]["BACKEND"] or "valkey" in CACHES["default"]["BACKEND"]:
+    # django-valkey does not support sync + async connections
+    CACHES["async"]["BACKEND"] = "django_valkey.async_cache.cache.AsyncValkeyCache"
+    # Workaround valkey pool key collision bug
+    CACHES["async"]["LOCATION"] = CACHES["default"]["LOCATION"] + "#"
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
