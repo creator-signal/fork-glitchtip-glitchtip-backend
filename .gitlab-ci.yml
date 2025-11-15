@@ -116,12 +116,21 @@ build_arm_x86:
     - rm assets.zip
     - mv dist/glitchtip-frontend/browser/* dist/
     - rmdir dist/glitchtip-frontend/browser/
-    - VERSION=${CI_COMMIT_REF_NAME#*v}
-    - MINOR_VERSION=$(echo "$CI_COMMIT_REF_NAME" | sed 's/\.[^.]*$//')
-    - echo "Build version $VERSION ci registry image $CI_REGISTRY_IMAGE commit ref $CI_COMMIT_REF_NAME"
+    # Parse versions from tag (e.g., v5.0.1)
+    - VERSION=${CI_COMMIT_REF_NAME#*v}       # 5.0.1
+    - MINOR_VERSION=${VERSION%.*}       # 5.0
+    - MAJOR_VERSION=${VERSION%%.*}     # 5
+    - echo "Building version $VERSION (Major: $MAJOR_VERSION, Minor: $MINOR_VERSION) for $CI_REGISTRY_IMAGE"
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
-    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push -t ${DOCKER_CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME} -t ${DOCKER_CI_REGISTRY_IMAGE}:${MINOR_VERSION} -t ${DOCKER_CI_REGISTRY_IMAGE}:latest --build-arg IS_CI="True" --build-arg GLITCHTIP_VERSION=$VERSION --build-arg COLLECT_STATIC="True" .
+    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${MINOR_VERSION} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:${MAJOR_VERSION} \
+        -t ${DOCKER_CI_REGISTRY_IMAGE}:latest \
+        --build-arg IS_CI="True" \
+        --build-arg GLITCHTIP_VERSION=$VERSION \
+        --build-arg COLLECT_STATIC="True" .
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
