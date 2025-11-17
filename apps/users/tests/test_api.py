@@ -52,7 +52,9 @@ class UserRegistrationTestCase(TestCase):
             "email": "test2@example.com",
             "password": "hunter222",
         }
-        with override_settings(ENABLE_USER_REGISTRATION=False, ENABLE_SOCIAL_APPS_USER_REGISTRATION=True):
+        with override_settings(
+            ENABLE_USER_REGISTRATION=False, ENABLE_SOCIAL_APPS_USER_REGISTRATION=True
+        ):
             res = self.client.post(url, user1_data, content_type="application/json")
             self.assertEqual(res.status_code, 200)
 

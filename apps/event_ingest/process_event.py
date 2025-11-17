@@ -484,9 +484,9 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     """
     projects_to_update = {msg.project_id for msg in messages if msg.update_first_event}
     if projects_to_update:
-        Project.objects.filter(id__in=projects_to_update, first_event__isnull=True).update(
-            first_event=timezone.now()
-        )
+        Project.objects.filter(
+            id__in=projects_to_update, first_event__isnull=True
+        ).update(first_event=timezone.now())
 
     # Fetch any needed releases, environments, and whether there is a dif file association
     # Get unique release/environment for each project_id
@@ -1067,11 +1067,13 @@ def update_tags(processing_events: list[ProcessingEvent]):
 
 # Transactions
 def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
-    projects_to_update = {msg.project_id for msg in ingest_events if msg.update_first_event}
+    projects_to_update = {
+        msg.project_id for msg in ingest_events if msg.update_first_event
+    }
     if projects_to_update:
-        Project.objects.filter(id__in=projects_to_update, first_event__isnull=True).update(
-            first_event=timezone.now()
-        )
+        Project.objects.filter(
+            id__in=projects_to_update, first_event__isnull=True
+        ).update(first_event=timezone.now())
 
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)

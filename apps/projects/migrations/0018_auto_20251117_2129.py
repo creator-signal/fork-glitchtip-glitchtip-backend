@@ -6,9 +6,8 @@ from apps.shared.migration_utils import get_sql_content
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('projects', '0017_auto_20250627_1413'),
+        ("projects", "0017_auto_20250627_1413"),
     ]
 
     operations = [
