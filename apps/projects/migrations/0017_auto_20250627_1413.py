@@ -10,9 +10,4 @@ class Migration(migrations.Migration):
         ("projects", "0001_squashed_0016_auto_20250125_1733"),
     ]
 
-    operations = [
-        RunSQL(
-            sql=get_sql_content(__file__, "get_project_auth_info.sql"),
-            reverse_sql="DROP FUNCTION IF EXISTS get_project_auth_info(INTEGER, UUID);",
-        )
-    ]
+    operations = []

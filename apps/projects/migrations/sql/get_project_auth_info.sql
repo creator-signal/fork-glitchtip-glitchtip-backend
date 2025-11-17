@@ -7,7 +7,8 @@ RETURNS TABLE (
     organization_id INT,
     organization_is_accepting_events BOOLEAN,
     organization_event_throttle_rate SMALLINT,
-    organization_scrub_ip_addresses BOOLEAN
+    organization_scrub_ip_addresses BOOLEAN,
+    project_first_event TIMESTAMP WITH TIME ZONE
 )
 AS $$
 BEGIN
@@ -19,7 +20,8 @@ BEGIN
         "projects_project"."organization_id",
         "organizations_ext_organization"."is_accepting_events",
         "organizations_ext_organization"."event_throttle_rate",
-        "organizations_ext_organization"."scrub_ip_addresses"
+        "organizations_ext_organization"."scrub_ip_addresses",
+        "projects_project"."first_event"
     FROM
         "projects_project"
     INNER JOIN

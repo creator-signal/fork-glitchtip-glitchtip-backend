@@ -74,6 +74,7 @@ def event_store(
         organization_id=request.auth.organization_id,
         payload=payload.dict() | {"type": issue_type},
         received=timezone.now(),
+        update_first_event=request.auth.first_event is None,
     )
     task_result = ingest_event.delay(asdict(issue_event))
     result = {"event_id": payload.event_id.hex}
@@ -120,6 +121,7 @@ def event_security(
         organization_id=request.auth.organization_id,
         payload=event.dict(by_alias=True),
         received=timezone.now(),
+        update_first_event=request.auth.first_event is None,
     )
     ingest_event.delay(asdict(issue_event))
     return HttpResponse(status=201)

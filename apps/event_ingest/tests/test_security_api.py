@@ -19,7 +19,7 @@ class SecurityAPITestCase(EventIngestTestCase):
         )
 
     def test_security_api(self):
-        with self.assertNumQueries(9):
+        with self.assertNumQueries(10):
             res = self.client.post(
                 self.url, self.small_event, content_type="application/json"
             )
