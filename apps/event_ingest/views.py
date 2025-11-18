@@ -74,6 +74,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         # Should be caught by event_auth, but defensive check
         return JsonResponse({"detail": "Denied"}, status=403)
     request.auth = project  # Assuming event_auth returns the project object
+    update_first_event = project.first_event is None
     client_ip = get_ip_address(request)
 
     # Read and validate Envelope Header
@@ -183,6 +184,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         organization_id=project.organization_id,
                         payload=item.dict() | {"type": issue_type},
                         received=timezone.now(),
+                        update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
                         ingest_event.delay(asdict(interchange_event))
@@ -194,6 +196,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         organization_id=project.organization_id,  # Use project from auth
                         payload=item.dict(),
                         received=timezone.now(),
+                        update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
                         ingest_transaction.delay(asdict(interchange_event))

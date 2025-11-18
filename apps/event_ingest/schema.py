@@ -489,6 +489,7 @@ class InterchangeEvent(LaxIngestSchema):
     project_id: int
     organization_id: int
     received: datetime
+    update_first_event: bool = False
     payload: (
         IssueEventSchema
         | ErrorIssueEventSchema

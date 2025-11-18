@@ -21,6 +21,7 @@ class IngestTaskMessage:
     organization_id: int
     received: datetime
     payload: dict  # Presumed to be validated prior
+    update_first_event: bool
 
 
 @dataclass

@@ -1,6 +1,7 @@
 import math
 import random
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -31,6 +32,7 @@ class ProjectAuthInfo:
     scrub_ip_addresses: bool
     event_throttle_rate: int
     organization_id: int
+    first_event: datetime | None
     organization: OrganizationInfo
 
     @property
@@ -154,11 +156,12 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         event_throttle_rate=row[2],
         organization_id=row[3],
         organization=OrganizationInfo(
-            id=row[0],
+            id=row[3],
             is_accepting_events=row[4],
             event_throttle_rate=row[5],
             scrub_ip_addresses=row[6],
         ),
+        first_event=row[7],
     )
 
     if (
