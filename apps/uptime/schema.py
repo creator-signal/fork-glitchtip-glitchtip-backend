@@ -8,7 +8,7 @@ from django.core.validators import URLValidator
 from django.urls import reverse
 from ninja import ModelSchema
 from ninja.errors import ValidationError
-from pydantic import model_validator, ConfigDict
+from pydantic import ConfigDict, model_validator
 
 from glitchtip.schema import CamelSchema
 

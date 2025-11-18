@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from ninja import Schema
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from glitchtip.schema import CamelSchema
 

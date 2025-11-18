@@ -1,6 +1,5 @@
-from pydantic import ConfigDict
-
 from ninja import Schema
+from pydantic import ConfigDict
 
 
 class LaxIngestSchema(Schema):

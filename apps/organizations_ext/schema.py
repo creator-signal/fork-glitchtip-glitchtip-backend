@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from ninja import Field, ModelSchema
-from pydantic import EmailStr, ConfigDict
+from pydantic import ConfigDict, EmailStr
 
 from apps.users.schema import UserSchema
 from glitchtip.schema import CamelSchema

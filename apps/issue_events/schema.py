@@ -113,8 +113,6 @@ class Request(CamelSchema, BaseRequest):
         return None
 
 
-
-
 class RequestEntry(Schema):
     type: Literal["request"]
     data: Request

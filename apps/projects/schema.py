@@ -74,8 +74,6 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
         return obj.created
 
 
-
-
 class KeyRateLimit(CamelSchema):
     window: int
     count: int

@@ -1,7 +1,7 @@
 from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 
 from ninja import Field, Schema
-from pydantic import BeforeValidator, model_serializer, ConfigDict
+from pydantic import BeforeValidator, ConfigDict, model_serializer
 
 from .base import LaxIngestSchema
 
