@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from ninja import Field, ModelSchema, Schema
+from pydantic import ConfigDict
 
 from apps.organizations_ext.constants import OrganizationUserRole, Scopes
 from apps.organizations_ext.schema import OrganizationSchema
@@ -38,8 +39,7 @@ class TeamSchema(TeamSlugSchema):
     class Meta(TeamSlugSchema.Meta):
         fields = ["id", "slug"]
 
-    class Config(CamelSchema.Config):
-        coerce_numbers_to_str = True
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
 
 class TeamProjectSchema(TeamSchema):

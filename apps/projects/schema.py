@@ -73,8 +73,7 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     def resolve_date_created(obj: Project):
         return obj.created
 
-    class Config(CamelSchema.Config):
-        pass
+
 
 
 class KeyRateLimit(CamelSchema):

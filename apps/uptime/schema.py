@@ -8,7 +8,7 @@ from django.core.validators import URLValidator
 from django.urls import reverse
 from ninja import ModelSchema
 from ninja.errors import ValidationError
-from pydantic import model_validator
+from pydantic import model_validator, ConfigDict
 
 from glitchtip.schema import CamelSchema
 
@@ -105,8 +105,7 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "timeout",
         ]
 
-    class Config(CamelSchema.Config):
-        coerce_numbers_to_str = True
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     @staticmethod
     def resolve_is_up(obj):

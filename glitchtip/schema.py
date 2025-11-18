@@ -1,4 +1,5 @@
 from ninja import Schema
+from pydantic import ConfigDict
 
 
 def to_camel(string: str) -> str:
@@ -18,6 +19,7 @@ class CamelSchema(Schema):
     - foobar_100 > foobar100
     """
 
-    class Config(Schema.Config):
-        alias_generator = to_camel
-        populate_by_name = True
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )

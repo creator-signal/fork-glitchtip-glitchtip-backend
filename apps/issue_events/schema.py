@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from ninja import Field, ModelSchema, Schema
-from pydantic import computed_field
+from pydantic import ConfigDict, computed_field
 
 from apps.event_ingest.schema import CSPReportSchema
 from apps.projects.models import Project
@@ -27,10 +27,11 @@ from .utils import get_entries, to_camel_with_lower_id
 class ProjectReference(CamelSchema, ModelSchema):
     id: str
 
-    class Config:
+    model_config = ConfigDict(populate_by_name=True)
+
+    class Meta:
         model = Project
-        model_fields = ["platform", "slug", "name"]
-        populate_by_name = True
+        fields = ["platform", "slug", "name"]
 
     @staticmethod
     def resolve_id(obj: Project):
@@ -68,16 +69,19 @@ class IssueSchema(ModelSchema):
         if event_id := context["request"].matching_event_id:
             return event_id.hex
 
-    class Config(Schema.Config):
+    model_config = ConfigDict(
+        alias_generator=to_camel_with_lower_id,
+        coerce_numbers_to_str=True,
+        populate_by_name=True,
+    )
+
+    class Meta:
         model = Issue
-        model_fields = [
+        fields = [
             "title",
             "metadata",
             "culprit",
         ]
-        alias_generator = to_camel_with_lower_id
-        coerce_numbers_to_str = True
-        populate_by_name = True
 
 
 class IssueDetailSchema(IssueSchema):
@@ -108,8 +112,7 @@ class Request(CamelSchema, BaseRequest):
             )
         return None
 
-    class Config(CamelSchema.Config, BaseRequest.Config):
-        pass
+
 
 
 class RequestEntry(Schema):
@@ -144,10 +147,11 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     user: Any | None = None
     sdk: dict[str, Any] | None = None
 
-    class Config:
+    model_config = ConfigDict(populate_by_name=True)
+
+    class Meta:
         model = IssueEvent
-        model_fields = ["id", "type", "title"]
-        populate_by_name = True
+        fields = ["id", "type", "title"]
 
     @staticmethod
     def resolve_date_created(obj: IssueEvent):
@@ -192,10 +196,11 @@ class UserReportSchema(CamelSchema, ModelSchema):
     date_created: datetime
     user: str | None = None
 
-    class Config:
+    model_config = ConfigDict(populate_by_name=True)
+
+    class Meta:
         model = UserReport
-        model_fields = ["id", "name", "email", "comments"]
-        populate_by_name = True
+        fields = ["id", "name", "email", "comments"]
 
     @staticmethod
     def resolve_date_created(obj):
@@ -213,12 +218,13 @@ class UserReportSchema(CamelSchema, ModelSchema):
 class CommentUserSchema(CamelSchema, ModelSchema):
     id: str
 
-    class Config:
+    model_config = ConfigDict(populate_by_name=True)
+
+    class Meta:
         model = User
-        model_fields = [
+        fields = [
             "email",
         ]
-        populate_by_name = True
 
     @staticmethod
     def resolve_id(obj: User):
@@ -231,9 +237,9 @@ class CommentSchema(CamelSchema, ModelSchema):
     date_created: datetime
     user: CommentUserSchema | None
 
-    class Config:
+    class Meta:
         model = Comment
-        model_fields = ["id"]
+        fields = ["id"]
 
     @staticmethod
     def resolve_data(obj: Comment):
@@ -287,9 +293,9 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     extra: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
     user: EventUser | None = Field(validation_alias="data.user", default=None)
 
-    class Config:
+    class Meta:
         model = IssueEvent
-        model_fields = ["title", "transaction", "tags", "hashes"]
+        fields = ["title", "transaction", "tags", "hashes"]
 
     @staticmethod
     def resolve_timestamp(obj):
@@ -338,9 +344,10 @@ class StatsDetailSchema(Schema):
     stats_24h: list[list[int]] | None = Field(default=None, alias="24h")
     stats_14d: list[list[int]] | None = Field(default=None, alias="14d")
 
-    class Config(Schema.Config):
-        validate_by_alias = False
-        validate_by_name = True
+    model_config = ConfigDict(
+        validate_by_alias=False,
+        populate_by_name=True,
+    )
 
 
 class IssueStatsResponse(CamelSchema):
