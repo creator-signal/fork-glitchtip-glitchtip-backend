@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from ninja import Field, ModelSchema
-from pydantic import EmailStr
+from pydantic import ConfigDict, EmailStr
 
 from apps.users.schema import UserSchema
 from glitchtip.schema import CamelSchema
@@ -76,8 +76,7 @@ class OrganizationUserSchema(CamelSchema, ModelSchema):
         model = OrganizationUser
         fields = ["id"]
 
-    class Config(CamelSchema.Config):
-        coerce_numbers_to_str = True
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     @staticmethod
     def resolve_email(obj):

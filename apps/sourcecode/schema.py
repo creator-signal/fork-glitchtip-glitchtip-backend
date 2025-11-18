@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from ninja import Schema
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from glitchtip.schema import CamelSchema
 
@@ -32,5 +32,4 @@ class DebugSymbolBundleSchema(CamelSchema):
     )
     name: str = Field(validation_alias="file.name")
 
-    class Config(CamelSchema.Config):
-        coerce_numbers_to_str = True
+    model_config = ConfigDict(coerce_numbers_to_str=True)

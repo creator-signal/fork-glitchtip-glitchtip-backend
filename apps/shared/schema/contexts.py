@@ -1,7 +1,7 @@
 from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 
 from ninja import Field, Schema
-from pydantic import BeforeValidator, model_serializer
+from pydantic import BeforeValidator, ConfigDict, model_serializer
 
 from .base import LaxIngestSchema
 
@@ -66,8 +66,7 @@ class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):
     supports_audio: Optional[bool] = None
     supports_location_service: Optional[bool] = None
 
-    class Config(LaxIngestSchema.Config):
-        protected_namespaces = ()
+    model_config = ConfigDict(protected_namespaces=())
 
 
 class OSContext(LaxIngestSchema, ExcludeNoneSchema):
