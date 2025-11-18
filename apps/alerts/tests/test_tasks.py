@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 
+from django.conf import settings
 from django.core import mail
 from django.urls import reverse
 from django.utils import timezone
@@ -213,6 +214,31 @@ class AlertTestCase(GlitchTipTestCase):
         )
         with self.assertNumQueries(5):
             process_event_alerts()
+
+    def test_email_headers(self):
+        baker.make(
+            "alerts.ProjectAlert",
+            project=self.project,
+            timespan_minutes=1,
+            quantity=1,
+        )
+        issue = baker.make("issue_events.Issue", project=self.project)
+        baker.make("issue_events.IssueEvent", issue=issue)
+        process_event_alerts()
+
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+
+        self.assertEqual(email.extra_headers["X-Mailer"], "GlitchTip")
+        self.assertEqual(email.extra_headers["X-GlitchTip-Project"], self.project.name)
+        self.assertEqual(
+            email.extra_headers["X-GlitchTip-Organization"],
+            self.project.organization.name,
+        )
+        self.assertEqual(
+            email.extra_headers["List-Id"],
+            f"<{self.project.slug}.{self.project.organization.slug}.{settings.GLITCHTIP_URL.hostname}>",
+        )
 
 
 class AlertWithUserProjectAlert(GlitchTipTestCase):
