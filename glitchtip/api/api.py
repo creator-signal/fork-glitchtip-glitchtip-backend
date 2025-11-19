@@ -94,9 +94,9 @@ class SocialAppSchema(ModelSchema):
     scopes: list[str]
     authorize_url: str | None
 
-    class Config:
+    class Meta:
         model = SocialApp
-        model_fields = ["name", "client_id", "provider"]
+        fields = ["name", "client_id", "provider"]
 
 
 class SettingsOut(CamelSchema):
