@@ -22,17 +22,21 @@ class AlertEmail(GlitchTipEmail):
         settings_link = (
             f"{base_url}/{org_slug}/settings/projects/{first_issue.project.slug}"
         )
-        context["issue_title"] = first_issue.title
-        context["project_name"] = first_issue.project
         context["first_issue"] = first_issue
-        context["issue_link"] = issue_link
-        context["issues"] = notification.issues.all()
+        context["glitchtip_hostname"] = settings.GLITCHTIP_URL.hostname
         context["issue_count"] = notification.issues.count()
-        context["project_notification_settings_link"] = settings_link
+        context["issue_link"] = issue_link
+        context["issue_title"] = first_issue.title
+        context["issues"] = notification.issues.all()
+        context["org_name"] = first_issue.project.organization.name
         context["org_slug"] = org_slug
+        context["project_id"] = first_issue.project.id
         context["project_link"] = (
             f"{base_url}/{org_slug}/issues?project={first_issue.project.id}"
         )
+        context["project_name"] = first_issue.project.name
+        context["project_slug"] = first_issue.project.slug
+        context["project_notification_settings_link"] = settings_link
 
         return context
 

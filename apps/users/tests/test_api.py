@@ -244,6 +244,9 @@ class UsersTestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 204)
         self.assertEqual(len(mail.outbox), 1)
 
+        email = mail.outbox[0]
+        self.assertEqual(email.extra_headers["X-Mailer"], "GlitchTip")
+
     def test_notifications_retrieve(self):
         url = reverse("api:get_notifications", args=["me"])
         res = self.client.get(url)

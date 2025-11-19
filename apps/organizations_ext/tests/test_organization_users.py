@@ -115,6 +115,9 @@ class OrganizationUsersTestCase(TestCase):
         }
         res = self.client.post(self.members_url, data, content_type="application/json")
         self.assertTrue(res.json()["pending"])
+
+        self.assertEqual(mail.outbox[0].extra_headers["X-Mailer"], "GlitchTip")
+
         body = mail.outbox[0].body
         html_content = mail.outbox[0].alternatives[0][0]
         self.assertFalse("<a>No</a><script>HtmlInOrgName</script>" in body)
@@ -175,6 +178,9 @@ class OrganizationUsersTestCase(TestCase):
                 "teamRoles": [],
             }
             self.client.post(self.members_url, data, content_type="application/json")
+
+            self.assertEqual(mail.outbox[0].extra_headers["X-Mailer"], "GlitchTip")
+
             body = mail.outbox[0].body
             html_content = mail.outbox[0].alternatives[0][0]
             self.assertFalse("visit https://evilspam.com" in body)
@@ -252,6 +258,9 @@ class OrganizationUsersTestCase(TestCase):
             "teamRoles": [],
         }
         self.client.post(self.members_url, data, content_type="application/json")
+
+        self.assertEqual(mail.outbox[0].extra_headers["X-Mailer"], "GlitchTip")
+
         body = mail.outbox[0].body
         body[body.find("http://localhost:8000/accept/") :].split("/")[4]
 

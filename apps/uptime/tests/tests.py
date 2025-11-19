@@ -2,6 +2,7 @@ import asyncio
 from unittest import mock
 
 from aioresponses import aioresponses
+from django.conf import settings
 from django.core import mail
 from django.core.cache import cache
 from django.urls import reverse
@@ -125,8 +126,22 @@ class UptimeTestCase(GlitchTipTestCase):
         cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-02"):
             dispatch_checks()
+
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("is down", mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].extra_headers["X-Mailer"], "GlitchTip")
+        self.assertEqual(
+            mail.outbox[0].extra_headers["X-GlitchTip-Project"], self.project.name
+        )
+        self.assertEqual(
+            mail.outbox[0].extra_headers["X-GlitchTip-Organization"],
+            self.project.organization.name,
+        )
+        self.assertEqual(
+            mail.outbox[0].extra_headers["List-Id"],
+            f"<{self.project.slug}.{self.project.organization.slug}.{settings.GLITCHTIP_URL.hostname}>",
+        )
+
         mock_post.assert_called_once()
 
         mocked.get(test_url, status=500)

@@ -6,6 +6,7 @@ from apps.users.utils import (
     is_social_apps_user_registration_open,
     is_user_registration_open,
 )
+from glitchtip.email import GlitchTipEmail
 
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
@@ -14,6 +15,14 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
 
 class CustomDefaultAccountAdapter(DefaultAccountAdapter):
+    def render_mail(self, template_prefix, email, context, headers=None):
+        headers = headers or {}
+        default_headers = GlitchTipEmail.get_default_headers()
+        for key, value in default_headers.items():
+            if key not in headers:
+                headers[key] = value
+        return super().render_mail(template_prefix, email, context, headers)
+
     def is_open_for_signup(self, request):
         return is_user_registration_open()
 

@@ -20,6 +20,13 @@ class GlitchTipEmail(ContextMixin):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    @staticmethod
+    def get_default_headers():
+        return {
+            "Auto-Submitted": "auto-generated",
+            "X-Mailer": "GlitchTip",
+        }
+
     def get_html_template_name(self):
         return self.html_template_name
 
@@ -40,14 +47,41 @@ class GlitchTipEmail(ContextMixin):
             :998
         ]
 
+    def get_headers(self, context):
+        headers = self.get_default_headers()
+        glitchtip_hostname = context.get("glitchtip_hostname", "glitchtip")
+
+        # Project and organization headers & list ID if available.
+        project_id = context.get("project_id")
+        project_slug = context.get("project_slug")
+        project_name = context.get("project_name")
+        org_name = context.get("org_name")
+        org_slug = context.get("org_slug")
+
+        if org_slug and project_id:
+            headers["List-Id"] = f"<{project_slug}.{org_slug}.{glitchtip_hostname}>"
+
+        if org_name:
+            headers["X-GlitchTip-Organization"] = org_name
+
+        if project_name:
+            headers["X-GlitchTip-Project"] = project_name
+
+        return headers
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["base_url"] = settings.GLITCHTIP_URL.geturl()
+        context["glitchtip_hostname"] = settings.GLITCHTIP_URL.hostname
+        context["version"] = settings.GLITCHTIP_VERSION
         return context
 
     def _send_email(self, context, to, users=None):
         subject = self.get_subject_content(context)
-        msg = EmailMultiAlternatives(subject, self.get_text_content(context), to=to)
+        headers = self.get_headers(context)
+        msg = EmailMultiAlternatives(
+            subject, self.get_text_content(context), to=to, headers=headers
+        )
         if users:
             msg.merge_metadata = {user.email: {"unique_id": user.id} for user in users}
         msg.attach_alternative(self.get_html_content(context), "text/html")
