@@ -343,7 +343,7 @@ class TransactionEventSchema(LaxIngestSchema):
     request: IngestRequest | None = None
     server_name: str | None = None
     sdk: ClientSDKInfo | None = None
-    platform: str | None
+    platform: str | None = Field(default="other")
     release: str | None = None
     environment: str | None = None
     _meta: JsonValue | None
