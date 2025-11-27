@@ -11,8 +11,4 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        RunSQL(
-            sql=get_sql_content(__file__, "append_and_limit_tsvector.sql"),
-            reverse_sql="DROP FUNCTION IF EXISTS append_and_limit_tsvector(tsvector, TEXT, INTEGER, REGCONFIG);",
-        )
     ]
