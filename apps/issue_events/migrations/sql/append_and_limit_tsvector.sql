@@ -1,6 +1,5 @@
--- This function appends new text to an existing tsvector, strips all
--- positional data, and then truncates the vector to a maximum number
--- of unique lexemes.
+-- Appends new text to a tsvector, then truncates the result to a max number of lexemes.
+-- Includes safeguards to prevent oversized vectors and excessive CPU usage.
 CREATE OR REPLACE FUNCTION append_and_limit_tsvector(
     existing_vector tsvector,
     new_text TEXT,
@@ -14,33 +13,37 @@ DECLARE
     lexemes_array TEXT[];
     lexemes_to_remove TEXT[];
     current_lexeme_count INTEGER;
+    existing_size INTEGER;
 BEGIN
-    -- Combine the existing vector with the new text.
+    -- 1. Truncate incoming text to 250KB to prevent to_tsvector from
+    -- using too much CPU or creating an oversized new vector.
+    new_text := left(new_text, 250000);
+
+    -- 2. Check the size of the existing vector. If it's already approaching
+    -- the ~1MB limit, return it as-is to prevent a crash on concatenation.
+    existing_size := pg_column_size(existing_vector);
+    IF existing_size > 1040000 THEN
+        RETURN existing_vector;
+    END IF;
+
+    -- 3. Combine the existing vector with the vector from the new text.
     combined_vector :=
         coalesce(existing_vector, ''::tsvector) ||
         to_tsvector(text_search_config, coalesce(new_text, ''));
 
-    -- If the combined vector is effectively empty, there's nothing more to do.
     IF combined_vector = ''::tsvector THEN
         RETURN combined_vector;
     END IF;
 
-    -- Use strip to remove all position and weight information.
+    -- 4. Strip positional data and truncate the vector to the desired number of lexemes.
     stripped_vector := strip(combined_vector);
-
-    -- Get an array of all unique lexemes from the stripped vector.
     lexemes_array := tsvector_to_array(stripped_vector);
     current_lexeme_count := array_length(lexemes_array, 1);
 
-    -- If the number of unique lexemes exceeds the limit, truncate.
     IF current_lexeme_count > max_lexemes THEN
-        -- Determine which lexemes to remove (the ones at the end of the sorted array).
         lexemes_to_remove := lexemes_array[max_lexemes + 1 : current_lexeme_count];
-
-        -- Use ts_delete to remove the excess lexemes from the stripped vector.
         RETURN ts_delete(stripped_vector, lexemes_to_remove);
     ELSE
-        -- If the limit is not exceeded, return the stripped vector.
         RETURN stripped_vector;
     END IF;
 END;
