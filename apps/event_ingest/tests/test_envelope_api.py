@@ -387,3 +387,37 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 "value": "invalid",
             }
         ]
+
+
+    def test_accept_transaction_without_platform_defaults_to_other(self):
+        """
+        Transactions without a 'platform' field should be accepted and
+        normalized to 'other', matching Sentry/Relay behavior.
+        """
+        data = self.get_json_data("events/test_data/transactions/django_simple.json")
+
+        # Remove platform from the event payload
+        # to simulate an SDK that omits it
+        data[2].pop("platform", None)
+
+        envelope = self.get_string_payload(data)
+
+        with freeze_time("2020-01-01"):
+            res = self.client.post(
+                self.url,
+                envelope,
+                content_type="application/x-sentry-envelope",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(
+            TransactionEvent.objects.exists(),
+            "Transaction without platform should still be ingested.",
+        )
+
+        tx = TransactionEvent.objects.first()
+        self.assertEqual(
+            tx.data.get("platform"),
+            "other",
+            "TransactionEvent platform should default to 'other' when missing.",
+        )
