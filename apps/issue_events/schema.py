@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
+from django.conf import settings
 from ninja import Field, ModelSchema, Schema
 from pydantic import ConfigDict, computed_field
 
@@ -68,6 +69,12 @@ class IssueSchema(ModelSchema):
     def resolve_matching_event_id(obj: Issue, context):
         if event_id := context["request"].matching_event_id:
             return event_id.hex
+
+    @staticmethod
+    def resolve_permalink(obj: Issue, context):
+        glitchtip_url = settings.GLITCHTIP_URL.geturl()
+        project_slug = obj.project.slug
+        return f"{glitchtip_url}/{project_slug}/issues/{obj.id}"
 
     model_config = ConfigDict(
         alias_generator=to_camel_with_lower_id,
