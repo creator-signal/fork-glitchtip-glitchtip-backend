@@ -2,6 +2,7 @@ import datetime
 import logging
 from timeit import default_timer as timer
 
+from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.db.models import F, Value
 from django.urls import reverse
@@ -68,6 +69,10 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(data.get("count"), str(issue.count))
         self.assertEqual(data.get("userReportCount"), 1)
         self.assertEqual(data.get("numComments"), 3)
+        expected_permalink = (
+            f"{settings.GLITCHTIP_URL.geturl()}/{issue.project.slug}/issues/{issue.id}"
+        )
+        self.assertEqual(data.get("permalink"), expected_permalink)
 
     def test_list(self):
         res = self.client.get(self.list_url)
