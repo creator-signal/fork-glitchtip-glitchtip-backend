@@ -31,9 +31,9 @@ services:
     #tty: true
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev
-    command: ./manage.py runserver 0.0.0.0:8000
+    command: granian --interface asgi glitchtip.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-ignore-worker-failure
     #command: python app.py
-    #command: python -m gunicorn glitchtip.asgi:application -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0
+    #command: ./manage.py runserver 0.0.0.0:8000
     depends_on: *default-depends_on
     volumes: *default-volumes
     ports:
