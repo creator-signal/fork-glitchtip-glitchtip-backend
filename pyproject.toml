@@ -42,6 +42,7 @@ dependencies = [
     "django-postgres-partition>=0.1.4",
     "pyyaml>=6.0.2", # allauth openapi spec
     "django-valkey[libvalkey,lz4]>=0.3.2",
+    "granian[reload,uvloop]>=2.6.0",
 ]
 
 [dependency-groups]
