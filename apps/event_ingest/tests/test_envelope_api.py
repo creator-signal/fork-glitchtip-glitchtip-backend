@@ -388,7 +388,6 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             }
         ]
 
-
     def test_accept_transaction_without_platform_defaults_to_other(self):
         """
         Transactions without a 'platform' field should be accepted and
