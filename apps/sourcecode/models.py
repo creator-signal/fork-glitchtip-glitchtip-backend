@@ -34,7 +34,7 @@ class DebugSymbolBundle(CreatedModel):
                 fields=["release", "file"], name="unique_release_file"
             ),
             models.CheckConstraint(
-                check=models.Q(debug_id__isnull=False)
+                condition=models.Q(debug_id__isnull=False)
                 | models.Q(release__isnull=False),
                 name="debug_id_or_release_required",
             ),

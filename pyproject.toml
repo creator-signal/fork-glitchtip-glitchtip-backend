@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "Django backend that powers GlitchTip, an open source reimplementation of Sentry"
 authors = ["David Burke"]
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "Brotli>=1.2.0",
-    "django~=5.2",
+    "django~=6.0",
     "django-allauth[mfa,socialaccount]~=65.0",
     "django-cors-headers~=4.0",
     "django-environ~=0.11",
@@ -76,3 +76,8 @@ django_settings_module = "glitchtip.settings"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[tool.uv]
+override-dependencies = [
+    "django>=6.0",
+]

@@ -18,7 +18,7 @@ class ExcludeNoneSchema(Schema):
         if isinstance(self, Schema):
             return {
                 model_field: getattr(self, model_field)
-                for model_field in self.model_fields
+                for model_field in self.__class__.model_fields
                 if getattr(self, model_field) is not None
             }
         return wrap(self)
