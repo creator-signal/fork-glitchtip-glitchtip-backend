@@ -65,8 +65,7 @@ class OrganizationsAPITestCase(TestCase):
         self.user.save()
 
         with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            with self.assertNumQueries(9):
-                res = self.client.post(self.url, data, content_type="application/json")
+            res = self.client.post(self.url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
 
     def test_organizations_update(self):

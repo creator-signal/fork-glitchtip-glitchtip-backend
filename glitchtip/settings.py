@@ -229,6 +229,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.humanize",
+    "django.contrib.postgres",
     "psql_partition",
     "django_prometheus",
     "allauth",
