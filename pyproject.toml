@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Django backend that powers GlitchTip, an open source reimplementation of Sentry"
 authors = ["David Burke"]
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "Brotli>=1.2.0",
     "django~=5.2",
