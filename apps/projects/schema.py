@@ -57,7 +57,6 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     class Meta(NameSlugProjectSchema.Meta):
         fields = [
             "first_event",
-            "id",
             "name",
             "scrub_ip_addresses",
             "slug",

@@ -142,7 +142,7 @@ class StatusPageIn(CamelSchema, ModelSchema):
 
     class Meta:
         model = StatusPage
-        fields = ["name", "is_public"]
+        fields = ["name"]
 
 
 class StatusPageSchema(StatusPageIn, ModelSchema):
