@@ -137,7 +137,7 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
     packages: dict[str, str | None] | None = Field(
         validation_alias="data.modules", default=None
     )
-    type: str = Field(validation_alias="get_type_display")
+    type: str
     message: str
     metadata: dict[str, str] = Field(default_factory=dict)
     tags: list[dict[str, str | None]] = []
@@ -156,7 +156,15 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     class Meta:
         model = IssueEvent
-        fields = ["id", "type", "title"]
+        fields = ["title"]
+
+    @staticmethod
+    def resolve_id(obj: IssueEvent):
+        return obj.id.hex
+
+    @staticmethod
+    def resolve_type(obj: IssueEvent):
+        return obj.get_type_display()
 
     @staticmethod
     def resolve_date_created(obj: IssueEvent):
@@ -292,7 +300,7 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     )
     contexts: dict | None = Field(validation_alias="data.contexts", default=None)
     sdk: dict | None = Field(validation_alias="data.sdk", default_factory=dict)
-    type: str | None = Field(validation_alias="get_type_display")
+    type: str | None
     request: Any | None = Field(validation_alias="data.request", default=None)
     environment: str | None = Field(validation_alias="data.environment", default=None)
     extra: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
@@ -301,6 +309,10 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     class Meta:
         model = IssueEvent
         fields = ["title", "transaction", "tags", "hashes"]
+
+    @staticmethod
+    def resolve_type(obj: IssueEvent):
+        return obj.get_type_display()
 
     @staticmethod
     def resolve_timestamp(obj):

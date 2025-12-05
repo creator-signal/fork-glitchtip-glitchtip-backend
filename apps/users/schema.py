@@ -5,7 +5,7 @@ from datetime import datetime
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
-from ninja import Field, ModelSchema
+from ninja import Field, ModelSchema, Schema
 from pydantic import EmailStr
 
 from glitchtip.schema import CamelSchema
@@ -99,20 +99,17 @@ class UserDetailSchema(UserSchema):
             return hash.hexdigest()
 
 
-class EmailAddressIn(CamelSchema, ModelSchema):
+class EmailAddressIn(CamelSchema, Schema):
     email: EmailStr
-
-    class Meta:
-        model = EmailAddress
-        fields = ["email"]
 
 
 class EmailAddressSchema(CamelSchema, ModelSchema):
     is_primary: bool
     is_verified: bool
 
-    class Meta(EmailAddressIn.Meta):
-        pass
+    class Meta:
+        model = EmailAddress
+        fields = ["email"]
 
     @staticmethod
     def resolve_is_primary(obj):

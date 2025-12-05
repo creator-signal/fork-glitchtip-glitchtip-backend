@@ -23,7 +23,7 @@ class TeamSlugSchema(CamelSchema, ModelSchema):
 
     class Meta:
         model = Team
-        fields = ["id", "slug"]
+        fields = ["slug"]
 
     @staticmethod
     def resolve_id(obj):
@@ -37,7 +37,7 @@ class TeamSchema(TeamSlugSchema):
     slug: SlugStr
 
     class Meta(TeamSlugSchema.Meta):
-        fields = ["id", "slug"]
+        fields = ["slug"]
 
     model_config = ConfigDict(coerce_numbers_to_str=True)
 
