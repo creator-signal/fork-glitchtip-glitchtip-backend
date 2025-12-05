@@ -103,7 +103,6 @@ class EmailAddressIn(CamelSchema, Schema):
     email: EmailStr
 
 
-
 class EmailAddressSchema(CamelSchema, ModelSchema):
     is_primary: bool
     is_verified: bool
