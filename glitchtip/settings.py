@@ -257,6 +257,7 @@ if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
 INSTALLED_APPS += [
     "storages",
+    "django_vtasks",
     "glitchtip",
     "apps.alerts",
     "apps.environments",
@@ -565,6 +566,16 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": UPTIME_CHECK_INTERVAL,
     },
 }
+
+TASKS = {
+    "default": {
+        "BACKEND": "django_vtasks.backends.valkey.ValkeyTaskBackend",
+        "OPTIONS": {
+            "BROKER_URL": VALKEY_URL,
+        },
+    }
+}
+
 # Maximum number of issues send in a single alert payload
 MAX_ISSUES_PER_ALERT = env.int("MAX_ISSUES_PER_ALERT", 3)
 
@@ -837,6 +848,7 @@ if TESTING:
     DATABASES["default"]["CONN_MAX_AGE"] = None
     DATABASES["default"]["OPTIONS"]["pool"] = False
     CELERY_TASK_ALWAYS_EAGER = True
+    TASKS["default"]["BACKEND"] = "django.tasks.backends.immediate.ImmediateBackend"
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES
     # https://github.com/evansd/whitenoise/issues/215

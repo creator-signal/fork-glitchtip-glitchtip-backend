@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db.models import Count
 from django.utils import timezone
 from django_valkey import get_valkey_connection
+from django.tasks import task
 
 from apps.issue_events.models import Issue
 
@@ -22,7 +23,7 @@ return members
 def process_alert(project_alert_id: int, issue_ids: list[int]):
     notification = Notification.objects.create(project_alert_id=project_alert_id)
     notification.issues.add(*issue_ids)
-    send_notification.delay(notification.pk)
+    send_notification.enqueue(notification.pk)
 
 
 @shared_task
@@ -67,10 +68,10 @@ def process_event_alerts():
         if issues:
             notification = alert.notification_set.create()
             notification.issues.add(*issues)
-            send_notification.delay(notification.pk)
+            send_notification.enqueue(notification.pk)
 
 
-@shared_task
+@task
 def send_notification(notification_id: int):
     notification = Notification.objects.get(pk=notification_id)
     notification.send_notifications()
