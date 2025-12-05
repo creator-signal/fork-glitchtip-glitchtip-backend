@@ -156,7 +156,11 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     class Meta:
         model = IssueEvent
-        fields = ["id", "title"]
+        fields = ["title"]
+
+    @staticmethod
+    def resolve_id(obj: IssueEvent):
+        return obj.id.hex
 
     @staticmethod
     def resolve_type(obj: IssueEvent):
@@ -269,12 +273,12 @@ class IssueEventDetailSchema(IssueEventSchema):
     @staticmethod
     def resolve_previous_event_id(obj):
         if event_id := obj.previous:
-            return str(event_id)
+            return event_id.hex
 
     @staticmethod
     def resolve_next_event_id(obj):
         if event_id := obj.next:
-            return str(event_id)
+            return event_id.hex
 
 
 class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):

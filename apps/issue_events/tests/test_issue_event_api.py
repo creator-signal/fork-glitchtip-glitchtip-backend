@@ -58,8 +58,8 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.headers.get("X-Hits"), "52")
         self.assertIn('rel="previous"; results="false"', res.headers.get("Link"))
 
-        self.assertEqual(res.json()[0]["id"], str(last_event.pk))
-        self.assertNotContains(res, str(first_event.pk))
+        self.assertEqual(res.json()[0]["id"], last_event.pk.hex)
+        self.assertNotContains(res, first_event.pk.hex)
 
         pattern = r"(?<=\<).+?(?=\>)"
         links = re.findall(pattern, res.headers.get("Link"))
@@ -70,8 +70,8 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertIn('rel="previous"; results="true"', res.headers.get("Link"))
         self.assertIn('rel="next"; results="false"', res.headers.get("Link"))
 
-        self.assertEqual(res.json()[-1]["id"], str(first_event.pk))
-        self.assertNotContains(res, str(last_event.pk))
+        self.assertEqual(res.json()[-1]["id"], first_event.pk.hex)
+        self.assertNotContains(res, last_event.pk.hex)
 
     def test_single_page_list(self):
         """
@@ -89,8 +89,8 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
             res = self.client.get(url)
 
         self.assertEqual(res.headers.get("X-Hits"), "2")
-        self.assertContains(res, str(last_event.pk))
-        self.assertContains(res, str(first_event.pk))
+        self.assertContains(res, last_event.pk.hex)
+        self.assertContains(res, first_event.pk.hex)
 
     def test_retrieve(self):
         issue = baker.make("issue_events.issue", project=self.project)
@@ -103,13 +103,13 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
         url = get_issue_event_url(issue.id, latest_event.id)
         res = self.client.get(url)
-        self.assertContains(res, str(latest_event.pk))
+        self.assertContains(res, latest_event.pk.hex)
 
         url = get_latest_issue_event_url(issue.id)
         res = self.client.get(url)
         event_details = res.json()
-        self.assertEqual(event_details["id"], str(latest_event.pk))
-        self.assertEqual(event_details["previousEventID"], str(previous_event.pk))
+        self.assertEqual(event_details["id"], latest_event.pk.hex)
+        self.assertEqual(event_details["previousEventID"], previous_event.pk.hex)
 
     def test_relative_event_ordering(self):
         issue = baker.make("issue_events.issue", project=self.project)
@@ -121,8 +121,8 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         url = get_issue_event_url(issue.id, event2.id)
         res = self.client.get(url)
         event_details = res.json()
-        self.assertEqual(event_details["nextEventID"], str(event3.pk))
-        self.assertEqual(event_details["previousEventID"], str(event1.pk))
+        self.assertEqual(event_details["nextEventID"], event3.pk.hex)
+        self.assertEqual(event_details["previousEventID"], event1.pk.hex)
 
     def test_authentication(self):
         url = get_list_issue_event_url(1)
@@ -155,7 +155,7 @@ class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
             kwargs={
                 "organization_slug": self.organization.slug,
                 "project_slug": self.project.slug,
-                "event_id": str(self.event.pk),
+                "event_id": self.event.pk.hex,
             },
         )
         self.latest_detail_url = get_latest_issue_event_url(self.event.issue_id)
