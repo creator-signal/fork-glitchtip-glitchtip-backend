@@ -55,11 +55,11 @@ test:
     matrix:
       - PYTHON_VERSION: '3.11'
         POSTGRES_VERSION: '14'
-      - PYTHON_VERSION: '3.14'
+      - PYTHON_VERSION: '3.13'
         POSTGRES_VERSION: '18'
 
 lint:
-  image: python:3.14-slim
+  image: python:3.13-slim
   script:
     - pip install ruff
     - ruff check glitchtip/ apps/
@@ -120,19 +120,19 @@ build_arm_x86:
     # --- Updated Version Parsing ---
     # Git tag (e.g., v5.0.1)
     - VERSION_V_FULL=${CI_COMMIT_REF_NAME}
-    
+
     # No-v versions (e.g., 5.0.1, 5.0, 5)
     - VERSION_NO_V_FULL=${CI_COMMIT_REF_NAME#*v}
     - VERSION_NO_V_MINOR=${VERSION_NO_V_FULL%.*}
     - VERSION_NO_V_MAJOR=${VERSION_NO_V_FULL%%.*}
-    
+
     # V-prefixed versions (e.g., v5.0, v5)
     - VERSION_V_MINOR="v${VERSION_NO_V_MINOR}"
     - VERSION_V_MAJOR="v${VERSION_NO_V_MAJOR}"
 
     # Quoted to handle colons in echo
     - 'echo "Building tags: latest, ${VERSION_NO_V_FULL}, ${VERSION_NO_V_MINOR}, ${VERSION_NO_V_MAJOR}, ${VERSION_V_FULL}, ${VERSION_V_MINOR}, ${VERSION_V_MAJOR}"'
-    
+
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
     - docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
