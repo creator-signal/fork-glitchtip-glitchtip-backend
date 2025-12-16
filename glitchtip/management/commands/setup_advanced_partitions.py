@@ -34,23 +34,22 @@ PARTMAN_CONFIG = {
 
 # The SQL script that an administrator needs to run if the command fails.
 ADMIN_SETUP_SQL = """
--- 1. Create the schema and the extension.
+-- Create the schema and the extension.
 CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;
 
--- 2. Grant USAGE on the schema to your application's user.
+-- Grant USAGE on the schema to your application's user.
 GRANT USAGE ON SCHEMA partman TO your_application_user;
 
--- 3. Grant EXECUTE permission on all functions and procedures in the schema.
+-- Grant EXECUTE permission on all functions and procedures in the schema.
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA partman TO your_application_user;
 GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA partman TO your_application_user;
 
--- 4. Grant permissions on the pg_partman configuration tables.
+-- Grant permissions on the pg_partman configuration tables.
 GRANT ALL ON TABLE partman.part_config TO your_application_user;
 GRANT ALL ON TABLE partman.part_config_sub TO your_application_user;
-GRANT USAGE, SELECT ON SEQUENCE partman.part_config_part_id_seq TO your_application_user;
 
--- 5. Grant permission for the user to create objects in the public schema.
+-- Grant permission for the user to create objects in the public schema.
 GRANT CREATE ON SCHEMA public TO your_application_user;
 """
 
@@ -160,12 +159,11 @@ class Command(BaseCommand):
                                         PERFORM partman.create_parent(
                                             p_parent_table := %(parent_table)s,
                                             p_control := %(control)s,
-                                            p_type := 'native',
+                                            p_type := 'range',
                                             p_interval := %(interval)s,
                                             p_premake := %(premake)s,
                                             p_start_partition := (CURRENT_TIMESTAMP - {offset_interval})::text,
-                                            p_default_table := false,
-                                            p_infinite_time_partitions := true
+                                            p_default_table := false
                                         );
                                     END IF;
                                 END;
