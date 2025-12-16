@@ -4,7 +4,7 @@
 # for testing advanced partitioning with pg_partman.
 #
 # To use, run:
-# docker compose -f compose.yml -f compose.advanced-partitioning.yml up --build
+# docker compose -f compose.yml -f compose.partman.yml up --build
 
 # Define anchors that are referenced within this file to make it self-contained.
 # These values will be merged with/override the base compose file's values.
@@ -26,7 +26,6 @@ x-volumes: &default-volumes
 
 services:
   postgres:
-    # 1. Override the base postgres service to use the pg_partman image.
     image: ghcr.io/dbsystel/postgresql-partman:18
     environment:
       # This image requires this environment variable to work without a password.
@@ -35,7 +34,6 @@ services:
       POSTGRES_HOST_AUTH_METHOD: "trust"
 
   web:
-    # 2. Extend the environment to enable the advanced partitioning feature flag.
     environment:
       # This inherits all variables from the &default-environment anchor
       # and adds our new flag.
@@ -48,7 +46,6 @@ services:
       <<: *default-environment
       GLITCHTIP_ADVANCED_PARTITIONING: "true"
 
-  # 3. Add a new helper service to run the one-time pg_partman setup.
   partman-setup:
     build: .
     user: root
@@ -58,7 +55,9 @@ services:
       web:
         condition: service_started
     volumes: *default-volumes
-    environment: *default-environment
+    environment:
+      <<: *default-environment
+      GLITCHTIP_ADVANCED_PARTITIONING: "true"
     # This command will wait 15 seconds for migrations to apply, then run your setup command.
     # In a CI/CD environment, you might use a more robust wait-for-it script.
     command: >
