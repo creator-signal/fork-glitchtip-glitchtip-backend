@@ -27,6 +27,7 @@ from .schema import (
     WebIngestIssueEvent,
 )
 from .tasks import ingest_event, ingest_transaction
+from .utils import serialize_for_vtasks
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,9 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_event.enqueue(asdict(interchange_event))
+                        ingest_event.enqueue(
+                            serialize_for_vtasks(asdict(interchange_event))
+                        )
 
                 elif item_header.type == "transaction":
                     item = TransactionEventSchema.model_validate_json(payload_bytes)
@@ -199,7 +202,9 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_transaction.enqueue(asdict(interchange_event))
+                        ingest_transaction.enqueue(
+                            serialize_for_vtasks(asdict(interchange_event))
+                        )
 
             except ValidationError as e:
                 # Payload validation failed for a supported type. Log it.

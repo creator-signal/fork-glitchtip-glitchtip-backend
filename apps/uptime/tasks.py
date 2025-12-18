@@ -73,7 +73,7 @@ def dispatch_checks():
     For example, if our check interval is 10 and the monitor should run every 2 seconds,
     there should be 5 checks run every other second
 
-    This method reduces the number of necessary celery tasks and sql queries. While keeping
+    This method reduces the number of necessary tasks and sql queries. While keeping
     the timing precise and allowing for any arbitrary interval (to the second).
     It also has no need to track state of previous checks.
 

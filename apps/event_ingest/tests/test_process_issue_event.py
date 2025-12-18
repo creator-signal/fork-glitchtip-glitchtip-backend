@@ -33,7 +33,7 @@ def is_exception(v):
 
 class IssueEventIngestTestCase(EventIngestTestCase):
     """
-    These tests bypass the API and celery. They test the event ingest logic itself.
+    These tests bypass the API and task queue. They test the event ingest logic itself.
     This file should be large are test the following use cases
     - Multiple event saved at the same time
     - Sentry API compatibility

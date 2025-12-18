@@ -1,6 +1,6 @@
 import logging
 
-from django.tasks import task
+from django_vtasks import task
 
 from apps.event_ingest.schema import InterchangeTransactionEvent, IssueTaskMessage
 

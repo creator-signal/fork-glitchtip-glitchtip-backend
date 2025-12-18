@@ -59,13 +59,13 @@ from .interfaces import IssueStats, IssueUpdate, ProcessingEvent
 from .javascript_event_processor import JavascriptEventProcessor
 from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
-    CeleryIssueEvent,
     ErrorIssueEventSchema,
     EventException,
     InterchangeTransactionEvent,
     IssueEventSchema,
     IssueTaskMessage,
     SourceMapImage,
+    TaskIssueEvent,
     ValueEventException,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
@@ -257,7 +257,7 @@ def update_issues(processing_events: list[ProcessingEvent]):
         )
 
 
-def generate_contexts(event: CeleryIssueEvent) -> Contexts:
+def generate_contexts(event: TaskIssueEvent) -> Contexts:
     """
     Add additional contexts if they aren't already set
     """
@@ -300,7 +300,7 @@ def generate_contexts(event: CeleryIssueEvent) -> Contexts:
     return contexts
 
 
-def generate_tags(event: CeleryIssueEvent) -> dict[str, str]:
+def generate_tags(event: TaskIssueEvent) -> dict[str, str]:
     """Generate key-value tags based on context and other event data"""
     tags: dict[str, str | None] = event.tags if isinstance(event.tags, dict) else {}
 
