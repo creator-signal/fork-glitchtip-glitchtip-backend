@@ -187,7 +187,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_event.delay(asdict(interchange_event))
+                        ingest_event.enqueue(asdict(interchange_event))
 
                 elif item_header.type == "transaction":
                     item = TransactionEventSchema.model_validate_json(payload_bytes)
@@ -199,7 +199,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_transaction.delay(asdict(interchange_event))
+                        ingest_transaction.enqueue(asdict(interchange_event))
 
             except ValidationError as e:
                 # Payload validation failed for a supported type. Log it.

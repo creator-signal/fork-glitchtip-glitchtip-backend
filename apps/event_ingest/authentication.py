@@ -197,7 +197,7 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         settings.BILLING_ENABLED
         and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
     ):
-        check_organization_throttle.delay(project.organization_id)
+        check_organization_throttle.enqueue(project.organization_id)
     return project
 
 

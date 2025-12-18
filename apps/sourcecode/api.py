@@ -5,7 +5,6 @@ from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
-from glitchtip.utils import async_call_celery_task
 
 from .schema import ArtifactBundleAssembleIn
 
@@ -23,8 +22,7 @@ async def artifact_bundle_assemble(
         Organization, slug=organization_slug, users=user_id
     )
 
-    await async_call_celery_task(
-        assemble_artifacts_task,
+    await assemble_artifacts_task.aenqueue(
         organization.id,
         payload.version,
         payload.checksum,

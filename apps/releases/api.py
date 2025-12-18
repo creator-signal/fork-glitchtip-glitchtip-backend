@@ -11,7 +11,6 @@ from apps.sourcecode.models import DebugSymbolBundle
 from apps.sourcecode.schema import DebugSymbolBundleSchema
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
-from glitchtip.utils import async_call_celery_task
 
 from .models import Release
 from .schema import (
@@ -426,8 +425,7 @@ async def assemble_release(
         Organization, slug=organization_slug, users=user_id
     )
 
-    await async_call_celery_task(
-        assemble_artifacts_task,
+    await assemble_artifacts_task.aenqueue(
         organization.id,
         version,
         payload.checksum,

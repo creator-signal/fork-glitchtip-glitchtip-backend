@@ -12,7 +12,6 @@ from ninja.pagination import paginate
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.utils import async_call_celery_task
 
 from .models import Monitor, MonitorCheck, StatusPage
 from .schema import (
@@ -79,9 +78,10 @@ async def heartbeat_check(
         is_change=monitor.latest_is_up is not True,
     )
     if monitor.latest_is_up is False:
-        await async_call_celery_task(
-            send_monitor_notification, monitor_check.pk, False, monitor.last_change
-        )
+        last_change = monitor.last_change
+        if last_change:
+            last_change = last_change.isoformat()
+        await send_monitor_notification.aenqueue(monitor_check.pk, False, last_change)
 
     return monitor_check
 

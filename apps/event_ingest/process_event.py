@@ -264,7 +264,7 @@ def generate_contexts(event: CeleryIssueEvent) -> Contexts:
     contexts = event.contexts if event.contexts else {}
 
     if request := event.request:
-        # Handle both IngestRequest objects and raw dict data from Celery
+        # Handle both IngestRequest objects and raw dict data from vtasks
         if isinstance(request, dict):
             headers = request.get("headers")
         else:
