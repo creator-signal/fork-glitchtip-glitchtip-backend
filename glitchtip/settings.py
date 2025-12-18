@@ -571,10 +571,7 @@ CELERY_BEAT_SCHEDULE = {
 
 TASKS = {
     "default": {
-        "BACKEND": "django_vtasks.backends.valkey.ValkeyTaskBackend",
-        "OPTIONS": {
-            "BROKER_URL": VALKEY_URL,
-        },
+        "BACKEND": "django_vtasks.backends.db.DatabaseTaskBackend",
     }
 }
 
@@ -585,6 +582,8 @@ if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
     }
+    if "django_vtasks.db" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_vtasks.db")
 elif VALKEY_URL:
     CACHES = {
         "default": {
@@ -598,7 +597,12 @@ elif VALKEY_URL:
             },
         }
     }
-    TASKS["default"]["OPTIONS"] = {"cache_alias": "default"}
+    TASKS = {
+        "default": {
+            "BACKEND": "django_vtasks.backends.valkey.ValkeyTaskBackend",
+            "OPTIONS": {"cache_alias": "default"},
+        }
+    }
 else:  # Fallback to database cache
     CACHES = {
         "default": {
@@ -607,6 +611,8 @@ else:  # Fallback to database cache
         }
     }
     INSTALLED_APPS.append("django.contrib.sessions")
+    if "django_vtasks.db" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_vtasks.db")
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
     try:
         # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
