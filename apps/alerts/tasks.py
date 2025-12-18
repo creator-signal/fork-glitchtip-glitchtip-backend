@@ -1,6 +1,5 @@
 from datetime import timedelta
 
-from celery import shared_task
 from django.conf import settings
 from django.db.models import Count
 from django.tasks import task
@@ -26,7 +25,7 @@ def process_alert(project_alert_id: int, issue_ids: list[int]):
     send_notification.enqueue(notification.pk)
 
 
-@shared_task
+@task
 def process_event_alerts():
     """Inspect alerts and determine if new notifications need sent"""
     now = timezone.now()

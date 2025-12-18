@@ -21,7 +21,6 @@ from typing_extensions import Annotated
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
-from glitchtip.utils import async_call_celery_task
 
 from ..constants import EventStatus, LogLevel
 from ..models import Issue, IssueAggregate, IssueEvent, IssueHash
@@ -105,7 +104,7 @@ async def delete_issue(request: AuthHttpRequest, issue_id: int):
     result = await qs.filter(id=issue_id).aupdate(is_deleted=True)
     if not result:
         raise Http404()
-    await async_call_celery_task(delete_issue_task, [issue_id])
+    await delete_issue_task.aenqueue([issue_id])
     return 204, None
 
 
@@ -303,7 +302,7 @@ async def delete_issues(
         issue_id
         async for issue_id in qs.filter(is_deleted=True).values_list("id", flat=True)
     ]
-    await async_call_celery_task(delete_issue_task, issue_ids)
+    await delete_issue_task.aenqueue(issue_ids)
     return {"status": "resolved"}
 
 

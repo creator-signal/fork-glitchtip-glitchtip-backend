@@ -19,7 +19,6 @@ from apps.files.models import File, FileBlob
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
-from glitchtip.utils import async_call_celery_task
 
 from .models import DebugInformationFile
 from .schema import AssemblePayload
@@ -87,8 +86,8 @@ async def difs_assemble_api(
             continue
 
         responses[checksum] = {"state": DIF_STATE_CREATED, "missingChunks": []}
-        await async_call_celery_task(
-            difs_assemble, project_slug, name, checksum, chunks, debug_id
+        await difs_assemble.aenqueue(
+            project_slug, name, checksum, chunks, debug_id
         )
 
     return responses

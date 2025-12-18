@@ -72,5 +72,5 @@ class InvitationBackend(BaseInvitationBackend):
                 "organization": user.organization,
             }
         )
-        send_email_invite.delay(user.pk, kwargs["token"])
+        send_email_invite.enqueue(user.pk, kwargs["token"])
         return True

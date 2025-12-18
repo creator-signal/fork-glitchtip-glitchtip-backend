@@ -76,7 +76,7 @@ def event_store(
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
     )
-    task_result = ingest_event.delay(asdict(issue_event))
+    task_result = ingest_event.enqueue(asdict(issue_event))
     result = {"event_id": payload.event_id.hex}
     if settings.IS_LOAD_TEST:
         result["task_id"] = task_result.task_id
@@ -123,5 +123,5 @@ def event_security(
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
     )
-    ingest_event.delay(asdict(issue_event))
+    ingest_event.enqueue(asdict(issue_event))
     return HttpResponse(status=201)

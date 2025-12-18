@@ -811,20 +811,6 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": env.str("LOG_LEVEL", "WARNING")},
 }
 
-if LOGGING_HANDLER_CLASS is not logging.StreamHandler:
-    from celery.signals import after_setup_logger, after_setup_task_logger
-
-    @after_setup_logger.connect
-    @after_setup_task_logger.connect
-    def setup_celery_logging(logger, **kwargs):
-        from django.utils.module_loading import import_string
-
-        handler = import_string(LOGGING_HANDLER_CLASS)
-
-        for h in logger.handlers:
-            logger.removeHandler(h)
-        logger.addHandler(handler())
-
 
 # Set to track activity with Plausible
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
@@ -846,14 +832,23 @@ elif TESTING:
     BILLING_ENABLED = True
     logging.disable(logging.WARNING)
 
-CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", False)
+VTASKS_BATCH_QUEUES = {
+    "ingest_event": {
+        "count": 100,
+        "timeout": 2.0,
+    },
+    "ingest_transaction": {
+        "count": 100,
+        "timeout": 2.0,
+    },
+}
+
 if TESTING:
     TEST_RUNNER = "glitchtip.test_runner.TimedTestRunner"
     # Optimization
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     DATABASES["default"]["CONN_MAX_AGE"] = None
     DATABASES["default"]["OPTIONS"]["pool"] = False
-    CELERY_TASK_ALWAYS_EAGER = True
     TASKS["default"]["BACKEND"] = "django.tasks.backends.immediate.ImmediateBackend"
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES
@@ -861,7 +856,7 @@ if TESTING:
     warnings.filterwarnings(
         "ignore", message="No directory at", module="whitenoise.base"
     )
-if CELERY_TASK_ALWAYS_EAGER:
+if TESTING:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
