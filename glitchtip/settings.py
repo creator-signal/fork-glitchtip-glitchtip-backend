@@ -21,6 +21,7 @@ from csp.constants import NONCE, SELF
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import UnreadablePostError
+from django_vtasks.scheduler import crontab
 from sentry_sdk.integrations.django import DjangoIntegration
 
 env = environ.FileAwareEnv(
@@ -217,7 +218,6 @@ AIOHTTP_CONFIG = {
 }
 
 # Application definition
-# Conditionally load to workaround unnecessary memory usage in celery/beat
 WEB_INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.messages",
@@ -520,58 +520,45 @@ VALKEY_SOCKET_CONNECT_TIMEOUT = env.int("VALKEY_SOCKET_CONNECT_TIMEOUT", 5)
 VALKEY_CONNECTION_POOL_TIMEOUT = env.int("VALKEY_CONNECTION_POOL_TIMEOUT", 5)
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
-CELERY_BROKER_URL = env.str(
-    "CELERY_BROKER_URL",
-    VALKEY_URL
-    or f"sqlalchemy+postgresql+psycopg://{db['USER']}:{db['PASSWORD']}@{db['HOST']}:{db['PORT']}/{db['NAME']}",
-)
-if VALKEY_URL or "valkey" in CELERY_BROKER_URL:
-    CELERY_BROKER_TRANSPORT_OPTIONS = {
-        "fanout_prefix": True,
-        "fanout_patterns": True,
-        "retry_on_timeout": VALKEY_RETRY,
-        "max_connections": VALKEY_MAX_CONNECTIONS,
-    }
-CELERY_REDIS_RETRY_ON_TIMEOUT = VALKEY_RETRY
-CELERY_REDIS_MAX_CONNECTIONS = VALKEY_MAX_CONNECTIONS
-if CELERY_BROKER_URL.startswith("sentinel"):
-    CELERY_BROKER_TRANSPORT_OPTIONS["master_name"] = env.str(
-        "CELERY_BROKER_MASTER_NAME", "mymaster"
-    )
 IS_LOAD_TEST = env("IS_LOAD_TEST")
-# GlitchTip doesn't require a celery result backend
-if IS_LOAD_TEST:
-    CELERY_RESULT_BACKEND = VALKEY_URL
-if socket_timeout := env.int("CELERY_BROKER_SOCKET_TIMEOUT", None):
-    CELERY_BROKER_TRANSPORT_OPTIONS["socket_timeout"] = socket_timeout
-if broker_sentinel_password := env.str("CELERY_BROKER_SENTINEL_KWARGS_PASSWORD", None):
-    CELERY_BROKER_TRANSPORT_OPTIONS["sentinel_kwargs"] = {
-        "password": broker_sentinel_password
-    }
 
 # Time in seconds to debounce some frequently run tasks
 TASK_DEBOUNCE_DELAY = env.int("TASK_DEBOUNCE_DELAY", 30)
 UPTIME_CHECK_INTERVAL = 10
 ALERT_NOTIFICATION_INTERVAL = env.int("ALERT_NOTIFICATION_INTERVAL", 60)
 VTASKS_SCHEDULE = {
-    # "send-alert-notifications": {
-    #     "task": "apps.alerts.tasks.process_event_alerts",
-    #     "schedule": ALERT_NOTIFICATION_INTERVAL,
-    # },
-    # "perform-maintenance": {
-    #     "task": "glitchtip.tasks.perform_maintenance",
-    #     "schedule": crontab(hour=5, minute=0),
-    # },
-    # "uptime-dispatch-checks": {
-    #     "task": "apps.uptime.tasks.dispatch_checks",
-    #     "schedule": UPTIME_CHECK_INTERVAL,
-    # },
+    "send-alert-notifications": {
+        "task": "apps.alerts.tasks.process_event_alerts",
+        "schedule": ALERT_NOTIFICATION_INTERVAL,
+    },
+    "perform-maintenance": {
+        "task": "glitchtip.tasks.perform_maintenance",
+        "schedule": crontab(hour=5, minute=0),
+    },
+    "uptime-dispatch-checks": {
+        "task": "apps.uptime.tasks.dispatch_checks",
+        "schedule": UPTIME_CHECK_INTERVAL,
+    },
 }
 
 TASKS = {
     "default": {
         "BACKEND": "django_vtasks.backends.db.DatabaseTaskBackend",
     }
+}
+
+# Batch queues configuration - must be defined before tasks are imported
+VTASKS_BATCH_QUEUES = {
+    "ingest_event": {
+        "task": "apps.event_ingest.tasks.ingest_event",
+        "count": 100,
+        "timeout": 2.0,
+    },
+    "ingest_transaction": {
+        "task": "apps.event_ingest.tasks.ingest_transaction",
+        "count": 100,
+        "timeout": 2.0,
+    },
 }
 
 # Maximum number of issues send in a single alert payload
@@ -832,16 +819,6 @@ elif TESTING:
     BILLING_ENABLED = True
     logging.disable(logging.WARNING)
 
-VTASKS_BATCH_QUEUES = {
-    "ingest_event": {
-        "count": 100,
-        "timeout": 2.0,
-    },
-    "ingest_transaction": {
-        "count": 100,
-        "timeout": 2.0,
-    },
-}
 
 if TESTING:
     TEST_RUNNER = "glitchtip.test_runner.TimedTestRunner"
@@ -849,7 +826,12 @@ if TESTING:
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     DATABASES["default"]["CONN_MAX_AGE"] = None
     DATABASES["default"]["OPTIONS"]["pool"] = False
-    TASKS["default"]["BACKEND"] = "django.tasks.backends.immediate.ImmediateBackend"
+    # Use custom immediate backend that accepts vtasks batch queue names
+    TASKS = {
+        "default": {
+            "BACKEND": "glitchtip.test_backends.VtasksImmediateBackend",
+        }
+    }
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES
     # https://github.com/evansd/whitenoise/issues/215
