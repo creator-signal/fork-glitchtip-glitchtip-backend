@@ -1,7 +1,7 @@
 import asyncio
 
-from celery import shared_task
 from django.core.management import call_command
+from django.tasks import task
 
 from apps.files.tasks import cleanup_old_files
 from apps.issue_events.maintenance import cleanup_old_issues
@@ -10,7 +10,7 @@ from apps.sourcecode.maintenance import cleanup_old_debug_symbol_bundles
 from apps.stripe.maintenance import sync_stripe_models
 
 
-@shared_task
+@task
 def perform_maintenance():
     """
     Update postgres partitions and delete old data

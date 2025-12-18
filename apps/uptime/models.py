@@ -107,7 +107,7 @@ class Monitor(models.Model):
         from apps.uptime.tasks import perform_checks
 
         if self.monitor_type != MonitorType.HEARTBEAT:
-            perform_checks.apply_async(args=([self.pk],), countdown=1)
+            perform_checks.enqueue([self.pk])
 
     def clean(self):
         if self.monitor_type in HTTP_MONITOR_TYPES:
