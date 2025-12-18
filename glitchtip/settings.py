@@ -16,7 +16,6 @@ from datetime import timedelta
 
 import environ
 import sentry_sdk
-from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from csp.constants import NONCE, SELF
 from django.conf import global_settings
@@ -280,8 +279,8 @@ INSTALLED_APPS += [
 ]
 
 
-IS_CELERY = env.bool("IS_CELERY", False)
-if not IS_CELERY:
+IS_WORKER = env.bool("IS_WORKER", False)
+if not IS_WORKER:
     INSTALLED_APPS = WEB_INSTALLED_APPS + INSTALLED_APPS
 
 # Ensure no one uses runsslserver in production
@@ -554,19 +553,19 @@ if broker_sentinel_password := env.str("CELERY_BROKER_SENTINEL_KWARGS_PASSWORD",
 TASK_DEBOUNCE_DELAY = env.int("TASK_DEBOUNCE_DELAY", 30)
 UPTIME_CHECK_INTERVAL = 10
 ALERT_NOTIFICATION_INTERVAL = env.int("ALERT_NOTIFICATION_INTERVAL", 60)
-CELERY_BEAT_SCHEDULE = {
-    "send-alert-notifications": {
-        "task": "apps.alerts.tasks.process_event_alerts",
-        "schedule": ALERT_NOTIFICATION_INTERVAL,
-    },
-    "perform-maintenance": {
-        "task": "glitchtip.tasks.perform_maintenance",
-        "schedule": crontab(hour=5, minute=0),
-    },
-    "uptime-dispatch-checks": {
-        "task": "apps.uptime.tasks.dispatch_checks",
-        "schedule": UPTIME_CHECK_INTERVAL,
-    },
+VTASKS_SCHEDULE = {
+    # "send-alert-notifications": {
+    #     "task": "apps.alerts.tasks.process_event_alerts",
+    #     "schedule": ALERT_NOTIFICATION_INTERVAL,
+    # },
+    # "perform-maintenance": {
+    #     "task": "glitchtip.tasks.perform_maintenance",
+    #     "schedule": crontab(hour=5, minute=0),
+    # },
+    # "uptime-dispatch-checks": {
+    #     "task": "apps.uptime.tasks.dispatch_checks",
+    #     "schedule": UPTIME_CHECK_INTERVAL,
+    # },
 }
 
 TASKS = {
@@ -809,7 +808,7 @@ LOGGING = {
             "propagate": False,
         },
     },
-    "root": {"handlers": ["console"]},
+    "root": {"handlers": ["console"], "level": env.str("LOG_LEVEL", "WARNING")},
 }
 
 if LOGGING_HANDLER_CLASS is not logging.StreamHandler:
@@ -838,7 +837,7 @@ I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
     I_PAID_FOR_GLITCHTIP = True
-    CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
+    VTASKS_SCHEDULE["check-all-organizations-throttle"] = {
         "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
         "schedule": timedelta(hours=4),
     }
