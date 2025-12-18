@@ -2,9 +2,9 @@ import datetime
 import time
 
 from celery.result import AsyncResult
+from events.test_data.event_generator import generate_random_event
 from locust import HttpUser, between, task
 
-from events.test_data.event_generator import generate_random_event
 from glitchtip.celery import app
 
 

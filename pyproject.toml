@@ -44,6 +44,7 @@ dependencies = [
     "pyyaml>=6.0.2", # allauth openapi spec
     "django-valkey[libvalkey,lz4]>=0.3.2",
     "granian[reload,uvloop]>=2.6.0",
+    "django-vcache>=0.1.1",
 ]
 
 [dependency-groups]

@@ -3,7 +3,6 @@ These settings act as the default (base) settings for the Sentry-provided
 web-server
 """
 
-
 import logging
 import os.path
 from collections import OrderedDict, namedtuple
