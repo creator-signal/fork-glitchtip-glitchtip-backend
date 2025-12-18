@@ -10,10 +10,7 @@ class TestAPITestCase(TestCase):
     def test_seed_data(self):
         with self.settings(ENABLE_TEST_API=True):
             url = reverse("seed_data")
-            res = self.client.post(
-                url,
-                QUERY_STRING="extras=true&seedIssues=true"
-            )
+            res = self.client.post(url, QUERY_STRING="extras=true&seedIssues=true")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(User.objects.all().count(), 2)
         self.assertEqual(Issue.objects.all().count(), 55)

@@ -64,7 +64,7 @@ async def setup_wizard_hash(request, wizard_hash: str, auth=None):
     Hash replaces user authentication
     """
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
-    wizard_data = cache.get(key)
+    wizard_data = await cache.aget(key)
 
     if wizard_data is None:
         raise Http404
@@ -90,7 +90,7 @@ async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardS
     """
     wizard_hash = payload.hash
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
-    wizard_data = cache.get(key)
+    wizard_data = await cache.aget(key)
     if wizard_data is None:
         raise HttpError(400, "Token not found")
 
@@ -110,4 +110,4 @@ async def setup_wizard_set_token(request: AuthHttpRequest, payload: SetupWizardS
         token = await APIToken.objects.acreate(user_id=user_id, scopes=scope)
 
     result = SetupWizardResultSchema(api_keys=token, projects=projects)
-    cache.set(key, result.dict(by_alias=True), SETUP_WIZARD_CACHE_TIMEOUT)
+    await cache.aset(key, result.dict(by_alias=True), SETUP_WIZARD_CACHE_TIMEOUT)

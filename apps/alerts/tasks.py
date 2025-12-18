@@ -3,9 +3,9 @@ from datetime import timedelta
 from celery import shared_task
 from django.conf import settings
 from django.db.models import Count
+from django.tasks import task
 from django.utils import timezone
 from django_valkey import get_valkey_connection
-from django.tasks import task
 
 from apps.issue_events.models import Issue
 

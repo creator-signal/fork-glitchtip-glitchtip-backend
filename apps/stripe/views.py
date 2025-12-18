@@ -181,13 +181,13 @@ async def stripe_webhook_view(request: HttpRequest, event_type: str | None = Non
         logger.warning("Invalid JSON payload in Stripe webhook.", exc_info=e)
         return HttpResponse(status=200)
 
-    last_event_for_object = cache.get_or_set(
+    last_event_for_object = await cache.aget_or_set(
         "stripe" + event.data.object.id, event.created, 600
     )
     if event.created < last_event_for_object:
         return HttpResponse(status=200)
 
-    if not cache.add("stripe" + event.id, None, 600):
+    if not await cache.aadd("stripe" + event.id, None, 600):
         return HttpResponse(status=200)
 
     if event.type in ["product.updated", "product.created"]:

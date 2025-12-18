@@ -517,6 +517,8 @@ VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
 VALKEY_MAX_CONNECTIONS = env.int(
     "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
 )
+VALKEY_SOCKET_CONNECT_TIMEOUT = env.int("VALKEY_SOCKET_CONNECT_TIMEOUT", 5)
+VALKEY_CONNECTION_POOL_TIMEOUT = env.int("VALKEY_CONNECTION_POOL_TIMEOUT", 5)
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
 CELERY_BROKER_URL = env.str(
@@ -586,17 +588,17 @@ if os.environ.get("CACHE_URL"):
 elif VALKEY_URL:
     CACHES = {
         "default": {
-            "BACKEND": "django_valkey.cache.ValkeyCache",
+            "BACKEND": "django_vcache.backend.ValkeyCache",
             "LOCATION": VALKEY_URL,
             "OPTIONS": {
-                "COMPRESSOR": "django_valkey.compressors.lz4.Lz4Compressor",
-                "CONNECTION_POOL_KWARGS": {
-                    "retry_on_timeout": VALKEY_RETRY,
-                    "max_connections": VALKEY_MAX_CONNECTIONS,
-                },
+                "max_connections": VALKEY_MAX_CONNECTIONS,
+                "retry_on_timeout": VALKEY_RETRY,
+                "socket_connect_timeout": VALKEY_SOCKET_CONNECT_TIMEOUT,
+                "connection_pool_timeout": VALKEY_CONNECTION_POOL_TIMEOUT,
             },
         }
     }
+    TASKS["default"]["OPTIONS"] = {"cache_alias": "default"}
 else:  # Fallback to database cache
     CACHES = {
         "default": {
@@ -618,13 +620,12 @@ if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
         raise ImproperlyConfigured(
             "Invalid cache redis sentinel url, format is host:port,host2:port2,..."
         ) from err
-    DJANGO_VALKEY_CONNECTION_FACTORY = "django_valkey.pool.SentinelConnectionFactory"
-    CACHES["default"]["OPTIONS"]["SENTINELS"] = SENTINELS
+    CACHES["default"]["OPTIONS"]["sentinels"] = SENTINELS
 if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
-    CACHES["default"]["OPTIONS"]["SENTINEL_KWARGS"] = {
+    CACHES["default"]["OPTIONS"]["sentinel_kwargs"] = {
         "password": cache_sentinel_password
     }
-if "valkey" in CACHES["default"]["BACKEND"]:
+if "vcache" in CACHES["default"]["BACKEND"]:
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
