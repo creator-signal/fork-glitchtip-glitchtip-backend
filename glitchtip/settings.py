@@ -826,10 +826,9 @@ if TESTING:
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     DATABASES["default"]["CONN_MAX_AGE"] = None
     DATABASES["default"]["OPTIONS"]["pool"] = False
-    # Use custom immediate backend that accepts vtasks batch queue names
     TASKS = {
         "default": {
-            "BACKEND": "glitchtip.test_backends.VtasksImmediateBackend",
+            "BACKEND": "django_vtasks.backends.immediate.ImmediateBackend",
         }
     }
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"

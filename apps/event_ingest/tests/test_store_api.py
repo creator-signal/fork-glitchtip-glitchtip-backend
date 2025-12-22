@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.tasks import task_backends
 from django.test import override_settings
 from django.urls import reverse
 from model_bakery import baker
@@ -28,6 +29,7 @@ class StoreAPITestCase(EventIngestTestCase):
             res = self.client.post(
                 self.url, self.event, content_type="application/json"
             )
+            task_backends["default"].flush_batches()
         self.assertContains(res, self.event["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
@@ -41,6 +43,7 @@ class StoreAPITestCase(EventIngestTestCase):
         """Unlike OSS Sentry, we just accept the duplicate as a performance optimization"""
         for _ in range(2):
             self.client.post(self.url, self.event, content_type="application/json")
+            task_backends["default"].flush_batches()
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
 
@@ -59,12 +62,16 @@ class StoreAPITestCase(EventIngestTestCase):
     def test_error_event(self):
         data = self.get_json_data("events/test_data/py_error.json")
         res = self.client.post(self.url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertEqual(
             self.project.issues.filter(type=IssueEventType.ERROR).count(), 1
         )
         self.assertEqual(
-            IssueEvent.objects.filter(type=IssueEventType.ERROR).count(), 1
+            IssueEvent.objects.filter(
+                type=IssueEventType.ERROR, issue__project=self.project
+            ).count(),
+            1,
         )
 
     @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=1)
