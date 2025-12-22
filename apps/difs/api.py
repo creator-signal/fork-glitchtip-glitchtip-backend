@@ -86,9 +86,7 @@ async def difs_assemble_api(
             continue
 
         responses[checksum] = {"state": DIF_STATE_CREATED, "missingChunks": []}
-        await difs_assemble.aenqueue(
-            project_slug, name, checksum, chunks, debug_id
-        )
+        await difs_assemble.aenqueue(project_slug, name, checksum, chunks, debug_id)
 
     return responses
 

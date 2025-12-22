@@ -7,6 +7,7 @@ import zipfile
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http.response import HttpResponse
+from django.tasks import task_backends
 from django.urls import reverse
 
 from apps.event_ingest.tests.utils import generate_event, list_to_envelope
@@ -158,6 +159,7 @@ class SourceCodeTestCase(GlitchTestCase):
         res = self.client.post(
             envelope_url, list_to_envelope(data), content_type="application/json"
         )
+        task_backends["default"].flush_batches()
         self.assertContains(res, data[0]["event_id"][:8])
         self.assertEqual(Issue.objects.count(), 1)
         issue = Issue.objects.get()

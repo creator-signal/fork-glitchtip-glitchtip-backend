@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core import mail
+from django.tasks import task_backends
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
@@ -19,6 +20,7 @@ from ..tasks import process_event_alerts
 
 class AlertTestCase(GlitchTipTestCase):
     def setUp(self):
+        super().setUp()
         self.create_user_and_project()
         self.now = timezone.now()
 
@@ -139,6 +141,7 @@ class AlertTestCase(GlitchTipTestCase):
         params = f"?sentry_key={projectkey.public_key}"
         url = reverse("api:event_store", args=[self.project.id]) + params
         self.client.post(url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
 
         # First alert
         process_event_alerts.call()
@@ -152,6 +155,7 @@ class AlertTestCase(GlitchTipTestCase):
         # Send a second event
         data["event_id"] = "cf536c31b68a473f97e579507ce155e4"
         self.client.post(url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
         process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 2)
 

@@ -1,3 +1,4 @@
+from django.tasks import task_backends
 from django.urls import reverse
 
 from apps.issue_events.models import Issue, IssueEvent
@@ -23,12 +24,14 @@ class SecurityAPITestCase(EventIngestTestCase):
             res = self.client.post(
                 self.url, self.small_event, content_type="application/json"
             )
+            task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 201)
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
 
     def test_csp_event(self):
         self.client.post(self.url, self.small_event, content_type="application/json")
+        task_backends["default"].flush_batches()
         issue = Issue.objects.get()
         self.assertEqual(issue.title, "Blocked 'style-elem' from 'example.com'")
         event = IssueEvent.objects.get()
