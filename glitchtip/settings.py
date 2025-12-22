@@ -17,7 +17,7 @@ from datetime import timedelta
 import environ
 import sentry_sdk
 from corsheaders.defaults import default_headers
-from csp.constants import NONCE, SELF
+from django.utils.csp import CSP
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import UnreadablePostError
@@ -300,7 +300,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "csp.middleware.CSPMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
@@ -334,6 +334,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "django.template.context_processors.csp",
             ],
         },
     },
@@ -372,45 +373,44 @@ SECURE_BROWSER_XSS_FILTER = True
 
 # Consider tracking CSP reports with GlitchTip itself
 # Enable Chatwoot only when configured
-default_connect_src = [SELF, "https://*.glitchtip.com"]
+default_connect_src = [CSP.SELF, "https://*.glitchtip.com"]
 if CHATWOOT_WEBSITE_TOKEN:
     default_connect_src.append("https://app.chatwoot.com")
 # Enable stripe by default only when configured
 stripe_domain = "https://js.stripe.com"
 default_script_src = [
-    SELF,
+    CSP.SELF,
     "https://*.glitchtip.com",
     "'sha256-iRcDQ27XiXX4k+jbJ8nGeQFBnBOjmII7FdMlixb6QE4='",  # Theme picker inline JS
 ]
-default_frame_src = [SELF]
+default_frame_src = [CSP.SELF]
 if BILLING_ENABLED:
     default_script_src.append(stripe_domain)
     default_frame_src.append(stripe_domain)
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        "default-src": env.list("CSP_DEFAULT_SRC", str, [SELF]) + [NONCE],
-        "style-src": env.list("CSP_STYLE_SRC", str, [SELF]) + [NONCE],
-        "font-src": env.list("CSP_FONT_SRC", str, [SELF, "data:"]),
-        "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
-        "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [NONCE],
-        "img-src": env.list("CSP_IMG_SRC", str, [SELF]),
-        "frame-src": env.list("CSP_FRAME_SRC", str, default_frame_src),
-        "report-uri": env.tuple("CSP_REPORT_URI", str, None),
-    },
-    "REPORT_PERCENTAGE": env.float("CSP_REPORT_PERCENTAGE", 10.0),
+SECURE_CSP_DIRECTIVES = {
+    "default-src": env.list("CSP_DEFAULT_SRC", str, [CSP.SELF]) + [CSP.NONCE],
+    "style-src": env.list("CSP_STYLE_SRC", str, [CSP.SELF]) + [CSP.NONCE],
+    "font-src": env.list("CSP_FONT_SRC", str, [CSP.SELF, "data:"]),
+    "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
+    "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [CSP.NONCE],
+    "img-src": env.list("CSP_IMG_SRC", str, [CSP.SELF]),
+    "frame-src": env.list("CSP_FRAME_SRC", str, default_frame_src),
 }
+if report_uri := env.tuple("CSP_REPORT_URI", str, None):
+    SECURE_CSP_DIRECTIVES["report-uri"] = report_uri
+
 if "CSP_STYLE_SRC_ELEM" in os.environ:
-    CONTENT_SECURITY_POLICY["DIRECTIVES"]["style-src-elem"] = env.list(
-        "CSP_STYLE_SRC_ELEM", str
-    )
+    SECURE_CSP_DIRECTIVES["style-src-elem"] = env.list("CSP_STYLE_SRC_ELEM", str)
 if "CSP_WORKER_SRC" in os.environ:
-    CONTENT_SECURITY_POLICY["DIRECTIVES"]["worker-src"] = env.list(
-        "CSP_WORKER_SRC", str
-    )
+    SECURE_CSP_DIRECTIVES["worker-src"] = env.list("CSP_WORKER_SRC", str)
+
 csp_report_only = env.bool("CSP_REPORT_ONLY", False)
 if csp_report_only:
-    CONTENT_SECURITY_POLICY_REPORT_ONLY = CONTENT_SECURITY_POLICY
-    CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
+    SECURE_CSP_REPORT_ONLY = SECURE_CSP_DIRECTIVES
+    SECURE_CSP = {}
+else:
+    SECURE_CSP = SECURE_CSP_DIRECTIVES
+    SECURE_CSP_REPORT_ONLY = {}
 
 
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
