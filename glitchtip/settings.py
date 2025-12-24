@@ -249,7 +249,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.okta",
     "anymail",
     "corsheaders",
-    "csp",
+
     "django_extensions",
 ]
 if DEBUG_TOOLBAR:
@@ -550,12 +550,10 @@ TASKS = {
 # Batch queues configuration - must be defined before tasks are imported
 VTASKS_BATCH_QUEUES = {
     "ingest_event": {
-        "task": "apps.event_ingest.tasks.ingest_event",
         "count": 100,
         "timeout": 2.0,
     },
     "ingest_transaction": {
-        "task": "apps.event_ingest.tasks.ingest_transaction",
         "count": 100,
         "timeout": 2.0,
     },

@@ -90,7 +90,10 @@ def dispatch_checks():
     if tick >= UPTIME_TICK_EXPIRE:
         cache.set(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
 
+    initial_tick = tick
+    logger.info(f"Dispatch Checks: Initial tick from cache: {initial_tick}")
     tick = tick * settings.UPTIME_CHECK_INTERVAL
+    logger.info(f"Dispatch Checks: Adjusted tick: {tick}")
     monitors = (
         Monitor.objects.filter(organization__event_throttle_rate__lt=100)
         .annotate(mod=tick % F("interval"))
@@ -98,6 +101,7 @@ def dispatch_checks():
         .exclude(Q(url="") & ~Q(monitor_type=MonitorType.HEARTBEAT))
         .only("id", "interval", "timeout")
     )
+    logger.info(f"Dispatch Checks: Found {monitors.count()} monitors")
     for i, (tick, bucket) in enumerate(bucket_monitors(monitors, tick).items()):
         for is_fast, monitors_to_dispatch in bucket.items():
             run_time = now + timedelta(seconds=i)
