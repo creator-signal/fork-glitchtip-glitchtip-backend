@@ -112,19 +112,7 @@ build_arm_x86:
 
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
-    - |
-      docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:latest \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_FULL} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MINOR} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MAJOR} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_FULL} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MINOR} \
-        -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MAJOR} \
-        --build-arg IS_CI="True" \
-        --build-arg GLITCHTIP_VERSION=${VERSION_NO_V_FULL} \
-        --build-arg COLLECT_STATIC="True"
-        .
+    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push -t ${DOCKER_CI_REGISTRY_IMAGE}:latest -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MAJOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MAJOR} --build-arg IS_CI="True" --build-arg GLITCHTIP_VERSION=${VERSION_NO_V_FULL} --build-arg COLLECT_STATIC="True" .
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
