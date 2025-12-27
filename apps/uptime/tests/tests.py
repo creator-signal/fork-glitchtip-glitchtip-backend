@@ -5,6 +5,7 @@ from aioresponses import aioresponses
 from django.conf import settings
 from django.core import mail
 from django.core.cache import cache
+from django.test import TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
@@ -12,7 +13,7 @@ from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import MonitorType
 from ..models import Monitor, MonitorCheck
@@ -21,7 +22,10 @@ from ..utils import fetch_all
 from ..webhooks import send_uptime_as_webhook
 
 
-class UptimeTestCase(GlitchTipTestCase):
+class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    def create_user_and_project(self):
+        self.create_logged_in_user()
+
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_dispatch_checks(self, mocked):
         test_url = "https://example.com"

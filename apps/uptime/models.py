@@ -104,10 +104,12 @@ class Monitor(models.Model):
             self.endpoint_id = uuid.uuid4()
         super().save(*args, **kwargs)
         # pylint: disable=import-outside-toplevel
+        from django.db import transaction
+
         from apps.uptime.tasks import perform_checks
 
         if self.monitor_type != MonitorType.HEARTBEAT:
-            perform_checks.enqueue([self.pk])
+            transaction.on_commit(lambda: perform_checks.enqueue([self.pk]))
 
     def clean(self):
         if self.monitor_type in HTTP_MONITOR_TYPES:

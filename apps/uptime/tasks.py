@@ -1,19 +1,23 @@
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
+import aiohttp
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import F, Q
 from django.tasks import task
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
 
 from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType
-from .utils import fetch_all
+from .utils import fetch
 from .webhooks import send_uptime_as_webhook
 
 logger = logging.getLogger(__name__)
@@ -46,55 +50,18 @@ def dispatch_checks():
         .exclude(Q(url="") & ~Q(monitor_type=MonitorType.HEARTBEAT))
         .only("id", "interval", "timeout")
     )
-    
-    # Batch them up to reduce queue pressure? 
-    # vtasks handles lists efficiently, but let's pass all IDs at once for now
-    # or chunk them if we expect thousands.
-    # perform_checks will fetch them all.
-    fast_ids = []
-    slow_ids = []
-    for monitor in monitors:
-        if (monitor.timeout or 20) < 30:
-            fast_ids.append(monitor.id)
-        else:
-            slow_ids.append(monitor.id)
 
-    if fast_ids:
-        perform_checks.enqueue(fast_ids)
-    if slow_ids:
-        perform_checks.enqueue(slow_ids)
+    monitor_ids = list(monitors.values_list("id", flat=True))
+    if monitor_ids:
+        perform_checks.enqueue(monitor_ids)
 
 
-@task
-def perform_checks(monitor_ids: list[int], now: str | None = None):
+@sync_to_async
+def save_monitor_checks(results, now):
     """
-    Performant check monitors and save results
-
-    1. Fetch all monitor data for ids
-    2. Async perform all checks
-    3. Save in bulk results
+    Bulk save monitor checks and trigger notifications.
+    This runs in a thread to avoid blocking the async loop.
     """
-    if now is None:
-        now = timezone.now()
-    else:
-        from django.utils.dateparse import parse_datetime
-
-        now = parse_datetime(now)
-    # Convert queryset to raw list[dict] for asyncio operations
-    monitors = list(
-        Monitor.objects.with_check_annotations().filter(pk__in=monitor_ids).values()
-    )
-    results = []
-    for result in asyncio.run(fetch_all(monitors)):
-        # Log and ignore exceptions
-        if isinstance(result, Exception):
-            logger.error("Critical monitor check failure", exc_info=result)
-        # Filter out "up" heartbeats
-        elif (
-            result["monitor_type"] != MonitorType.HEARTBEAT or result["is_up"] is False
-        ):
-            results.append(result)
-
     monitor_checks = MonitorCheck.objects.bulk_create(
         [
             MonitorCheck(
@@ -110,13 +77,75 @@ def perform_checks(monitor_ids: list[int], now: str | None = None):
         ]
     )
     for i, result in enumerate(results):
-        last_change = result["last_change"]
-        if last_change:
-            last_change = last_change.isoformat()
-        if result["latest_is_up"] is True and result["is_up"] is False:
-            send_monitor_notification.enqueue(monitor_checks[i].pk, True, last_change)
-        elif result["latest_is_up"] is False and result["is_up"] is True:
-            send_monitor_notification.enqueue(monitor_checks[i].pk, False, last_change)
+        if result["latest_is_up"] != result["is_up"]:
+            last_change = result["last_change"]
+            if last_change:
+                last_change = last_change.isoformat()
+            send_monitor_notification.enqueue(
+                monitor_checks[i].pk, not result["is_up"], last_change
+            )
+
+
+async def run_checks(monitors, now):
+    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+        tasks = [asyncio.create_task(fetch(session, m)) for m in monitors]
+        pending = tasks
+        buffer = []
+        BATCH_SIZE = 100
+        FLUSH_INTERVAL = 1.0
+        last_flush = time.monotonic()
+
+        while pending:
+            # Wait for tasks to finish, but flush buffer if needed
+            time_since_flush = time.monotonic() - last_flush
+            timeout = max(0.1, FLUSH_INTERVAL - time_since_flush)
+
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED, timeout=timeout
+            )
+
+            for task in done:
+                try:
+                    result = task.result()
+                    # Filter out "up" heartbeats
+                    if (
+                        result["monitor_type"] != MonitorType.HEARTBEAT
+                        or result["is_up"] is False
+                    ):
+                        buffer.append(result)
+                except Exception as e:
+                    logger.error("Critical monitor check failure", exc_info=e)
+
+            # Flush if batch full or timeout reached
+            if len(buffer) >= BATCH_SIZE or (
+                buffer and time.monotonic() - last_flush >= FLUSH_INTERVAL
+            ):
+                await save_monitor_checks(buffer, now)
+                buffer = []
+                last_flush = time.monotonic()
+
+        # Final flush
+        if buffer:
+            await save_monitor_checks(buffer, now)
+
+
+@task
+def perform_checks(monitor_ids: list[int], now: str | None = None):
+    """
+    Performant check monitors and save results
+    """
+    if now is None:
+        now = timezone.now()
+    else:
+        now = parse_datetime(now)
+
+    # Fetch monitors synchronously
+    monitors = list(
+        Monitor.objects.with_check_annotations().filter(pk__in=monitor_ids).values()
+    )
+
+    # Run async checks with smart batching
+    asyncio.run(run_checks(monitors, now))
 
 
 @task
@@ -124,8 +153,6 @@ def send_monitor_notification(
     monitor_check_id: int, went_down: bool, last_change: str | None
 ):
     if last_change:
-        from django.utils.dateparse import parse_datetime
-
         last_change = parse_datetime(last_change)
     recipients = AlertRecipient.objects.filter(
         alert__project__monitor__checks=monitor_check_id, alert__uptime=True
