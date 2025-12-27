@@ -3,7 +3,6 @@ import logging
 import time
 
 import aiohttp
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import F, Q
@@ -26,19 +25,19 @@ UPTIME_TICK_EXPIRE = 2147483647
 
 
 @task
-def dispatch_checks():
+async def dispatch_checks():
     """
     Dispatch monitor checks tasks in batches.
     """
     try:
-        tick = cache.incr(UPTIME_COUNTER_KEY)
+        tick = await cache.aincr(UPTIME_COUNTER_KEY)
     except ValueError:
-        cache.set(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
-        tick = cache.incr(UPTIME_COUNTER_KEY)
+        await cache.aset(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
+        tick = await cache.aincr(UPTIME_COUNTER_KEY)
 
     # Reset tick if it gets too large, but keep it monotonic
     if tick >= UPTIME_TICK_EXPIRE:
-        cache.set(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
+        await cache.aset(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
 
     # Dispatch checks for monitors that are scheduled to run at this tick
     # We use the monitor ID to spread the load across the interval window
@@ -50,18 +49,16 @@ def dispatch_checks():
         .only("id", "interval", "timeout")
     )
 
-    monitor_ids = list(monitors.values_list("id", flat=True))
+    monitor_ids = [mid async for mid in monitors.values_list("id", flat=True)]
     if monitor_ids:
-        perform_checks.enqueue(monitor_ids)
+        await perform_checks.aenqueue(monitor_ids)
 
 
-@sync_to_async
-def save_monitor_checks(results, now):
+async def save_monitor_checks(results, now):
     """
     Bulk save monitor checks and trigger notifications.
-    This runs in a thread to avoid blocking the async loop.
     """
-    monitor_checks = MonitorCheck.objects.bulk_create(
+    monitor_checks = await MonitorCheck.objects.abulk_create(
         [
             MonitorCheck(
                 monitor_id=result["id"],
@@ -80,7 +77,7 @@ def save_monitor_checks(results, now):
             last_change = result["last_change"]
             if last_change:
                 last_change = last_change.isoformat()
-            send_monitor_notification.enqueue(
+            await send_monitor_notification.aenqueue(
                 monitor_checks[i].pk, not result["is_up"], last_change
             )
 
@@ -129,7 +126,7 @@ async def run_checks(monitors, now):
 
 
 @task
-def perform_checks(monitor_ids: list[int], now: str | None = None):
+async def perform_checks(monitor_ids: list[int], now: str | None = None):
     """
     Performant check monitors and save results
     """
@@ -138,13 +135,17 @@ def perform_checks(monitor_ids: list[int], now: str | None = None):
     else:
         now = parse_datetime(now)
 
-    # Fetch monitors synchronously
-    monitors = list(
-        Monitor.objects.with_check_annotations().filter(pk__in=monitor_ids).values()
-    )
+    # Fetch monitors asynchronously
+    # Django's values() returns a QuerySet, which is async iterable in Django 4.1+
+    monitors = [
+        m
+        async for m in Monitor.objects.with_check_annotations()
+        .filter(pk__in=monitor_ids)
+        .values()
+    ]
 
     # Run async checks with smart batching
-    asyncio.run(run_checks(monitors, now))
+    await run_checks(monitors, now)
 
 
 @task
