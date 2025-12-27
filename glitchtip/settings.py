@@ -17,10 +17,10 @@ from datetime import timedelta
 import environ
 import sentry_sdk
 from corsheaders.defaults import default_headers
-from django.utils.csp import CSP
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import UnreadablePostError
+from django.utils.csp import CSP
 from django_vtasks.scheduler import crontab
 from sentry_sdk.integrations.django import DjangoIntegration
 
@@ -249,7 +249,6 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.okta",
     "anymail",
     "corsheaders",
-
     "django_extensions",
 ]
 if DEBUG_TOOLBAR:

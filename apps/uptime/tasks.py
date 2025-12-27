@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-from datetime import timedelta
 
 import aiohttp
 from asgiref.sync import sync_to_async
