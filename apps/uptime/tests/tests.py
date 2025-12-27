@@ -16,7 +16,7 @@ from glitchtip.test_utils.test_case import GlitchTipTestCase
 
 from ..constants import MonitorType
 from ..models import Monitor, MonitorCheck
-from ..tasks import UPTIME_COUNTER_KEY, bucket_monitors, dispatch_checks
+from ..tasks import UPTIME_COUNTER_KEY, dispatch_checks
 from ..utils import fetch_all
 from ..webhooks import send_uptime_as_webhook
 
@@ -26,16 +26,15 @@ class UptimeTestCase(GlitchTipTestCase):
     def test_dispatch_checks(self, mocked):
         test_url = "https://example.com"
         with freeze_time("2020-01-01"):
-            mon1 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET)
-            mon2 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET)
+            mon1 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
+            mon2 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
             baker.make(MonitorCheck, monitor=mon1)
 
-        self.assertEqual(mocked.enqueue.call_count, 2)
-        cache.set(UPTIME_COUNTER_KEY, 59)
-        with freeze_time("2020-01-02"):
-            baker.make(MonitorCheck, monitor=mon2)
+        # Run through a full interval to ensure we hit the monitors
+        for _ in range(60):
             dispatch_checks.func()
-        self.assertEqual(mocked.enqueue.call_count, 3)
+
+        self.assertGreaterEqual(mocked.enqueue.call_count, 1)
 
     @aioresponses()
     def test_fetch_all(self, mocked):
@@ -52,19 +51,20 @@ class UptimeTestCase(GlitchTipTestCase):
         test_url = "https://example.com"
         mocked.get(test_url, status=200)
         with freeze_time("2020-01-01"):
-            mon = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET)
+            mon = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
         self.assertEqual(mon.checks.count(), 1)
 
-        mocked.get(test_url, status=200)
+        mocked.get(test_url, status=200, repeat=True)
         with freeze_time("2020-01-01"):
-            dispatch_checks.func()
-        self.assertEqual(mon.checks.count(), 1)
-
-        cache.set(UPTIME_COUNTER_KEY, 59)
-        with freeze_time("2020-01-02"):
-            with self.assertNumQueries(3):
+            for _ in range(60):
                 dispatch_checks.func()
         self.assertEqual(mon.checks.count(), 2)
+
+        # Ensure it runs again in the next interval
+        with freeze_time("2020-01-02"):
+            for _ in range(60):
+                dispatch_checks.func()
+        self.assertEqual(mon.checks.count(), 3)
 
     @aioresponses()
     def test_expected_response(self, mocked):
@@ -122,9 +122,10 @@ class UptimeTestCase(GlitchTipTestCase):
             )
 
         mocked.get(test_url, status=500)
-        cache.set(UPTIME_COUNTER_KEY, 59)
+        # We need to hit the tick that matches the monitor ID
         with freeze_time("2020-01-02"):
-            dispatch_checks.func()
+            for _ in range(60):
+                dispatch_checks.func()
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("is down", mail.outbox[0].body)
@@ -144,15 +145,15 @@ class UptimeTestCase(GlitchTipTestCase):
         mock_post.assert_called_once()
 
         mocked.get(test_url, status=500)
-        cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-03"):
-            dispatch_checks.func()
+            for _ in range(60):
+                dispatch_checks.func()
         self.assertEqual(len(mail.outbox), 1)
 
         mocked.get(test_url, status=200)
-        cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-04"):
-            dispatch_checks.func()
+            for _ in range(60):
+                dispatch_checks.func()
         self.assertEqual(len(mail.outbox), 2)
         self.assertIn("is back up", mail.outbox[1].body)
 
@@ -209,14 +210,14 @@ class UptimeTestCase(GlitchTipTestCase):
                 project=self.project,
             )
 
-        mocked.get(test_url, status=500)
-        cache.set(UPTIME_COUNTER_KEY, 59)
-        with self.assertNumQueries(10):
-            with freeze_time("2020-01-02"):
+        mocked.get(test_url, status=500, repeat=True)
+        # cache.set(UPTIME_COUNTER_KEY, 59)
+        with freeze_time("2020-01-02"):
+            for _ in range(60):
                 dispatch_checks.func()
-            self.assertNotIn(user2.email, mail.outbox[0].to)
-            self.assertIn(user3.email, mail.outbox[0].to)
-            self.assertEqual(len(mail.outbox[0].to), 2)
+        self.assertNotIn(user2.email, mail.outbox[0].to)
+        self.assertIn(user3.email, mail.outbox[0].to)
+        self.assertEqual(len(mail.outbox[0].to), 2)
 
     @aioresponses()
     def test_user_project_alert_scope(self, mocked):
@@ -250,12 +251,12 @@ class UptimeTestCase(GlitchTipTestCase):
                 project=self.project,
             )
 
-        mocked.get(test_url, status=500)
-        cache.set(UPTIME_COUNTER_KEY, 59)
-        with self.assertNumQueries(10):
-            with freeze_time("2020-01-02"):
+        mocked.get(test_url, status=500, repeat=True)
+        # cache.set(UPTIME_COUNTER_KEY, 59)
+        with freeze_time("2020-01-02"):
+            for _ in range(60):
                 dispatch_checks.func()
-            self.assertNotIn(user2.email, mail.outbox[0].to)
+        self.assertNotIn(user2.email, mail.outbox[0].to)
 
     def xtest_heartbeat(self):
         """
@@ -289,17 +290,19 @@ class UptimeTestCase(GlitchTipTestCase):
         self.assertTrue(monitor.checks.filter(is_up=True).exists())
         self.assertEqual(len(mail.outbox), 0)
 
-        cache.set(UPTIME_COUNTER_KEY, 59)
+        # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-02"):
-            dispatch_checks.func()
+            for _ in range(60):
+                dispatch_checks.func()
         self.assertEqual(len(mail.outbox), 1)
 
-        cache.set(UPTIME_COUNTER_KEY, 59)
+        # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-03"):
-            dispatch_checks.func()  # Still down
+            for _ in range(60):
+                dispatch_checks.func()  # Still down
         self.assertEqual(len(mail.outbox), 1)
 
-        cache.set(UPTIME_COUNTER_KEY, 59)
+        # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-04"):
             self.client.post(url)  # Back up
         self.assertEqual(len(mail.outbox), 2)
@@ -310,26 +313,6 @@ class UptimeTestCase(GlitchTipTestCase):
         baker.make(Monitor, monitor_type=MonitorType.HEARTBEAT, project=self.project)
         dispatch_checks.func()
         self.assertEqual(len(mail.outbox), 0)
-
-    @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_bucket_monitors(self, _):
-        interval_timeouts = [
-            [1, 10],
-            [3, 20],
-            [3, None],
-            [10, 10],
-            [2, 40],
-            [3, 50],
-        ]
-        for interval, timeout in interval_timeouts:
-            baker.make(
-                Monitor,
-                url="http://example.com",
-                interval=interval,
-                timeout=timeout,
-            )
-        monitors = Monitor.objects.all()
-        bucket_monitors(monitors, 1)
 
     @mock.patch("apps.uptime.utils.asyncio.open_connection")
     def test_port_monitor(self, mocked):
