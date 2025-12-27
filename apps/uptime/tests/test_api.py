@@ -82,7 +82,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": str(self.project.pk),
             "timeout": 25,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.name, data["name"])
@@ -103,7 +104,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "timeout": None,
             "interval": 60,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.url, "example.com:80")
@@ -162,7 +164,8 @@ class UptimeAPITestCase(GlitchTestCase):
             "interval": 60,
             "project": str(self.project.pk),
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
         mocked.enqueue.assert_called_once()
         self.assertEqual(res.status_code, 201)
         self.assertTrue(Monitor.objects.filter(expected_status=None).exists())
