@@ -20,66 +20,13 @@ logger = logging.getLogger(__name__)
 
 UPTIME_COUNTER_KEY = "uptime_counter"
 UPTIME_TICK_EXPIRE = 2147483647
-UPTIME_CHECK_INTERVAL = settings.UPTIME_CHECK_INTERVAL
-
-
-def bucket_monitors(monitors, tick: int, check_interval=UPTIME_CHECK_INTERVAL):
-    """
-    Sort monitors into buckets based on:
-
-    Each interval group.
-    <30 seconds timeout vs >= 30 (potentially slow)
-
-    Example: if there is one monior with interval of 1 and the check interval is 10,
-    this monitor should run every time. The return should be a list of 10 ticks with
-    the same monitor in each
-
-    Result:
-    {tick: {is_fast: monitors[]}}
-    {1, {True: [monitor, monitor]}}
-    {1, {False: [monitor]}}
-    {2, {True: [monitor]}}
-    """
-    result = {}
-    for i in range(tick, tick + check_interval):
-        fast_tick_monitors = [
-            monitor
-            for monitor in monitors
-            if i % monitor.interval == 0 and monitor.int_timeout < 30
-        ]
-        slow_tick_monitors = [
-            monitor
-            for monitor in monitors
-            if i % monitor.interval == 0 and monitor.int_timeout >= 30
-        ]
-        if fast_tick_monitors or slow_tick_monitors:
-            result[i] = {}
-            if fast_tick_monitors:
-                result[i][True] = fast_tick_monitors
-            if slow_tick_monitors:
-                result[i][False] = slow_tick_monitors
-    return result
 
 
 @task
 def dispatch_checks():
     """
-    Dispatch monitor checks tasks in batches, include start time for check
-
-    Track each "second tick". A tick is the number of seconds away from an arbitrary start time.
-    Fetch each monitor that would need to run in the next UPTIME_CHECK_INTERVAL
-    Determine when monitors need to run based on each second tick and whether it's
-    timeout is fast or slow (group slow together)
-    For example, if our check interval is 10 and the monitor should run every 2 seconds,
-    there should be 5 checks run every other second
-
-    This method reduces the number of necessary tasks and sql queries. While keeping
-    the timing precise and allowing for any arbitrary interval (to the second).
-    It also has no need to track state of previous checks.
-
-    The check result DB writes are then batched for better performance.
+    Dispatch monitor checks tasks in batches.
     """
-    now = timezone.now()
     try:
         tick = cache.incr(UPTIME_COUNTER_KEY)
     except ValueError:
@@ -90,27 +37,32 @@ def dispatch_checks():
     if tick >= UPTIME_TICK_EXPIRE:
         cache.set(UPTIME_COUNTER_KEY, 0, UPTIME_TICK_EXPIRE)
 
-    initial_tick = tick
-    logger.info(f"Dispatch Checks: Initial tick from cache: {initial_tick}")
-    tick = tick * settings.UPTIME_CHECK_INTERVAL
-    logger.info(f"Dispatch Checks: Adjusted tick: {tick}")
+    # Dispatch checks for monitors that are scheduled to run at this tick
+    # We use the monitor ID to spread the load across the interval window
     monitors = (
         Monitor.objects.filter(organization__event_throttle_rate__lt=100)
-        .annotate(mod=tick % F("interval"))
-        .filter(mod__lt=UPTIME_CHECK_INTERVAL)
+        .annotate(mod=(tick + F("id")) % F("interval"))
+        .filter(mod=0)
         .exclude(Q(url="") & ~Q(monitor_type=MonitorType.HEARTBEAT))
         .only("id", "interval", "timeout")
     )
-    logger.info(f"Dispatch Checks: Found {monitors.count()} monitors")
-    for i, (tick, bucket) in enumerate(bucket_monitors(monitors, tick).items()):
-        for is_fast, monitors_to_dispatch in bucket.items():
-            run_time = now + timedelta(seconds=i)
-            # vtasks doesn't support delay yet, so we just run it roughly now
-            # The logic inside perform_checks relies on being run roughly at run_time?
-            # It uses `now` argument if passed.
-            perform_checks.enqueue(
-                [m.pk for m in monitors_to_dispatch], run_time.isoformat()
-            )
+    
+    # Batch them up to reduce queue pressure? 
+    # vtasks handles lists efficiently, but let's pass all IDs at once for now
+    # or chunk them if we expect thousands.
+    # perform_checks will fetch them all.
+    fast_ids = []
+    slow_ids = []
+    for monitor in monitors:
+        if (monitor.timeout or 20) < 30:
+            fast_ids.append(monitor.id)
+        else:
+            slow_ids.append(monitor.id)
+
+    if fast_ids:
+        perform_checks.enqueue(fast_ids)
+    if slow_ids:
+        perform_checks.enqueue(slow_ids)
 
 
 @task

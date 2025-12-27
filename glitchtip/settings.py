@@ -524,7 +524,7 @@ IS_LOAD_TEST = env("IS_LOAD_TEST")
 
 # Time in seconds to debounce some frequently run tasks
 TASK_DEBOUNCE_DELAY = env.int("TASK_DEBOUNCE_DELAY", 30)
-UPTIME_CHECK_INTERVAL = 10
+UPTIME_CHECK_INTERVAL = 1
 ALERT_NOTIFICATION_INTERVAL = env.int("ALERT_NOTIFICATION_INTERVAL", 60)
 VTASKS_SCHEDULE = {
     "send-alert-notifications": {
