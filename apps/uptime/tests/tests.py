@@ -4,7 +4,6 @@ from unittest import mock
 from aioresponses import aioresponses
 from django.conf import settings
 from django.core import mail
-from django.core.cache import cache
 from django.test import TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -17,7 +16,7 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import MonitorType
 from ..models import Monitor, MonitorCheck
-from ..tasks import UPTIME_COUNTER_KEY, dispatch_checks
+from ..tasks import dispatch_checks
 from ..utils import fetch_all
 from ..webhooks import send_uptime_as_webhook
 
@@ -30,8 +29,12 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     def test_dispatch_checks(self, mocked):
         test_url = "https://example.com"
         with freeze_time("2020-01-01"):
-            mon1 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
-            mon2 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
+            mon1 = baker.make(
+                Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60
+            )
+            baker.make(
+                Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60
+            )
             baker.make(MonitorCheck, monitor=mon1)
 
         # Run through a full interval to ensure we hit the monitors
@@ -55,7 +58,9 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         test_url = "https://example.com"
         mocked.get(test_url, status=200)
         with freeze_time("2020-01-01"):
-            mon = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
+            mon = baker.make(
+                Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60
+            )
         self.assertEqual(mon.checks.count(), 1)
 
         mocked.get(test_url, status=200, repeat=True)
