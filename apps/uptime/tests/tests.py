@@ -1,7 +1,7 @@
-import asyncio
 from unittest import mock
 
 from aioresponses import aioresponses
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.core import mail
 from django.test import TransactionTestCase
@@ -37,8 +37,11 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             baker.make(MonitorCheck, monitor=mon1)
 
         # Run through a full interval to ensure we hit the monitors
-        for _ in range(60):
-            asyncio.run(dispatch_checks.func())
+        async def run_loop():
+            for _ in range(60):
+                await dispatch_checks.func()
+
+        async_to_sync(run_loop)()
 
         self.assertGreaterEqual(mocked.aenqueue.call_count, 1)
 
@@ -49,7 +52,7 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         mon1 = baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET)
         mocked.get(test_url, status=200)
         monitors = list(Monitor.objects.all().values())
-        results = asyncio.run(fetch_all(monitors))
+        results = async_to_sync(fetch_all)(monitors)
         self.assertEqual(results[0]["id"], mon1.pk)
 
     @aioresponses()
@@ -64,14 +67,17 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
         mocked.get(test_url, status=200, repeat=True)
         with freeze_time("2020-01-01"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+
+            async def run_loop():
+                for _ in range(60):
+                    await dispatch_checks.func()
+
+            async_to_sync(run_loop)()
         self.assertEqual(mon.checks.count(), 2)
 
         # Ensure it runs again in the next interval
         with freeze_time("2020-01-02"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+            async_to_sync(run_loop)()
         self.assertEqual(mon.checks.count(), 3)
 
     @aioresponses()
@@ -130,10 +136,14 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             )
 
         mocked.get(test_url, status=500)
+
         # We need to hit the tick that matches the monitor ID
-        with freeze_time("2020-01-02"):
+        async def run_loop():
             for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+                await dispatch_checks.func()
+
+        with freeze_time("2020-01-02"):
+            async_to_sync(run_loop)()
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("is down", mail.outbox[0].body)
@@ -154,14 +164,12 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
         mocked.get(test_url, status=500)
         with freeze_time("2020-01-03"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+            async_to_sync(run_loop)()
         self.assertEqual(len(mail.outbox), 1)
 
         mocked.get(test_url, status=200)
         with freeze_time("2020-01-04"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+            async_to_sync(run_loop)()
         self.assertEqual(len(mail.outbox), 2)
         self.assertIn("is back up", mail.outbox[1].body)
 
@@ -221,8 +229,12 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         mocked.get(test_url, status=500, repeat=True)
         # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-02"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+
+            async def run_loop():
+                for _ in range(60):
+                    await dispatch_checks.func()
+
+            async_to_sync(run_loop)()
         self.assertNotIn(user2.email, mail.outbox[0].to)
         self.assertIn(user3.email, mail.outbox[0].to)
         self.assertEqual(len(mail.outbox[0].to), 2)
@@ -262,8 +274,12 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         mocked.get(test_url, status=500, repeat=True)
         # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-02"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+
+            async def run_loop():
+                for _ in range(60):
+                    await dispatch_checks.func()
+
+            async_to_sync(run_loop)()
         self.assertNotIn(user2.email, mail.outbox[0].to)
 
     def xtest_heartbeat(self):
@@ -294,20 +310,23 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertFalse(monitor.checks.exists())
             self.client.post(url)
             self.assertTrue(monitor.checks.filter(is_up=True).exists())
-            asyncio.run(dispatch_checks.func())
+            async_to_sync(dispatch_checks.func)()
         self.assertTrue(monitor.checks.filter(is_up=True).exists())
         self.assertEqual(len(mail.outbox), 0)
 
         # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-02"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())
+
+            async def run_loop():
+                for _ in range(60):
+                    await dispatch_checks.func()
+
+            async_to_sync(run_loop)()
         self.assertEqual(len(mail.outbox), 1)
 
         # cache.set(UPTIME_COUNTER_KEY, 59)
         with freeze_time("2020-01-03"):
-            for _ in range(60):
-                asyncio.run(dispatch_checks.func())  # Still down
+            async_to_sync(run_loop)()  # Still down
         self.assertEqual(len(mail.outbox), 1)
 
         # cache.set(UPTIME_COUNTER_KEY, 59)
@@ -319,7 +338,7 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         # Don't alert users when heartbeat check has never come in
         self.create_user_and_project()
         baker.make(Monitor, monitor_type=MonitorType.HEARTBEAT, project=self.project)
-        asyncio.run(dispatch_checks.func())
+        async_to_sync(dispatch_checks.func)()
         self.assertEqual(len(mail.outbox), 0)
 
     @mock.patch("apps.uptime.utils.asyncio.open_connection")
