@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
+
 if [ "$USE_GRANIAN" = "true" ]; then
     exec bin/run-granian.sh
 elif [ "$USE_ASYNC_SERVER" = "true" ]; then

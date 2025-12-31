@@ -546,13 +546,11 @@ TASKS = {
     }
 }
 
+VTASKS_QUEUES = ["default", "ingest"]
+
 # Batch queues configuration - must be defined before tasks are imported
 VTASKS_BATCH_QUEUES = {
-    "ingest_event": {
-        "count": 100,
-        "timeout": 2.0,
-    },
-    "ingest_transaction": {
+    "ingest": {
         "count": 100,
         "timeout": 2.0,
     },

@@ -9,6 +9,7 @@ x-environment: &default-environment
   ENABLE_OBSERVABILITY_API: "true"
   #IS_LOAD_TEST: "true"
   VTASKS_CONCURRENCY: 4
+  LOG_LEVEL: INFO
 
 x-depends_on: &default-depends_on
   - postgres
@@ -28,7 +29,7 @@ services:
     #tty: true
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev
-    command: granian --interface asgi glitchtip.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-ignore-worker-failure
+    command: granian --interface asgi glitchtip.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-ignore-worker-failure --access-log
     #command: python app.py
     #command: ./manage.py runserver 0.0.0.0:8000
     depends_on: *default-depends_on
@@ -43,8 +44,3 @@ services:
     depends_on: *default-depends_on
     volumes: *default-volumes
     environment: *default-environment
-    # Work around https://github.com/celery/celery/issues/8306
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
