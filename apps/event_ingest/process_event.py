@@ -244,17 +244,30 @@ def update_issues(processing_events: list[ProcessingEvent]):
                 search_vector=vector,
             )
 
-    for issue_id, value in issues_to_update.items():
-        Issue.objects.filter(id=issue_id).update(
-            count=F("count") + value.added_count,
-            search_vector=PGAppendAndLimitTsVector(
-                F("search_vector"),
-                Value(value.search_vector),
-                Value(settings.SEARCH_MAX_LEXEMES),
-                Value("english"),
-            ),
-            last_seen=Greatest(F("last_seen"), value.last_seen),
+    if not issues_to_update:
+        return
+
+    data = sorted(
+        [
+            (issue_id, value.added_count, value.search_vector, value.last_seen)
+            for issue_id, value in issues_to_update.items()
+        ],
+        key=itemgetter(0),
+    )
+
+    with connection.cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+        max_lexemes = settings.SEARCH_MAX_LEXEMES
+
+        sql = (
+            "UPDATE issue_events_issue SET "
+            "count = issue_events_issue.count + v.added_count, "
+            f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
+            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen) "
+            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen) "
+            "WHERE issue_events_issue.id = v.id"
         )
+        cursor.execute(sql)
 
 
 def generate_contexts(event: TaskIssueEvent) -> Contexts:
