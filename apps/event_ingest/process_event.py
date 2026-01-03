@@ -10,13 +10,12 @@ from django.contrib.postgres.search import SearchVector
 from django.db import connection, transaction
 from django.db.models import (
     Exists,
-    F,
     OuterRef,
     Q,
     QuerySet,
     Value,
 )
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models.functions import Coalesce
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from django_valkey import get_valkey_connection
@@ -57,7 +56,6 @@ from ..shared.schema.contexts import (
 )
 from .interfaces import IssueStats, IssueUpdate, ProcessingEvent
 from .javascript_event_processor import JavascriptEventProcessor
-from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
     ErrorIssueEventSchema,
     EventException,
