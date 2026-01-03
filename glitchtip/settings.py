@@ -45,6 +45,7 @@ env = environ.FileAwareEnv(
     DEBUG_TOOLBAR=(bool, False),
     STATIC_URL=(str, "/"),
     ENABLE_OBSERVABILITY_API=(bool, False),
+    READ_ONLY_DATABASE_URL=(str, None),
 )
 path = environ.Path()
 
@@ -462,6 +463,9 @@ DATABASES = {
         "DATABASE_URL", default="postgres://postgres:postgres@postgres:5432/postgres"
     )
 }
+if env("READ_ONLY_DATABASE_URL"):
+    DATABASES["read_only"] = env.db("READ_ONLY_DATABASE_URL")
+
 # If component variables like DATABASE_HOST are provided, update the base config
 if env.str("DATABASE_HOST", None):
     DATABASES["default"].update(
@@ -474,24 +478,25 @@ if env.str("DATABASE_HOST", None):
         }
     )
 # Add other settings that apply to both methods.
-DATABASES["default"]["ENGINE"] = "psql_partition.backend"
-DATABASES["default"].setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
-DATABASES["default"].setdefault(
-    "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
-)
-DATABASES["default"].setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
-pooling_already_configured = "pool" in DATABASES["default"].get("OPTIONS", {})
-# Apply the default client-side pool ONLY IF connection reuse is not active
-if (
-    DATABASES["default"]["CONN_MAX_AGE"] == 0
-    and not pooling_already_configured
-    and env.bool("DATABASE_POOL", True)
-):
-    DATABASES["default"].setdefault("OPTIONS", {})
-    DATABASES["default"]["OPTIONS"]["pool"] = {
-        "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
-        "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
-    }
+for db_config in DATABASES.values():
+    db_config["ENGINE"] = "psql_partition.backend"
+    db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
+    db_config.setdefault(
+        "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
+    )
+    db_config.setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
+    pooling_already_configured = "pool" in db_config.get("OPTIONS", {})
+    # Apply the default client-side pool ONLY IF connection reuse is not active
+    if (
+        db_config["CONN_MAX_AGE"] == 0
+        and not pooling_already_configured
+        and env.bool("DATABASE_POOL", True)
+    ):
+        db_config.setdefault("OPTIONS", {})
+        db_config["OPTIONS"]["pool"] = {
+            "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
+            "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
+        }
 
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
@@ -819,8 +824,9 @@ if TESTING:
     TEST_RUNNER = "glitchtip.test_runner.TimedTestRunner"
     # Optimization
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
-    DATABASES["default"]["CONN_MAX_AGE"] = None
-    DATABASES["default"]["OPTIONS"]["pool"] = False
+    for db_config in DATABASES.values():
+        db_config["CONN_MAX_AGE"] = None
+        db_config["OPTIONS"]["pool"] = False
     TASKS = {
         "default": {
             "BACKEND": "django_vtasks.backends.immediate.ImmediateBackend",
