@@ -101,6 +101,7 @@ def _get_or_create_related_models(
     release_set: set,
     environment_set: set,
     project_set: set,
+    read_only_db: str = "default",
 ) -> tuple[list[tuple[str, int, int]], QuerySet]:
     """
     Given sets of release, environment, and project data,
@@ -109,7 +110,8 @@ def _get_or_create_related_models(
     release_version_set = {version for version, _, _ in release_set}
     environment_name_set = {name for name, _, _ in environment_set}
 
-    projects_query = Project.objects.filter(id__in=project_set)
+    projects_query = Project.objects.using(read_only_db).filter(id__in=project_set)
+
     annotations = {
         "release_id": Coalesce("releases__id", Value(None)),
         "release_name": Coalesce("releases__version", Value(None)),
@@ -482,7 +484,7 @@ def get_and_create_releases(
     ]
 
 
-def process_issue_events(messages: list[IssueTaskMessage]):
+def process_issue_events(messages: list[IssueTaskMessage], read_only_db: str = "default"):
     """
     Accepts a list of events to ingest. Events should be:
     - Few enough to save in a single DB call
@@ -517,7 +519,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     release_version_set = {version for version, _, _ in release_set}
 
     releases, projects_with_data = _get_or_create_related_models(
-        release_set, environment_set, project_set
+        release_set, environment_set, project_set, read_only_db
     )
 
     projects_with_data = projects_with_data.annotate(
@@ -551,9 +553,8 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     }
 
     debug_files = (
-        DebugSymbolBundle.objects.filter(
-            organization__in={event.organization_id for event in messages}
-        )
+        DebugSymbolBundle.objects.using(read_only_db)
+        .filter(organization__in={event.organization_id for event in messages})
         .filter(
             Q(
                 release__version__in=release_version_set,
@@ -731,7 +732,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
 
-    hash_queryset = IssueHash.objects.filter(q_objects).values(
+    hash_queryset = IssueHash.objects.using(read_only_db).filter(q_objects).values(
         "value", "project_id", "issue_id", "issue__status"
     )
     issue_events: list[IssueEvent] = []
@@ -1077,7 +1078,9 @@ def update_tags(processing_events: list[ProcessingEvent]):
 
 
 # Transactions
-def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
+def process_transaction_events(
+    ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
+):
     projects_to_update = {
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
@@ -1099,7 +1102,9 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
     project_set = {project_id for _, project_id, _ in release_set}.union(
         {project_id for _, project_id, _ in environment_set}
     )
-    _get_or_create_related_models(release_set, environment_set, project_set)
+    _get_or_create_related_models(
+        release_set, environment_set, project_set, read_only_db
+    )
     transactions = []
 
     for ingest_event in ingest_events:
@@ -1118,12 +1123,23 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
 
         # TODO tags
 
-        group, group_created = TransactionGroup.objects.get_or_create(
-            project_id=ingest_event.project_id,
-            transaction=event.transaction[:1024],  # Truncate
-            op=op,
-            method=method,
+        group = (
+            TransactionGroup.objects.using(read_only_db)
+            .filter(
+                project_id=ingest_event.project_id,
+                transaction=event.transaction[:1024],  # Truncate
+                op=op,
+                method=method,
+            )
+            .first()
         )
+        if not group:
+            group, _ = TransactionGroup.objects.get_or_create(
+                project_id=ingest_event.project_id,
+                transaction=event.transaction[:1024],  # Truncate
+                op=op,
+                method=method,
+            )
 
         transactions.append(
             TransactionEvent(
