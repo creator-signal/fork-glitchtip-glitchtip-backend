@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -e
+export USE_ASYNC_SERVER=false
 
 if echo "$PORT" | grep -qF :; then
     HTTP_SOCKET="$PORT"

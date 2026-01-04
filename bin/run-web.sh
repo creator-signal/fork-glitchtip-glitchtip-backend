@@ -1,12 +1,5 @@
 #!/usr/bin/env sh
 export LOG_LEVEL=${LOG_LEVEL:-INFO}
+export USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
 
-if [ "$USE_GRANIAN" = "true" ]; then
-    exec bin/run-granian.sh
-elif [ "$USE_ASYNC_SERVER" = "true" ]; then
-    # Run the command for asynchronous server
-    exec bin/run-uvicorn.sh
-else
-    # Run the original command
-    exec bin/run-uwsgi.sh
-fi
+exec bin/run-granian.sh

@@ -564,6 +564,29 @@ VTASKS_BATCH_QUEUES = {
 # Maximum number of issues send in a single alert payload
 MAX_ISSUES_PER_ALERT = env.int("MAX_ISSUES_PER_ALERT", 3)
 
+# Support running in WSGI mode (uWSGI or Granian WSGI)
+# We need to use a different cache backend for WSGI to avoid async loop issues
+try:
+    import uwsgi
+
+    HAS_UWSGI = True
+except ImportError:
+    HAS_UWSGI = False
+
+# Default to True for now, but if running under uWSGI or Granian WSGI, we might need to switch
+USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
+
+_use_valkey_wsgi_default = False
+if not USE_ASYNC_SERVER:
+    _use_valkey_wsgi_default = True
+elif "USE_ASYNC_SERVER" not in os.environ and HAS_UWSGI:
+    _use_valkey_wsgi_default = True
+
+USE_VALKEY_WSGI_CACHE = env.bool("USE_VALKEY_WSGI_CACHE", _use_valkey_wsgi_default)
+
+if IS_WORKER:
+    USE_VALKEY_WSGI_CACHE = False
+
 if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
@@ -571,9 +594,13 @@ if os.environ.get("CACHE_URL"):
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
 elif VALKEY_URL:
+    valkey_backend = "django_vcache.backend.ValkeyCache"
+    if USE_VALKEY_WSGI_CACHE:
+        valkey_backend = "django_vcache.wsgi.ValkeyWSGICache"
+
     CACHES = {
         "default": {
-            "BACKEND": "django_vcache.backend.ValkeyCache",
+            "BACKEND": valkey_backend,
             "LOCATION": VALKEY_URL,
             "OPTIONS": {
                 "max_connections": VALKEY_MAX_CONNECTIONS,
