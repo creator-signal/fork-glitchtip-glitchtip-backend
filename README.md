@@ -66,16 +66,6 @@ This automatically configures `pg_partman` but you can update it manually with `
 Default partitioning uses `DATE` partitions managed by Django. Advanced partitioning uses nested `ORG_ID HASH > DATE`
 partitions managed by `pg_partman`.
 
-### VS Code (Optional)
-
-VS Code can do type checking and type inference. However, it requires setting up a virtual environment.
-
-1. Install Python. For Ubuntu this is `apt install python3-dev python3-venv`
-2. Install [poetry](https://python-poetry.org/docs/#installation)
-3. Create Python virtual environment `python -m venv env`
-4. Activate environment `source env/bin/activate`
-5. Install packages `poetry install`
-
 ### Load testing
 
 We use [Locust](https://locust.io/) to load test. It's built into the dev dependencies.

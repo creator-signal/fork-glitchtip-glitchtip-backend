@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -e
 
-exec bin/run-worker.sh
+echo "This script is deprecated and no longer does anything"
