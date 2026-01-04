@@ -5,6 +5,7 @@ WORKERS=${WEB_CONCURRENCY:-1}
 HOST=${GRANIAN_HOST:-0.0.0.0}
 PORT=${GRANIAN_PORT:-8000}
 LOG_LEVEL=${GRANIAN_LOG_LEVEL:-info}
+USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
 
 if [ "$USE_ASYNC_SERVER" = "true" ]; then
     echo "Start GlitchTip with ${WORKERS} granian worker(s) (ASGI)"
