@@ -5,6 +5,8 @@
 - Switch Cache to django-vcache
 - Add optional READ_ONLY_DATABASE_URL
 - Ingest optimizations around bulk queries
+- Use port 8000 more consistently instead of sometimes port 8080
+- Remove gunicorn and uvicorn. Please use granian. uwsgi still included for compatibility.
 
 # v5.2.0
 
