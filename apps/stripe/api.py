@@ -92,7 +92,7 @@ class CreateSubscriptionResponse(SubscriptionIn):
 
 
 class StripeCheckoutSessionSchema(CamelSchema):
-    id: str
+    url: str
 
 
 class StripePortalSessionSchema(CamelSchema):
