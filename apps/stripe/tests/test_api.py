@@ -46,7 +46,7 @@ class StripeAPITestCase(TestCase):
     @patch("apps.stripe.api.create_session")
     def test_create_stripe_session(self, mock_create_session):
         url = reverse("api:create_stripe_session", args=[self.organization.slug])
-        mock_create_session.return_value = {"id": "test"}
+        mock_create_session.return_value = {"url": "test"}
         res = self.client.post(
             url, {"price": self.price.stripe_id}, content_type="application/json"
         )
