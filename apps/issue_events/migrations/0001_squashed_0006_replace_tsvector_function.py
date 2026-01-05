@@ -44,32 +44,6 @@ def get_sql_content(migration_file, filename):
         return f.read()
 
 
-# --- Define SQL for the Advanced Path (from 0004) ---
-CREATE_ADVANCED_PARTITION_SQL = """
-    CREATE TABLE "issue_events_issueaggregate" (
-        "issue_id" BIGINT NOT NULL,
-        "organization_id" INTEGER NOT NULL,
-        "date" TIMESTAMPTZ NOT NULL,
-        "count" INTEGER NOT NULL,
-        PRIMARY KEY ("issue_id", "organization_id", "date")
-    ) PARTITION BY HASH (organization_id);
-
-    CREATE TABLE issue_events_issueaggregate_p0 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 0) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p1 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 1) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p2 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 2) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p3 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 3) PARTITION BY RANGE (date);
-"""
-DROP_TABLE_SQL = 'DROP TABLE IF EXISTS "issue_events_issueaggregate";'
-
-
-def get_sql_content(migration_file, filename):
-    """Helper to read SQL from a file."""
-    sql_dir = os.path.join(os.path.dirname(migration_file), "./sql")
-    file_path = os.path.join(sql_dir, filename)
-    with open(file_path, "r") as f:
-        return f.read()
-
-
 class Migration(migrations.Migration):
     replaces = [
         ("issue_events", "0001_initial"),
