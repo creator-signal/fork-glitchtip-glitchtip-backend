@@ -60,38 +60,40 @@ class IssueTag(AggregationModel):
 class IssueAggregate(AggregationModel):
     """Count the number of events for an issue per time unit"""
 
-    pk = models.CompositePrimaryKey("issue", "organization", "date")
+    # Fields ordered for optimal data alignment: 8-byte foreign keys first, then other fields
     issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
+    pk = models.CompositePrimaryKey("issue", "organization", "date")
 
     class PartitioningMeta(AggregationModel.PartitioningMeta):
         pass
 
 
 class Issue(SoftDeleteModel):
-    culprit = models.CharField(max_length=1024, blank=True, null=True)
-    is_public = models.BooleanField(default=False)
-    level = models.PositiveSmallIntegerField(
-        choices=LogLevel.choices, default=LogLevel.ERROR
-    )
-    metadata = models.JSONField()
+    # Fields ordered for optimal data alignment: 8-byte, 4-byte, 2-byte, 1-byte, then variable-width
     project = models.ForeignKey(
         "projects.Project", on_delete=models.CASCADE, related_name="issues"
     )
-    title = models.CharField(max_length=255)
+    first_seen = models.DateTimeField(default=timezone.now, db_index=True)
+    last_seen = models.DateTimeField(default=timezone.now, db_index=True)
+    count = models.PositiveIntegerField(default=1, editable=False)
+    short_id = models.PositiveIntegerField(null=True)
+    level = models.PositiveSmallIntegerField(
+        choices=LogLevel.choices, default=LogLevel.ERROR
+    )
     type = models.PositiveSmallIntegerField(
         choices=IssueEventType.choices, default=IssueEventType.DEFAULT
     )
     status = models.PositiveSmallIntegerField(
         choices=EventStatus.choices, default=EventStatus.UNRESOLVED
     )
-    short_id = models.PositiveIntegerField(null=True)
+    is_public = models.BooleanField(default=False)
+    culprit = models.CharField(max_length=1024, blank=True, null=True)
+    title = models.CharField(max_length=255)
+    metadata = models.JSONField()
     search_vector = SearchVectorField(editable=False, default="")
-    count = models.PositiveIntegerField(default=1, editable=False)
-    first_seen = models.DateTimeField(default=timezone.now, db_index=True)
-    last_seen = models.DateTimeField(default=timezone.now, db_index=True)
 
     objects = DeferedFieldManager(["search_vector"])
 
@@ -185,24 +187,26 @@ class UserReport(CreatedModel):
 
 
 class IssueEvent(PostgresPartitionedModel, models.Model):
+    # Fields ordered for optimal data alignment: 16-byte, 8-byte, 2-byte, then variable-width
+    # This reduces padding and improves CPU cache utilization
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
-    type = models.PositiveSmallIntegerField(default=0, choices=IssueEventType.choices)
     timestamp = models.DateTimeField(help_text="Time at which event happened")
     received = models.DateTimeField(help_text="Time at which GlitchTip accepted event")
-    title = models.CharField(max_length=255)
-    transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
-    level = models.PositiveSmallIntegerField(
-        choices=LogLevel.choices, default=LogLevel.ERROR
-    )
-    data = models.JSONField()
-    hashes = ArrayField(models.CharField(max_length=32), db_default=[])
-    # This could be HStore, but jsonb is just as good and removes need for
-    # 'django.contrib.postgres' which makes several unnecessary SQL calls
-    tags = models.JSONField()
+    issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
     release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
+    type = models.PositiveSmallIntegerField(default=0, choices=IssueEventType.choices)
+    level = models.PositiveSmallIntegerField(
+        choices=LogLevel.choices, default=LogLevel.ERROR
+    )
+    title = models.CharField(max_length=255)
+    transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
+    data = models.JSONField()
+    # This could be HStore, but jsonb is just as good and removes need for
+    # 'django.contrib.postgres' which makes several unnecessary SQL calls
+    tags = models.JSONField()
+    hashes = ArrayField(models.CharField(max_length=32), db_default=[])
 
     class Meta:
         indexes = [
