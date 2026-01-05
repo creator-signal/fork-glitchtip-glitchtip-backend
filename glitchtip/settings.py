@@ -567,7 +567,7 @@ MAX_ISSUES_PER_ALERT = env.int("MAX_ISSUES_PER_ALERT", 3)
 # Support running in WSGI mode (uWSGI or Granian WSGI)
 # We need to use a different cache backend for WSGI to avoid async loop issues
 try:
-    import uwsgi
+    import uwsgi  # noqa
 
     HAS_UWSGI = True
 except ImportError:

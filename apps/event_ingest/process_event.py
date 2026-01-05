@@ -484,7 +484,9 @@ def get_and_create_releases(
     ]
 
 
-def process_issue_events(messages: list[IssueTaskMessage], read_only_db: str = "default"):
+def process_issue_events(
+    messages: list[IssueTaskMessage], read_only_db: str = "default"
+):
     """
     Accepts a list of events to ingest. Events should be:
     - Few enough to save in a single DB call
@@ -732,8 +734,10 @@ def process_issue_events(messages: list[IssueTaskMessage], read_only_db: str = "
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
 
-    hash_queryset = IssueHash.objects.using(read_only_db).filter(q_objects).values(
-        "value", "project_id", "issue_id", "issue__status"
+    hash_queryset = (
+        IssueHash.objects.using(read_only_db)
+        .filter(q_objects)
+        .values("value", "project_id", "issue_id", "issue__status")
     )
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
