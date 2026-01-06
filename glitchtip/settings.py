@@ -64,6 +64,8 @@ DEBUG = env("DEBUG")
 
 # Enable only for running end to end testing. Debug must be True to use.
 ENABLE_TEST_API = env.bool("ENABLE_TEST_API", False)
+if ENABLE_TEST_API:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 if DEBUG is False:
     ENABLE_TEST_API = False
 if DEBUG and ENABLE_TEST_API:
