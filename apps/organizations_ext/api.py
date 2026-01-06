@@ -239,13 +239,13 @@ async def create_organization_member(
     count = settings.EMAIL_INVITE_THROTTLE_COUNT
     interval = settings.EMAIL_INVITE_THROTTLE_INTERVAL
     cache_key = f"email_invite_throttle_{user.id}"
-    invite_attempts = cache.get(cache_key, 0)
+    invite_attempts = await cache.aget(cache_key, 0)
     if invite_attempts >= count:
         raise Throttled(count)
     if invite_attempts == 0:
-        cache.set(cache_key, 1, interval)
+        await cache.aset(cache_key, 1, interval)
     else:
-        cache.incr(cache_key)
+        await cache.aincr(cache_key)
 
     member, created = await OrganizationUser.objects.aget_or_create(
         email=email,

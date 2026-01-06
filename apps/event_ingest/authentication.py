@@ -1,3 +1,4 @@
+import logging
 import math
 import random
 from dataclasses import dataclass
@@ -7,7 +8,8 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection
+from django.db import connection, connections
+from django.db.utils import OperationalError
 from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
@@ -16,6 +18,8 @@ from glitchtip.api.exceptions import ThrottleException
 from sentry.utils.auth import parse_auth_header
 
 from .constants import EVENT_BLOCK_CACHE_KEY
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -105,6 +109,36 @@ def calculate_retry_after(throttle: int):
     return math.ceil(0.02 * throttle**2.3)
 
 
+def get_project_auth_info_row(project_id: int, sentry_key: UUID):
+    # May someday be async https://code.djangoproject.com/ticket/35629
+    if "read_only" in settings.DATABASES:
+        try:
+            with connections["read_only"].cursor() as cursor:
+                cursor.callproc(
+                    "get_project_auth_info",
+                    [
+                        project_id,
+                        sentry_key,
+                    ],
+                )
+                return cursor.fetchone()
+        except OperationalError:
+            pass
+        except Exception as e:
+            # Fail safe - don't let a read only db failure stop the request
+            logger.warning("Failed to read from read_only database", exc_info=e)
+
+    with connection.cursor() as cursor:
+        cursor.callproc(
+            "get_project_auth_info",
+            [
+                project_id,
+                sentry_key,
+            ],
+        )
+        return cursor.fetchone()
+
+
 def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Return the valid and accepting events project based on a request.
@@ -135,16 +169,7 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
 
-    # May someday be async https://code.djangoproject.com/ticket/35629
-    with connection.cursor() as cursor:
-        cursor.callproc(
-            "get_project_auth_info",
-            [
-                project_id,
-                sentry_key,
-            ],
-        )
-        row = cursor.fetchone()
+    row = get_project_auth_info_row(project_id, sentry_key)
 
     if not row:
         cache.set(block_cache_key, "v", REJECTION_WAIT)
@@ -197,7 +222,7 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         settings.BILLING_ENABLED
         and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
     ):
-        check_organization_throttle.delay(project.organization_id)
+        check_organization_throttle.enqueue(project.organization_id)
     return project
 
 

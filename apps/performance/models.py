@@ -10,8 +10,9 @@ from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteMode
 
 
 class TransactionGroup(CreatedModel, SoftDeleteModel):
-    transaction = models.CharField(max_length=1024)
+    # Fields ordered for optimal data alignment: 8-byte FKs first, then variable-width
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
+    transaction = models.CharField(max_length=1024)
     op = models.CharField(max_length=255)
     method = models.CharField(max_length=255, blank=True)
     tags = models.JSONField(default=dict)
@@ -30,12 +31,10 @@ class TransactionGroup(CreatedModel, SoftDeleteModel):
 
 
 class TransactionEvent(PostgresPartitionedModel, models.Model):
+    # Fields ordered for optimal data alignment: 16-byte (uuid), 8-byte (timestamps, FKs), then variable-width
+    # This reduces padding and improves CPU cache utilization
     pk = models.CompositePrimaryKey("event_id", "organization", "start_timestamp")
     event_id = models.UUIDField(default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(
-        "organizations_ext.Organization", on_delete=models.CASCADE
-    )
-    group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
     trace_id = models.UUIDField(db_index=True)
     start_timestamp = models.DateTimeField(
         db_index=True,
@@ -46,6 +45,10 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
         null=True,
         help_text="Datetime reported by client as the time the measurement finished",
     )
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
     data = models.JSONField(help_text="General event data that is searchable")
     # This could be HStore, but jsonb is just as good and removes need for
     # 'django.contrib.postgres' which makes several unnecessary SQL calls
@@ -84,6 +87,7 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
 class TransactionGroupAggregate(AggregationModel):
     """Count the number of events for a transaction group per time unit"""
 
+    # Fields ordered for optimal data alignment: 8-byte foreign keys first, then other fields
     pk = models.CompositePrimaryKey("group", "organization", "date")
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
     organization = models.ForeignKey(

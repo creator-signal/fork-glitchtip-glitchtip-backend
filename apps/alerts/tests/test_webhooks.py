@@ -134,11 +134,11 @@ class WebhookTestCase(GlitchTipTestCase):
         issue = baker.make("issue_events.Issue", project=project)
 
         baker.make("issue_events.IssueEvent", issue=issue)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 0)
 
         baker.make("issue_events.IssueEvent", issue=issue)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(
             Notification.objects.filter(
                 project_alert__alertrecipient__recipient_type=RecipientType.GENERAL_WEBHOOK
@@ -172,7 +172,7 @@ class WebhookTestCase(GlitchTipTestCase):
 
         baker.make("issue_events.IssueEvent", issue=issue)
         baker.make("issue_events.IssueEvent", issue=issue)
-        process_event_alerts()
+        process_event_alerts.call()
 
         mock_post.assert_called_once()
         json_data = json.dumps(mock_post.call_args.kwargs["json"])

@@ -4,6 +4,7 @@ from unittest import mock
 from urllib.parse import urlparse
 
 from django.core.cache import cache
+from django.tasks import task_backends
 from django.test.client import FakePayload
 from django.urls import reverse
 from freezegun import freeze_time
@@ -56,6 +57,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 list_to_envelope(self.django_event),
                 content_type="application/json",
             )
+            task_backends["default"].flush_batches()
         self.assertContains(res, self.django_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
@@ -66,6 +68,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, js_payload, content_type="text/plain;charset=UTF-8"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.js_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
@@ -80,6 +83,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 data,
                 content_type="application/x-sentry-envelope",
             )
+            task_backends["default"].flush_batches()
             mock_warning.assert_called_once()
         self.assertEqual(res.status_code, 200)
         self.assertFalse(TransactionEvent.objects.exists())
@@ -90,6 +94,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 data,
                 content_type="application/x-sentry-envelope",
             )
+            task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionEvent.objects.exists())
 
@@ -101,6 +106,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             data,
             content_type="application/x-sentry-envelope",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 403)
 
     def test_malformed_sdk_packages(self):
@@ -114,6 +120,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             list_to_envelope(event),
             content_type="application/json",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertEqual(IssueEvent.objects.count(), 1)
 
@@ -123,6 +130,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             '{}\n{"lol": "haha"}',
             content_type="application/x-sentry-envelope",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
 
     @mock.patch("apps.shared.schema.utils.logger.warning")
@@ -132,6 +140,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             '{}\n{"type": "event"}\n{"timestamp": false}',
             content_type="application/x-sentry-envelope",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         mock_log.assert_called_once()
 
@@ -160,6 +169,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "wsgi.input": FakePayload(data),
         }
         res = self.client.request(**r)
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertEqual(self.project.issues.count(), 1)
 
@@ -174,6 +184,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, list_to_envelope(event), content_type="application/json"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertTrue(
             IssueEvent.objects.filter(
@@ -188,6 +199,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         # The ["b"] param is wrong, it should get coerced to a str
         event[2]["logentry"] = {"params": ["a", ["b"]], "message": "%s %s"}
         res = self.client.post(self.url, event, content_type="application/json")
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
 
     def test_weird_debug_meta(self):
@@ -195,6 +207,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         # The ["b"] param is wrong, it should get coerced to a str
         event[2]["debug_meta"] = {"images": [{"type": "silly"}]}
         res = self.client.post(self.url, event, content_type="application/json")
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
 
     def test_invalid_mechanism(self):
@@ -207,6 +220,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "values": [{"type": "Error", "value": "The error", "mechanism": {}}]
         }
         res = self.client.post(self.url, event, content_type="application/json")
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
 
     def test_item_with_explicit_length(self):
@@ -243,6 +257,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
 
         res = self.client.post(self.url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(self.project.issues.count(), 1)
@@ -297,6 +312,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
 
         res = self.client.post(self.url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(
@@ -350,6 +366,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         )
 
         res = self.client.post(self.url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(
@@ -366,6 +383,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             list_to_envelope(event),
             content_type="application/json",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         self.assertEqual(IssueEvent.objects.count(), 1)
 
@@ -377,6 +395,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             list_to_envelope(event),
             content_type="application/json",
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         db_event = IssueEvent.objects.first()
         self.assertTrue(db_event)
@@ -407,6 +426,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 envelope,
                 content_type="application/x-sentry-envelope",
             )
+            task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200)
         self.assertTrue(

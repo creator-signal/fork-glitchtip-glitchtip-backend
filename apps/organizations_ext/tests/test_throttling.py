@@ -54,7 +54,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
     )
     def test_check_organization_throttle(self):
-        check_organization_throttle(self.organization.id)
+        check_organization_throttle.call(self.organization.id)
         self.assertTrue(Organization.objects.filter(event_throttle_rate=0).exists())
 
         baker.make(
@@ -62,7 +62,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
             project__organization=self.organization,
             count=11,
         )
-        check_organization_throttle(self.organization.id)
+        check_organization_throttle.call(self.organization.id)
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 10)
         self.assertEqual(len(mail.outbox), 1)
@@ -72,17 +72,17 @@ class OrganizationThrottleCheckTestCase(TestCase):
             project__organization=self.organization,
             count=100,
         )
-        check_organization_throttle(self.organization.id)
+        check_organization_throttle.call(self.organization.id)
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
         self.assertEqual(len(mail.outbox), 2)
 
     def test_bypass_organization_throttle(self):
         """Ensure bypassing the check org throttle cache works"""
-        check_organization_throttle(self.organization.id)
+        check_organization_throttle.call(self.organization.id)
         self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))
         cache.clear()
-        check_organization_throttle(self.organization.id, True)
+        check_organization_throttle.call(self.organization.id, True)
         self.assertFalse(cache.get(f"org-throttle-{self.organization.id}"))
         cache.clear()
 
@@ -91,21 +91,21 @@ class OrganizationThrottleCheckTestCase(TestCase):
 
         # No events, no throttle
         with self.assertNumQueries(1):
-            check_all_organizations_throttle()
+            check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
 
         # 6 events (of 10), no throttle
         self._make_events(3)
         self._make_transaction_events(3)
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
         self.assertEqual(len(mail.outbox), 0)
 
         # 11 events (of 10), small throttle
         self._make_events(5)
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 10)
         self.assertEqual(len(mail.outbox), 1)
@@ -115,7 +115,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.subscription.current_period_start = now
         self.subscription.current_period_end = now + timedelta(hours=1)
         self.subscription.save()
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
         self.assertEqual(len(mail.outbox), 1)
@@ -123,14 +123,14 @@ class OrganizationThrottleCheckTestCase(TestCase):
         # Throttle again
         with freeze_time(now):
             self._make_events(16)
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 50)
 
         # Throttle 100%
         with freeze_time(now):
             self._make_events(5)
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 100)
 
@@ -139,7 +139,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         It's possible to not sign up for a free plan, they should be throttled
         """
         self.subscription.delete()
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
 
@@ -154,7 +154,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
             {self.organization.id}
         )
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 0)
 
@@ -164,7 +164,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
             {self.organization.id}
         )
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 100)
 
@@ -179,6 +179,6 @@ class OrganizationThrottleCheckTestCase(TestCase):
         async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
             {self.organization.id}
         )
-        check_all_organizations_throttle()
+        check_all_organizations_throttle.call()
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.event_throttle_rate, 0)

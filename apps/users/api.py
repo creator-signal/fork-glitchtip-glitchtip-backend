@@ -236,7 +236,9 @@ async def generate_recovery_codes(request: AuthHttpRequest):
     """
     authenticator = Authenticator(data={"seed": RecoveryCodes.generate_seed()})
     codes = RecoveryCodes(authenticator).generate_codes()
-    cache.set(generate_user_seed_key(request.auth.user_id), authenticator.data["seed"])
+    await cache.aset(
+        generate_user_seed_key(request.auth.user_id), authenticator.data["seed"]
+    )
     return {
         "codes": codes,
     }
@@ -248,7 +250,7 @@ async def set_recovery_codes(request: AuthHttpRequest, payload: RecoveryCodeSche
     Extension of django-allauth headless API to set recovery codes
     """
     user_id = request.auth.user_id
-    seed = cache.get(generate_user_seed_key(user_id))
+    seed = await cache.aget(generate_user_seed_key(user_id))
     if not seed:
         raise HttpError(400, "No recovery codes set, use GET first")
     authenticator = Authenticator(

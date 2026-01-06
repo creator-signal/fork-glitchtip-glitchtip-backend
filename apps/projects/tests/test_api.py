@@ -1,11 +1,8 @@
-from unittest import mock
-
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
 
-import apps.projects.tasks
 from apps.organizations_ext.constants import OrganizationUserRole
 
 from ..models import Project, ProjectKey
@@ -140,14 +137,10 @@ class ProjectsAPITestCase(TestCase):
         )
 
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
-        with mock.patch.object(
-            apps.projects.tasks.delete_project, "delay"
-        ) as delete_project_mock:
-            res = self.client.delete(url)
+        res = self.client.delete(url)
         self.assertEqual(res.status_code, 204)
-        project.refresh_from_db()
-        self.assertTrue(project.is_deleted)
-        self.assertEqual(delete_project_mock.call_args, mock.call(project.pk))
+        with self.assertRaises(Project.DoesNotExist):
+            project.refresh_from_db()
 
     def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""

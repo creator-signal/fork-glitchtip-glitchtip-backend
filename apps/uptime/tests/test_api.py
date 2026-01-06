@@ -22,7 +22,7 @@ class UptimeAPITestCase(GlitchTestCase):
     def setUp(self):
         self.client.force_login(self.user)
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_list(self, mocked):
         monitor = baker.make(
             "uptime.Monitor", organization=self.organization, url="http://example.com"
@@ -46,7 +46,7 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(data[0]["isUp"], True)
         self.assertEqual(data[0]["lastChange"], "2021-09-19T15:40:31Z")
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_list_aggregation(self, _):
         """Test up and down event aggregations"""
         monitor = baker.make(
@@ -70,7 +70,7 @@ class UptimeAPITestCase(GlitchTestCase):
             res = self.client.get(self.list_url)
         self.assertEqual(len(res.json()[0]["checks"]), 60)
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_http_monitor(self, mocked):
         data = {
             "monitorType": "Ping",
@@ -82,16 +82,17 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": str(self.project.pk),
             "timeout": 25,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.name, data["name"])
         self.assertEqual(monitor.timeout, data["timeout"])
         self.assertEqual(monitor.organization, self.organization)
         self.assertEqual(monitor.project, self.project)
-        mocked.assert_called_once()
+        mocked.enqueue.assert_called_once()
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_port_monitor(self, mocked):
         """Port monitor URLs should be converted to domain:port format, with protocol removed"""
         data = {
@@ -103,11 +104,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "timeout": None,
             "interval": 60,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
         monitor = Monitor.objects.all().first()
         self.assertEqual(monitor.url, "example.com:80")
-        mocked.assert_called_once()
+        mocked.enqueue.assert_called_once()
 
     def test_create_port_monitor_validation(self):
         """Port monitor URLs should be converted to domain:port format, with protocol removed"""
@@ -150,7 +152,7 @@ class UptimeAPITestCase(GlitchTestCase):
         res = self.client.post(self.list_url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_expected_status(self, mocked):
         data = {
             "monitorType": "Ping",
@@ -162,12 +164,13 @@ class UptimeAPITestCase(GlitchTestCase):
             "interval": 60,
             "project": str(self.project.pk),
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
-        mocked.assert_called_once()
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
+        mocked.enqueue.assert_called_once()
         self.assertEqual(res.status_code, 201)
         self.assertTrue(Monitor.objects.filter(expected_status=None).exists())
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_monitor_retrieve(self, _):
         """Test monitor details endpoint. Unlike the list view,
         checks here should include response time for the frontend graph"""
@@ -207,7 +210,7 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(data["environmentID"], environment.pk)
         self.assertIn("responseTime", data["checks"][0])
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_monitor_checks_list(self, _):
         monitor = baker.make(
             "uptime.Monitor",
@@ -228,7 +231,7 @@ class UptimeAPITestCase(GlitchTestCase):
         res = self.client.get(url)
         self.assertContains(res, "2021-09-19T15:39:31Z")
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_monitor_update(self, _):
         monitor = baker.make(
             "uptime.Monitor",
@@ -323,7 +326,7 @@ class UptimeAPITestCase(GlitchTestCase):
         res = self.client.delete(url)
         self.assertEqual(res.status_code, 404)
 
-    @mock.patch("apps.uptime.tasks.perform_checks.run")
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_list_isolation(self, _):
         """Users should only access monitors in their organization"""
         user2 = baker.make("users.user")

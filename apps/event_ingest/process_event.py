@@ -10,13 +10,12 @@ from django.contrib.postgres.search import SearchVector
 from django.db import connection, transaction
 from django.db.models import (
     Exists,
-    F,
     OuterRef,
     Q,
     QuerySet,
     Value,
 )
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models.functions import Coalesce
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from django_valkey import get_valkey_connection
@@ -57,15 +56,14 @@ from ..shared.schema.contexts import (
 )
 from .interfaces import IssueStats, IssueUpdate, ProcessingEvent
 from .javascript_event_processor import JavascriptEventProcessor
-from .model_functions import PGAppendAndLimitTsVector
 from .schema import (
-    CeleryIssueEvent,
     ErrorIssueEventSchema,
     EventException,
     InterchangeTransactionEvent,
     IssueEventSchema,
     IssueTaskMessage,
     SourceMapImage,
+    TaskIssueEvent,
     ValueEventException,
 )
 from .utils import generate_hash, remove_bad_chars, transform_parameterized_message
@@ -103,6 +101,7 @@ def _get_or_create_related_models(
     release_set: set,
     environment_set: set,
     project_set: set,
+    read_only_db: str = "default",
 ) -> tuple[list[tuple[str, int, int]], QuerySet]:
     """
     Given sets of release, environment, and project data,
@@ -111,7 +110,8 @@ def _get_or_create_related_models(
     release_version_set = {version for version, _, _ in release_set}
     environment_name_set = {name for name, _, _ in environment_set}
 
-    projects_query = Project.objects.filter(id__in=project_set)
+    projects_query = Project.objects.using(read_only_db).filter(id__in=project_set)
+
     annotations = {
         "release_id": Coalesce("releases__id", Value(None)),
         "release_name": Coalesce("releases__version", Value(None)),
@@ -244,27 +244,40 @@ def update_issues(processing_events: list[ProcessingEvent]):
                 search_vector=vector,
             )
 
-    for issue_id, value in issues_to_update.items():
-        Issue.objects.filter(id=issue_id).update(
-            count=F("count") + value.added_count,
-            search_vector=PGAppendAndLimitTsVector(
-                F("search_vector"),
-                Value(value.search_vector),
-                Value(settings.SEARCH_MAX_LEXEMES),
-                Value("english"),
-            ),
-            last_seen=Greatest(F("last_seen"), value.last_seen),
+    if not issues_to_update:
+        return
+
+    data = sorted(
+        [
+            (issue_id, value.added_count, value.search_vector, value.last_seen)
+            for issue_id, value in issues_to_update.items()
+        ],
+        key=itemgetter(0),
+    )
+
+    with connection.cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+        max_lexemes = settings.SEARCH_MAX_LEXEMES
+
+        sql = (
+            "UPDATE issue_events_issue SET "
+            "count = issue_events_issue.count + v.added_count, "
+            f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
+            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen) "
+            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen) "
+            "WHERE issue_events_issue.id = v.id"
         )
+        cursor.execute(sql)
 
 
-def generate_contexts(event: CeleryIssueEvent) -> Contexts:
+def generate_contexts(event: TaskIssueEvent) -> Contexts:
     """
     Add additional contexts if they aren't already set
     """
     contexts = event.contexts if event.contexts else {}
 
     if request := event.request:
-        # Handle both IngestRequest objects and raw dict data from Celery
+        # Handle both IngestRequest objects and raw dict data from vtasks
         if isinstance(request, dict):
             headers = request.get("headers")
         else:
@@ -300,7 +313,7 @@ def generate_contexts(event: CeleryIssueEvent) -> Contexts:
     return contexts
 
 
-def generate_tags(event: CeleryIssueEvent) -> dict[str, str]:
+def generate_tags(event: TaskIssueEvent) -> dict[str, str]:
     """Generate key-value tags based on context and other event data"""
     tags: dict[str, str | None] = event.tags if isinstance(event.tags, dict) else {}
 
@@ -471,7 +484,9 @@ def get_and_create_releases(
     ]
 
 
-def process_issue_events(messages: list[IssueTaskMessage]):
+def process_issue_events(
+    messages: list[IssueTaskMessage], read_only_db: str = "default"
+):
     """
     Accepts a list of events to ingest. Events should be:
     - Few enough to save in a single DB call
@@ -506,7 +521,7 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     release_version_set = {version for version, _, _ in release_set}
 
     releases, projects_with_data = _get_or_create_related_models(
-        release_set, environment_set, project_set
+        release_set, environment_set, project_set, read_only_db
     )
 
     projects_with_data = projects_with_data.annotate(
@@ -540,9 +555,8 @@ def process_issue_events(messages: list[IssueTaskMessage]):
     }
 
     debug_files = (
-        DebugSymbolBundle.objects.filter(
-            organization__in={event.organization_id for event in messages}
-        )
+        DebugSymbolBundle.objects.using(read_only_db)
+        .filter(organization__in={event.organization_id for event in messages})
         .filter(
             Q(
                 release__version__in=release_version_set,
@@ -720,8 +734,10 @@ def process_issue_events(messages: list[IssueTaskMessage]):
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
 
-    hash_queryset = IssueHash.objects.filter(q_objects).values(
-        "value", "project_id", "issue_id", "issue__status"
+    hash_queryset = (
+        IssueHash.objects.using(read_only_db)
+        .filter(q_objects)
+        .values("value", "project_id", "issue_id", "issue__status")
     )
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
@@ -1066,7 +1082,9 @@ def update_tags(processing_events: list[ProcessingEvent]):
 
 
 # Transactions
-def process_transaction_events(ingest_events: list[InterchangeTransactionEvent]):
+def process_transaction_events(
+    ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
+):
     projects_to_update = {
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
@@ -1088,7 +1106,9 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
     project_set = {project_id for _, project_id, _ in release_set}.union(
         {project_id for _, project_id, _ in environment_set}
     )
-    _get_or_create_related_models(release_set, environment_set, project_set)
+    _get_or_create_related_models(
+        release_set, environment_set, project_set, read_only_db
+    )
     transactions = []
 
     for ingest_event in ingest_events:
@@ -1107,12 +1127,23 @@ def process_transaction_events(ingest_events: list[InterchangeTransactionEvent])
 
         # TODO tags
 
-        group, group_created = TransactionGroup.objects.get_or_create(
-            project_id=ingest_event.project_id,
-            transaction=event.transaction[:1024],  # Truncate
-            op=op,
-            method=method,
+        group = (
+            TransactionGroup.objects.using(read_only_db)
+            .filter(
+                project_id=ingest_event.project_id,
+                transaction=event.transaction[:1024],  # Truncate
+                op=op,
+                method=method,
+            )
+            .first()
         )
+        if not group:
+            group, _ = TransactionGroup.objects.get_or_create(
+                project_id=ingest_event.project_id,
+                transaction=event.transaction[:1024],  # Truncate
+                op=op,
+                method=method,
+            )
 
         transactions.append(
             TransactionEvent(
