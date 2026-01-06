@@ -266,39 +266,6 @@ class GzipDecoder(ZDecoder):
 # --- Other Middleware Classes ---
 
 
-class SetRemoteAddrFromForwardedFor(object):
-    """Middleware to set REMOTE_ADDR based on X-Forwarded-For header."""
-
-    def __init__(self, get_response=None):
-        self.get_response = get_response
-        if not getattr(settings, "SENTRY_USE_X_FORWARDED_FOR", True):
-            from django.core.exceptions import MiddlewareNotUsed
-
-            raise MiddlewareNotUsed
-
-    def __call__(self, request):
-        self.process_request(request)
-        response = self.get_response(request)
-        return response
-
-    def _remove_port_number(self, ip_address):
-        # Helper to strip port number if present
-        if "[" in ip_address and "]" in ip_address:
-            return ip_address[ip_address.find("[") + 1 : ip_address.find("]")]
-        if "." in ip_address and ip_address.rfind(":") > ip_address.rfind("."):
-            return ip_address.rsplit(":", 1)[0]
-        return ip_address
-
-    def process_request(self, request):
-        try:
-            real_ip = request.META["HTTP_X_FORWARDED_FOR"]
-            real_ip = real_ip.split(",")[0].strip()
-            real_ip = self._remove_port_number(real_ip)
-            request.META["REMOTE_ADDR"] = real_ip
-        except KeyError:
-            pass  # Header not present
-
-
 class ChunkedMiddleware(object):
     """Middleware to handle chunked transfer encoding with uWSGI."""
 
