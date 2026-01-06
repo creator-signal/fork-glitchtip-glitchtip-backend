@@ -3,7 +3,7 @@ import logging
 import tempfile
 from hashlib import sha1
 
-from celery import shared_task
+from django.tasks import task
 from symbolic import Archive
 
 from apps.difs.models import DebugInformationFile
@@ -31,7 +31,7 @@ DIF_STATE_OK = "ok"
 DIF_STATE_NOT_FOUND = "not_found"
 
 
-@shared_task
+@task
 def difs_assemble(project_slug, name, checksum, chunks, debug_id):
     try:
         project = Project.objects.filter(slug=project_slug).get()

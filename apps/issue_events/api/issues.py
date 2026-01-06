@@ -1,29 +1,23 @@
-import re
-import shlex
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
-from django.db.models import Count, F, FloatField, Q, Sum, Value
-from django.db.models.expressions import ExpressionWrapper
-from django.db.models.functions import Extract, Log, TruncDay
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncDay
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
-from ninja import Field, Query, Schema
+from ninja import Query, Schema
 from ninja.pagination import paginate
-from pydantic.functional_validators import BeforeValidator
-from typing_extensions import Annotated
 
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
-from glitchtip.utils import async_call_celery_task
 
-from ..constants import EventStatus, LogLevel
+from ..constants import EventStatus
 from ..models import Issue, IssueAggregate, IssueEvent, IssueHash
 from ..schema import (
     IssueDetailSchema,
@@ -32,32 +26,9 @@ from ..schema import (
     IssueTagSchema,
     StatsDetailSchema,
 )
-from ..tasks import delete_issue_task
+from ..services import IssueFilters, filter_issue_list, get_queryset, sort_options
+from ..tasks import delete_issue_task, update_issues_task
 from . import router
-
-
-async def get_queryset(
-    request: AuthHttpRequest,
-    organization_slug: str | None = None,
-    project_slug: str | None = None,
-):
-    user_id = request.auth.user_id
-    qs = Issue.objects
-
-    if organization_slug:
-        organization = await aget_object_or_404(
-            Organization, users=user_id, slug=organization_slug
-        )
-        qs = qs.filter(project__organization_id=organization.id)
-    else:
-        qs = qs.filter(project__organization__users=user_id)
-
-    if project_slug:
-        qs = qs.filter(project__slug=project_slug)
-    return qs.annotate(
-        num_comments=Count("comments", distinct=True),
-    ).select_related("project")
-
 
 EventStatusEnum = StrEnum("EventStatusEnum", EventStatus.labels)
 
@@ -74,7 +45,7 @@ class UpdateIssueSchema(Schema):
 )
 @has_permission(["event:read", "event:write", "event:admin"])
 async def get_issue(request: AuthHttpRequest, issue_id: int):
-    qs = await get_queryset(request)
+    qs = await get_queryset(request.auth.user_id)
     qs = qs.annotate(
         user_report_count=Count("userreport", distinct=True),
     )
@@ -94,18 +65,18 @@ async def update_issue(
     issue_id: int,
     payload: UpdateIssueSchema,
 ):
-    qs = await get_queryset(request)
+    qs = await get_queryset(request.auth.user_id)
     return await update_issue_status(qs, issue_id, payload)
 
 
 @router.delete("/issues/{int:issue_id}/", response={204: None})
 @has_permission(["event:write", "event:admin"])
 async def delete_issue(request: AuthHttpRequest, issue_id: int):
-    qs = await get_queryset(request)
+    qs = await get_queryset(request.auth.user_id)
     result = await qs.filter(id=issue_id).aupdate(is_deleted=True)
     if not result:
         raise Http404()
-    await async_call_celery_task(delete_issue_task, [issue_id])
+    await delete_issue_task.aenqueue([issue_id])
     return 204, None
 
 
@@ -120,7 +91,7 @@ async def update_organization_issue(
     issue_id: int,
     payload: UpdateIssueSchema,
 ):
-    qs = await get_queryset(request, organization_slug=organization_slug)
+    qs = await get_queryset(request.auth.user_id, organization_slug=organization_slug)
     return await update_issue_status(qs, issue_id, payload)
 
 
@@ -140,125 +111,6 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
     return obj
 
 
-RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")
-
-
-def relative_to_datetime(v: Any) -> datetime:
-    """
-    Allow relative terms like now or now-1h. Only 0 or 1 subtraction operation is permitted.
-
-    Accepts
-    - now
-    - - (subtraction)
-    - m (minutes)
-    - h (hours)
-    - d (days)
-    """
-    result = timezone.now()
-    if v == "now":
-        return result
-    if RELATIVE_TIME_REGEX.match(v):
-        spaces_stripped = v.replace(" ", "")
-        numbers = int(re.findall(r"\d+", spaces_stripped)[0])
-        if spaces_stripped[-1] == "m":
-            result -= timedelta(minutes=numbers)
-        if spaces_stripped[-1] == "h":
-            result -= timedelta(hours=numbers)
-        if spaces_stripped[-1] == "d":
-            result -= timedelta(days=numbers)
-        return result
-    return v
-
-
-RelativeDateTime = Annotated[datetime, BeforeValidator(relative_to_datetime)]
-
-
-class IssueFilters(Schema):
-    id__in: list[int] | None = Field(None, alias="id")
-    first_seen__gte: RelativeDateTime | None = Field(None, alias="start")
-    first_seen__lte: RelativeDateTime | None = Field(None, alias="end")
-    project__in: list[int] | None = Field(None, alias="project")
-    environment: list[str] | None = None
-    query: str | None = None
-
-
-sort_options = Literal[
-    "last_seen",
-    "first_seen",
-    "count",
-    "priority",
-    "-last_seen",
-    "-first_seen",
-    "-count",
-    "-priority",
-]
-
-
-def filter_issue_list(
-    qs: QuerySet,
-    filters: Query[IssueFilters],
-    sort: sort_options | None = None,
-    event_id: UUID | None = None,
-):
-    qs_filters = filters.dict(exclude_none=True)
-    query = qs_filters.pop("query", None)
-    if filters.environment:
-        qs_filters["issuetag__tag_key__key"] = "environment"
-        qs_filters["issuetag__tag_value__value__in"] = qs_filters.pop("environment")
-    if qs_filters:
-        qs = qs.filter(**qs_filters)
-
-    if event_id:
-        qs = qs.filter(issueevent__id=event_id)
-    elif query:
-        queries = shlex.split(query)
-        # First look for structured queries
-        for i, query in enumerate(queries):
-            query_part = query.split(":", 1)
-            if len(query_part) == 2:
-                query_name, query_value = query_part
-                query_value = query_value.strip('"')
-
-                if query_name == "is":
-                    qs = qs.filter(status=EventStatus.from_string(query_value))
-                elif query_name == "has":
-                    # Does not require distinct as we already have a group by from annotations
-                    qs = qs.filter(
-                        issuetag__tag_key__key=query_value,
-                    )
-                elif query_name == "level":
-                    qs = qs.filter(level=LogLevel.from_string(query_value))
-                else:
-                    qs = qs.filter(
-                        issuetag__tag_key__key=query_name,
-                        issuetag__tag_value__value=query_value,
-                    )
-            if len(query_part) == 1:
-                search_query = " ".join(queries[i:])
-                if "*" in search_query:
-                    qs = qs.filter(
-                        Q(title__ilike=f"%{search_query.replace('*', '%')}%")
-                        | Q(search_vector=search_query)
-                    )
-                else:
-                    qs = qs.filter(search_vector=search_query)
-                # Search queries must be at end of query string, finished when parsing
-                break
-
-    if sort:
-        if sort.endswith("priority"):
-            # Inspired by https://stackoverflow.com/a/43788975/443457
-            qs = qs.annotate(
-                priority=ExpressionWrapper(
-                    Log(10, F("count"))
-                    + Extract(F("last_seen"), "epoch") / Value(300000.0),
-                    output_field=FloatField(),
-                )
-            )
-        qs = qs.order_by(sort)
-    return qs
-
-
 @router.get(
     "organizations/{slug:organization_slug}/issues/",
     response=list[IssueSchema],
@@ -273,9 +125,9 @@ async def list_issues(
     filters: Query[IssueFilters],
     sort: sort_options = "-last_seen",
 ):
-    qs = (await get_queryset(request, organization_slug=organization_slug)).filter(
-        is_deleted=False
-    )
+    qs = (
+        await get_queryset(request.auth.user_id, organization_slug=organization_slug)
+    ).filter(is_deleted=False)
     event_id: UUID | None = None
     if filters.query:
         try:
@@ -296,14 +148,14 @@ async def delete_issues(
     organization_slug: str,
     filters: Query[IssueFilters],
 ):
-    qs = await get_queryset(request, organization_slug=organization_slug)
+    qs = await get_queryset(request.auth.user_id, organization_slug=organization_slug)
     qs = filter_issue_list(qs, filters)
     await qs.aupdate(is_deleted=True)
     issue_ids = [
         issue_id
         async for issue_id in qs.filter(is_deleted=True).values_list("id", flat=True)
     ]
-    await async_call_celery_task(delete_issue_task, issue_ids)
+    await delete_issue_task.aenqueue(issue_ids)
     return {"status": "resolved"}
 
 
@@ -317,24 +169,61 @@ async def update_issues(
     filters: Query[IssueFilters],
     payload: UpdateIssueSchema,
 ):
-    qs = await get_queryset(request, organization_slug=organization_slug)
+    user_id = request.auth.user_id
+    qs = await get_queryset(user_id, organization_slug=organization_slug)
     qs = filter_issue_list(qs, filters)
+
+    # Freeze the set of issues to update to avoid race conditions with new issues
+    max_id = await qs.order_by("-id").values_list("id", flat=True).afirst()
+    if not max_id:
+        return payload
+
+    qs = qs.filter(id__lte=max_id)
+
+    # Process a limited batch immediately for UI responsiveness
+    limit = 50
+    updated_ids = [i async for i in qs.values_list("id", flat=True)[:limit]]
+
+    should_enqueue = len(updated_ids) == limit
+    task_kwargs = {
+        "organization_slug": organization_slug,
+        "user_id": user_id,
+        "filter_params": filters.dict(),
+        "exclude_ids": updated_ids,
+        "max_id": max_id,
+        "update_params": payload.dict(),
+    }
+
     if payload.status:
-        await qs.aupdate(status=EventStatus.from_string(payload.status))
+        await Issue.objects.filter(id__in=updated_ids).aupdate(
+            status=EventStatus.from_string(payload.status)
+        )
+        if should_enqueue:
+            await update_issues_task.aenqueue(**task_kwargs)
+
     if payload.merge:
+        # Identify the target issue (most recent one)
+        # Note: logic requires that the target issue is in the initial queryset
         issue = await qs.order_by("-id").afirst()
         if not issue:
             return payload
-        remove_qs = qs.exclude(id=issue.id)
+
+        remove_qs = Issue.objects.filter(id__in=updated_ids).exclude(id=issue.id)
         await remove_qs.aupdate(is_deleted=True)
         await IssueHash.objects.filter(issue__in=remove_qs).aupdate(issue=issue)
-        # Switch only the first 1000 events
+
         event_ids = []
         async for event_id in IssueEvent.objects.filter(
             issue__in=remove_qs
         ).values_list("id", flat=True)[:1000]:
             event_ids.append(event_id)
         await IssueEvent.objects.filter(id__in=event_ids).aupdate(issue=issue)
+
+        if should_enqueue:
+            # Pass the target merge issue ID to the task
+            task_kwargs["update_params"]["merge"] = issue.id
+            await update_issues_task.aenqueue(**task_kwargs)
+
     return payload
 
 
@@ -354,7 +243,9 @@ async def list_project_issues(
     sort: sort_options = "-last_seen",
 ):
     qs = await get_queryset(
-        request, organization_slug=organization_slug, project_slug=project_slug
+        request.auth.user_id,
+        organization_slug=organization_slug,
+        project_slug=project_slug,
     )
     event_id: UUID | None = None
     if filters.query:
@@ -374,7 +265,7 @@ async def list_project_issues(
 async def list_issue_tags(
     request: AuthHttpRequest, issue_id: int, key: str | None = None
 ):
-    qs = await get_queryset(request)
+    qs = await get_queryset(request.auth.user_id)
     try:
         issue = await qs.filter(id=issue_id).aget()
     except Issue.DoesNotExist:

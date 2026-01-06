@@ -126,6 +126,15 @@ class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
     """
 
     def setUp(self):
+        from django.tasks import task_backends
+
+        # Clear any pending batches from previous tests to avoid cross-test pollution
+        # (e.g. tasks for projects that have been rolled back/deleted)
+        if "default" in task_backends:
+            backend = task_backends["default"]
+            if hasattr(backend, "pending_batches"):
+                backend.pending_batches.clear()
+
         self.create_project()
         self.params = f"?sentry_key={self.projectkey.public_key}"
 

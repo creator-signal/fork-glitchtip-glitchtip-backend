@@ -1,5 +1,7 @@
 import hashlib
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from .schema import EventMessage
 
@@ -79,5 +81,24 @@ def remove_bad_chars(obj: Replacable) -> Replacable:
         return [remove_bad_chars(item) for item in obj]
     elif isinstance(obj, str):
         return _clean_string(obj)
+    else:
+        return obj
+
+
+def serialize_for_vtasks(obj: Any) -> Any:
+    """
+    Serialize objects to JSON-compatible types for vtasks.
+
+    Converts datetime objects to ISO format strings and UUID objects to hex strings.
+    This is needed because vtasks' normalize_json doesn't handle these types.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, UUID):
+        return obj.hex
+    elif isinstance(obj, dict):
+        return {key: serialize_for_vtasks(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [serialize_for_vtasks(item) for item in obj]
     else:
         return obj

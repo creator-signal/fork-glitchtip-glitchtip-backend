@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core import mail
+from django.tasks import task_backends
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
@@ -19,6 +20,7 @@ from ..tasks import process_event_alerts
 
 class AlertTestCase(GlitchTipTestCase):
     def setUp(self):
+        super().setUp()
         self.create_user_and_project()
         self.now = timezone.now()
 
@@ -34,22 +36,22 @@ class AlertTestCase(GlitchTipTestCase):
         baker.make("issue_events.IssueEvent", issue=issue)
 
         # Not sufficient events to create alert
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 0)
 
         baker.make("issue_events.IssueEvent", issue=issue, _quantity=9)
 
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
 
         # Notifications have a cooldown time equal to alert timespan
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
 
         # Notifications should not happen again for same issue
         with freeze_time(self.now + timedelta(minutes=11)):
             baker.make("issue_events.IssueEvent", issue=issue, _quantity=10)
-            process_event_alerts()
+            process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 1)
 
@@ -70,13 +72,13 @@ class AlertTestCase(GlitchTipTestCase):
         issue1 = baker.make("issue_events.Issue", project=self.project)
         baker.make("issue_events.IssueEvent", issue=issue1)
 
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
 
         issue2 = baker.make("issue_events.Issue", project=self.project)
         baker.make("issue_events.IssueEvent", issue=issue2, _quantity=2)
 
-        process_event_alerts()
+        process_event_alerts.call()
         # Trigger both alerts, as both meet criteria, total of 3
         self.assertEqual(Notification.objects.count(), 3)
 
@@ -95,10 +97,10 @@ class AlertTestCase(GlitchTipTestCase):
         baker.make("issue_events.IssueEvent", issue=issue, _quantity=4)
         with freeze_time(self.now + timedelta(minutes=5)):
             baker.make("issue_events.IssueEvent", issue=issue, _quantity=4)
-            process_event_alerts()
+            process_event_alerts.call()
         with freeze_time(self.now + timedelta(minutes=11)):
             baker.make("issue_events.IssueEvent", issue=issue, _quantity=4)
-            process_event_alerts()
+            process_event_alerts.call()
 
         # Not sufficient rate of events to trigger alert.
         self.assertEqual(Notification.objects.count(), 0)
@@ -106,7 +108,7 @@ class AlertTestCase(GlitchTipTestCase):
         # time 12: 4 more events (16 total, 12 in past 10 minutes)
         with freeze_time(self.now + timedelta(minutes=12)):
             baker.make("issue_events.IssueEvent", issue=issue, _quantity=4)
-            process_event_alerts()
+            process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
 
     def test_alert_one_event(self):
@@ -119,7 +121,7 @@ class AlertTestCase(GlitchTipTestCase):
         )
         issue = baker.make("issue_events.Issue", project=self.project)
         baker.make("issue_events.IssueEvent", issue=issue)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 1)
 
     def test_alert_on_regression(self):
@@ -139,9 +141,10 @@ class AlertTestCase(GlitchTipTestCase):
         params = f"?sentry_key={projectkey.public_key}"
         url = reverse("api:event_store", args=[self.project.id]) + params
         self.client.post(url, data, content_type="application/json")
+        task_backends["default"].flush_batches()
 
         # First alert
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 1)
 
         # Mark resolved
@@ -152,7 +155,8 @@ class AlertTestCase(GlitchTipTestCase):
         # Send a second event
         data["event_id"] = "cf536c31b68a473f97e579507ce155e4"
         self.client.post(url, data, content_type="application/json")
-        process_event_alerts()
+        task_backends["default"].flush_batches()
+        process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 2)
 
     def test_alert_subscription_default_scope(self):
@@ -179,7 +183,7 @@ class AlertTestCase(GlitchTipTestCase):
         team3.projects.add(self.project)
 
         baker.make("issue_events.IssueEvent", issue__project=self.project)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertNotIn(user2.email, mail.outbox[0].to)
         self.assertIn(user3.email, mail.outbox[0].to)
         self.assertEqual(len(mail.outbox[0].to), 2)  # Ensure no duplicate emails
@@ -213,7 +217,7 @@ class AlertTestCase(GlitchTipTestCase):
             quantity=1,
         )
         with self.assertNumQueries(5):
-            process_event_alerts()
+            process_event_alerts.call()
 
     def test_email_headers(self):
         baker.make(
@@ -224,7 +228,7 @@ class AlertTestCase(GlitchTipTestCase):
         )
         issue = baker.make("issue_events.Issue", project=self.project)
         baker.make("issue_events.IssueEvent", issue=issue)
-        process_event_alerts()
+        process_event_alerts.call()
 
         self.assertEqual(len(mail.outbox), 1)
         email = mail.outbox[0]
@@ -281,7 +285,7 @@ class AlertWithUserProjectAlert(GlitchTipTestCase):
         )
 
         baker.make("issue_events.IssueEvent", issue__project=self.project)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(len(mail.outbox[0].merge_metadata), 2)
 
@@ -296,7 +300,7 @@ class AlertWithUserProjectAlert(GlitchTipTestCase):
         )
 
         baker.make("issue_events.IssueEvent", issue__project=self.project)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 0)
 
     def test_alert_enabled_subscribe_by_default_override_false(self):
@@ -315,7 +319,7 @@ class AlertWithUserProjectAlert(GlitchTipTestCase):
             status=ProjectAlertStatus.ON,
         )
         baker.make("issue_events.IssueEvent", issue__project=self.project)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertEqual(len(mail.outbox), 1)
 
     def test_user_project_alert_scope(self):
@@ -337,5 +341,5 @@ class AlertWithUserProjectAlert(GlitchTipTestCase):
             status=ProjectAlertStatus.ON,
         )
         baker.make("issue_events.IssueEvent", issue__project=self.project)
-        process_event_alerts()
+        process_event_alerts.call()
         self.assertNotIn(user2.email, mail.outbox[0].to)

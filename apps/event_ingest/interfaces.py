@@ -14,7 +14,7 @@ from .schema import (
 @dataclass(frozen=True)
 class IngestTaskMessage:
     """A simple, type-hinted data container for a validated event
-    being sent to a Celery worker.
+    being sent to a task worker.
     """
 
     project_id: int

@@ -1,7 +1,7 @@
 from datetime import timedelta
 
-from celery import shared_task
 from django.conf import settings
+from django.tasks import task
 from django.utils.timezone import now
 
 from apps.organizations_ext.models import Organization
@@ -10,7 +10,7 @@ from .assemble import assemble_artifacts
 from .models import FileBlob
 
 
-@shared_task
+@task
 def assemble_artifacts_task(org_id, version, checksum, chunks, **kwargs):
     """
     Creates release files from an uploaded artifact bundle.

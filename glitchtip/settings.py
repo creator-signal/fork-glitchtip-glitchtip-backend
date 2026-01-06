@@ -16,12 +16,12 @@ from datetime import timedelta
 
 import environ
 import sentry_sdk
-from celery.schedules import crontab
 from corsheaders.defaults import default_headers
-from csp.constants import NONCE, SELF
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import UnreadablePostError
+from django.utils.csp import CSP
+from django_vtasks.scheduler import crontab
 from sentry_sdk.integrations.django import DjangoIntegration
 
 env = environ.FileAwareEnv(
@@ -45,6 +45,7 @@ env = environ.FileAwareEnv(
     DEBUG_TOOLBAR=(bool, False),
     STATIC_URL=(str, "/"),
     ENABLE_OBSERVABILITY_API=(bool, False),
+    READ_ONLY_DATABASE_URL=(str, None),
 )
 path = environ.Path()
 
@@ -218,7 +219,6 @@ AIOHTTP_CONFIG = {
 }
 
 # Application definition
-# Conditionally load to workaround unnecessary memory usage in celery/beat
 WEB_INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.messages",
@@ -250,13 +250,13 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.okta",
     "anymail",
     "corsheaders",
-    "csp",
     "django_extensions",
 ]
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
 INSTALLED_APPS += [
     "storages",
+    "django_vtasks",
     "glitchtip",
     "apps.alerts",
     "apps.environments",
@@ -279,8 +279,8 @@ INSTALLED_APPS += [
 ]
 
 
-IS_CELERY = env.bool("IS_CELERY", False)
-if not IS_CELERY:
+IS_WORKER = env.bool("IS_WORKER", False)
+if not IS_WORKER:
     INSTALLED_APPS = WEB_INSTALLED_APPS + INSTALLED_APPS
 
 # Ensure no one uses runsslserver in production
@@ -300,7 +300,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "csp.middleware.CSPMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
@@ -334,6 +334,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "django.template.context_processors.csp",
             ],
         },
     },
@@ -372,45 +373,44 @@ SECURE_BROWSER_XSS_FILTER = True
 
 # Consider tracking CSP reports with GlitchTip itself
 # Enable Chatwoot only when configured
-default_connect_src = [SELF, "https://*.glitchtip.com"]
+default_connect_src = [CSP.SELF, "https://*.glitchtip.com"]
 if CHATWOOT_WEBSITE_TOKEN:
     default_connect_src.append("https://app.chatwoot.com")
 # Enable stripe by default only when configured
 stripe_domain = "https://js.stripe.com"
 default_script_src = [
-    SELF,
+    CSP.SELF,
     "https://*.glitchtip.com",
     "'sha256-iRcDQ27XiXX4k+jbJ8nGeQFBnBOjmII7FdMlixb6QE4='",  # Theme picker inline JS
 ]
-default_frame_src = [SELF]
+default_frame_src = [CSP.SELF]
 if BILLING_ENABLED:
     default_script_src.append(stripe_domain)
     default_frame_src.append(stripe_domain)
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        "default-src": env.list("CSP_DEFAULT_SRC", str, [SELF]) + [NONCE],
-        "style-src": env.list("CSP_STYLE_SRC", str, [SELF]) + [NONCE],
-        "font-src": env.list("CSP_FONT_SRC", str, [SELF, "data:"]),
-        "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
-        "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [NONCE],
-        "img-src": env.list("CSP_IMG_SRC", str, [SELF]),
-        "frame-src": env.list("CSP_FRAME_SRC", str, default_frame_src),
-        "report-uri": env.tuple("CSP_REPORT_URI", str, None),
-    },
-    "REPORT_PERCENTAGE": env.float("CSP_REPORT_PERCENTAGE", 10.0),
+SECURE_CSP_DIRECTIVES = {
+    "default-src": env.list("CSP_DEFAULT_SRC", str, [CSP.SELF]) + [CSP.NONCE],
+    "style-src": env.list("CSP_STYLE_SRC", str, [CSP.SELF]) + [CSP.NONCE],
+    "font-src": env.list("CSP_FONT_SRC", str, [CSP.SELF, "data:"]),
+    "connect-src": env.list("CSP_CONNECT_SRC", str, default_connect_src),
+    "script-src": env.list("CSP_SCRIPT_SRC", str, default_script_src) + [CSP.NONCE],
+    "img-src": env.list("CSP_IMG_SRC", str, [CSP.SELF]),
+    "frame-src": env.list("CSP_FRAME_SRC", str, default_frame_src),
 }
+if report_uri := env.tuple("CSP_REPORT_URI", str, None):
+    SECURE_CSP_DIRECTIVES["report-uri"] = report_uri
+
 if "CSP_STYLE_SRC_ELEM" in os.environ:
-    CONTENT_SECURITY_POLICY["DIRECTIVES"]["style-src-elem"] = env.list(
-        "CSP_STYLE_SRC_ELEM", str
-    )
+    SECURE_CSP_DIRECTIVES["style-src-elem"] = env.list("CSP_STYLE_SRC_ELEM", str)
 if "CSP_WORKER_SRC" in os.environ:
-    CONTENT_SECURITY_POLICY["DIRECTIVES"]["worker-src"] = env.list(
-        "CSP_WORKER_SRC", str
-    )
+    SECURE_CSP_DIRECTIVES["worker-src"] = env.list("CSP_WORKER_SRC", str)
+
 csp_report_only = env.bool("CSP_REPORT_ONLY", False)
 if csp_report_only:
-    CONTENT_SECURITY_POLICY_REPORT_ONLY = CONTENT_SECURITY_POLICY
-    CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
+    SECURE_CSP_REPORT_ONLY = SECURE_CSP_DIRECTIVES
+    SECURE_CSP = {}
+else:
+    SECURE_CSP = SECURE_CSP_DIRECTIVES
+    SECURE_CSP_REPORT_ONLY = {}
 
 
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
@@ -463,6 +463,9 @@ DATABASES = {
         "DATABASE_URL", default="postgres://postgres:postgres@postgres:5432/postgres"
     )
 }
+if env("READ_ONLY_DATABASE_URL"):
+    DATABASES["read_only"] = env.db("READ_ONLY_DATABASE_URL")
+
 # If component variables like DATABASE_HOST are provided, update the base config
 if env.str("DATABASE_HOST", None):
     DATABASES["default"].update(
@@ -475,24 +478,25 @@ if env.str("DATABASE_HOST", None):
         }
     )
 # Add other settings that apply to both methods.
-DATABASES["default"]["ENGINE"] = "psql_partition.backend"
-DATABASES["default"].setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
-DATABASES["default"].setdefault(
-    "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
-)
-DATABASES["default"].setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
-pooling_already_configured = "pool" in DATABASES["default"].get("OPTIONS", {})
-# Apply the default client-side pool ONLY IF connection reuse is not active
-if (
-    DATABASES["default"]["CONN_MAX_AGE"] == 0
-    and not pooling_already_configured
-    and env.bool("DATABASE_POOL", True)
-):
-    DATABASES["default"].setdefault("OPTIONS", {})
-    DATABASES["default"]["OPTIONS"]["pool"] = {
-        "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
-        "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
-    }
+for db_config in DATABASES.values():
+    db_config["ENGINE"] = "psql_partition.backend"
+    db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
+    db_config.setdefault(
+        "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
+    )
+    db_config.setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
+    pooling_already_configured = "pool" in db_config.get("OPTIONS", {})
+    # Apply the default client-side pool ONLY IF connection reuse is not active
+    if (
+        db_config["CONN_MAX_AGE"] == 0
+        and not pooling_already_configured
+        and env.bool("DATABASE_POOL", True)
+    ):
+        db_config.setdefault("OPTIONS", {})
+        db_config["OPTIONS"]["pool"] = {
+            "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
+            "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
+        }
 
 PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
@@ -516,42 +520,17 @@ VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
 VALKEY_MAX_CONNECTIONS = env.int(
     "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
 )
+VALKEY_SOCKET_CONNECT_TIMEOUT = env.int("VALKEY_SOCKET_CONNECT_TIMEOUT", 5)
+VALKEY_CONNECTION_POOL_TIMEOUT = env.int("VALKEY_CONNECTION_POOL_TIMEOUT", 5)
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
-CELERY_BROKER_URL = env.str(
-    "CELERY_BROKER_URL",
-    VALKEY_URL
-    or f"sqlalchemy+postgresql+psycopg://{db['USER']}:{db['PASSWORD']}@{db['HOST']}:{db['PORT']}/{db['NAME']}",
-)
-if VALKEY_URL or "valkey" in CELERY_BROKER_URL:
-    CELERY_BROKER_TRANSPORT_OPTIONS = {
-        "fanout_prefix": True,
-        "fanout_patterns": True,
-        "retry_on_timeout": VALKEY_RETRY,
-        "max_connections": VALKEY_MAX_CONNECTIONS,
-    }
-CELERY_REDIS_RETRY_ON_TIMEOUT = VALKEY_RETRY
-CELERY_REDIS_MAX_CONNECTIONS = VALKEY_MAX_CONNECTIONS
-if CELERY_BROKER_URL.startswith("sentinel"):
-    CELERY_BROKER_TRANSPORT_OPTIONS["master_name"] = env.str(
-        "CELERY_BROKER_MASTER_NAME", "mymaster"
-    )
 IS_LOAD_TEST = env("IS_LOAD_TEST")
-# GlitchTip doesn't require a celery result backend
-if IS_LOAD_TEST:
-    CELERY_RESULT_BACKEND = VALKEY_URL
-if socket_timeout := env.int("CELERY_BROKER_SOCKET_TIMEOUT", None):
-    CELERY_BROKER_TRANSPORT_OPTIONS["socket_timeout"] = socket_timeout
-if broker_sentinel_password := env.str("CELERY_BROKER_SENTINEL_KWARGS_PASSWORD", None):
-    CELERY_BROKER_TRANSPORT_OPTIONS["sentinel_kwargs"] = {
-        "password": broker_sentinel_password
-    }
 
 # Time in seconds to debounce some frequently run tasks
 TASK_DEBOUNCE_DELAY = env.int("TASK_DEBOUNCE_DELAY", 30)
-UPTIME_CHECK_INTERVAL = 10
+UPTIME_CHECK_INTERVAL = 1
 ALERT_NOTIFICATION_INTERVAL = env.int("ALERT_NOTIFICATION_INTERVAL", 60)
-CELERY_BEAT_SCHEDULE = {
+VTASKS_SCHEDULE = {
     "send-alert-notifications": {
         "task": "apps.alerts.tasks.process_event_alerts",
         "schedule": ALERT_NOTIFICATION_INTERVAL,
@@ -565,25 +544,76 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": UPTIME_CHECK_INTERVAL,
     },
 }
+
+TASKS = {
+    "default": {
+        "BACKEND": "django_vtasks.backends.db.DatabaseTaskBackend",
+    }
+}
+
+VTASKS_QUEUES = ["default", "ingest"]
+
+# Batch queues configuration - must be defined before tasks are imported
+VTASKS_BATCH_QUEUES = {
+    "ingest": {
+        "count": 100,
+        "timeout": 2.0,
+    },
+}
+
 # Maximum number of issues send in a single alert payload
 MAX_ISSUES_PER_ALERT = env.int("MAX_ISSUES_PER_ALERT", 3)
+
+# Support running in WSGI mode (uWSGI or Granian WSGI)
+# We need to use a different cache backend for WSGI to avoid async loop issues
+try:
+    import uwsgi  # noqa
+
+    HAS_UWSGI = True
+except ImportError:
+    HAS_UWSGI = False
+
+# Default to True for now, but if running under uWSGI or Granian WSGI, we might need to switch
+USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
+
+_use_valkey_wsgi_default = False
+if not USE_ASYNC_SERVER:
+    _use_valkey_wsgi_default = True
+elif "USE_ASYNC_SERVER" not in os.environ and HAS_UWSGI:
+    _use_valkey_wsgi_default = True
+
+USE_VALKEY_WSGI_CACHE = env.bool("USE_VALKEY_WSGI_CACHE", _use_valkey_wsgi_default)
+
+if IS_WORKER:
+    USE_VALKEY_WSGI_CACHE = False
 
 if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
     }
+    if "django_vtasks.db" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_vtasks.db")
 elif VALKEY_URL:
+    valkey_backend = "django_vcache.backend.ValkeyCache"
+    if USE_VALKEY_WSGI_CACHE:
+        valkey_backend = "django_vcache.wsgi.ValkeyWSGICache"
+
     CACHES = {
         "default": {
-            "BACKEND": "django_valkey.cache.ValkeyCache",
+            "BACKEND": valkey_backend,
             "LOCATION": VALKEY_URL,
             "OPTIONS": {
-                "COMPRESSOR": "django_valkey.compressors.lz4.Lz4Compressor",
-                "CONNECTION_POOL_KWARGS": {
-                    "retry_on_timeout": VALKEY_RETRY,
-                    "max_connections": VALKEY_MAX_CONNECTIONS,
-                },
+                "max_connections": VALKEY_MAX_CONNECTIONS,
+                "retry_on_timeout": VALKEY_RETRY,
+                "socket_connect_timeout": VALKEY_SOCKET_CONNECT_TIMEOUT,
+                "connection_pool_timeout": VALKEY_CONNECTION_POOL_TIMEOUT,
             },
+        }
+    }
+    TASKS = {
+        "default": {
+            "BACKEND": "django_vtasks.backends.valkey.ValkeyTaskBackend",
+            "OPTIONS": {"cache_alias": "default"},
         }
     }
 else:  # Fallback to database cache
@@ -594,6 +624,8 @@ else:  # Fallback to database cache
         }
     }
     INSTALLED_APPS.append("django.contrib.sessions")
+    if "django_vtasks.db" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_vtasks.db")
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
     try:
         # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
@@ -607,13 +639,12 @@ if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
         raise ImproperlyConfigured(
             "Invalid cache redis sentinel url, format is host:port,host2:port2,..."
         ) from err
-    DJANGO_VALKEY_CONNECTION_FACTORY = "django_valkey.pool.SentinelConnectionFactory"
-    CACHES["default"]["OPTIONS"]["SENTINELS"] = SENTINELS
+    CACHES["default"]["OPTIONS"]["sentinels"] = SENTINELS
 if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
-    CACHES["default"]["OPTIONS"]["SENTINEL_KWARGS"] = {
+    CACHES["default"]["OPTIONS"]["sentinel_kwargs"] = {
         "password": cache_sentinel_password
     }
-if "valkey" in CACHES["default"]["BACKEND"]:
+if "vcache" in CACHES["default"]["BACKEND"]:
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
@@ -791,22 +822,8 @@ LOGGING = {
             "propagate": False,
         },
     },
-    "root": {"handlers": ["console"]},
+    "root": {"handlers": ["console"], "level": env.str("LOG_LEVEL", "WARNING")},
 }
-
-if LOGGING_HANDLER_CLASS is not logging.StreamHandler:
-    from celery.signals import after_setup_logger, after_setup_task_logger
-
-    @after_setup_logger.connect
-    @after_setup_task_logger.connect
-    def setup_celery_logging(logger, **kwargs):
-        from django.utils.module_loading import import_string
-
-        handler = import_string(LOGGING_HANDLER_CLASS)
-
-        for h in logger.handlers:
-            logger.removeHandler(h)
-        logger.addHandler(handler())
 
 
 # Set to track activity with Plausible
@@ -820,7 +837,7 @@ I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
     I_PAID_FOR_GLITCHTIP = True
-    CELERY_BEAT_SCHEDULE["check-all-organizations-throttle"] = {
+    VTASKS_SCHEDULE["check-all-organizations-throttle"] = {
         "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
         "schedule": timedelta(hours=4),
     }
@@ -829,21 +846,26 @@ elif TESTING:
     BILLING_ENABLED = True
     logging.disable(logging.WARNING)
 
-CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", False)
+
 if TESTING:
     TEST_RUNNER = "glitchtip.test_runner.TimedTestRunner"
     # Optimization
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
-    DATABASES["default"]["CONN_MAX_AGE"] = None
-    DATABASES["default"]["OPTIONS"]["pool"] = False
-    CELERY_TASK_ALWAYS_EAGER = True
+    for db_config in DATABASES.values():
+        db_config["CONN_MAX_AGE"] = None
+        db_config["OPTIONS"]["pool"] = False
+    TASKS = {
+        "default": {
+            "BACKEND": "django_vtasks.backends.immediate.ImmediateBackend",
+        }
+    }
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
     STORAGES = global_settings.STORAGES
     # https://github.com/evansd/whitenoise/issues/215
     warnings.filterwarnings(
         "ignore", message="No directory at", module="whitenoise.base"
     )
-if CELERY_TASK_ALWAYS_EAGER:
+if TESTING:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",

@@ -14,7 +14,7 @@ projects_metric = Gauge(
 async def compile_metrics():
     """Update and cache the organization and project metrics"""
 
-    orgs = cache.get(OBSERVABILITY_ORG_CACHE_KEY)
+    orgs = await cache.aget(OBSERVABILITY_ORG_CACHE_KEY)
     if orgs is None:
         orgs = [
             org
@@ -22,7 +22,7 @@ async def compile_metrics():
             .values("slug", "projects__count")
             .all()
         ]
-        cache.set(OBSERVABILITY_ORG_CACHE_KEY, orgs, 60 * 60)
+        await cache.aset(OBSERVABILITY_ORG_CACHE_KEY, orgs, 60 * 60)
 
     for org in orgs:
         projects_metric.labels(org["slug"]).set(org["projects__count"])

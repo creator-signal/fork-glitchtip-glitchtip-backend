@@ -47,7 +47,36 @@ class OptionalSchemeURLValidator(URLValidator):
 
 
 class Monitor(models.Model):
+    # Fields ordered for optimal data alignment: 8-byte (FKs, timestamps), 4-byte, 2-byte, then variable-width
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    project = models.ForeignKey(
+        "projects.Project",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    environment = models.ForeignKey(
+        "environments.Environment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
     created = models.DateTimeField(auto_now_add=True)
+    interval = models.PositiveSmallIntegerField(
+        default=60,
+        validators=[MaxValueValidator(86400), MinValueValidator(1)],
+    )
+    timeout = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        validators=[MaxValueValidator(60), MinValueValidator(1)],
+        help_text="Blank implies default value of 20",
+    )
+    expected_status = models.PositiveSmallIntegerField(
+        default=200, blank=True, null=True
+    )
     monitor_type = models.CharField(
         max_length=12, choices=MonitorType.choices, default=MonitorType.PING
     )
@@ -61,35 +90,7 @@ class Monitor(models.Model):
     url = models.CharField(
         max_length=2000, blank=True, validators=[OptionalSchemeURLValidator()]
     )
-    expected_status = models.PositiveSmallIntegerField(
-        default=200, blank=True, null=True
-    )
     expected_body = models.CharField(max_length=2000, blank=True)
-    environment = models.ForeignKey(
-        "environments.Environment",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
-    project = models.ForeignKey(
-        "projects.Project",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
-    organization = models.ForeignKey(
-        "organizations_ext.Organization", on_delete=models.CASCADE
-    )
-    interval = models.PositiveSmallIntegerField(
-        default=60,
-        validators=[MaxValueValidator(86400), MinValueValidator(1)],
-    )
-    timeout = models.PositiveSmallIntegerField(
-        blank=True,
-        null=True,
-        validators=[MaxValueValidator(60), MinValueValidator(1)],
-        help_text="Blank implies default value of 20",
-    )
 
     objects = MonitorManager()
 
@@ -104,10 +105,12 @@ class Monitor(models.Model):
             self.endpoint_id = uuid.uuid4()
         super().save(*args, **kwargs)
         # pylint: disable=import-outside-toplevel
+        from django.db import transaction
+
         from apps.uptime.tasks import perform_checks
 
         if self.monitor_type != MonitorType.HEARTBEAT:
-            perform_checks.apply_async(args=([self.pk],), countdown=1)
+            transaction.on_commit(lambda: perform_checks.enqueue([self.pk]))
 
     def clean(self):
         if self.monitor_type in HTTP_MONITOR_TYPES:
@@ -125,22 +128,23 @@ class Monitor(models.Model):
 
 
 class MonitorCheck(PostgresPartitionedModel, models.Model):
+    # Fields ordered for optimal data alignment: 8-byte (FKs, timestamps), 4-byte, 2-byte, 1-byte, then variable-width
     monitor = models.ForeignKey(
         Monitor, on_delete=models.CASCADE, related_name="checks"
-    )
-    is_up = models.BooleanField()
-    is_change = models.BooleanField(
-        help_text="Indicates change to is_up status for associated monitor",
     )
     start_check = models.DateTimeField(
         default=now,
         help_text="Time when the start of this check was performed",
     )
+    response_time = models.PositiveIntegerField(
+        blank=True, null=True, help_text="Reponse time in milliseconds"
+    )
     reason = models.PositiveSmallIntegerField(
         choices=MonitorCheckReason.choices, default=0, null=True, blank=True
     )
-    response_time = models.PositiveIntegerField(
-        blank=True, null=True, help_text="Reponse time in milliseconds"
+    is_up = models.BooleanField()
+    is_change = models.BooleanField(
+        help_text="Indicates change to is_up status for associated monitor",
     )
     data = models.JSONField(null=True, blank=True)
 
@@ -170,14 +174,15 @@ class StatusPage(CreatedModel):
     A status page is a collection of monitors that are available to view
     """
 
+    # Fields ordered for optimal data alignment: 8-byte FKs first, 1-byte booleans, then variable-width
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    name = models.CharField(max_length=200)
-    slug = AutoSlugField(populate_from=["name"], max_length=200)
     is_public = models.BooleanField(
         help_text="When true, the status page URL is publicly accessible"
     )
+    name = models.CharField(max_length=200)
+    slug = AutoSlugField(populate_from=["name"], max_length=200)
     monitors = models.ManyToManyField(Monitor, blank=True)
 
     class Meta:

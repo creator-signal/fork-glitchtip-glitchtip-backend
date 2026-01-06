@@ -14,3 +14,8 @@ from django.core.asgi import get_asgi_application
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "glitchtip.settings")
 
 application = get_asgi_application()
+
+if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":
+    from django_vtasks.asgi import get_worker_application
+
+    application = get_worker_application(application)

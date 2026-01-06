@@ -77,7 +77,7 @@ class Project(CreatedModel, SoftDeleteModel):
         from apps.projects.tasks import delete_project
 
         super().delete(*args, **kwargs)
-        delete_project.delay(self.pk)
+        delete_project.enqueue(self.pk)
 
     def force_delete(self, *args, **kwargs):
         """Really delete the project and all related data."""

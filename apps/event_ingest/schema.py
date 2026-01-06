@@ -421,9 +421,9 @@ class SecuritySchema(LaxIngestSchema):
 ## Normalized Interchange Issue Events
 
 
-class CeleryIssueEvent(BaseIssueEvent):
+class TaskIssueEvent(BaseIssueEvent):
     """
-    Lightweight schema for Celery - assumes data already validated
+    Lightweight schema for task processing - assumes data already validated
     All fields used by process_event.py with simple types
     """
 
@@ -451,22 +451,22 @@ class CeleryIssueEvent(BaseIssueEvent):
     csp: CSPReportSchema | None = None
 
 
-class CeleryDefaultIssueEvent(CeleryIssueEvent):
+class TaskDefaultIssueEvent(TaskIssueEvent):
     type: Literal[IssueEventType.DEFAULT] = IssueEventType.DEFAULT
 
 
-class CeleryErrorIssueEvent(CeleryIssueEvent):
+class TaskErrorIssueEvent(TaskIssueEvent):
     type: Literal[IssueEventType.ERROR] = IssueEventType.ERROR
 
 
-class CeleryCSPIssueEvent(CeleryIssueEvent):
+class TaskCSPIssueEvent(TaskIssueEvent):
     type: Literal[IssueEventType.CSP] = IssueEventType.CSP
 
 
 class IssueEventSchema(WebIngestIssueEvent):
     """
     Event storage and interchange format
-    Used in json view and celery interchange
+    Used in json view and task interchange
     Don't use this for api intake
     """
 

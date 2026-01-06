@@ -2,6 +2,7 @@ import os
 import shutil
 import uuid
 
+from django.tasks import task_backends
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -33,7 +34,7 @@ def is_exception(v):
 
 class IssueEventIngestTestCase(EventIngestTestCase):
     """
-    These tests bypass the API and celery. They test the event ingest logic itself.
+    These tests bypass the API and task queue. They test the event ingest logic itself.
     This file should be large are test the following use cases
     - Multiple event saved at the same time
     - Sentry API compatibility
@@ -987,6 +988,7 @@ class SentryCompatTestCase(EventIngestTestCase):
             content_type="application/json",
             REMOTE_ADDR="142.255.29.14",
         )
+        task_backends["default"].flush_batches()
         res_data = res.json()
         event = IssueEvent.objects.get(pk=res_data["event_id"])
         event_json = self.get_event_json(event)
