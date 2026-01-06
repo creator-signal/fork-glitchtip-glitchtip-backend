@@ -7,6 +7,8 @@
 - Ingest optimizations around bulk queries
 - Use port 8000 more consistently instead of sometimes port 8080
 - Remove gunicorn and uvicorn. Please use granian. uwsgi still included for compatibility.
+- Add TRUSTED_PROXIES env var (defaults to "*") for granian support.
+- Remove unused SetRemoteAddrFromForwardedFor middleware (was never enabled)
 
 # v5.2.0
 
