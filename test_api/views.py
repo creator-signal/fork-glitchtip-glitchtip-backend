@@ -40,12 +40,12 @@ def seed_data(request: HttpRequest):
         email=other_user_email, password=user_password
     )
 
-    EmailAddress.objects.create(
-        user=user, email=user_email, primary=True, verified=False
-    )
-    EmailAddress.objects.create(
-        user=other_user, email=other_user_email, primary=True, verified=True
-    )
+    # EmailAddress.objects.create(
+    #     user=user, email=user_email, primary=True, verified=False
+    # )
+    # EmailAddress.objects.create(
+    #     user=other_user, email=other_user_email, primary=True, verified=True
+    # )
 
     Organization.objects.filter(name__contains=e2e_object_identifier).delete()
     organization = Organization.objects.create(name=organization_name)
@@ -55,14 +55,14 @@ def seed_data(request: HttpRequest):
     project = Project.objects.create(name=project_name, organization=organization)
 
     Monitor.objects.filter(name__contains=e2e_object_identifier).delete()
-    Monitor.objects.create(
-        name=monitor_name,
-        organization=organization,
-        project=project,
-        url="https://www.google.com",
-        monitor_type="Ping",
-        interval=60,
-    )
+    # Monitor.objects.create(
+    #     name=monitor_name,
+    #     organization=organization,
+    #     project=project,
+    #     url="https://www.google.com",
+    #     monitor_type="Ping",
+    #     interval=60,
+    # )
 
     if request.GET.get("extras", None):
         project_name = "second-seeded-project"
