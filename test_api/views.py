@@ -47,14 +47,14 @@ def seed_data(request: HttpRequest):
     #     user=other_user, email=other_user_email, primary=True, verified=True
     # )
 
-    Organization.objects.filter(name__contains=e2e_object_identifier).delete()
-    organization = Organization.objects.create(name=organization_name)
-    orgUser = organization.add_user(user=user)
+    # Organization.objects.filter(name__contains=e2e_object_identifier).delete()
+    # organization = Organization.objects.create(name=organization_name)
+    # orgUser = organization.add_user(user=user)
 
-    team = Team.objects.create(slug=team_slug, organization=organization)
-    project = Project.objects.create(name=project_name, organization=organization)
+    # team = Team.objects.create(slug=team_slug, organization=organization)
+    # project = Project.objects.create(name=project_name, organization=organization)
 
-    Monitor.objects.filter(name__contains=e2e_object_identifier).delete()
+    # Monitor.objects.filter(name__contains=e2e_object_identifier).delete()
     # Monitor.objects.create(
     #     name=monitor_name,
     #     organization=organization,
@@ -64,17 +64,17 @@ def seed_data(request: HttpRequest):
     #     interval=60,
     # )
 
-    if request.GET.get("extras", None):
-        project_name = "second-seeded-project"
-        project2 = Project.objects.create(name=project_name, organization=organization)
-        project_name = "third-seeded-project"
-        project3 = Project.objects.create(
-            name=project_name, organization=organization, platform="JavaScript"
-        )
-        team.projects.add(project)
-        team.projects.add(project2)
-        team.projects.add(project3)
-        team.members.add(orgUser)
+    # if request.GET.get("extras", None):
+    #     project_name = "second-seeded-project"
+    #     project2 = Project.objects.create(name=project_name, organization=organization)
+    #     project_name = "third-seeded-project"
+    #     project3 = Project.objects.create(
+    #         name=project_name, organization=organization, platform="JavaScript"
+    #     )
+    #     team.projects.add(project)
+    #     team.projects.add(project2)
+    #     team.projects.add(project3)
+    #     team.members.add(orgUser)
 
         # if request.GET.get("seedIssues", None):
         #     call_command(
