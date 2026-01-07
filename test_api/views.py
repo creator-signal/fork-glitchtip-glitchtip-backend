@@ -1,4 +1,5 @@
 from allauth.account.models import EmailAddress
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.management import call_command
 from django.http import Http404, HttpRequest, HttpResponse
@@ -10,19 +11,8 @@ from apps.teams.models import Team
 from apps.uptime.models import Monitor
 from apps.users.models import User
 
-
-@csrf_exempt
-def seed_data(request: HttpRequest):
-    """
-    Very destructive. Never enable on production.
-    Generates data for e2e testing and deletes orgs it
-    created previously as well as orgs created on
-    behalf of e2e frontend. Always include `e2etestobj`
-    in org name when creating orgs in e2e tests.
-    """
-    if settings.ENABLE_TEST_API is not True:
-        raise Http404("Enable Test API is not enabled")
-
+@sync_to_async
+def generate_seed_data():
     user_email = "seeded-user@example.com"
     other_user_email = "second-seeded-user@example.com"
     user_password = "hunter22"  # nosec
@@ -40,6 +30,20 @@ def seed_data(request: HttpRequest):
         email=other_user_email, password=user_password
     )
 
+
+@csrf_exempt
+async def seed_data(request: HttpRequest):
+    """
+    Very destructive. Never enable on production.
+    Generates data for e2e testing and deletes orgs it
+    created previously as well as orgs created on
+    behalf of e2e frontend. Always include `e2etestobj`
+    in org name when creating orgs in e2e tests.
+    """
+    if settings.ENABLE_TEST_API is not True:
+        raise Http404("Enable Test API is not enabled")
+
+    await generate_seed_data()
     # EmailAddress.objects.create(
     #     user=user, email=user_email, primary=True, verified=False
     # )
