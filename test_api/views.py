@@ -43,7 +43,7 @@ async def seed_data(request: HttpRequest):
     if settings.ENABLE_TEST_API is not True:
         raise Http404("Enable Test API is not enabled")
 
-    await generate_seed_data()
+    # await generate_seed_data()
     # EmailAddress.objects.create(
     #     user=user, email=user_email, primary=True, verified=False
     # )
