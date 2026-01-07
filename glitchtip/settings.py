@@ -503,19 +503,20 @@ PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Make a best attempt to support both Valkey and Redis. Support full auth string or parts.
-VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
-if VALKEY_HOST:
-    VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
-    VALKEY_DATABASE = env.str("VALKEY_DATABASE", env.str("REDIS_DATABASE", "0"))
-    VALKEY_PASSWORD = env.str("VALKEY_PASSWORD", env.str("REDIS_PASSWORD", None))
-    if VALKEY_PASSWORD:
-        VALKEY_URL = (
-            f"redis://:{VALKEY_PASSWORD}@{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
-        )
+# Priority: VALKEY_URL > REDIS_URL > constructed from VALKEY_HOST/REDIS_HOST components
+VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", None))
+if not VALKEY_URL:
+    VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
+    if VALKEY_HOST:
+        VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
+        VALKEY_DATABASE = env.str("VALKEY_DATABASE", env.str("REDIS_DATABASE", "0"))
+        VALKEY_PASSWORD = env.str("VALKEY_PASSWORD", env.str("REDIS_PASSWORD", None))
+        if VALKEY_PASSWORD:
+            VALKEY_URL = f"redis://:{VALKEY_PASSWORD}@{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
+        else:
+            VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
     else:
-        VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
-else:
-    VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
+        VALKEY_URL = "redis://redis:6379/0"
 VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
 VALKEY_MAX_CONNECTIONS = env.int(
     "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
