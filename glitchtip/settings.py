@@ -317,6 +317,9 @@ MIDDLEWARE += [
     "allauth.account.middleware.AccountMiddleware",
 ]
 
+if "GRANIAN_STATIC_PATH_MOUNT" in os.environ:
+    MIDDLEWARE.remove("whitenoise.middleware.WhiteNoiseMiddleware")
+
 if ENABLE_OBSERVABILITY_API:
     MIDDLEWARE.insert(0, "django_prometheus.middleware.PrometheusBeforeMiddleware")
     MIDDLEWARE.append("django_prometheus.middleware.PrometheusAfterMiddleware")
