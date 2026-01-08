@@ -17,8 +17,15 @@ def provision_user_and_token(apps, schema_editor):
 
         if token is not None:
             APIToken = apps.get_model("api_tokens", "APIToken")
+            scopes = (
+                getattr(APIToken.scopes, "project:admin")
+                | getattr(APIToken.scopes, "team:admin")
+                | getattr(APIToken.scopes, "event:admin")
+                | getattr(APIToken.scopes, "org:admin")
+                | getattr(APIToken.scopes, "member:admin")
+            )
             APIToken.objects.create(
-                scopes=getattr(APIToken.scopes, "org:admin"),
+                scopes=scopes,
                 user_id=superuser.id,
                 token=token,
             )
