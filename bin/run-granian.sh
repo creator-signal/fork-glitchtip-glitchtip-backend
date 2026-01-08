@@ -12,6 +12,9 @@ PORT=${GRANIAN_PORT:-8000}
 # Use async by default
 USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
 
+# Serve static files by default
+export GRANIAN_STATIC_PATH_MOUNT=${GRANIAN_STATIC_PATH_MOUNT:-static}
+
 if [ "$USE_ASYNC_SERVER" = "true" ]; then
     echo "Start GlitchTip with ${WORKERS} granian worker(s) (ASGI)"
     exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS
