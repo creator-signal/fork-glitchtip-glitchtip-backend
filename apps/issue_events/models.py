@@ -228,13 +228,18 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
     @property
     def message(self):
         """Often the title and message are the same. If message isn't stored, assume it's the title"""
-        return self.data.get("message", self.title)
+        if self.data:
+            return self.data.get("message", self.title)
+        return self.title
 
     @property
     def metadata(self):
         """Return metadata if exists, else return just the title as metadata"""
-        return self.data.get("metadata", {"title": self.title})
+        if self.data:
+            return self.data.get("metadata", {"title": self.title})
+        return {"title": self.title}
 
     @property
     def platform(self):
-        return self.data.get("platform")
+        if self.data:
+            return self.data.get("platform")
