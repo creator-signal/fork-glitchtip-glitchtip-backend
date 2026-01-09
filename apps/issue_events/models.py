@@ -202,7 +202,7 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
     )
     title = models.CharField(max_length=255)
     transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
-    data = models.JSONField()
+    data = models.JSONField(null=True)
     # This could be HStore, but jsonb is just as good and removes need for
     # 'django.contrib.postgres' which makes several unnecessary SQL calls
     tags = models.JSONField()

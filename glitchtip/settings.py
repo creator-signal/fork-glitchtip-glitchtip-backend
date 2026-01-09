@@ -107,6 +107,9 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
 
 # Events and associated data older than this will be deleted from the database
 GLITCHTIP_MAX_EVENT_LIFE_DAYS = env.int("GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=90)
+GLITCHTIP_EVENT_DOWNSAMPLE_DAYS = env.int(
+    "GLITCHTIP_EVENT_DOWNSAMPLE_DAYS", default=int(GLITCHTIP_MAX_EVENT_LIFE_DAYS / 3)
+)
 GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
 )
@@ -879,4 +882,3 @@ CACHE_IS_VALKEY = "valkey" in CACHES["default"]["BACKEND"]
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"
 )
-

@@ -38,6 +38,10 @@ class Project(CreatedModel, SoftDeleteModel):
         validators=[MaxValueValidator(100)],
         help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
     )
+    downsample_rate = models.FloatField(
+        default=0.1,
+        help_text="Fraction of events to keep in sample (0.0 to 1.0) when downsampling old data.",
+    )
 
     class Meta:
         unique_together = (("organization", "slug"),)
