@@ -13,7 +13,7 @@ export GLITCHTIP_EMBED_WORKER=true
 
 # Granian settings
 
-WORKERS=${WEB_CONCURRENCY:-1}
+WORKERS=${GRANIAN_WORKERS:-${WEB_CONCURRENCY:-1}}
 
 HOST=${GRANIAN_HOST:-0.0.0.0}
 
@@ -21,8 +21,21 @@ PORT=${GRANIAN_PORT:-8000}
 
 G_LOG_LEVEL=${GRANIAN_LOG_LEVEL:-INFO}
 
+# Serve static files by default if the directory exists
+if [ -n "$GRANIAN_STATIC_PATH_MOUNT" ]; then
+    export GRANIAN_STATIC_PATH_MOUNT
+elif [ -d "static" ]; then
+    export GRANIAN_STATIC_PATH_MOUNT="static"
+fi
 
+if [ "${ENABLE_OBSERVABILITY_API}" = "True" ] || [ "${ENABLE_OBSERVABILITY_API}" = "true" ] || [ "${ENABLE_OBSERVABILITY_API}" = "1" ]; then
+    if [ "$WORKERS" -gt 1 ]; then
+        export PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus_multiproc}
+        mkdir -p $PROMETHEUS_MULTIPROC_DIR
+        rm -rf $PROMETHEUS_MULTIPROC_DIR/*
+    fi
+fi
 
 # Run Granian
 
-exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --log-level $G_LOG_LEVEL --no-ws
+exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --log-level $G_LOG_LEVEL --no-ws "$@"

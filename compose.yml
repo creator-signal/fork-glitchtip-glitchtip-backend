@@ -29,7 +29,7 @@ services:
     #tty: true
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev
-    command: granian --interface asgi glitchtip.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-ignore-worker-failure --access-log
+    command: ./bin/run-granian.sh --reload --reload-ignore-worker-failure --access-log
     #command: python app.py
     #command: ./manage.py runserver 0.0.0.0:8000
     depends_on: *default-depends_on
