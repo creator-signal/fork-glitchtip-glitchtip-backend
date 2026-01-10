@@ -75,3 +75,22 @@ class InternalHealthTestCase(TestCase):
         data = res.json()
         self.assertIn("healthy", data)
         self.assertIn("problems", data)
+
+
+class ObservabilityTestCase(TestCase):
+    def test_metrics_endpoint(self):
+        from django.urls import include, path
+
+        from glitchtip import urls
+
+        # Manually inject the URL pattern to simulate ENABLE_OBSERVABILITY_API=True
+        # This avoids needing to reload the entire URLconf module which is flaky in tests
+        pattern = path("", include("django_prometheus.urls"))
+        urls.urlpatterns.append(pattern)
+
+        try:
+            res = self.client.get("/metrics")
+            self.assertEqual(res.status_code, 200)
+            self.assertTrue(res["Content-Type"].startswith("text/plain"))
+        finally:
+            urls.urlpatterns.pop()
