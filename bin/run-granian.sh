@@ -15,6 +15,12 @@ USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
 # Serve static files by default
 export GRANIAN_STATIC_PATH_MOUNT=${GRANIAN_STATIC_PATH_MOUNT:-static}
 
+if [ "${ENABLE_OBSERVABILITY_API}" = "True" ] || [ "${ENABLE_OBSERVABILITY_API}" = "true" ] || [ "${ENABLE_OBSERVABILITY_API}" = "1" ]; then
+    export PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus_multiproc}
+    mkdir -p $PROMETHEUS_MULTIPROC_DIR
+    rm -rf $PROMETHEUS_MULTIPROC_DIR/*
+fi
+
 if [ "$USE_ASYNC_SERVER" = "true" ]; then
     echo "Start GlitchTip with ${WORKERS} granian worker(s) (ASGI)"
     exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS
