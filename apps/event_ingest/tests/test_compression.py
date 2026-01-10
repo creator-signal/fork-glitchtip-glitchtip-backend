@@ -1,9 +1,11 @@
-
 import json
+
 import zstd
-from django.urls import reverse
 from django.tasks import task_backends
+from django.urls import reverse
+
 from .utils import EventIngestTestCase
+
 
 class CompressionTestCase(EventIngestTestCase):
     def setUp(self):
@@ -14,7 +16,7 @@ class CompressionTestCase(EventIngestTestCase):
     def test_zstd_compression(self):
         json_data = json.dumps(self.event).encode("utf-8")
         compressed_data = zstd.compress(json_data)
-        
+
         with self.assertNumQueries(18):
             res = self.client.post(
                 self.url,
@@ -23,7 +25,7 @@ class CompressionTestCase(EventIngestTestCase):
                 HTTP_CONTENT_ENCODING="zstd",
             )
             task_backends["default"].flush_batches()
-            
+
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.event["event_id"])
         self.assertEqual(self.project.issues.count(), 1)

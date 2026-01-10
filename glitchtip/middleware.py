@@ -10,11 +10,13 @@ from django.http import HttpResponseForbidden  # For returning error response
 
 try:
     from compression.zstd import ZstdDecompressor, ZstdError
+
     _zstd_builtin = True
 except ImportError:
     try:
         import zstandard as zstd
         from zstandard import ZstdError
+
         _zstd_builtin = False
     except ImportError:
         zstd = None
@@ -147,7 +149,9 @@ class StreamingDecompressorBase(io.RawIOBase):
                 try:
                     decompressed_bytes = self._decompress_chunk(chunk)
                 except Exception as e:
-                    if ZstdError and isinstance(e, (zlib.error, brotli.error, ZstdError)):
+                    if ZstdError and isinstance(
+                        e, (zlib.error, brotli.error, ZstdError)
+                    ):
                         logger.warning(
                             "%s decompression error: %s", self.__class__.__name__, e
                         )
@@ -160,9 +164,13 @@ class StreamingDecompressorBase(io.RawIOBase):
                     # Flush the decompressor
                     decompressed_bytes = self._flush_decompressor()
                 except Exception as e:
-                    if ZstdError and isinstance(e, (zlib.error, brotli.error, ZstdError)):
+                    if ZstdError and isinstance(
+                        e, (zlib.error, brotli.error, ZstdError)
+                    ):
                         logger.warning(
-                            "%s error during final flush: %s", self.__class__.__name__, e
+                            "%s error during final flush: %s",
+                            self.__class__.__name__,
+                            e,
                         )
                         return n  # Return bytes processed so far
                     raise
