@@ -1,6 +1,13 @@
 import json
 
-import zstd
+try:
+    from compression import zstd
+except ImportError:
+    try:
+        import zstandard as zstd
+    except ImportError:
+        import zstd
+
 from django.tasks import task_backends
 from django.urls import reverse
 
