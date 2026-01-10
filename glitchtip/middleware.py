@@ -13,8 +13,8 @@ try:
     _zstd_builtin = True
 except ImportError:
     try:
-        import zstd
-        from zstd import ZstdError
+        import zstandard as zstd
+        from zstandard import ZstdError
         _zstd_builtin = False
     except ImportError:
         zstd = None

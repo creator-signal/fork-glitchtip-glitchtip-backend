@@ -1182,7 +1182,7 @@ dependencies = [
     { name = "uwsgi" },
     { name = "uwsgi-chunked" },
     { name = "whitenoise" },
-    { name = "zstd", marker = "python_full_version < '3.14'" },
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
 
 [package.dev-dependencies]
@@ -1237,7 +1237,7 @@ requires-dist = [
     { name = "uwsgi", specifier = "~=2.0" },
     { name = "uwsgi-chunked", specifier = "~=0.1" },
     { name = "whitenoise", specifier = "~=6.0" },
-    { name = "zstd", marker = "python_full_version < '3.14'", specifier = ">=1.5" },
+    { name = "zstandard", marker = "python_full_version < '3.14'", specifier = ">=0.23.0" },
 ]
 
 [package.metadata.requires-dev]
