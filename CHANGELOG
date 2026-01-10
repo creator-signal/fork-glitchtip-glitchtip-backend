@@ -9,6 +9,7 @@
 - Remove gunicorn and uvicorn. Please use granian. uwsgi still included for compatibility.
 - Add TRUSTED_PROXIES env var (defaults to "*") for granian support.
 - Remove unused SetRemoteAddrFromForwardedFor middleware (was never enabled)
+- Optional metrics endpoint is now just "/metrics" and not in openapi schema
 
 # v5.2.0
 
