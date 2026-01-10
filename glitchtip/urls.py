@@ -67,3 +67,8 @@ if settings.DEBUG_TOOLBAR:
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+if settings.ENABLE_OBSERVABILITY_API:
+    from apps.observability.views import prometheus_metrics_view
+
+    urlpatterns.append(path("metrics", prometheus_metrics_view))
