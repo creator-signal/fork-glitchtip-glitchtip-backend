@@ -55,7 +55,7 @@ test:
     matrix:
       - PYTHON_VERSION: '3.12'
         POSTGRES_VERSION: '14'
-      - PYTHON_VERSION: '3.13'
+      - PYTHON_VERSION: '3.14'
         POSTGRES_VERSION: '18'
 
 lint:
