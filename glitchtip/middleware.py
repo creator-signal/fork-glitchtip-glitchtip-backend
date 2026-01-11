@@ -9,6 +9,22 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponseForbidden  # For returning error response
 
 try:
+    from compression.zstd import ZstdDecompressor, ZstdError
+
+    _zstd_builtin = True
+except ImportError:
+    try:
+        import zstandard as zstd
+        from zstandard import ZstdError
+
+        _zstd_builtin = False
+    except ImportError:
+        zstd = None
+        ZstdError = None
+        _zstd_builtin = False
+
+
+try:
     import uwsgi
 
     has_uwsgi = True
@@ -29,6 +45,7 @@ Z_CHUNK = 1024 * 8
 
 # Chunk size specifically for reading Brotli ('br') compressed streams.
 BR_CHUNK = 1024 * 8
+
 
 # --- uWSGI Chunked Input Handling ---
 if has_uwsgi:
@@ -131,22 +148,32 @@ class StreamingDecompressorBase(io.RawIOBase):
                 # Decompress the chunk
                 try:
                     decompressed_bytes = self._decompress_chunk(chunk)
-                except (zlib.error, brotli.error) as e:
-                    logger.warning(
-                        "%s decompression error: %s", self.__class__.__name__, e
-                    )
-                    return n  # Return bytes processed so far before the error
+                except Exception as e:
+                    if ZstdError and isinstance(
+                        e, (zlib.error, brotli.error, ZstdError)
+                    ):
+                        logger.warning(
+                            "%s decompression error: %s", self.__class__.__name__, e
+                        )
+                        return n  # Return bytes processed so far before the error
+                    raise
             else:
                 # EOF reached on input stream
                 self.eof_reached = True
                 try:
                     # Flush the decompressor
                     decompressed_bytes = self._flush_decompressor()
-                except (zlib.error, brotli.error) as e:
-                    logger.warning(
-                        "%s error during final flush: %s", self.__class__.__name__, e
-                    )
-                    return n  # Return bytes processed so far
+                except Exception as e:
+                    if ZstdError and isinstance(
+                        e, (zlib.error, brotli.error, ZstdError)
+                    ):
+                        logger.warning(
+                            "%s error during final flush: %s",
+                            self.__class__.__name__,
+                            e,
+                        )
+                        return n  # Return bytes processed so far
+                    raise
 
             # If decompression yielded data, process it
             if decompressed_bytes:
@@ -247,6 +274,29 @@ class BrotliDecoder(StreamingDecompressorBase):
         return b""
 
 
+class ZstdDecoder(StreamingDecompressorBase):
+    """Decompressor for Zstandard streams ('zstd' encoding)."""
+
+    def _init_decompressor(self):
+        if _zstd_builtin:
+            return ZstdDecompressor()
+        return zstd.ZstdDecompressor().decompressobj()
+
+    def _decompress_chunk(self, chunk):
+        if _zstd_builtin:
+            max_allowed_size = settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE
+            max_chunk_output = max_allowed_size - self.total_decompressed
+            if max_chunk_output < 0:
+                max_chunk_output = 0
+            return self.decompressor.decompress(chunk, max_length=max_chunk_output)
+        return self.decompressor.decompress(chunk)
+
+    def _flush_decompressor(self):
+        if hasattr(self.decompressor, "flush"):
+            return self.decompressor.flush()
+        return b""
+
+
 class DeflateDecoder(ZDecoder):
     """Decoding for "content-encoding: deflate" """
 
@@ -308,6 +358,8 @@ class DecompressBodyMiddleware(object):
             decoder_class = DeflateDecoder
         elif encoding == "br":
             decoder_class = BrotliDecoder
+        elif encoding == "zstd":
+            decoder_class = ZstdDecoder
 
         if decoder_class:
             try:
@@ -337,14 +389,14 @@ class DecompressBodyMiddleware(object):
         except RequestDataTooBig as e:
             logger.warning("RequestDataTooBig caught in middleware: %s", e)
             return HttpResponseForbidden(f"{e}", status=413)
-        except (zlib.error, brotli.error) as e:
-            logger.error(
-                "Decompression error during view processing: %s", e, exc_info=True
-            )
-            return HttpResponseForbidden(
-                f"Invalid compressed request body: {e}", status=400
-            )
         except Exception as e:
+            if ZstdError and isinstance(e, (zlib.error, brotli.error, ZstdError)):
+                logger.error(
+                    "Decompression error during view processing: %s", e, exc_info=True
+                )
+                return HttpResponseForbidden(
+                    f"Invalid compressed request body: {e}", status=400
+                )
             logger.error(
                 "Unexpected error in DecompressBodyMiddleware/View: %s",
                 e,
