@@ -30,6 +30,7 @@ CHUNK_UPLOAD_ACCEPT = (
     "pdbs",  # PDB upload and debug id override
     "sources",  # Source artifact bundle upload
     "artifact_bundles",  # Artifact bundles contain debug ids to link source to sourcemaps
+    "proguard",
 )
 
 
