@@ -12,6 +12,7 @@ router = Router()
 
 
 @router.post("organizations/{slug:organization_slug}/artifactbundle/assemble/")
+@router.post("organizations/{slug:organization_slug}/artifactbundle/assemble")
 @has_permission(["project:write", "project:admin", "project:releases"])
 async def artifact_bundle_assemble(
     request: AuthHttpRequest, organization_slug: str, payload: ArtifactBundleAssembleIn

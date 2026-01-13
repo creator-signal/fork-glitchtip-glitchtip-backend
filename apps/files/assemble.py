@@ -130,6 +130,7 @@ def assemble_artifacts(
 
     bundles: list[DebugSymbolBundle] = []
     for file in files:
+        sourcemap_file = None
         if file.type == "minified_source":
             try:
                 sourcemap_file = next(
@@ -147,18 +148,17 @@ def assemble_artifacts(
                     )
                 )
             except StopIteration:
-                sourcemap_file = None
+                pass
 
-            if sourcemap_file:
-                bundles.append(
-                    DebugSymbolBundle(
-                        organization=organization,
-                        debug_id=file.headers.get("debug-id"),
-                        release=release,
-                        sourcemap_file=sourcemap_file,
-                        file=file,
-                    )
-                )
+        bundles.append(
+            DebugSymbolBundle(
+                organization=organization,
+                debug_id=file.headers.get("debug-id"),
+                release=release,
+                sourcemap_file=sourcemap_file,
+                file=file,
+            )
+        )
 
     DebugSymbolBundle.objects.bulk_create(
         bundles,
