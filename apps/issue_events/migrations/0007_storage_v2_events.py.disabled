@@ -1,0 +1,189 @@
+# Generated manually for Storage Engine V2
+# Implements dual-ID schema (server UUIDv7 + client UUIDv4) with nested partitioning
+
+import os
+from datetime import datetime, timedelta, timezone
+
+from django.db import migrations, models
+from django.db.migrations import RunSQL, SeparateDatabaseAndState
+
+from apps.shared.migration_utils import get_sql_content
+
+
+def create_initial_partitions(apps, schema_editor):
+    """
+    Create initial partitions for the next 7 days.
+    Uses simple RANGE partitioning on UUIDv7 ID (no HASH sub-partitions).
+
+    Note: Events don't have direct organization_id, so we skip HASH sub-partitioning
+    for now. This can be optimized later if needed by adding org_id or using
+    a composite key that includes issue.organization_id.
+    """
+    from glitchtip.partition_manager import UUID7Helper
+
+    # Create partitions for next 7 days using raw SQL
+    start_date = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    with schema_editor.connection.cursor() as cursor:
+        for day in range(7):
+            partition_date = start_date + timedelta(days=day)
+            next_date = partition_date + timedelta(days=1)
+
+            partition_name = (
+                f"issue_events_issueevent_{partition_date.strftime('%Y%m%d')}"
+            )
+
+            # Check if partition already exists
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT FROM pg_tables
+                    WHERE schemaname = 'public'
+                    AND tablename = %s
+                );
+                """,
+                [partition_name],
+            )
+
+            if cursor.fetchone()[0]:
+                print(f"Partition {partition_name} already exists, skipping")
+                continue
+
+            # Generate UUIDv7 range for this day
+            start_uuid, end_uuid = UUID7Helper.get_range_for_date(
+                partition_date, next_date
+            )
+
+            sql = f"""
+            CREATE TABLE {partition_name} PARTITION OF issue_events_issueevent
+            FOR VALUES FROM ('{start_uuid}') TO ('{end_uuid}');
+            """
+
+            cursor.execute(sql)
+            print(f"Created partition: {partition_name}")
+
+    print(f"Created 7 partitions for issue_events_issueevent")
+
+
+def drop_initial_partitions(apps, schema_editor):
+    """
+    Reverse migration: drop the partitions we created.
+    Note: This doesn't restore data, just cleans up partition structure.
+    """
+    start_date = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    with schema_editor.connection.cursor() as cursor:
+        for day in range(7):
+            partition_date = start_date + timedelta(days=day)
+            partition_name = (
+                f"issue_events_issueevent_{partition_date.strftime('%Y%m%d')}"
+            )
+
+            sql = f"DROP TABLE IF EXISTS {partition_name} CASCADE;"
+            cursor.execute(sql)
+
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ("issue_events", "0006_replace_tsvector_function"),
+    ]
+
+    operations = [
+        # Phase 0: Create uuid_generate_v7() function
+        RunSQL(
+            sql=get_sql_content(__file__, "uuid_generate_v7.sql"),
+            reverse_sql="DROP FUNCTION IF EXISTS uuid_generate_v7();",
+        ),
+        # Phase 1: Rename old table to archive (preserves data)
+        SeparateDatabaseAndState(
+            state_operations=[],
+            database_operations=[
+                RunSQL(
+                    sql="""
+                    -- Rename existing events table to archive
+                    ALTER TABLE IF EXISTS issue_events_issueevent
+                    RENAME TO issue_events_issueevent_archive;
+
+                    -- Rename indexes to avoid conflicts
+                    ALTER INDEX IF EXISTS issue_events_issueevent_pkey
+                    RENAME TO issue_events_issueevent_archive_pkey;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_issue_id_received_idx
+                    RENAME TO issue_events_issueevent_archive_issue_id_received_idx;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_hashes_idx
+                    RENAME TO issue_events_issueevent_archive_hashes_idx;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_release_id_idx
+                    RENAME TO issue_events_issueevent_archive_release_id_idx;
+                    """,
+                    reverse_sql="""
+                    -- Restore original table name
+                    ALTER TABLE IF EXISTS issue_events_issueevent_archive
+                    RENAME TO issue_events_issueevent;
+
+                    -- Restore index names
+                    ALTER INDEX IF EXISTS issue_events_issueevent_archive_pkey
+                    RENAME TO issue_events_issueevent_pkey;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_archive_issue_id_received_idx
+                    RENAME TO issue_events_issueevent_issue_id_received_idx;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_archive_hashes_idx
+                    RENAME TO issue_events_issueevent_hashes_idx;
+
+                    ALTER INDEX IF EXISTS issue_events_issueevent_archive_release_id_idx
+                    RENAME TO issue_events_issueevent_release_id_idx;
+                    """,
+                ),
+            ],
+        ),
+        # Phase 2: Create V2 table with dual-ID schema
+        SeparateDatabaseAndState(
+            state_operations=[
+                # Update Django state to reflect new model structure
+                migrations.RemoveField(
+                    model_name="issueevent",
+                    name="id",
+                ),
+                migrations.AddField(
+                    model_name="issueevent",
+                    name="id",
+                    field=models.UUIDField(
+                        primary_key=True,
+                        editable=False,
+                        help_text="Server-generated UUIDv7 (partition key)",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="issueevent",
+                    name="event_id",
+                    field=models.UUIDField(
+                        null=True,
+                        blank=True,
+                        db_index=True,
+                        help_text="Client-provided event ID from Sentry SDK (UUIDv4)",
+                    ),
+                ),
+            ],
+            database_operations=[
+                RunSQL(
+                    sql=get_sql_content(__file__, "create_events_v2.sql"),
+                    reverse_sql="""
+                    DROP TABLE IF EXISTS issue_events_issueevent CASCADE;
+                    """,
+                ),
+            ],
+        ),
+        # Phase 3: Create initial partitions
+        migrations.RunPython(
+            code=create_initial_partitions,
+            reverse_code=drop_initial_partitions,
+        ),
+        # Phase 4: Archive table comment removed (SQL concatenation issues)
+        # Users should refer to migration documentation for archive table info
+    ]

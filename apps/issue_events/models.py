@@ -189,6 +189,8 @@ class UserReport(CreatedModel):
 class IssueEvent(PostgresPartitionedModel, models.Model):
     # Fields ordered for optimal data alignment: 16-byte, 8-byte, 2-byte, then variable-width
     # This reduces padding and improves CPU cache utilization
+    # NOTE: Storage Engine V2 will add dual-ID schema (id=UUIDv7, event_id=UUIDv4)
+    # but that requires migration 0007 to be applied first
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     timestamp = models.DateTimeField(help_text="Time at which event happened")
     received = models.DateTimeField(help_text="Time at which GlitchTip accepted event")
