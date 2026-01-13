@@ -1,0 +1,8 @@
+services:
+  postgres-bench:
+    image: postgres:18
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: benchdb
+    volumes:
+      - .:/scripts
