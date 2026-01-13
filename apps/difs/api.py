@@ -33,6 +33,9 @@ router = Router()
 @router.post(
     "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/"
 )
+@router.post(
+    "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble"
+)
 async def difs_assemble_api(
     request: AuthHttpRequest,
     organization_slug: str,
@@ -92,6 +95,7 @@ async def difs_assemble_api(
 
 
 @router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/")
+@router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing")
 async def project_reprocessing(
     request: AuthHttpRequest,
     organization_slug: str,
