@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+from datetime import timezone as tz
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
@@ -10,10 +12,17 @@ from psql_partition.models import PostgresPartitionedModel
 from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
+from glitchtip.partition_manager import UUID7Helper
 from sentry.constants import MAX_CULPRIT_LENGTH
 
 from .constants import MAX_TAG_LENGTH, EventStatus, IssueEventType, LogLevel
+from .managers import EventManager
 from .utils import base32_encode
+
+
+def _generate_uuid7():
+    """Generate UUIDv7 for IssueEvent default."""
+    return UUID7Helper.from_datetime(datetime.now(tz.utc))
 
 
 class DeferedFieldManager(models.Manager):
@@ -187,28 +196,65 @@ class UserReport(CreatedModel):
 
 
 class IssueEvent(PostgresPartitionedModel, models.Model):
-    # Fields ordered for optimal data alignment: 16-byte, 8-byte, 2-byte, then variable-width
-    # This reduces padding and improves CPU cache utilization
-    # NOTE: Storage Engine V2 will add dual-ID schema (id=UUIDv7, event_id=UUIDv4)
-    # but that requires migration 0007 to be applied first
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    """
+    Storage Engine V2: Dual-ID Schema with Optimized Column Alignment
+
+    Column alignment (reduces padding, improves CPU cache):
+    - 16-byte: UUIDs (id, event_id)
+    - 8-byte: Timestamps and ForeignKeys (timestamp, received, issue, release)
+    - 2-byte: SmallIntegers (type, level)
+    - Variable: Text/JSON fields (title, transaction, data, tags, hashes)
+
+    Dual-ID Strategy:
+    - id: Server-generated UUIDv7 (partition key, contains timestamp)
+    - event_id: Client-provided UUIDv4 (nullable, for SDK compatibility)
+
+    Partitioning:
+    - V2 uses native Python PartitionManager (not psql_partition library actively)
+    - Partitioned by RANGE on id (UUIDv7)
+    - Partitions managed manually via management commands
+    - PostgresPartitionedModel kept for migration compatibility, will be removed in v7.0
+    """
+
+    # 16-byte alignment: UUIDs
+    id = models.UUIDField(
+        primary_key=True,
+        default=_generate_uuid7,
+        editable=False,
+        help_text="Server-generated UUIDv7 (partition key, contains timestamp)",
+    )
+    event_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Client-provided event ID from Sentry SDK (UUIDv4)",
+    )
+
+    # 8-byte alignment: Timestamps
     timestamp = models.DateTimeField(help_text="Time at which event happened")
     received = models.DateTimeField(help_text="Time at which GlitchTip accepted event")
+
+    # 8-byte alignment: Foreign keys
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
     release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
+
+    # 2-byte alignment: Small integers
     type = models.PositiveSmallIntegerField(default=0, choices=IssueEventType.choices)
     level = models.PositiveSmallIntegerField(
         choices=LogLevel.choices, default=LogLevel.ERROR
     )
+
+    # Variable-width fields
     title = models.CharField(max_length=255)
     transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
     data = models.JSONField()
-    # This could be HStore, but jsonb is just as good and removes need for
-    # 'django.contrib.postgres' which makes several unnecessary SQL calls
     tags = models.JSONField()
     hashes = ArrayField(models.CharField(max_length=32), db_default=[])
+
+    # Use custom manager for smart partition-aware queries
+    objects = EventManager()
 
     class Meta:
         indexes = [
@@ -217,15 +263,25 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
         ]
 
     class PartitioningMeta:
+        # NOTE: V2 manages partitions manually via PartitionManager
+        # This PartitioningMeta is kept only for migration compatibility
+        # with old migrations that expect it. It will be removed in v7.0.
+        # DO NOT use pgpartition command to manage IssueEvent partitions!
         method = PostgresPartitioningMethod.RANGE
-        key = ["received"]
+        key = ["id"]  # V2: Partitioned by UUIDv7 id (not datetime)
 
     def __str__(self):
         return self.eventID
 
     @property
     def eventID(self):
-        return self.id.hex
+        """
+        Return the event ID for API responses.
+
+        V2 Strategy: Prefer client-provided event_id if available,
+        otherwise use server-generated id.
+        """
+        return (self.event_id or self.id).hex
 
     @property
     def message(self):
