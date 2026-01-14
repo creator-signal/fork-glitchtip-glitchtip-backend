@@ -132,7 +132,9 @@ class Command(BaseCommand):
             if import_start and import_end:
                 self.ensure_partitions(import_start, import_end)
             else:
-                self.stdout.write("Could not determine date range. Skipping partition creation.")
+                self.stdout.write(
+                    "Could not determine date range. Skipping partition creation."
+                )
 
         # Confirm before proceeding
         self.stdout.write(
@@ -439,11 +441,13 @@ class Command(BaseCommand):
 
         # Normalize start_dt to midnight to align with daily partitions
         start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         # Add 1 day buffer to end date to cover the last day fully
         # PartitionManager treats end_date as exclusive, so if we have events up to
         # 2025-01-01 23:59:59, we need partition up to 2025-01-02
-        adjusted_end_dt = end_dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        adjusted_end_dt = end_dt.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
 
         self.stdout.write(
             f"Ensuring partitions exist from {start_dt.date()} to {adjusted_end_dt.date()}..."

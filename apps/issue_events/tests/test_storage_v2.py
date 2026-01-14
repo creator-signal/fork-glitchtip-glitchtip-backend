@@ -8,8 +8,8 @@ Tests the new IssueEvent model with:
 - Partition targeting for performance
 """
 
-from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from datetime import timedelta
+from uuid import uuid4
 
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone as django_timezone
@@ -140,7 +140,7 @@ class EventManagerLookupTestCase(TransactionTestCase):
         issue = baker.make("issue_events.Issue")
         client_uuid = uuid4()
 
-        event = IssueEvent.objects.create(
+        IssueEvent.objects.create(
             issue=issue,
             event_id=client_uuid,
             timestamp=django_timezone.now(),

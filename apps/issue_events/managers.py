@@ -7,11 +7,15 @@ based on UUID version detection.
 
 import logging
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import models
 
 from glitchtip.partition_manager import UUID7Helper
+
+if TYPE_CHECKING:
+    from .models import IssueEvent
 
 logger = logging.getLogger(__name__)
 
