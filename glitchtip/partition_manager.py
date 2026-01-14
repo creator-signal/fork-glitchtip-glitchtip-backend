@@ -16,7 +16,6 @@ from typing import Literal
 from uuid import UUID
 
 from django.db import connection
-from uuid6 import uuid7 as generate_uuid7
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,6 @@
 # Generated manually for Storage Engine V2
 # Implements dual-ID schema (server UUIDv7 + client UUIDv4) with nested partitioning
 
-import os
 from datetime import datetime, timedelta, timezone
 
 from django.db import migrations, models
@@ -64,7 +63,7 @@ def create_initial_partitions(apps, schema_editor):
             cursor.execute(sql)
             print(f"Created partition: {partition_name}")
 
-    print(f"Created 7 partitions for issue_events_issueevent")
+    print("Created 7 partitions for issue_events_issueevent")
 
 
 def drop_initial_partitions(apps, schema_editor):
