@@ -5,13 +5,14 @@ from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
-
-
 from glitchtip.partition_manager import UUID7Helper
+
 
 def _generate_uuid7():
     """Generate UUIDv7 for TransactionEvent default."""
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
+
     return UUID7Helper.from_datetime(datetime.now(tz.utc))
 
 
@@ -38,7 +39,7 @@ class TransactionGroup(CreatedModel, SoftDeleteModel):
 
 class TransactionEvent(models.Model):
     # Storage V2: Partitioned by id (UUIDv7)
-    
+
     # 16-byte alignment: UUIDs
     id = models.UUIDField(
         default=_generate_uuid7,
@@ -46,10 +47,10 @@ class TransactionEvent(models.Model):
     )
     # Primary Key is composite (id, organization) to allow HASH sub-partitioning by organization
     pk = models.CompositePrimaryKey("id", "organization")
-    
+
     event_id = models.UUIDField(default=uuid.uuid4, editable=False, null=True)
     trace_id = models.UUIDField(db_index=True)
-    
+
     # 8-byte alignment
     start_timestamp = models.DateTimeField(
         db_index=True,
@@ -64,7 +65,7 @@ class TransactionEvent(models.Model):
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
-    
+
     # Other fields
     duration = models.PositiveIntegerField(db_index=True, help_text="Milliseconds")
     data = models.JSONField(help_text="General event data that is searchable")
@@ -77,7 +78,7 @@ class TransactionEvent(models.Model):
         return str(self.trace_id)
 
     @property
-    def duration(self) -> timedelta | None:
+    def duration_timedelta(self) -> timedelta | None:
         if self.timestamp is None:
             return None
         duration = self.timestamp - self.start_timestamp
@@ -86,7 +87,7 @@ class TransactionEvent(models.Model):
     @property
     def duration_ms(self) -> int | None:
         """Optimized method for getting duration in milliseconds"""
-        duration = self.duration
+        duration = self.duration_timedelta
         if duration is None:
             return None
         return (
@@ -117,4 +118,3 @@ class TransactionGroupAggregate(AggregationModel):
         default=dict,
         help_text="Stores a fixed-bucket histogram for percentile approximation.",
     )
-

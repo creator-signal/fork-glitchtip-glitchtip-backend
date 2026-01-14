@@ -1043,7 +1043,11 @@ def update_tags(processing_events: list[ProcessingEvent]):
     }
 
     tag_stats: TagStats = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"count": 0, "organization_id": None})))
+        lambda: defaultdict(
+            lambda: defaultdict(
+                lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
+            )
+        )
     )
     for processing_event in processing_events:
         if processing_event.issue_id is None:
@@ -1071,10 +1075,19 @@ def update_tags(processing_events: list[ProcessingEvent]):
         for issue_id, d2 in d1.items():
             for key_id, d3 in d2.items():
                 for value_id, stats in d3.items():
-                    data.append([date, issue_id, stats["organization_id"], key_id, value_id, stats["count"]])
-    
+                    data.append(
+                        [
+                            date,
+                            issue_id,
+                            stats["organization_id"],
+                            key_id,
+                            value_id,
+                            stats["count"],
+                        ]
+                    )
+
     data.sort(key=itemgetter(0, 1, 2, 3, 4))
-    
+
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data)
         sql = (

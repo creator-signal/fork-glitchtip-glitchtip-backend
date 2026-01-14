@@ -6,6 +6,7 @@ from django.db import migrations
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
+
 def create_initial_partitions(apps, schema_editor):
     """
     Create initial partitions for Project Stats.
@@ -16,12 +17,12 @@ def create_initial_partitions(apps, schema_editor):
     now = datetime.now(timezone.utc)
     start_of_week = now - timedelta(days=now.weekday())
     start_date = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     # Create partitions for next 4 weeks
     end_date = start_date + timedelta(weeks=4)
 
     manager = PartitionManager()
-    
+
     manager.create_partitions_for_date_range(
         parent_table="projects_issueeventprojecthourlystatistic",
         start_date=start_date,
@@ -42,25 +43,27 @@ def create_initial_partitions(apps, schema_editor):
         key_type="datetime",
     )
 
+
 def drop_partitions(apps, schema_editor):
     pass
+
 
 class Migration(migrations.Migration):
     dependencies = [
         ("projects", "0018_auto_20251117_2129"),
-        ("issue_events", "0007_storage_v2_events"), 
+        ("issue_events", "0007_storage_v2_events"),
     ]
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[], 
+            state_operations=[],
             database_operations=[
                 RunSQL(
                     sql="""
                     DROP TABLE IF EXISTS projects_issueeventprojecthourlystatistic CASCADE;
                     DROP TABLE IF EXISTS projects_transactioneventprojecthourlystatistic CASCADE;
                     """,
-                    reverse_sql="", 
+                    reverse_sql="",
                 ),
                 RunSQL(
                     sql=get_sql_content(__file__, "create_project_stats_v2.sql"),
@@ -81,7 +84,7 @@ class Migration(migrations.Migration):
                     PARTITION OF projects_transactioneventprojecthourlystatistic DEFAULT;
                     """,
                     reverse_sql="",
-                )
+                ),
             ],
         ),
         migrations.RunPython(

@@ -6,21 +6,22 @@ from django.db import migrations
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
+
 def create_initial_partitions(apps, schema_editor):
     """
     Create initial partitions for Performance tables.
     """
-    from glitchtip.partition_manager import PartitionManager, UUID7Helper
+    from glitchtip.partition_manager import PartitionManager
 
     manager = PartitionManager()
-    
+
     # 1. TransactionEvent (UUIDv7 Range -> Hash)
     # Create daily partitions for next 7 days
     start_date = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     end_date = start_date + timedelta(days=7)
-    
+
     manager.create_partitions_for_date_range(
         parent_table="performance_transactionevent",
         start_date=start_date,
@@ -46,25 +47,27 @@ def create_initial_partitions(apps, schema_editor):
         key_type="datetime",
     )
 
+
 def drop_partitions(apps, schema_editor):
     pass
+
 
 class Migration(migrations.Migration):
     dependencies = [
         ("performance", "0017_remove_transactionevent_duration_and_more"),
-        ("issue_events", "0007_storage_v2_events"), # For uuid_generate_v7 function
+        ("issue_events", "0007_storage_v2_events"),  # For uuid_generate_v7 function
     ]
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[], 
+            state_operations=[],
             database_operations=[
                 RunSQL(
                     sql="""
                     DROP TABLE IF EXISTS performance_transactionevent CASCADE;
                     DROP TABLE IF EXISTS performance_transactiongroupaggregate CASCADE;
                     """,
-                    reverse_sql="", 
+                    reverse_sql="",
                 ),
                 RunSQL(
                     sql=get_sql_content(__file__, "create_performance_v2.sql"),
@@ -85,7 +88,7 @@ class Migration(migrations.Migration):
                     PARTITION OF performance_transactiongroupaggregate DEFAULT;
                     """,
                     reverse_sql="",
-                )
+                ),
             ],
         ),
         migrations.RunPython(

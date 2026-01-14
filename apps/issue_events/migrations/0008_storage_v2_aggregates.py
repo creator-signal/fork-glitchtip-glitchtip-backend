@@ -6,6 +6,7 @@ from django.db import migrations
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
+
 def create_initial_partitions(apps, schema_editor):
     """
     Create initial partitions for IssueAggregate.
@@ -17,7 +18,7 @@ def create_initial_partitions(apps, schema_editor):
     now = datetime.now(timezone.utc)
     start_of_week = now - timedelta(days=now.weekday())
     start_date = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     # Create partitions for next 4 weeks (1 month coverage)
     end_date = start_date + timedelta(weeks=4)
 
@@ -32,8 +33,10 @@ def create_initial_partitions(apps, schema_editor):
         key_type="datetime",
     )
 
+
 def drop_partitions(apps, schema_editor):
     pass
+
 
 class Migration(migrations.Migration):
     dependencies = [
@@ -42,7 +45,7 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],  # Model state update will be separate or handled by makemigrations if I updated models.py? 
+            state_operations=[],  # Model state update will be separate or handled by makemigrations if I updated models.py?
             # Actually, I should update models.py to remove PostgresPartitionedModel and let Django generate the state changes.
             # But here I'm doing manual SQL.
             # I will assume the model definition in Django is compatible or updated separately.
@@ -50,7 +53,7 @@ class Migration(migrations.Migration):
             database_operations=[
                 RunSQL(
                     sql="DROP TABLE IF EXISTS issue_events_issueaggregate CASCADE;",
-                    reverse_sql="", # Irreversible data loss (Fresh Start)
+                    reverse_sql="",  # Irreversible data loss (Fresh Start)
                 ),
                 RunSQL(
                     sql=get_sql_content(__file__, "create_issue_aggregate_v2.sql"),

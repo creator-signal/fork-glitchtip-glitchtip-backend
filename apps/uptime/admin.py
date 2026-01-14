@@ -1,10 +1,9 @@
 from django.conf import settings
 from django.contrib import admin
-from django.forms.models import BaseInlineFormSet
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Monitor, MonitorCheck, StatusPage
+from .models import Monitor, StatusPage
 
 
 class MonitorAdmin(admin.ModelAdmin):
