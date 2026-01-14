@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
+from django.conf import settings
 from django.db import connection
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,7 @@ class PartitionManager:
         partition_name: str,
         start_date: datetime,
         end_date: datetime,
-        hash_buckets: int = 16,
+        hash_buckets: int | None = None,
         hash_column: str = "organization_id",
         key_type: Literal["uuid7", "datetime"] = "datetime",
         partition_column: str = "date",
@@ -219,6 +220,11 @@ class PartitionManager:
         This generates SQL for nested partitioning:
         1. Parent time partition (RANGE on date/uuid)
         2. Child hash partitions (HASH on organization_id)
+
+        Hash Buckets:
+        - If `hash_buckets` is None, it reads from settings.PARTITION_HASH_BUCKETS (default: 16).
+        - If `hash_buckets` is 0, it creates a simple leaf partition (no hash sub-partitioning).
+        - If `hash_buckets` > 0, it creates that many sub-partitions.
 
         Example for datetime mode:
           CREATE TABLE events_2025_01_15 PARTITION OF events
@@ -240,7 +246,7 @@ class PartitionManager:
             partition_name: Name for the time-range partition
             start_date: Start of date range (inclusive)
             end_date: End of date range (exclusive)
-            hash_buckets: Number of hash sub-partitions (default: 16)
+            hash_buckets: Number of hash sub-partitions. None=settings default, 0=no hash.
             hash_column: Column to hash on (default: organization_id)
             key_type: 'uuid7' or 'datetime'
             partition_column: Column name for partitioning (e.g., 'id', 'date')
@@ -249,6 +255,9 @@ class PartitionManager:
             List of SQL statements to execute
         """
         sqls = []
+
+        if hash_buckets is None:
+            hash_buckets = getattr(settings, "PARTITION_HASH_BUCKETS", 16)
 
         # Ensure timezone-aware datetimes
         if start_date.tzinfo is None:
@@ -364,7 +373,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         partition_name: str,
         start_date: datetime,
         end_date: datetime,
-        hash_buckets: int = 16,
+        hash_buckets: int | None = None,
         hash_column: str = "organization_id",
         key_type: Literal["uuid7", "datetime"] = "datetime",
         partition_column: str = "date",
@@ -406,8 +415,8 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         parent_table: str,
         start_date: datetime,
         end_date: datetime,
-        partition_interval_days: int = 1,
-        hash_buckets: int = 16,
+        partition_interval: str | int = "WEEK",
+        hash_buckets: int | None = None,
         hash_column: str = "organization_id",
         key_type: Literal["uuid7", "datetime"] = "datetime",
         partition_column: str = "date",
@@ -419,8 +428,8 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             parent_table: Parent table name
             start_date: Start of range
             end_date: End of range (exclusive)
-            partition_interval_days: Days per partition (default: 1)
-            hash_buckets: Hash sub-partitions per time partition
+            partition_interval: 'WEEK' (default), 'DAY', or int (days)
+            hash_buckets: Hash sub-partitions per time partition. None=settings default.
             hash_column: Column to hash on
             key_type: 'uuid7' or 'datetime'
             partition_column: Partition key column name
@@ -433,8 +442,18 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         total_created = 0
         current_date = start_date
 
+        # Determine interval timedelta
+        if isinstance(partition_interval, int):
+            interval = timedelta(days=partition_interval)
+        elif partition_interval.upper() == "WEEK":
+            interval = timedelta(weeks=1)
+        elif partition_interval.upper() == "DAY":
+            interval = timedelta(days=1)
+        else:
+            raise ValueError(f"Invalid partition interval: {partition_interval}")
+
         while current_date < end_date:
-            next_date = current_date + timedelta(days=partition_interval_days)
+            next_date = current_date + interval
             if next_date > end_date:
                 next_date = end_date
 

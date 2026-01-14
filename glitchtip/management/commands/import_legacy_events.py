@@ -458,7 +458,7 @@ class Command(BaseCommand):
             parent_table="issue_events_issueevent",
             start_date=start_dt,
             end_date=adjusted_end_dt,
-            partition_interval_days=1,
+            partition_interval="DAY",
             hash_buckets=0,  # Simple partitioning (no hash)
             key_type="uuid7",
         )
