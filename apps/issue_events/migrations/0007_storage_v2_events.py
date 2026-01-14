@@ -32,7 +32,6 @@ def create_initial_partitions(apps, schema_editor):
         key_type="uuid7",
     )
 
-
     print("Created 7 partitions for issue_events_issueevent")
 
 
@@ -43,7 +42,6 @@ def migrate_legacy_data(apps, schema_editor):
     - Sets event_id = old.id
     - Populates organization_id via join
     """
-    from django.conf import settings
     from glitchtip.partition_manager import UUID7Helper
     import os
 
@@ -146,12 +144,18 @@ def migrate_legacy_data(apps, schema_editor):
                 print(f"Migrated {len(values)} events.")
 
         # Cleanup
-        retain_data = os.environ.get("GLITCHTIP_RETAIN_LEGACY_DATA", "False").lower() == "true"
+        retain_data = (
+            os.environ.get("GLITCHTIP_RETAIN_LEGACY_DATA", "False").lower() == "true"
+        )
         if not retain_data:
             print("Dropping legacy archive table...")
-            cursor.execute("DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;")
+            cursor.execute(
+                "DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;"
+            )
         else:
-            print("Skipping drop of issue_events_issueevent_archive (GLITCHTIP_RETAIN_LEGACY_DATA=True)")
+            print(
+                "Skipping drop of issue_events_issueevent_archive (GLITCHTIP_RETAIN_LEGACY_DATA=True)"
+            )
 
 
 def drop_initial_partitions(apps, schema_editor):
