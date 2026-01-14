@@ -79,7 +79,7 @@ base_operations = [
     ),
 ]
 
-if settings.GLITCHTIP_ADVANCED_PARTITIONING:
+if getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False):
     operations = [
         migrations.SeparateDatabaseAndState(
             state_operations=base_operations,

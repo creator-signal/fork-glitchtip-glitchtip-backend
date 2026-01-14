@@ -7,8 +7,6 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 from glitchtip.partition_manager import UUID7Helper
@@ -49,20 +47,21 @@ class IssueTag(AggregationModel):
     """
 
     issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
     tag_key = models.ForeignKey(TagKey, on_delete=models.CASCADE)
     tag_value = models.ForeignKey(TagValue, on_delete=models.CASCADE)
     count = models.PositiveIntegerField(default=1)
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["issue", "date", "tag_key", "tag_value"],
-                name="issue_tag_key_value_unique",
-            )
-        ]
+    pk = models.CompositePrimaryKey(
+        "issue", "organization", "date", "tag_key", "tag_value"
+    )
 
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
+    class Meta:
         pass
+
+    # V2: Partitioning managed manually via PartitionManager
 
 
 class IssueAggregate(AggregationModel):
@@ -75,8 +74,8 @@ class IssueAggregate(AggregationModel):
     )
     pk = models.CompositePrimaryKey("issue", "organization", "date")
 
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
-        pass
+    # V2: Partitioning managed manually via PartitionManager
+    # PartitioningMeta removed to detach from psql_partition
 
 
 class Issue(SoftDeleteModel):
@@ -194,7 +193,7 @@ class UserReport(CreatedModel):
         ]
 
 
-class IssueEvent(PostgresPartitionedModel, models.Model):
+class IssueEvent(models.Model):
     """
     Storage Engine V2: Dual-ID Schema with Optimized Column Alignment
 
@@ -209,10 +208,9 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
     - event_id: Client-provided UUIDv4 (nullable, for SDK compatibility)
 
     Partitioning:
-    - V2 uses native Python PartitionManager (not psql_partition library actively)
+    - V2 uses native Python PartitionManager
     - Partitioned by RANGE on id (UUIDv7)
     - Partitions managed manually via management commands
-    - PostgresPartitionedModel kept for migration compatibility, will be removed in v7.0
     """
 
     # 16-byte alignment: UUIDs
@@ -260,14 +258,6 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
             models.Index(fields=["issue", "-received"]),
             GinIndex(fields=["hashes"]),
         ]
-
-    class PartitioningMeta:
-        # NOTE: V2 manages partitions manually via PartitionManager
-        # This PartitioningMeta is kept only for migration compatibility
-        # with old migrations that expect it. It will be removed in v7.0.
-        # DO NOT use pgpartition command to manage IssueEvent partitions!
-        method = PostgresPartitioningMethod.RANGE
-        key = ["id"]  # V2: Partitioned by UUIDv7 id (not datetime)
 
     def __str__(self):
         return self.eventID

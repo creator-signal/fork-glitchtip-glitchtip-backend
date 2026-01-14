@@ -1,6 +1,4 @@
 from django.db import models
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
 
 
 class CreatedModel(models.Model):
@@ -42,9 +40,9 @@ class SoftDeleteModel(models.Model):
         super().delete(*args, **kwargs)
 
 
-class AggregationModel(PostgresPartitionedModel, models.Model):
+class AggregationModel(models.Model):
     """
-    Partitioned base model for storing aggregate statistics in such as per
+    Base model for storing aggregate statistics in such as per
     time delta counts of events
     """
 
@@ -54,6 +52,3 @@ class AggregationModel(PostgresPartitionedModel, models.Model):
     class Meta:
         abstract = True
 
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["date"]

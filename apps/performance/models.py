@@ -3,10 +3,16 @@ from datetime import timedelta
 
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
+
+
+from glitchtip.partition_manager import UUID7Helper
+
+def _generate_uuid7():
+    """Generate UUIDv7 for TransactionEvent default."""
+    from datetime import datetime, timezone as tz
+    return UUID7Helper.from_datetime(datetime.now(tz.utc))
 
 
 class TransactionGroup(CreatedModel, SoftDeleteModel):
@@ -30,12 +36,21 @@ class TransactionGroup(CreatedModel, SoftDeleteModel):
         return self.transaction
 
 
-class TransactionEvent(PostgresPartitionedModel, models.Model):
-    # Fields ordered for optimal data alignment: 16-byte (uuid), 8-byte (timestamps, FKs), then variable-width
-    # This reduces padding and improves CPU cache utilization
-    pk = models.CompositePrimaryKey("event_id", "organization", "start_timestamp")
-    event_id = models.UUIDField(default=uuid.uuid4, editable=False)
+class TransactionEvent(models.Model):
+    # Storage V2: Partitioned by id (UUIDv7)
+    
+    # 16-byte alignment: UUIDs
+    id = models.UUIDField(
+        default=_generate_uuid7,
+        editable=False,
+    )
+    # Primary Key is composite (id, organization) to allow HASH sub-partitioning by organization
+    pk = models.CompositePrimaryKey("id", "organization")
+    
+    event_id = models.UUIDField(default=uuid.uuid4, editable=False, null=True)
     trace_id = models.UUIDField(db_index=True)
+    
+    # 8-byte alignment
     start_timestamp = models.DateTimeField(
         db_index=True,
         help_text="Datetime reported by client as the time the measurement started",
@@ -49,17 +64,14 @@ class TransactionEvent(PostgresPartitionedModel, models.Model):
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
+    
+    # Other fields
+    duration = models.PositiveIntegerField(db_index=True, help_text="Milliseconds")
     data = models.JSONField(help_text="General event data that is searchable")
-    # This could be HStore, but jsonb is just as good and removes need for
-    # 'django.contrib.postgres' which makes several unnecessary SQL calls
     tags = models.JSONField(default=dict)
 
     class Meta:
         ordering = ["-start_timestamp"]
-
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["start_timestamp"]
 
     def __str__(self):
         return str(self.trace_id)
@@ -106,5 +118,3 @@ class TransactionGroupAggregate(AggregationModel):
         help_text="Stores a fixed-bucket histogram for percentile approximation.",
     )
 
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
-        pass
