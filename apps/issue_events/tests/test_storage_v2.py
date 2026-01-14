@@ -225,10 +225,12 @@ class UUID7TimestampTestCase(TestCase):
         base_time = django_timezone.now()
 
         # Create events at different times
+        t1 = base_time
         event1 = IssueEvent.objects.create(
+            id=UUID7Helper.from_datetime(t1),
             issue=issue,
-            timestamp=base_time,
-            received=base_time,
+            timestamp=t1,
+            received=t1,
             type=0,
             level=4,
             title="Event 1",
@@ -237,10 +239,12 @@ class UUID7TimestampTestCase(TestCase):
             tags={},
         )
 
+        t2 = base_time + timedelta(seconds=1)
         event2 = IssueEvent.objects.create(
+            id=UUID7Helper.from_datetime(t2),
             issue=issue,
-            timestamp=base_time + timedelta(seconds=1),
-            received=base_time + timedelta(seconds=1),
+            timestamp=t2,
+            received=t2,
             type=0,
             level=4,
             title="Event 2",
@@ -249,10 +253,12 @@ class UUID7TimestampTestCase(TestCase):
             tags={},
         )
 
+        t3 = base_time + timedelta(seconds=2)
         event3 = IssueEvent.objects.create(
+            id=UUID7Helper.from_datetime(t3),
             issue=issue,
-            timestamp=base_time + timedelta(seconds=2),
-            received=base_time + timedelta(seconds=2),
+            timestamp=t3,
+            received=t3,
             type=0,
             level=4,
             title="Event 3",
