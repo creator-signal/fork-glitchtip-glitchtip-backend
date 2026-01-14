@@ -9,11 +9,11 @@ CREATE TABLE IF NOT EXISTS performance_transactionevent (
     trace_id UUID NOT NULL,
     start_timestamp TIMESTAMPTZ NOT NULL,
     timestamp TIMESTAMPTZ,
+    group_id BIGINT NOT NULL,
+    organization_id BIGINT NOT NULL,
     duration INTEGER CHECK (duration >= 0),
     data JSONB NOT NULL,
     tags JSONB NOT NULL,
-    group_id BIGINT NOT NULL,
-    organization_id BIGINT NOT NULL,
     
     PRIMARY KEY (id, organization_id)
 ) PARTITION BY RANGE (id);
@@ -40,9 +40,9 @@ CREATE TABLE IF NOT EXISTS performance_transactiongroupaggregate (
     group_id BIGINT NOT NULL,
     organization_id BIGINT NOT NULL,
     date TIMESTAMPTZ NOT NULL,
-    count INTEGER CHECK (count >= 0),
     total_duration BIGINT CHECK (total_duration >= 0),
     sum_of_squares_duration BIGINT CHECK (sum_of_squares_duration >= 0),
+    count INTEGER CHECK (count >= 0),
     histogram JSONB NOT NULL,
     
     PRIMARY KEY (group_id, organization_id, date)
