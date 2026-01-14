@@ -181,6 +181,7 @@ class Command(MakeSampleCommand):
                         timestamp=timestamp,
                         received=received,
                         tags=tags,
+                        organization=self.project.organization,
                     )
                 )
 

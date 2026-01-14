@@ -20,7 +20,7 @@ def create_initial_partitions(apps, schema_editor):
     # Create daily partitions for next 7 days
     end_date = start_date + timedelta(days=7)
 
-    manager = PartitionManager()
+    manager = PartitionManager(db_connection=schema_editor.connection.alias)
     manager.create_partitions_for_date_range(
         parent_table="uptime_monitorcheck",
         start_date=start_date,

@@ -730,6 +730,7 @@ def process_issue_events(
                 event_data=event_data,
                 event_tags=event_tags,
                 release_id=release_id,
+                uuid=ingest_event.uuid,
             )
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
@@ -826,8 +827,10 @@ def process_issue_events(
 
         issue_events.append(
             IssueEvent(
-                id=processing_event.payload.event_id,
+                id=processing_event.uuid or processing_event.payload.event_id,
+                event_id=processing_event.payload.event_id,
                 issue_id=processing_event.issue_id,
+                organization_id=processing_event.organization_id,
                 type=event_type,
                 level=processing_event.level
                 if processing_event.level

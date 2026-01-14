@@ -432,7 +432,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         file_name = event_data["exception"]["values"][0]["stacktrace"]["frames"][0][
             "filename"
         ]
-        issue_event = IssueEvent.objects.get(pk=event.payload.event_id)
+        issue_event = IssueEvent.objects.get_event(event.payload.event_id)
         self.assertIn(file_name, issue_event.issue.search_vector)
         self.assertIn(
             event_data["request"]["url"].split("//")[-1],
@@ -588,7 +588,7 @@ class SentryCompatTestCase(EventIngestTestCase):
             received=timezone.now(),
         )
         process_issue_events([event])
-        return IssueEvent.objects.get(pk=event.payload.event_id)
+        return IssueEvent.objects.get_event(event.payload.event_id)
 
     def upgrade_data(self, data):
         """A recursive replace function"""
@@ -657,7 +657,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         event_json = self.get_event_json(event)
         self.assertCompareData(event_json, sentry_json, ["datetime"])
 
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         self.assertCompareData(res_data, sentry_data, ["timestamp"])
         self.assertEqual(res_data["entries"][1].get("type"), "breadcrumbs")
@@ -677,7 +677,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         sentry_data = self.get_json_data(
             "events/test_data/oss_sentry_events/dotnet_error.json"
         )
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         self.assertCompareData(
             res_data,
@@ -697,7 +697,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         )
         event = self.submit_event(sdk_error)
 
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         self.assertCompareData(
@@ -718,7 +718,7 @@ class SentryCompatTestCase(EventIngestTestCase):
             "django_message_params"
         )
         event = self.submit_event(sdk_error)
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         self.assertCompareData(
@@ -736,7 +736,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         from events.test_data.django_error_factory import message
 
         event = self.submit_event(message, event_type="default")
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         data = self.get_json_data("events/test_data/django_message_event.json")
@@ -751,7 +751,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         sdk_error, sentry_json, sentry_data = self.get_json_test_data("python_logging")
         event = self.submit_event(sdk_error, event_type="default")
 
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         self.assertEqual(res.status_code, 200)
@@ -778,7 +778,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         sentry_data = self.get_json_data(
             "events/test_data/oss_sentry_events/go_file_not_found.json"
         )
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         self.assertEqual(res.status_code, 200)
         self.assertCompareData(
@@ -799,7 +799,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         sentry_data = self.get_json_data(
             "events/test_data/oss_sentry_events/very_small_event.json"
         )
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         self.assertEqual(res.status_code, 200)
         self.assertCompareData(
@@ -849,7 +849,7 @@ class SentryCompatTestCase(EventIngestTestCase):
             "Compare if datetime is almost the same",
         )
 
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         self.assertEqual(res.status_code, 200)
         self.assertCompareData(
@@ -880,7 +880,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         )
         event = self.submit_event(sdk_error)
         event_json = self.get_event_json(event)
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         self.assertCompareData(event_json, sentry_json, ["environment"])
@@ -917,7 +917,7 @@ class SentryCompatTestCase(EventIngestTestCase):
 
         event = self.submit_event(sdk_error)
         event_json = self.get_event_json(event)
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
         res_exception = next(filter(is_exception, res_data["entries"]), None)
         sentry_exception = next(filter(is_exception, sentry_data["entries"]), None)
@@ -952,7 +952,7 @@ class SentryCompatTestCase(EventIngestTestCase):
         self.assertCompareData(event_json, sentry_json, ["title"])
         self.assertEqual(event_json["project"], event.issue.project_id)
 
-        res = self.client.get(self.get_project_events_detail(event.pk))
+        res = self.client.get(self.get_project_events_detail(event.id))
         res_data = res.json()
 
         self.assertCompareData(
@@ -990,11 +990,11 @@ class SentryCompatTestCase(EventIngestTestCase):
         )
         task_backends["default"].flush_batches()
         res_data = res.json()
-        event = IssueEvent.objects.get(pk=res_data["event_id"])
+        event = IssueEvent.objects.get_event(res_data["event_id"])
         event_json = self.get_event_json(event)
         self.assertCompareData(event_json, sentry_json, ["title", "extra", "user"])
 
-        url = self.get_project_events_detail(event.pk)
+        url = self.get_project_events_detail(event.id)
         res = self.client.get(url)
         res_json = res.json()
         self.assertCompareData(res_json, sentry_data, ["context"])
