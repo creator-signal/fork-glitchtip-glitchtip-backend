@@ -10,13 +10,13 @@ Usage:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
-from glitchtip.partition_manager import UUID7Helper
+from glitchtip.partition_manager import PartitionManager, UUID7Helper
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,15 @@ class Command(BaseCommand):
             )
             self.preview_migration(batch_size, start_dt, end_dt)
             return
+
+        # Ensure partitions exist for the date range
+        if not dry_run:
+            self.stdout.write("\nChecking partitions...")
+            import_start, import_end = self.get_date_range(start_dt, end_dt)
+            if import_start and import_end:
+                self.ensure_partitions(import_start, import_end)
+            else:
+                self.stdout.write("Could not determine date range. Skipping partition creation.")
 
         # Confirm before proceeding
         self.stdout.write(
@@ -385,3 +394,72 @@ class Command(BaseCommand):
         with connection.cursor() as cursor:
             cursor.executemany(insert_sql, values)
             return cursor.rowcount
+
+    def get_date_range(
+        self, start_dt: datetime = None, end_dt: datetime = None
+    ) -> tuple[datetime, datetime]:
+        """Get the min and max received dates for events to be imported."""
+        if start_dt and end_dt:
+            return start_dt, end_dt
+
+        where_clauses = []
+        params = []
+        if start_dt:
+            where_clauses.append("received >= %s")
+            params.append(start_dt)
+        if end_dt:
+            where_clauses.append("received < %s")
+            params.append(end_dt)
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        with connection.cursor() as cursor:
+            # Get min date
+            if not start_dt:
+                cursor.execute(
+                    f"SELECT MIN(received) FROM issue_events_issueevent_archive {where_sql}",
+                    params,
+                )
+                start_dt = cursor.fetchone()[0]
+
+            # Get max date
+            if not end_dt:
+                cursor.execute(
+                    f"SELECT MAX(received) FROM issue_events_issueevent_archive {where_sql}",
+                    params,
+                )
+                end_dt = cursor.fetchone()[0]
+
+        return start_dt, end_dt
+
+    def ensure_partitions(self, start_dt: datetime, end_dt: datetime):
+        """Create partitions for the given date range."""
+        if not start_dt or not end_dt:
+            return
+
+        # Normalize start_dt to midnight to align with daily partitions
+        start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Add 1 day buffer to end date to cover the last day fully
+        # PartitionManager treats end_date as exclusive, so if we have events up to
+        # 2025-01-01 23:59:59, we need partition up to 2025-01-02
+        adjusted_end_dt = end_dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+        self.stdout.write(
+            f"Ensuring partitions exist from {start_dt.date()} to {adjusted_end_dt.date()}..."
+        )
+
+        manager = PartitionManager()
+        count = manager.create_partitions_for_date_range(
+            parent_table="issue_events_issueevent",
+            start_date=start_dt,
+            end_date=adjusted_end_dt,
+            partition_interval_days=1,
+            hash_buckets=0,  # Simple partitioning (no hash)
+            key_type="uuid7",
+        )
+
+        if count > 0:
+            self.stdout.write(self.style.SUCCESS(f"Created {count} partitions."))
+        else:
+            self.stdout.write("Partitions already exist.")

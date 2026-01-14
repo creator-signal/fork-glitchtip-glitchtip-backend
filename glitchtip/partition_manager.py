@@ -122,7 +122,8 @@ class UUID7Helper:
 
         # Generate deterministic UUID bounds for partition ranges
         # Use minimum possible UUID (all random bits = 0) for start
-        # Use maximum possible UUID (all random bits = 1) for end
+        # Use minimum possible UUID (all random bits = 0) for end (the start of the NEXT range)
+        # This ensures [start_uuid, end_uuid) ranges are perfectly contiguous with no gaps or overlaps.
         start_uuid = UUID7Helper._uuid7_for_timestamp(start_date, min_random=True)
         end_uuid = UUID7Helper._uuid7_for_timestamp(end_date, min_random=True)
 
@@ -266,20 +267,25 @@ class PartitionManager:
             range_from = f"'{start_date.isoformat()}'"
             range_to = f"'{end_date.isoformat()}'"
 
-        # Create parent time partition with HASH sub-partitioning
-        parent_sql = f"""CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {parent_table}
+        # Create parent time partition
+        if hash_buckets > 0:
+            # Nested Partitioning: TIME -> HASH
+            parent_sql = f"""CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {parent_table}
 FOR VALUES FROM ({range_from}) TO ({range_to})
 PARTITION BY HASH ({hash_column});"""
+            sqls.append(parent_sql)
 
-        sqls.append(parent_sql)
-
-        # Create HASH child partitions
-        for i in range(hash_buckets):
-            child_name = f"{partition_name}_h{i}"
-            child_sql = f"""CREATE TABLE IF NOT EXISTS {child_name} PARTITION OF {partition_name}
+            # Create HASH child partitions
+            for i in range(hash_buckets):
+                child_name = f"{partition_name}_h{i}"
+                child_sql = f"""CREATE TABLE IF NOT EXISTS {child_name} PARTITION OF {partition_name}
 FOR VALUES WITH (MODULUS {hash_buckets}, REMAINDER {i});"""
-
-            sqls.append(child_sql)
+                sqls.append(child_sql)
+        else:
+            # Simple Range Partitioning (Leaf Node)
+            parent_sql = f"""CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {parent_table}
+FOR VALUES FROM ({range_from}) TO ({range_to});"""
+            sqls.append(parent_sql)
 
         return sqls
 

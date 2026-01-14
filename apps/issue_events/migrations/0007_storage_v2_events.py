@@ -140,6 +140,27 @@ class Migration(migrations.Migration):
                     RENAME TO issue_events_issueevent_release_id_idx;
                     """,
                 ),
+                # Drop foreign keys on archive table to prevent "cannot truncate" errors during tests
+                RunSQL(
+                    sql="""
+                    DO $$
+                    DECLARE
+                        r record;
+                    BEGIN
+                        -- Drop all foreign key constraints on the archive table
+                        FOR r IN
+                            SELECT conname
+                            FROM pg_constraint
+                            WHERE conrelid = 'issue_events_issueevent_archive'::regclass
+                            AND contype = 'f'
+                        LOOP
+                            EXECUTE 'ALTER TABLE issue_events_issueevent_archive DROP CONSTRAINT ' || quote_ident(r.conname);
+                        END LOOP;
+                    END
+                    $$;
+                    """,
+                    reverse_sql="",  # No need to restore constraints on reverse, they were on the original table
+                ),
             ],
         ),
         # Phase 2: Create V2 table with dual-ID schema
@@ -176,6 +197,15 @@ class Migration(migrations.Migration):
                     reverse_sql="""
                     DROP TABLE IF EXISTS issue_events_issueevent CASCADE;
                     """,
+                ),
+                # Explicitly create default partition to ensure tests pass with legacy dates
+                RunSQL(
+                    sql="""
+                    DROP TABLE IF EXISTS issue_events_issueevent_default;
+                    CREATE TABLE issue_events_issueevent_default
+                    PARTITION OF issue_events_issueevent DEFAULT;
+                    """,
+                    reverse_sql="DROP TABLE IF EXISTS issue_events_issueevent_default;",
                 ),
             ],
         ),
