@@ -22,7 +22,7 @@ def create_initial_partitions(apps, schema_editor):
     # Create partitions for next 4 weeks (1 month coverage)
     end_date = start_date + timedelta(weeks=4)
 
-    manager = PartitionManager()
+    manager = PartitionManager(db_connection=schema_editor.connection.alias)
     manager.create_partitions_for_date_range(
         parent_table="issue_events_issueaggregate",
         start_date=start_date,

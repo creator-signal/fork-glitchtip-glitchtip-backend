@@ -12,64 +12,151 @@ from apps.shared.migration_utils import get_sql_content
 def create_initial_partitions(apps, schema_editor):
     """
     Create initial partitions for the next 7 days.
-    Uses simple RANGE partitioning on UUIDv7 ID (no HASH sub-partitions).
-
-    Note: Events don't have direct organization_id, so we skip HASH sub-partitioning
-    for now. This can be optimized later if needed by adding org_id or using
-    a composite key that includes issue.organization_id.
+    Uses nested partitioning: RANGE (UUIDv7) -> HASH (organization_id).
     """
-    from glitchtip.partition_manager import UUID7Helper
+    from glitchtip.partition_manager import PartitionManager
 
-    # Create partitions for next 7 days using raw SQL
+    manager = PartitionManager(db_connection=schema_editor.connection.alias)
     start_date = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    end_date = start_date + timedelta(days=7)
 
-    with schema_editor.connection.cursor() as cursor:
-        for day in range(7):
-            partition_date = start_date + timedelta(days=day)
-            next_date = partition_date + timedelta(days=1)
+    manager.create_partitions_for_date_range(
+        parent_table="issue_events_issueevent",
+        start_date=start_date,
+        end_date=end_date,
+        partition_interval="DAY",
+        hash_buckets=16,  # Default safe value
+        hash_column="organization_id",
+        key_type="uuid7",
+    )
 
-            partition_name = (
-                f"issue_events_issueevent_{partition_date.strftime('%Y%m%d')}"
-            )
-
-            # Check if partition already exists
-            cursor.execute(
-                """
-                SELECT EXISTS (
-                    SELECT FROM pg_tables
-                    WHERE schemaname = 'public'
-                    AND tablename = %s
-                );
-                """,
-                [partition_name],
-            )
-
-            if cursor.fetchone()[0]:
-                print(f"Partition {partition_name} already exists, skipping")
-                continue
-
-            # Generate UUIDv7 range for this day
-            start_uuid, end_uuid = UUID7Helper.get_range_for_date(
-                partition_date, next_date
-            )
-
-            sql = f"""
-            CREATE TABLE {partition_name} PARTITION OF issue_events_issueevent
-            FOR VALUES FROM ('{start_uuid}') TO ('{end_uuid}');
-            """
-
-            cursor.execute(sql)
-            print(f"Created partition: {partition_name}")
 
     print("Created 7 partitions for issue_events_issueevent")
+
+
+def migrate_legacy_data(apps, schema_editor):
+    """
+    Migrate the most recent 10,000 events from the archive table to the new V2 table.
+    - Re-mints ID as UUIDv7 (preserving timestamp)
+    - Sets event_id = old.id
+    - Populates organization_id via join
+    """
+    from django.conf import settings
+    from glitchtip.partition_manager import UUID7Helper
+    import os
+
+    # Use raw cursor to avoid model state issues
+    with schema_editor.connection.cursor() as cursor:
+        # Check if archive exists
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT FROM pg_tables
+                WHERE schemaname = 'public'
+                AND tablename = 'issue_events_issueevent_archive'
+            );
+            """
+        )
+        if not cursor.fetchone()[0]:
+            return
+
+        print("Migrating recent legacy events...")
+
+        # Fetch recent events
+        # We fetch columns that match the new schema + old ID
+        cursor.execute(
+            """
+            SELECT
+                archive.id, archive.timestamp, archive.received,
+                archive.issue_id, archive.release_id,
+                archive.type, archive.level,
+                archive.title, archive.transaction, archive.data, archive.tags, archive.hashes,
+                (SELECT project.organization_id FROM projects_project project JOIN issue_events_issue issue ON issue.project_id = project.id WHERE issue.id = archive.issue_id) as organization_id
+            FROM issue_events_issueevent_archive archive
+            ORDER BY archive.received DESC
+            LIMIT 10000
+            """
+        )
+        rows = cursor.fetchall()
+
+        if not rows:
+            print("No legacy events found.")
+        else:
+            # Prepare bulk insert
+            # We construct the VALUES list manually to ensure correct types
+            values = []
+            for row in rows:
+                (
+                    old_id,
+                    timestamp,
+                    received,
+                    issue_id,
+                    release_id,
+                    type_val,
+                    level,
+                    title,
+                    transaction,
+                    data,
+                    tags,
+                    hashes,
+                    organization_id,
+                ) = row
+
+                if organization_id is None:
+                    continue
+
+                # Re-mint ID using received time
+                new_id = UUID7Helper.from_datetime(received)
+
+                # Append to values list. Note: data/tags (json) and hashes (array) need adaptation if using raw SQL strings,
+                # but cursor.executemany or simple execute with params handles it.
+                # We will use mogrify-like approach or executemany.
+                # Actually, executemany with a single INSERT statement is best.
+                values.append(
+                    (
+                        str(new_id),
+                        str(old_id),  # event_id
+                        timestamp,
+                        received,
+                        issue_id,
+                        organization_id,
+                        release_id,
+                        type_val,
+                        level,
+                        title,
+                        transaction,
+                        data,  # psycopg2 adapts dict to jsonb
+                        tags,  # psycopg2 adapts dict to jsonb
+                        hashes,  # psycopg2 adapts list to array
+                        received,  # created (backfill with received)
+                    )
+                )
+
+            if values:
+                insert_sql = """
+                INSERT INTO issue_events_issueevent (
+                    id, event_id, timestamp, received, issue_id, organization_id, release_id,
+                    type, level, title, transaction, data, tags, hashes, created
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING;
+                """
+                cursor.executemany(insert_sql, values)
+                print(f"Migrated {len(values)} events.")
+
+        # Cleanup
+        retain_data = os.environ.get("GLITCHTIP_RETAIN_LEGACY_DATA", "False").lower() == "true"
+        if not retain_data:
+            print("Dropping legacy archive table...")
+            cursor.execute("DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;")
+        else:
+            print("Skipping drop of issue_events_issueevent_archive (GLITCHTIP_RETAIN_LEGACY_DATA=True)")
 
 
 def drop_initial_partitions(apps, schema_editor):
     """
     Reverse migration: drop the partitions we created.
-    Note: This doesn't restore data, just cleans up partition structure.
     """
     start_date = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -82,6 +169,7 @@ def drop_initial_partitions(apps, schema_editor):
                 f"issue_events_issueevent_{partition_date.strftime('%Y%m%d')}"
             )
 
+            # Cascade drops all sub-partitions (hashes)
             sql = f"DROP TABLE IF EXISTS {partition_name} CASCADE;"
             cursor.execute(sql)
 
@@ -181,6 +269,14 @@ class Migration(migrations.Migration):
                 ),
                 migrations.AddField(
                     model_name="issueevent",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.Organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="issueevent",
                     name="event_id",
                     field=models.UUIDField(
                         null=True,
@@ -197,15 +293,6 @@ class Migration(migrations.Migration):
                     DROP TABLE IF EXISTS issue_events_issueevent CASCADE;
                     """,
                 ),
-                # Explicitly create default partition to ensure tests pass with legacy dates
-                RunSQL(
-                    sql="""
-                    DROP TABLE IF EXISTS issue_events_issueevent_default;
-                    CREATE TABLE issue_events_issueevent_default
-                    PARTITION OF issue_events_issueevent DEFAULT;
-                    """,
-                    reverse_sql="DROP TABLE IF EXISTS issue_events_issueevent_default;",
-                ),
             ],
         ),
         # Phase 3: Create initial partitions
@@ -213,6 +300,9 @@ class Migration(migrations.Migration):
             code=create_initial_partitions,
             reverse_code=drop_initial_partitions,
         ),
-        # Phase 4: Archive table comment removed (SQL concatenation issues)
-        # Users should refer to migration documentation for archive table info
+        # Phase 4: Migrate Data & Cleanup
+        migrations.RunPython(
+            code=migrate_legacy_data,
+            reverse_code=migrations.RunPython.noop,
+        ),
     ]

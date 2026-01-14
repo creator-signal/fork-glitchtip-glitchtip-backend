@@ -490,6 +490,7 @@ class InterchangeEvent(LaxIngestSchema):
     organization_id: int
     received: datetime
     update_first_event: bool = False
+    uuid: str | None = None
     payload: (
         IssueEventSchema
         | ErrorIssueEventSchema

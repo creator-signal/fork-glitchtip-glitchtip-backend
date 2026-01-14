@@ -29,6 +29,7 @@ class UUID7EventCreationTestCase(TestCase):
 
         event = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
             type=0,
@@ -53,6 +54,7 @@ class UUID7EventCreationTestCase(TestCase):
 
         event = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             event_id=client_uuid,  # Client-provided
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
@@ -77,6 +79,7 @@ class UUID7EventCreationTestCase(TestCase):
         # Event WITH client event_id
         event_with_client_id = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             event_id=client_uuid,
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
@@ -94,6 +97,7 @@ class UUID7EventCreationTestCase(TestCase):
         # Event WITHOUT client event_id
         event_without_client_id = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
             type=0,
@@ -120,6 +124,7 @@ class EventManagerLookupTestCase(TransactionTestCase):
 
         event = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             timestamp=received_time,
             received=received_time,
             type=0,
@@ -142,6 +147,7 @@ class EventManagerLookupTestCase(TransactionTestCase):
 
         IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             event_id=client_uuid,
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
@@ -164,6 +170,7 @@ class EventManagerLookupTestCase(TransactionTestCase):
 
         event = IssueEvent.objects.create(
             issue=issue,
+            organization=issue.project.organization,
             timestamp=django_timezone.now(),
             received=django_timezone.now(),
             type=0,
@@ -202,6 +209,7 @@ class UUID7TimestampTestCase(TestCase):
         event = IssueEvent.objects.create(
             id=UUID7Helper.from_datetime(received_time),
             issue=issue,
+            organization=issue.project.organization,
             timestamp=received_time,
             received=received_time,
             type=0,
@@ -229,6 +237,7 @@ class UUID7TimestampTestCase(TestCase):
         event1 = IssueEvent.objects.create(
             id=UUID7Helper.from_datetime(t1),
             issue=issue,
+            organization=issue.project.organization,
             timestamp=t1,
             received=t1,
             type=0,
@@ -243,6 +252,7 @@ class UUID7TimestampTestCase(TestCase):
         event2 = IssueEvent.objects.create(
             id=UUID7Helper.from_datetime(t2),
             issue=issue,
+            organization=issue.project.organization,
             timestamp=t2,
             received=t2,
             type=0,
@@ -257,6 +267,7 @@ class UUID7TimestampTestCase(TestCase):
         event3 = IssueEvent.objects.create(
             id=UUID7Helper.from_datetime(t3),
             issue=issue,
+            organization=issue.project.organization,
             timestamp=t3,
             received=t3,
             type=0,
@@ -289,6 +300,7 @@ class EventTimeRangeQueryTestCase(TransactionTestCase):
             IssueEvent.objects.create(
                 id=UUID7Helper.from_datetime(event_time),
                 issue=issue,
+                organization=issue.project.organization,
                 timestamp=event_time,
                 received=event_time,
                 type=0,

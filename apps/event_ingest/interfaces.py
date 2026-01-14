@@ -22,6 +22,7 @@ class IngestTaskMessage:
     received: datetime
     payload: dict  # Presumed to be validated prior
     update_first_event: bool
+    uuid: str | None = None
 
 
 @dataclass
@@ -40,6 +41,7 @@ class ProcessingEvent:
     issue_id: int | None = None
     issue_created = False
     release_id: int | None = None
+    uuid: str | None = None
 
 
 @dataclass

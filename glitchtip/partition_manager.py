@@ -16,7 +16,7 @@ from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
-from django.db import connection
+from django.db import connection, connections
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +199,12 @@ class PartitionManager:
         Initialize partition manager.
 
         Args:
-            db_connection: Optional Django database connection alias
+            db_connection: Optional Django database connection alias (str) or connection object
         """
-        self.db_connection = db_connection or connection
+        if isinstance(db_connection, str):
+            self.db_connection = connections[db_connection]
+        else:
+            self.db_connection = db_connection or connection
 
     def create_time_partition(
         self,

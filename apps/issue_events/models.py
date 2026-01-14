@@ -199,7 +199,7 @@ class IssueEvent(models.Model):
 
     Column alignment (reduces padding, improves CPU cache):
     - 16-byte: UUIDs (id, event_id)
-    - 8-byte: Timestamps and ForeignKeys (timestamp, received, issue, release)
+    - 8-byte: Timestamps and ForeignKeys (timestamp, received, issue, release, organization)
     - 2-byte: SmallIntegers (type, level)
     - Variable: Text/JSON fields (title, transaction, data, tags, hashes)
 
@@ -210,16 +210,18 @@ class IssueEvent(models.Model):
     Partitioning:
     - V2 uses native Python PartitionManager
     - Partitioned by RANGE on id (UUIDv7)
-    - Partitions managed manually via management commands
+    - Sub-partitioned by HASH on organization_id
     """
 
     # 16-byte alignment: UUIDs
     id = models.UUIDField(
-        primary_key=True,
         default=_generate_uuid7,
         editable=False,
         help_text="Server-generated UUIDv7 (partition key, contains timestamp)",
     )
+    # Primary Key is composite (id, organization) to allow HASH sub-partitioning by organization
+    pk = models.CompositePrimaryKey("id", "organization")
+
     event_id = models.UUIDField(
         null=True,
         blank=True,
@@ -233,6 +235,9 @@ class IssueEvent(models.Model):
 
     # 8-byte alignment: Foreign keys
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
     release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
@@ -248,7 +253,7 @@ class IssueEvent(models.Model):
     transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
     data = models.JSONField()
     tags = models.JSONField()
-    hashes = ArrayField(models.CharField(max_length=32), db_default=[])
+    hashes = ArrayField(models.TextField(), db_default=[])
 
     # Use custom manager for smart partition-aware queries
     objects = EventManager()

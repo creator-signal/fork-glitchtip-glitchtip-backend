@@ -13,7 +13,7 @@ def create_initial_partitions(apps, schema_editor):
     """
     from glitchtip.partition_manager import PartitionManager
 
-    manager = PartitionManager()
+    manager = PartitionManager(db_connection=schema_editor.connection.alias)
 
     # 1. TransactionEvent (UUIDv7 Range -> Hash)
     # Create daily partitions for next 7 days
