@@ -117,13 +117,6 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
     "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
 )
 
-# This must be set during initial setup. Changing later will break things.
-# Setting to True will disable Python-based partition management and delegate it to pg_partman.
-# It will also create a more complex declarative partitioning scheme that may benefit multi-tenant setups.
-# It's strongly advised to disable this for single-tenant or small to medium-sized deployments.
-# More partitions will not necessarily improve performance and may degrade smaller deployments.
-GLITCHTIP_ADVANCED_PARTITIONING = env.bool("GLITCHTIP_ADVANCED_PARTITIONING", False)
-
 # Check if a throttle is needed 1 out of every 5000 event requests
 GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
 SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
@@ -232,7 +225,6 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.humanize",
     "django.contrib.postgres",
-    "psql_partition",
     "django_prometheus",
     "allauth",
     "allauth.account",
@@ -480,26 +472,13 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
-    db_config["ENGINE"] = "psql_partition.backend"
+    db_config["ENGINE"] = "django.db.backends.postgresql"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
     )
     db_config.setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
     pooling_already_configured = "pool" in db_config.get("OPTIONS", {})
-    # Apply the default client-side pool ONLY IF connection reuse is not active
-    if (
-        db_config["CONN_MAX_AGE"] == 0
-        and not pooling_already_configured
-        and env.bool("DATABASE_POOL", True)
-    ):
-        db_config.setdefault("OPTIONS", {})
-        db_config["OPTIONS"]["pool"] = {
-            "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
-            "max_size": env.int("DATABASE_POOL_MAX_SIZE", 10),
-        }
-
-PSQLEXTRA_PARTITIONING_MANAGER = "glitchtip.partitioning.manager"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -854,7 +833,8 @@ if TESTING:
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     for db_config in DATABASES.values():
         db_config["CONN_MAX_AGE"] = None
-        db_config["OPTIONS"]["pool"] = False
+        if "OPTIONS" in db_config:
+            db_config["OPTIONS"]["pool"] = False
     TASKS = {
         "default": {
             "BACKEND": "django_vtasks.backends.immediate.ImmediateBackend",

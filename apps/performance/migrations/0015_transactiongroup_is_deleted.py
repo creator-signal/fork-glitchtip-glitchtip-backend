@@ -227,7 +227,7 @@ base_operations = [
 ]
 
 # --- Conditionally build the final operations list ---
-if settings.GLITCHTIP_ADVANCED_PARTITIONING:
+if getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False):
     # For the advanced path, we use SeparateDatabaseAndState for each model
     operations = always_run_operations + [
         # The AddField operation is common to both paths

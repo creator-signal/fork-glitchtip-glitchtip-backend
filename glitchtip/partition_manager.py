@@ -337,6 +337,46 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def drop_old_partitions(self, parent_table: str, max_days: int) -> int:
+        """
+        Identify and drop partitions older than max_days.
+        Assumes partition naming convention: parent_table_YYYYMMDD
+
+        Args:
+            parent_table: Parent table name
+            max_days: Maximum age of partitions in days
+
+        Returns:
+            Number of partitions dropped
+        """
+        import re
+        from datetime import timedelta
+
+        partitions = self.list_partitions(parent_table)
+        threshold_date = datetime.now(timezone.utc).date() - timedelta(days=max_days)
+        dropped_count = 0
+
+        # Pattern for YYYYMMDD suffix
+        pattern = re.compile(r".*_(\d{8})$")
+
+        for p in partitions:
+            name = p["partition_name"]
+            match = pattern.match(name)
+            if match:
+                try:
+                    date_str = match.group(1)
+                    partition_date = datetime.strptime(date_str, "%Y%m%d").date()
+                    if partition_date < threshold_date:
+                        logger.info(f"Dropping old partition {name}...")
+                        sql = self.drop_partition(name)
+                        with self.db_connection.cursor() as cursor:
+                            cursor.execute(sql)
+                        dropped_count += 1
+                except ValueError:
+                    continue
+
+        return dropped_count
+
     def get_partition_info(self, partition_name: str) -> dict | None:
         """
         Get metadata about a specific partition.
@@ -366,6 +406,28 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
                 columns = [col[0] for col in cursor.description]
                 return dict(zip(columns, row))
             return None
+
+    def is_table_partitioned(self, table_name: str) -> bool:
+        """
+        Check if a table exists and is a partitioned table.
+
+        Args:
+            table_name: Table name
+
+        Returns:
+            True if table is partitioned, False otherwise
+        """
+        sql = """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = %s
+            AND c.relkind = 'p'
+        );
+        """
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(sql, [table_name.split(".")[-1]])
+            return cursor.fetchone()[0]
 
     def execute_partition_creation(
         self,

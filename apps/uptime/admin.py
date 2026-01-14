@@ -7,26 +7,6 @@ from django.utils import timezone
 from .models import Monitor, MonitorCheck, StatusPage
 
 
-class MonitorCheckInlineFormSet(BaseInlineFormSet):
-    def get_queryset(self):
-        if not hasattr(self, "_queryset"):
-            # pylint: disable=attribute-defined-outside-init
-            self._queryset = super().get_queryset()[:50]  # noqa
-        return self._queryset
-
-
-class MonitorCheckInlineAdmin(admin.TabularInline):
-    model = MonitorCheck
-    formset = MonitorCheckInlineFormSet
-    can_delete = False
-
-    def has_add_permission(self, request, obj=None):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-
 class MonitorAdmin(admin.ModelAdmin):
     list_display = [
         "name",
@@ -39,7 +19,6 @@ class MonitorAdmin(admin.ModelAdmin):
     readonly_fields = ["heartbeat_endpoint"]
     list_filter = ["monitor_type"]
     search_fields = ["name", "organization__name"]
-    inlines = [MonitorCheckInlineAdmin]
 
     def get_queryset(self, request):
         qs = self.model.objects.with_check_annotations()
@@ -69,15 +48,9 @@ class MonitorAdmin(admin.ModelAdmin):
             )
 
 
-class MonitorCheckAdmin(admin.ModelAdmin):
-    list_filter = ["is_up", "reason", "start_check"]
-    list_display = ["monitor", "is_up", "reason", "start_check", "response_time"]
-
-
 class StatusPageAdmin(admin.ModelAdmin):
     list_display = ["organization", "name", "is_public"]
 
 
 admin.site.register(Monitor, MonitorAdmin)
-admin.site.register(MonitorCheck, MonitorCheckAdmin)
 admin.site.register(StatusPage, StatusPageAdmin)

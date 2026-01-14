@@ -106,6 +106,7 @@ class Command(MakeSampleCommand):
                     issue_tags.append(
                         IssueTag(
                             issue=issue,
+                            organization_id=self.project.organization_id,
                             date=tag_date,
                             tag_key_id=tag_key_id,
                             tag_value_id=tag_value_id,

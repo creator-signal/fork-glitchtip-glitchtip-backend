@@ -61,7 +61,7 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
-        if not settings.GLITCHTIP_ADVANCED_PARTITIONING:
+        if not getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False):
             self.stdout.write(
                 self.style.WARNING(
                     "GLITCHTIP_ADVANCED_PARTITIONING is not enabled. Skipping."
