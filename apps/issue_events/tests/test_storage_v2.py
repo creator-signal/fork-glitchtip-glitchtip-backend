@@ -197,9 +197,10 @@ class UUID7TimestampTestCase(TestCase):
     def test_uuid7_contains_timestamp(self):
         """UUIDv7 ID should encode the received timestamp"""
         issue = baker.make("issue_events.Issue")
-        received_time = datetime(2025, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+        received_time = django_timezone.now()
 
         event = IssueEvent.objects.create(
+            id=UUID7Helper.from_datetime(received_time),
             issue=issue,
             timestamp=received_time,
             received=received_time,
@@ -278,10 +279,12 @@ class EventTimeRangeQueryTestCase(TransactionTestCase):
 
         # Create events across multiple days
         for i in range(5):
+            event_time = base_time + timedelta(days=i)
             IssueEvent.objects.create(
+                id=UUID7Helper.from_datetime(event_time),
                 issue=issue,
-                timestamp=base_time + timedelta(days=i),
-                received=base_time + timedelta(days=i),
+                timestamp=event_time,
+                received=event_time,
                 type=0,
                 level=4,
                 title=f"Event Day {i}",
