@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS issue_events_issueevent (
     transaction VARCHAR(200) NOT NULL,
     data JSONB NOT NULL,
     tags JSONB NOT NULL,
-    hashes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
+    hashes VARCHAR(32)[] NOT NULL DEFAULT ARRAY[]::VARCHAR(32)[]
 
 ) PARTITION BY RANGE (id);
 
