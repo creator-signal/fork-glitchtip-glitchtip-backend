@@ -215,7 +215,6 @@ class IssueEventProjectHourlyStatistic(ProjectStatisticBase):
     pass
 
 
-
 class ProjectAlertStatus(models.IntegerChoices):
     OFF = 0, "off"
     ON = 1, "on"

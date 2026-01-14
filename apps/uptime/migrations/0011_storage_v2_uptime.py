@@ -6,6 +6,7 @@ from django.db import migrations
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
+
 def create_initial_partitions(apps, schema_editor):
     """
     Create initial partitions for MonitorCheck.
@@ -30,22 +31,24 @@ def create_initial_partitions(apps, schema_editor):
         key_type="uuid7",
     )
 
+
 def drop_partitions(apps, schema_editor):
     pass
+
 
 class Migration(migrations.Migration):
     dependencies = [
         ("uptime", "0001_squashed_0010_auto_20240712_1900"),
-        ("issue_events", "0007_storage_v2_events"), # For uuid_generate_v7 function
+        ("issue_events", "0007_storage_v2_events"),  # For uuid_generate_v7 function
     ]
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[], 
+            state_operations=[],
             database_operations=[
                 RunSQL(
                     sql="DROP TABLE IF EXISTS uptime_monitorcheck CASCADE;",
-                    reverse_sql="", 
+                    reverse_sql="",
                 ),
                 RunSQL(
                     sql=get_sql_content(__file__, "create_uptime_v2.sql"),
@@ -59,7 +62,7 @@ class Migration(migrations.Migration):
                     PARTITION OF uptime_monitorcheck DEFAULT;
                     """,
                     reverse_sql="",
-                )
+                ),
             ],
         ),
         migrations.RunPython(

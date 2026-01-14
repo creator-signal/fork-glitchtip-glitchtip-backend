@@ -1,7 +1,6 @@
 from enum import StrEnum
 from typing import Union
 
-from django.conf import settings
 from django.db import migrations, models
 
 

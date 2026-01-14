@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class PostgresPartitioningMethod(Enum):
     RANGE = "RANGE"
     LIST = "LIST"

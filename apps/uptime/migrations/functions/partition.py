@@ -15,4 +15,3 @@ def create_partitions(apps, schema_editor):
         logger.error(f"Failed to maintain partitions: {e}")
         # In migrations, we might want to ignore errors if it's a dry run or similar
         # but generally maintenance should succeed.
-

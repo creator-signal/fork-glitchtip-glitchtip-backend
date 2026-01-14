@@ -10,6 +10,7 @@ from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
 
 from glitchtip.base_models import CreatedModel
+from glitchtip.partition_manager import UUID7Helper
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 
@@ -125,17 +126,17 @@ class Monitor(models.Model):
         return self.timeout or 20
 
 
-from glitchtip.partition_manager import UUID7Helper
-
 def _generate_uuid7():
     """Generate UUIDv7 for MonitorCheck default."""
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
+
     return UUID7Helper.from_datetime(datetime.now(tz.utc))
 
 
 class MonitorCheck(models.Model):
     # Storage V2: Partitioned by id (UUIDv7) -> Hash by organization
-    
+
     # 16-byte alignment: UUIDs
     id = models.UUIDField(
         default=_generate_uuid7,
@@ -143,7 +144,7 @@ class MonitorCheck(models.Model):
     )
     # Primary Key is composite (id, organization)
     pk = models.CompositePrimaryKey("id", "organization")
-    
+
     # 8-byte alignment
     monitor = models.ForeignKey(
         Monitor, on_delete=models.CASCADE, related_name="checks"
@@ -155,7 +156,7 @@ class MonitorCheck(models.Model):
         default=now,
         help_text="Time when the start of this check was performed",
     )
-    
+
     # Other fields
     response_time = models.PositiveIntegerField(
         blank=True, null=True, help_text="Reponse time in milliseconds"
@@ -184,7 +185,6 @@ class MonitorCheck(models.Model):
         if self.is_up:
             return "Up"
         return "Down"
-
 
 
 class StatusPage(CreatedModel):
