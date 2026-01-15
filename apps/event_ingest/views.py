@@ -16,6 +16,7 @@ from sentry_sdk import capture_exception, set_context, set_level
 from apps.event_ingest.interfaces import IngestTaskMessage
 from apps.issue_events.constants import IssueEventType
 from glitchtip.api.exceptions import ThrottleException
+from glitchtip.partition_manager import UUID7Helper
 
 from .api import get_ip_address
 from .authentication import EventAuthHttpRequest, event_auth
@@ -180,12 +181,14 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     if item.event_id is None:
                         item.event_id = envelope_header_event_id or uuid.uuid4()
 
+                    primary_id = UUID7Helper.from_datetime()
                     interchange_event = IngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,
                         payload=item.dict() | {"type": issue_type},
                         received=timezone.now(),
                         update_first_event=update_first_event,
+                        uuid=primary_id.hex,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
                         ingest_event.enqueue(
@@ -194,12 +197,14 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
 
                 elif item_header.type == "transaction":
                     item = TransactionEventSchema.model_validate_json(payload_bytes)
+                    primary_id = UUID7Helper.from_datetime()
                     interchange_event = IngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,  # Use project from auth
                         payload=item.dict(),
                         received=timezone.now(),
                         update_first_event=update_first_event,
+                        uuid=primary_id.hex,
                     )
                     if cache.add("uuid" + item.event_id.hex, True):
                         ingest_transaction.enqueue(
