@@ -1,6 +1,3 @@
-from datetime import datetime
-from datetime import timezone as tz
-
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
@@ -19,7 +16,7 @@ from .utils import base32_encode
 
 def _generate_uuid7():
     """Generate UUIDv7 for IssueEvent default."""
-    return UUID7Helper.from_datetime(datetime.now(tz.utc))
+    return UUID7Helper.from_datetime()
 
 
 class DeferedFieldManager(models.Manager):
@@ -61,8 +58,6 @@ class IssueTag(AggregationModel):
     class Meta:
         pass
 
-    # V2: Partitioning managed manually via PartitionManager
-
 
 class IssueAggregate(AggregationModel):
     """Count the number of events for an issue per time unit"""
@@ -74,7 +69,6 @@ class IssueAggregate(AggregationModel):
     )
     pk = models.CompositePrimaryKey("issue", "organization", "date")
 
-    # V2: Partitioning managed manually via PartitionManager
     # PartitioningMeta removed to detach from psql_partition
 
 
@@ -195,7 +189,7 @@ class UserReport(CreatedModel):
 
 class IssueEvent(models.Model):
     """
-    Storage Engine V2: Dual-ID Schema with Optimized Column Alignment
+    Dual-ID Schema with Optimized Column Alignment
 
     Column alignment (reduces padding, improves CPU cache):
     - 16-byte: UUIDs (id, event_id)
@@ -208,7 +202,7 @@ class IssueEvent(models.Model):
     - event_id: Client-provided UUIDv4 (nullable, for SDK compatibility)
 
     Partitioning:
-    - V2 uses native Python PartitionManager
+    - Uses native Python PartitionManager
     - Partitioned by RANGE on id (UUIDv7)
     - Sub-partitioned by HASH on organization_id
     """

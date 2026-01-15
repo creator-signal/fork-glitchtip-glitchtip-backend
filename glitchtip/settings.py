@@ -472,13 +472,15 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
-    db_config["ENGINE"] = "django.db.backends.postgresql"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
     )
     db_config.setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
     pooling_already_configured = "pool" in db_config.get("OPTIONS", {})
+    if not pooling_already_configured and db_config["CONN_MAX_AGE"] == 0:
+        db_config.setdefault("OPTIONS", {})
+        db_config["OPTIONS"]["pool"] = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

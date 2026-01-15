@@ -18,7 +18,7 @@ class Command(BaseCommand):
 
         # 1. Daily UUIDv7 partitions (Events)
         daily_v7_models = [
-            ("issue_events_issueevent", 0),  # No hash
+            ("issue_events_issueevent", None),  # Use settings
             ("performance_transactionevent", None),  # Use settings
             ("uptime_monitorcheck", None),
         ]

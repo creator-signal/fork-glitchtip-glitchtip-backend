@@ -22,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = (
-        "Import legacy events from issue_events_issueevent_archive to V2 table. "
-        "Re-mints IDs as UUIDv7 based on received timestamp, preserves original ID as event_id."
-    )
+    help = "Management command to import legacy events to partitioned tables (UUIDv7 partitioning)."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -80,7 +77,7 @@ class Command(BaseCommand):
             end_dt = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
 
         self.stdout.write(self.style.WARNING("=" * 70))
-        self.stdout.write(self.style.WARNING("Storage Engine V2: Legacy Event Import"))
+        self.stdout.write(self.style.WARNING("Legacy Event Import"))
         self.stdout.write(self.style.WARNING("=" * 70))
 
         # Check if archive table exists
