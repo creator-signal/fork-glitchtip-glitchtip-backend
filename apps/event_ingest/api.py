@@ -71,7 +71,7 @@ def event_store(
             payload.user = EventUser(ip_address=client_ip)
 
     issue_type = IssueEventType.ERROR if payload.exception else IssueEventType.DEFAULT
-    primary_id = UUID7Helper.from_datetime(timezone.now())
+    primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
@@ -120,7 +120,7 @@ def event_security(
             event.user.ip_address = client_ip
         else:
             event.user = EventUser(ip_address=client_ip)
-    primary_id = UUID7Helper.from_datetime(timezone.now())
+    primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,

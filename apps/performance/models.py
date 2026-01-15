@@ -10,10 +10,7 @@ from glitchtip.partition_manager import UUID7Helper
 
 def _generate_uuid7():
     """Generate UUIDv7 for TransactionEvent default."""
-    from datetime import datetime
-    from datetime import timezone as tz
-
-    return UUID7Helper.from_datetime(datetime.now(tz.utc))
+    return UUID7Helper.from_datetime()
 
 
 class TransactionGroup(CreatedModel, SoftDeleteModel):
@@ -38,7 +35,7 @@ class TransactionGroup(CreatedModel, SoftDeleteModel):
 
 
 class TransactionEvent(models.Model):
-    # Storage V2: Partitioned by id (UUIDv7)
+    # Partitioned by id (UUIDv7)
 
     # 16-byte alignment: UUIDs
     id = models.UUIDField(

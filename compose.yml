@@ -19,8 +19,6 @@ x-volumes: &default-volumes
 services:
   postgres:
     image: postgres:18
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
   valkey:

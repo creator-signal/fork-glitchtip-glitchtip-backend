@@ -34,17 +34,20 @@ class UUID7Helper:
     """
 
     @staticmethod
-    def from_datetime(dt: datetime) -> UUID:
+    def from_datetime(dt: datetime | None = None) -> UUID:
         """
         Generate UUIDv7 from datetime.
 
         Args:
-            dt: Datetime to encode (must be timezone-aware)
+            dt: Datetime to encode (must be timezone-aware). Defaults to now.
 
         Returns:
             UUIDv7 with encoded timestamp
         """
         import os
+
+        if dt is None:
+            dt = datetime.now(timezone.utc)
 
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)

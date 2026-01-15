@@ -378,3 +378,21 @@ class PartitionManagerTestCase(TestCase):
         for i in range(4):
             expected_name = f"issue_events_issueaggregate_20250115_h{i}"
             self.assertIn(expected_name, sqls[i + 1])
+
+
+class DatabaseSettingsTestCase(TestCase):
+    def test_database_settings_defaults(self):
+        """
+        Verify that database settings are applied correctly.
+        Note: In TESTING mode, some values are overridden (see settings.py).
+        """
+        from django.conf import settings
+
+        db_settings = settings.DATABASES["default"]
+        # In TESTING mode, CONN_MAX_AGE is explicitly set to None
+        self.assertIsNone(db_settings.get("CONN_MAX_AGE"))
+        self.assertEqual(db_settings.get("CONN_HEALTH_CHECKS"), False)
+        self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
+        # In TESTING mode, pool is explicitly set to False
+        self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
+        self.assertEqual(db_settings.get("ENGINE"), "django.db.backends.postgresql")

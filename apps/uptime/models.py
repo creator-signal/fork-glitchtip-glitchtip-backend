@@ -128,14 +128,11 @@ class Monitor(models.Model):
 
 def _generate_uuid7():
     """Generate UUIDv7 for MonitorCheck default."""
-    from datetime import datetime
-    from datetime import timezone as tz
-
-    return UUID7Helper.from_datetime(datetime.now(tz.utc))
+    return UUID7Helper.from_datetime()
 
 
 class MonitorCheck(models.Model):
-    # Storage V2: Partitioned by id (UUIDv7) -> Hash by organization
+    # Partitioned by id (UUIDv7) -> Hash by organization
 
     # 16-byte alignment: UUIDs
     id = models.UUIDField(
