@@ -197,16 +197,29 @@ class JavascriptEventProcessor:
         ):
             exception["raw_stacktrace"] = copy.deepcopy(exception["stacktrace"])
 
+        # Map minified filenames to debug_ids from debug_meta
+        debug_id_map = {}
+        if self.data.debug_meta and self.data.debug_meta.images:
+            for image in self.data.debug_meta.images:
+                if image.type == "sourcemap" and image.code_file:
+                    filename = image.code_file.split("/")[-1]
+                    debug_id_map[filename] = str(image.debug_id)
+
         frames_with_source = []
         for frame in frames:
             minified_filename = frame.abs_path.split("/")[-1] if frame.abs_path else ""
+            debug_id = debug_id_map.get(minified_filename)
             minified_file = None
             map_file = None
             for debug_bundle in self.debug_bundles:
-                # File name as given. When debug ids are used, this is based on the debug id
+                # Match by debug_id if both have it
+                if debug_id and debug_bundle.debug_id and str(debug_id) == str(debug_bundle.debug_id):
+                    minified_file = debug_bundle.file
+                    map_file = debug_bundle.sourcemap_file
+                    break
+
+                # Fallback to matching by filename
                 file_name = debug_bundle.file.name
-                # The code file name is the one given by the debug_meta source code image
-                # When debug id is used, we must match on this name
                 code_file = debug_bundle.data.get("code_file")
                 if code_file:  # Get name, not full path
                     code_file = code_file.split("/")[-1]
@@ -214,6 +227,8 @@ class JavascriptEventProcessor:
                 if minified_filename in [file_name, code_file]:
                     minified_file = debug_bundle.file
                     map_file = debug_bundle.sourcemap_file
+                    break
+            
             if map_file:
                 frames_with_source.append((frame, map_file, minified_file))
 
