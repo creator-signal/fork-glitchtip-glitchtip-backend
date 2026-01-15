@@ -11,16 +11,77 @@ from apps.shared.migration_utils import get_sql_content
 
 def create_initial_partitions(apps, schema_editor):
     """
-    Create initial partitions for the next 7 days.
+    Create initial partitions.
     Uses nested partitioning: RANGE (UUIDv7) -> HASH (organization_id).
+
+    Determines start date by looking at legacy data to ensure we have partitions
+    for the events we are about to migrate.
     """
     from glitchtip.partition_manager import PartitionManager
 
     manager = PartitionManager(db_connection=schema_editor.connection.alias)
-    start_date = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
+    now = datetime.now(timezone.utc)
+
+    # Default start date is today
+    start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Try to find older data in the archive to ensure we create partitions for it
+    with schema_editor.connection.cursor() as cursor:
+        try:
+            # Check if archive table exists and has data
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT FROM pg_tables
+                    WHERE schemaname = 'public'
+                    AND tablename = 'issue_events_issueevent_archive'
+                );
+                """
+            )
+            if cursor.fetchone()[0]:
+                # Find the oldest date among the recent 10,000 events (matching migration logic)
+                cursor.execute(
+                    """
+                    SELECT min(received) 
+                    FROM (
+                        SELECT received 
+                        FROM issue_events_issueevent_archive 
+                        ORDER BY received DESC 
+                        LIMIT 10000
+                    ) as sub;
+                    """
+                )
+                min_received = cursor.fetchone()[0]
+                if min_received:
+                    # If we found data, ensure start_date covers it
+                    if min_received.tzinfo is None:
+                        min_received = min_received.replace(tzinfo=timezone.utc)
+                    min_date = min_received.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    if min_date < start_date:
+                        start_date = min_date
+                        print(
+                            f"Adjusted partition start date to {start_date} to cover legacy events."
+                        )
+        except Exception as e:
+            print(f"Warning: Could not determine legacy data range: {e}")
+
+    # Ensure we cover at least 7 days from now
+    end_date = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        days=7
     )
-    end_date = start_date + timedelta(days=7)
+
+    # If start_date is significantly in the past, end_date calculation should still ensure we cover up to now+7d
+    # But manager.create_partitions_for_date_range iterates from start to end.
+    # So valid range is [start_date, max(end_date, start_date + 7d? No, end_date is absolute)]
+
+    # We want [start_date, now + 7 days]
+    target_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        days=7
+    )
+    if end_date < target_end:
+        end_date = target_end
 
     manager.create_partitions_for_date_range(
         parent_table="issue_events_issueevent",
@@ -32,7 +93,9 @@ def create_initial_partitions(apps, schema_editor):
         key_type="uuid7",
     )
 
-    print("Created 7 partitions for issue_events_issueevent")
+    print(
+        f"Created partitions for issue_events_issueevent from {start_date} to {end_date}"
+    )
 
 
 def migrate_legacy_data(apps, schema_editor):
