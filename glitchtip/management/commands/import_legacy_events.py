@@ -298,11 +298,17 @@ class Command(BaseCommand):
                 cursor.execute(
                     f"""
                     SELECT
-                        id, timestamp, received, issue_id, release_id,
-                        type, level, title, transaction, data, tags, hashes
-                    FROM issue_events_issueevent_archive
+                        archive.id, archive.timestamp, archive.received,
+                        archive.issue_id, archive.release_id,
+                        archive.type, archive.level,
+                        archive.title, archive.transaction, archive.data,
+                        archive.tags, archive.hashes,
+                        project.organization_id
+                    FROM issue_events_issueevent_archive archive
+                    JOIN issue_events_issue issue ON issue.id = archive.issue_id
+                    JOIN projects_project project ON project.id = issue.project_id
                     {where_sql}
-                    ORDER BY received
+                    ORDER BY archive.received
                     LIMIT %s OFFSET %s;
                     """,
                     params + [current_batch_size, offset],
@@ -339,15 +345,17 @@ class Command(BaseCommand):
             timestamp, received,
             issue_id, release_id,
             type, level,
-            title, transaction, data, tags, hashes
+            title, transaction, data, tags, hashes,
+            organization_id
         ) VALUES (
             %s, %s,
             %s, %s,
             %s, %s,
             %s, %s,
-            %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s,
+            %s
         )
-        ON CONFLICT (id) DO NOTHING;
+        ON CONFLICT DO NOTHING;
         """
 
         values = []
@@ -365,6 +373,7 @@ class Command(BaseCommand):
                 data,
                 tags,
                 hashes,
+                organization_id,
             ) = row
 
             # Generate new UUIDv7 based on received timestamp
@@ -386,6 +395,7 @@ class Command(BaseCommand):
                     data,
                     tags,
                     hashes,
+                    organization_id,
                 )
             )
 
