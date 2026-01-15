@@ -65,6 +65,7 @@ async def get_chunk_upload_info(request: AuthHttpRequest, organization_slug: str
 
 
 @router.post("organizations/{slug:organization_slug}/chunk-upload/")
+@router.post("organizations/{slug:organization_slug}/chunk-upload")
 @has_permission(["project:write", "project:admin", "project:releases"])
 async def chunk_upload(
     request: AuthHttpRequest,
