@@ -27,7 +27,3 @@ ALTER TABLE uptime_monitorcheck
     ADD CONSTRAINT uptime_monitorcheck_organization_id_fkey
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
-
--- Default partition
-CREATE TABLE IF NOT EXISTS uptime_monitorcheck_default
-    PARTITION OF uptime_monitorcheck DEFAULT;
