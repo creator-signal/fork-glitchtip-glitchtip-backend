@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Create future partitions and cleanup old ones for Storage V2"
+    help = "Create future partitions and cleanup old ones"
 
     def handle(self, *args, **options):
         manager = PartitionManager()
