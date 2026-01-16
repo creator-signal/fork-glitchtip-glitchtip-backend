@@ -489,11 +489,11 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
 
         with self.db_connection.cursor() as cursor:
             for sql in sqls:
-                logger.info(f"Executing partition SQL: {sql[:100]}...")
+                logger.debug(f"Executing partition SQL: {sql[:100]}...")
                 cursor.execute(sql)
 
-        logger.info(
-            f"Created partition {partition_name} with {hash_buckets} hash buckets "
+        logger.debug(
+            f"Verified partition {partition_name} with {hash_buckets} hash buckets "
             f"for date range {start_date.date()} to {end_date.date()}"
         )
 
@@ -524,11 +524,11 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             partition_column: Partition key column name
 
         Returns:
-            Total number of partitions created (including hash sub-partitions)
+            Total number of NEW partitions created (parent tables).
         """
         from datetime import timedelta
 
-        total_created = 0
+        new_partitions_count = 0
         current_date = start_date
 
         # Determine interval timedelta
@@ -550,25 +550,35 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             date_suffix = current_date.strftime("%Y%m%d")
             partition_name = f"{parent_table}_{date_suffix}"
 
-            if not self.table_exists(partition_name):
-                count = self.execute_partition_creation(
-                    parent_table=parent_table,
-                    partition_name=partition_name,
-                    start_date=current_date,
-                    end_date=next_date,
-                    hash_buckets=hash_buckets,
-                    hash_column=hash_column,
-                    key_type=key_type,
-                    partition_column=partition_column,
-                )
-                total_created += count
+            # Check existence first to report accurate "Created" stats
+            exists = self.table_exists(partition_name)
+
+            # Always execute SQL to ensure sub-partitions (hash buckets) exist
+            self.execute_partition_creation(
+                parent_table=parent_table,
+                partition_name=partition_name,
+                start_date=current_date,
+                end_date=next_date,
+                hash_buckets=hash_buckets,
+                hash_column=hash_column,
+                key_type=key_type,
+                partition_column=partition_column,
+            )
+
+            if not exists:
+                new_partitions_count += 1
 
             current_date = next_date
 
-        if total_created > 0:
+        if new_partitions_count > 0:
             logger.info(
-                f"Created {total_created} new partitions for {parent_table} "
-                f"from {start_date.date()} to {end_date.date()}"
+                f"Created {new_partitions_count} new partitions for {parent_table} "
+                f"(Covering {start_date.date()} to {end_date.date()})"
+            )
+        else:
+            logger.debug(
+                f"Partitions up to date for {parent_table} "
+                f"(Covering {start_date.date()} to {end_date.date()})"
             )
 
-        return total_created
+        return new_partitions_count
