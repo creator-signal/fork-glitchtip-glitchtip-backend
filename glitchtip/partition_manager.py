@@ -435,6 +435,27 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             cursor.execute(sql, [table_name.split(".")[-1]])
             return cursor.fetchone()[0]
 
+    def table_exists(self, table_name: str) -> bool:
+        """
+        Check if a table exists in the database.
+
+        Args:
+            table_name: Table name
+
+        Returns:
+            True if table exists
+        """
+        sql = """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = %s
+        );
+        """
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(sql, [table_name.split(".")[-1]])
+            return cursor.fetchone()[0]
+
     def execute_partition_creation(
         self,
         parent_table: str,
@@ -529,23 +550,25 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             date_suffix = current_date.strftime("%Y%m%d")
             partition_name = f"{parent_table}_{date_suffix}"
 
-            count = self.execute_partition_creation(
-                parent_table=parent_table,
-                partition_name=partition_name,
-                start_date=current_date,
-                end_date=next_date,
-                hash_buckets=hash_buckets,
-                hash_column=hash_column,
-                key_type=key_type,
-                partition_column=partition_column,
-            )
+            if not self.table_exists(partition_name):
+                count = self.execute_partition_creation(
+                    parent_table=parent_table,
+                    partition_name=partition_name,
+                    start_date=current_date,
+                    end_date=next_date,
+                    hash_buckets=hash_buckets,
+                    hash_column=hash_column,
+                    key_type=key_type,
+                    partition_column=partition_column,
+                )
+                total_created += count
 
-            total_created += count
             current_date = next_date
 
-        logger.info(
-            f"Created {total_created} total partitions for {parent_table} "
-            f"from {start_date.date()} to {end_date.date()}"
-        )
+        if total_created > 0:
+            logger.info(
+                f"Created {total_created} new partitions for {parent_table} "
+                f"from {start_date.date()} to {end_date.date()}"
+            )
 
         return total_created
