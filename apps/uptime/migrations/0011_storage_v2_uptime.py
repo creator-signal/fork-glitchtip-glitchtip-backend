@@ -41,7 +41,7 @@ def create_initial_partitions(apps, schema_editor):
                     FROM (
                         SELECT start_check 
                         FROM uptime_monitorcheck_archive 
-                        ORDER BY start_check DESC 
+                        ORDER BY start_check DESC, id DESC
                         LIMIT 10000
                     ) as sub;
                     """
@@ -50,7 +50,8 @@ def create_initial_partitions(apps, schema_editor):
                 if min_start:
                     if min_start.tzinfo is None:
                         min_start = min_start.replace(tzinfo=timezone.utc)
-                    min_date = min_start.replace(
+                    # Subtract 1 day as a safety buffer to ensure all 10k rows are covered
+                    min_date = (min_start - timedelta(days=1)).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )
                     if min_date < start_date:
@@ -111,7 +112,7 @@ def migrate_legacy_data(apps, schema_editor):
                 monitor.organization_id
             FROM uptime_monitorcheck_archive archive
             JOIN uptime_monitor monitor ON monitor.id = archive.monitor_id
-            ORDER BY archive.start_check DESC
+            ORDER BY archive.start_check DESC, archive.id DESC
             LIMIT 10000
             """
         )

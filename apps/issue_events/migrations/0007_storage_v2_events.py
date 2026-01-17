@@ -46,7 +46,7 @@ def create_initial_partitions(apps, schema_editor):
                     FROM (
                         SELECT received 
                         FROM issue_events_issueevent_archive 
-                        ORDER BY received DESC 
+                        ORDER BY received DESC, id DESC
                         LIMIT 10000
                     ) as sub;
                     """
@@ -56,7 +56,8 @@ def create_initial_partitions(apps, schema_editor):
                     # If we found data, ensure start_date covers it
                     if min_received.tzinfo is None:
                         min_received = min_received.replace(tzinfo=timezone.utc)
-                    min_date = min_received.replace(
+                    # Subtract 1 day as a safety buffer to ensure all 10k rows are covered
+                    min_date = (min_received - timedelta(days=1)).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )
                     if min_date < start_date:
@@ -136,7 +137,7 @@ def migrate_legacy_data(apps, schema_editor):
                 archive.title, archive.transaction, archive.data, archive.tags, archive.hashes,
                 (SELECT project.organization_id FROM projects_project project JOIN issue_events_issue issue ON issue.project_id = project.id WHERE issue.id = archive.issue_id) as organization_id
             FROM issue_events_issueevent_archive archive
-            ORDER BY archive.received DESC
+            ORDER BY archive.received DESC, archive.id DESC
             LIMIT 10000
             """
         )
