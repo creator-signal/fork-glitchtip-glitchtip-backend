@@ -609,7 +609,25 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(issues, 0)
 
     def test_issue_merge(self):
-        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+        issue_event_count = 2
+        issues = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            _quantity=2,
+            # Baker creates issues with random count values, despite not creating any events
+            # so set this to the number we will make
+            count=issue_event_count,
+        )
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issues[0],
+            _quantity=issue_event_count,
+        )
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issues[1],
+            _quantity=issue_event_count,
+        )
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
         data = {"merge": 1}
         res = self.client.put(
@@ -619,6 +637,10 @@ class IssueAPITestCase(GlitchTestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(Issue.objects.filter(is_deleted=False).count(), 1)
+        self.assertEqual(
+            Issue.objects.get(is_deleted=False).count,
+            2 * issue_event_count,
+        )
 
     def test_bulk_delete_via_search(self):
         """Bulk delete Issues via search string"""
