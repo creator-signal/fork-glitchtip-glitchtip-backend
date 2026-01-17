@@ -2,7 +2,7 @@
 # Replaces IssueAggregate with V2 schema (Range -> Hash partitioning)
 
 from datetime import datetime, timedelta, timezone
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
@@ -45,11 +45,29 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],  # Model state update will be separate or handled by makemigrations if I updated models.py?
-            # Actually, I should update models.py to remove PostgresPartitionedModel and let Django generate the state changes.
-            # But here I'm doing manual SQL.
-            # I will assume the model definition in Django is compatible or updated separately.
-            # For "Fresh Start", I drop the old table.
+            state_operations=[
+                migrations.AlterModelManagers(
+                    name="issueaggregate",
+                    managers=[],
+                ),
+                migrations.RemoveField(
+                    model_name="issueaggregate",
+                    name="pk",
+                ),
+                migrations.AddField(
+                    model_name="issueaggregate",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "issue",
+                        "organization",
+                        "date",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+            ],
             database_operations=[
                 RunSQL(
                     sql="DROP TABLE IF EXISTS issue_events_issueaggregate CASCADE;",

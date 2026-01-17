@@ -1,8 +1,10 @@
 # Generated manually for Storage Engine V2
 # Replaces Performance tables with V2 schema (PartitionManager compliant)
 
+import uuid
+import apps.performance.models
 from datetime import datetime, timedelta, timezone
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
@@ -60,7 +62,76 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],
+            state_operations=[
+                migrations.AlterModelManagers(
+                    name="transactionevent",
+                    managers=[],
+                ),
+                migrations.AlterModelManagers(
+                    name="transactiongroupaggregate",
+                    managers=[],
+                ),
+                migrations.AddField(
+                    model_name="transactionevent",
+                    name="duration",
+                    field=models.PositiveIntegerField(
+                        db_index=True, help_text="Milliseconds"
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactionevent",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactionevent",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "id",
+                        "organization",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.AlterField(
+                    model_name="transactionevent",
+                    name="event_id",
+                    field=models.UUIDField(default=uuid.uuid4, editable=False, null=True),
+                ),
+                migrations.AlterField(
+                    model_name="transactionevent",
+                    name="id",
+                    field=models.UUIDField(
+                        default=apps.performance.models._generate_uuid7, editable=False
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactiongroupaggregate",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactiongroupaggregate",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "group",
+                        "organization",
+                        "date",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+            ],
             database_operations=[
                 RunSQL(
                     sql="""

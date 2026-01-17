@@ -1,8 +1,9 @@
 # Generated manually for Storage Engine V2
 # Replaces Uptime tables with V2 schema and migrates recent data
 
+import apps.uptime.models
 from datetime import datetime, timedelta, timezone
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
@@ -187,7 +188,39 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],
+            state_operations=[
+                migrations.AlterModelManagers(
+                    name="monitorcheck",
+                    managers=[],
+                ),
+                migrations.AddField(
+                    model_name="monitorcheck",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="monitorcheck",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "id",
+                        "organization",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.AlterField(
+                    model_name="monitorcheck",
+                    name="id",
+                    field=models.UUIDField(
+                        default=apps.uptime.models._generate_uuid7, editable=False
+                    ),
+                ),
+            ],
             database_operations=[
                 RunSQL(
                     sql="""

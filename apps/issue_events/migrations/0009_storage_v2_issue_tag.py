@@ -2,7 +2,7 @@
 # Replaces IssueTag with V2 schema
 
 from datetime import datetime, timedelta, timezone
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
@@ -44,7 +44,42 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],
+            state_operations=[
+                migrations.AlterModelManagers(
+                    name="issuetag",
+                    managers=[],
+                ),
+                migrations.RemoveConstraint(
+                    model_name="issuetag",
+                    name="issue_tag_key_value_unique",
+                ),
+                migrations.AddField(
+                    model_name="issuetag",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE, to="organizations_ext.organization"
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="issuetag",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "issue",
+                        "organization",
+                        "date",
+                        "tag_key",
+                        "tag_value",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.RemoveField(
+                    model_name="issuetag",
+                    name="id",
+                ),
+            ],
             database_operations=[
                 RunSQL(
                     sql="DROP TABLE IF EXISTS issue_events_issuetag CASCADE;",
