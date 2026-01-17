@@ -101,7 +101,9 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="transactionevent",
                     name="event_id",
-                    field=models.UUIDField(default=uuid.uuid4, editable=False, null=True),
+                    field=models.UUIDField(
+                        default=uuid.uuid4, editable=False, null=True
+                    ),
                 ),
                 migrations.AlterField(
                     model_name="transactionevent",
