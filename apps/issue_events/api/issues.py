@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from django.db.models import Count, Sum
+from django.db.models import Count, F, Sum
 from django.db.models.functions import TruncDay
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
@@ -218,6 +218,8 @@ async def update_issues(
         ).values_list("id", flat=True)[:1000]:
             event_ids.append(event_id)
         await IssueEvent.objects.filter(id__in=event_ids).aupdate(issue=issue)
+        issue.count = F("count") + len(event_ids)
+        await issue.asave(update_fields=["count"])
 
         if should_enqueue:
             # Pass the target merge issue ID to the task
