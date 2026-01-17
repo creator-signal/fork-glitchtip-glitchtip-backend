@@ -1,3 +1,4 @@
+from django.db.models import F
 from django.tasks import task
 
 from .constants import EventStatus
@@ -51,6 +52,7 @@ async def update_issues_task(
         except Issue.DoesNotExist:
             return
 
+        updated_issue_count = 0
         chunk_size = 1000
         while True:
             batch_ids = [
@@ -82,3 +84,7 @@ async def update_issues_task(
                 await IssueEvent.objects.filter(id__in=event_ids).aupdate(
                     issue=target_issue
                 )
+                updated_issue_count += len(event_ids)
+
+        target_issue.count = F("count") + updated_issue_count
+        await target_issue.asave(update_fields=["count"])
