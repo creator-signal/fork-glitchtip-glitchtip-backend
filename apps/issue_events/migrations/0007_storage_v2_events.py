@@ -1,6 +1,8 @@
 # Generated manually for Storage Engine V2
 # Implements dual-ID schema (server UUIDv7 + client UUIDv4) with nested partitioning
 
+import django.contrib.postgres.fields
+import apps.issue_events.models
 from datetime import datetime, timedelta, timezone
 
 from django.db import migrations, models
@@ -321,18 +323,15 @@ class Migration(migrations.Migration):
         # Phase 2: Create V2 table with dual-ID schema
         SeparateDatabaseAndState(
             state_operations=[
-                # Update Django state to reflect new model structure
-                migrations.RemoveField(
-                    model_name="issueevent",
-                    name="id",
+                migrations.AlterModelManagers(
+                    name="issueevent",
+                    managers=[],
                 ),
-                migrations.AddField(
+                migrations.AlterField(
                     model_name="issueevent",
-                    name="id",
-                    field=models.UUIDField(
-                        primary_key=True,
-                        editable=False,
-                        help_text="Server-generated UUIDv7 (partition key)",
+                    name="hashes",
+                    field=django.contrib.postgres.fields.ArrayField(
+                        base_field=models.TextField(), db_default=[]
                     ),
                 ),
                 migrations.AddField(
@@ -341,6 +340,27 @@ class Migration(migrations.Migration):
                     field=models.ForeignKey(
                         on_delete=models.CASCADE,
                         to="organizations_ext.Organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="issueevent",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "id",
+                        "organization",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.AlterField(
+                    model_name="issueevent",
+                    name="id",
+                    field=models.UUIDField(
+                        default=apps.issue_events.models._generate_uuid7,
+                        editable=False,
+                        help_text="Server-generated UUIDv7 (partition key, contains timestamp)",
                     ),
                 ),
                 migrations.AddField(

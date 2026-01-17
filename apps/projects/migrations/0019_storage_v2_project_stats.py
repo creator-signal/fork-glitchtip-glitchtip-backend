@@ -2,7 +2,7 @@
 # Replaces Project Statistics with V2 schema
 
 from datetime import datetime, timedelta, timezone
-from django.db import migrations
+from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 from apps.shared.migration_utils import get_sql_content
 
@@ -56,7 +56,74 @@ class Migration(migrations.Migration):
 
     operations = [
         SeparateDatabaseAndState(
-            state_operations=[],
+            state_operations=[
+                migrations.AlterModelManagers(
+                    name="issueeventprojecthourlystatistic",
+                    managers=[],
+                ),
+                migrations.AlterModelManagers(
+                    name="transactioneventprojecthourlystatistic",
+                    managers=[],
+                ),
+                migrations.AlterUniqueTogether(
+                    name="issueeventprojecthourlystatistic",
+                    unique_together=set(),
+                ),
+                migrations.AlterUniqueTogether(
+                    name="transactioneventprojecthourlystatistic",
+                    unique_together=set(),
+                ),
+                migrations.AddField(
+                    model_name="issueeventprojecthourlystatistic",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="issueeventprojecthourlystatistic",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "project",
+                        "organization",
+                        "date",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactioneventprojecthourlystatistic",
+                    name="organization",
+                    field=models.ForeignKey(
+                        on_delete=models.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="transactioneventprojecthourlystatistic",
+                    name="pk",
+                    field=models.CompositePrimaryKey(
+                        "project",
+                        "organization",
+                        "date",
+                        blank=True,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                migrations.RemoveField(
+                    model_name="issueeventprojecthourlystatistic",
+                    name="id",
+                ),
+                migrations.RemoveField(
+                    model_name="transactioneventprojecthourlystatistic",
+                    name="id",
+                ),
+            ],
             database_operations=[
                 RunSQL(
                     sql="""
