@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from uuid import UUID
 
 import aiohttp
 from django.conf import settings
@@ -62,6 +63,7 @@ async def save_monitor_checks(results, now):
         [
             MonitorCheck(
                 monitor_id=result["id"],
+                organization_id=result["organization_id"],
                 is_up=result["is_up"],
                 is_change=result["latest_is_up"] != result["is_up"],
                 start_check=now,
@@ -77,8 +79,10 @@ async def save_monitor_checks(results, now):
             last_change = result["last_change"]
             if last_change:
                 last_change = last_change.isoformat()
+            # Pass monitor_id and composite PK as a list of strings for JSON serializability
+            monitor_check_pk = [str(monitor_checks[i].id), result["organization_id"]]
             await send_monitor_notification.aenqueue(
-                monitor_checks[i].pk, not result["is_up"], last_change
+                result["id"], monitor_check_pk, not result["is_up"], last_change
             )
 
 
@@ -150,12 +154,16 @@ async def perform_checks(monitor_ids: list[int], now: str | None = None):
 
 @task
 def send_monitor_notification(
-    monitor_check_id: int, went_down: bool, last_change: str | None
+    monitor_id: int, monitor_check_pk: list, went_down: bool, last_change: str | None
 ):
     if last_change:
         last_change = parse_datetime(last_change)
+
+    # Convert list back to tuple for Django lookup
+    monitor_check_id = (UUID(monitor_check_pk[0]), monitor_check_pk[1])
+
     recipients = AlertRecipient.objects.filter(
-        alert__project__monitor__checks=monitor_check_id, alert__uptime=True
+        alert__project__monitor__id=monitor_id, alert__uptime=True
     )
     for recipient in recipients:
         if recipient.recipient_type == RecipientType.EMAIL:

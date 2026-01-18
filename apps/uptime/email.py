@@ -17,6 +17,12 @@ class MonitorEmail(DetailEmail):
     went_down = True
     last_change = None
 
+    def get_object(self, queryset=None):
+        pk = self.kwargs.get("pk")
+        if isinstance(pk, (list, tuple)):
+            return self.model.objects.get(id=pk[0], organization_id=pk[1])
+        return super().get_object(queryset)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         monitor = self.object.monitor

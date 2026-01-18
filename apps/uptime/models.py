@@ -8,10 +8,9 @@ from django.db.models import OuterRef, Subquery
 from django.urls import reverse
 from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import CreatedModel
+from glitchtip.partition_manager import UUID7Helper
 
 from .constants import HTTP_MONITOR_TYPES, MonitorCheckReason, MonitorType
 
@@ -127,15 +126,35 @@ class Monitor(models.Model):
         return self.timeout or 20
 
 
-class MonitorCheck(PostgresPartitionedModel, models.Model):
-    # Fields ordered for optimal data alignment: 8-byte (FKs, timestamps), 4-byte, 2-byte, 1-byte, then variable-width
+def _generate_uuid7():
+    """Generate UUIDv7 for MonitorCheck default."""
+    return UUID7Helper.from_datetime()
+
+
+class MonitorCheck(models.Model):
+    # Partitioned by id (UUIDv7) -> Hash by organization
+
+    # 16-byte alignment: UUIDs
+    id = models.UUIDField(
+        default=_generate_uuid7,
+        editable=False,
+    )
+    # Primary Key is composite (id, organization)
+    pk = models.CompositePrimaryKey("id", "organization")
+
+    # 8-byte alignment
     monitor = models.ForeignKey(
         Monitor, on_delete=models.CASCADE, related_name="checks"
+    )
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
     )
     start_check = models.DateTimeField(
         default=now,
         help_text="Time when the start of this check was performed",
     )
+
+    # Other fields
     response_time = models.PositiveIntegerField(
         blank=True, null=True, help_text="Reponse time in milliseconds"
     )
@@ -154,10 +173,6 @@ class MonitorCheck(PostgresPartitionedModel, models.Model):
             models.Index(fields=["monitor", "is_change", "-start_check"]),
         ]
         ordering = ("-start_check",)
-
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["start_check"]
 
     def __str__(self):
         return self.up_or_down

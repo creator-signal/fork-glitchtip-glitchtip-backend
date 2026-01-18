@@ -15,7 +15,7 @@ def perform_maintenance():
     """
     Update postgres partitions and delete old data
     """
-    call_command("pgpartition", yes=True)
+    call_command("maintain_partitions")
     cleanup_old_transaction_events()
     cleanup_old_files()
     cleanup_old_issues()

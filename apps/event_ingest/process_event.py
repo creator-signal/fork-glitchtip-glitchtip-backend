@@ -765,6 +765,7 @@ def process_issue_events(
                 event_data=event_data,
                 event_tags=event_tags,
                 release_id=release_id,
+                uuid=ingest_event.uuid,
             )
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
@@ -777,8 +778,8 @@ def process_issue_events(
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
     # Group events by time and project for event count statistics
-    data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
-        lambda: defaultdict(int)
+    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
     )
     issue_hourly_stats: defaultdict[datetime, defaultdict[int, IssueStats]] = (
         defaultdict(lambda: defaultdict(lambda: {"count": 0, "organization_id": None}))
@@ -849,7 +850,10 @@ def process_issue_events(
         hour_received = processing_event.received.replace(
             minute=0, second=0, microsecond=0
         )
-        data_stats[hour_received][processing_event.project_id] += 1
+        project_stats = data_stats[hour_received][processing_event.project_id]
+        project_stats["count"] += 1
+        project_stats["organization_id"] = processing_event.organization_id
+
         if processing_event.issue_id:  # Only count if issue is known
             issue_hourly_stats[hour_received][processing_event.issue_id]["count"] += 1
             issue_hourly_stats[hour_received][processing_event.issue_id][
@@ -858,8 +862,10 @@ def process_issue_events(
 
         issue_events.append(
             IssueEvent(
-                id=processing_event.payload.event_id,
+                id=processing_event.uuid or processing_event.payload.event_id,
+                event_id=processing_event.payload.event_id,
                 issue_id=processing_event.issue_id,
+                organization_id=processing_event.organization_id,
                 type=event_type,
                 level=processing_event.level
                 if processing_event.level
@@ -912,7 +918,7 @@ def process_issue_events(
 
 
 def update_statistics(
-    stats_data: defaultdict[datetime, defaultdict[int, int]],
+    stats_data: defaultdict[datetime, defaultdict[int, dict]],
     table_name: StatsTableName,
 ):
     """
@@ -924,24 +930,23 @@ def update_statistics(
 
     id_column_name = STATS_TABLE_CONFIG[table_name]["id_column"]
 
-    data = sorted(
-        [
-            [date, key, value]
-            for date, inner_dict in stats_data.items()
-            for key, value in inner_dict.items()
-        ],
-        key=itemgetter(0, 1),
-    )
+    data = []
+    for date, inner_dict in stats_data.items():
+        for key, stats in inner_dict.items():
+            if (organization_id := stats.get("organization_id")) is not None:
+                data.append([date, key, organization_id, stats["count"]])
 
     if not data:
         return
 
+    data.sort(key=itemgetter(0, 1, 2))
+
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s)", x) for x in data)
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
         sql = (
-            f"INSERT INTO {table_name} (date, {id_column_name}, count)\n"
+            f"INSERT INTO {table_name} (date, {id_column_name}, organization_id, count)\n"
             f"VALUES {args_str}\n"
-            f"ON CONFLICT ({id_column_name}, date)\n"
+            f"ON CONFLICT ({id_column_name}, organization_id, date)\n"
             f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
@@ -978,8 +983,8 @@ def update_org_statistics(
         args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
 
         # The ON CONFLICT target must match the composite primary key
-        # of (organization_id, issue_id, date)
-        conflict_target = f"(organization_id, {id_column_name}, date)"
+        # of (issue_id, organization_id, date)
+        conflict_target = f"({id_column_name}, organization_id, date)"
 
         # Construct the final SQL query
         sql = (
@@ -1026,7 +1031,7 @@ def update_transaction_group_stats(
         args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
 
         # The ON CONFLICT target must match the composite PK
-        conflict_target = "(date, organization_id, group_id)"
+        conflict_target = "(group_id, organization_id, date)"
 
         # Construct the final SQL query for an atomic "upsert"
         sql = f"""
@@ -1046,7 +1051,7 @@ def update_transaction_group_stats(
 
 TagStats = defaultdict[
     datetime,
-    defaultdict[int, defaultdict[int, defaultdict[int, int]]],
+    defaultdict[int, defaultdict[int, defaultdict[int, dict]]],
 ]
 
 
@@ -1076,7 +1081,11 @@ def update_tags(processing_events: list[ProcessingEvent]):
     }
 
     tag_stats: TagStats = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        lambda: defaultdict(
+            lambda: defaultdict(
+                lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
+            )
+        )
     )
     for processing_event in processing_events:
         if processing_event.issue_id is None:
@@ -1089,28 +1098,40 @@ def update_tags(processing_events: list[ProcessingEvent]):
         for key, value in processing_event.event_tags.items():
             key_id = tag_keys[key]
             value_id = tag_values[value]
-            tag_stats[minute_received][processing_event.issue_id][key_id][value_id] += 1
+            bucket = tag_stats[minute_received][processing_event.issue_id][key_id][
+                value_id
+            ]
+            bucket["count"] += 1
+            bucket["organization_id"] = processing_event.organization_id
 
     if not tag_stats:
         return
 
     # Sort to mitigate deadlocks
-    data = sorted(
-        [
-            [date, issue_id, key_id, value_id, count]
-            for date, d1 in tag_stats.items()
-            for issue_id, d2 in d1.items()
-            for key_id, d3 in d2.items()
-            for value_id, count in d3.items()
-        ],
-        key=itemgetter(0, 1, 2, 3),
-    )
+    data = []
+    for date, d1 in tag_stats.items():
+        for issue_id, d2 in d1.items():
+            for key_id, d3 in d2.items():
+                for value_id, stats in d3.items():
+                    data.append(
+                        [
+                            date,
+                            issue_id,
+                            stats["organization_id"],
+                            key_id,
+                            value_id,
+                            stats["count"],
+                        ]
+                    )
+
+    data.sort(key=itemgetter(0, 1, 2, 3, 4))
+
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO issue_events_issuetag (date, issue_id, tag_key_id, tag_value_id, count)\n"
+            "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
             f"VALUES {args_str}\n"
-            "ON CONFLICT (issue_id, date, tag_key_id, tag_value_id)\n"
+            "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date)\n"
             "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
@@ -1228,15 +1249,17 @@ def process_transaction_events(
             stats_bucket["sum_of_squares_duration"] += duration**2
     update_transaction_group_stats(group_stats)
 
-    data_stats: defaultdict[datetime, defaultdict[int, int]] = defaultdict(
-        lambda: defaultdict(int)
+    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
     )
 
     for perf_transaction in transactions:
         hour_received = perf_transaction.start_timestamp.replace(
             minute=0, second=0, microsecond=0
         )
-        data_stats[hour_received][perf_transaction.group.project_id] += 1
+        project_stats = data_stats[hour_received][perf_transaction.group.project_id]
+        project_stats["count"] += 1
+        project_stats["organization_id"] = perf_transaction.organization_id
     update_statistics(
         data_stats,
         table_name="projects_transactioneventprojecthourlystatistic",

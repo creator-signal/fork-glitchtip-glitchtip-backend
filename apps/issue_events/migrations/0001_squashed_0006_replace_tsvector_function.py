@@ -18,24 +18,6 @@ from django.conf import settings
 from django.db import migrations, models
 
 
-# --- SQL for Advanced Partitioning (from migration 0004) ---
-CREATE_ADVANCED_PARTITION_SQL = """
-    CREATE TABLE "issue_events_issueaggregate" (
-        "issue_id" BIGINT NOT NULL,
-        "organization_id" INTEGER NOT NULL,
-        "date" TIMESTAMPTZ NOT NULL,
-        "count" INTEGER NOT NULL,
-        PRIMARY KEY ("issue_id", "organization_id", "date")
-    ) PARTITION BY HASH (organization_id);
-
-    CREATE TABLE issue_events_issueaggregate_p0 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 0) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p1 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 1) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p2 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 2) PARTITION BY RANGE (date);
-    CREATE TABLE issue_events_issueaggregate_p3 PARTITION OF issue_events_issueaggregate FOR VALUES WITH (MODULUS 4, REMAINDER 3) PARTITION BY RANGE (date);
-"""
-DROP_TABLE_SQL = 'DROP TABLE IF EXISTS "issue_events_issueaggregate";'
-
-
 def get_sql_content(migration_file, filename):
     """Helper to read SQL from a file - inline to avoid dependency on apps.shared"""
     sql_dir = os.path.join(os.path.dirname(migration_file), "sql")
@@ -447,72 +429,7 @@ class Migration(migrations.Migration):
         ),
         # From migration 0004: Create IssueAggregate with advanced partitioning support
         # Fields ordered for optimal data alignment: 8-byte FKs first, then other fields
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
-                psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
-                    name="IssueAggregate",
-                    fields=[
-                        (
-                            "issue",
-                            models.ForeignKey(
-                                on_delete=django.db.models.deletion.CASCADE,
-                                to="issue_events.issue",
-                            ),
-                        ),
-                        (
-                            "organization",
-                            models.ForeignKey(
-                                on_delete=django.db.models.deletion.CASCADE,
-                                to="organizations_ext.organization",
-                            ),
-                        ),
-                        ("date", models.DateTimeField()),
-                        ("count", models.PositiveIntegerField()),
-                        (
-                            "pk",
-                            models.CompositePrimaryKey(
-                                "issue",
-                                "organization",
-                                "date",
-                                blank=True,
-                                editable=False,
-                                primary_key=True,
-                                serialize=False,
-                            ),
-                        ),
-                    ],
-                    options={
-                        "abstract": False,
-                    },
-                    partitioning_options={
-                        "method": psql_partition.types.PostgresPartitioningMethod[
-                            "RANGE"
-                        ],
-                        "key": ["date"],
-                    },
-                    bases=(psql_partition.models.partitioned.PostgresPartitionedModel,),
-                    managers=[
-                        ("objects", psql_partition.manager.manager.PostgresManager()),
-                    ],
-                ),
-                glitchtip.model_utils.TestDefaultPartition(
-                    model_name="IssueAggregate",
-                    name="default",
-                ),
-            ],
-            database_operations=[
-                migrations.RunSQL(
-                    CREATE_ADVANCED_PARTITION_SQL
-                    if getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False)
-                    else migrations.RunSQL.noop,
-                    reverse_sql=DROP_TABLE_SQL,
-                ),
-            ]
-            if getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False)
-            else [],
-        )
-        if getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False)
-        else psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
+        psql_partition.backend.migrations.operations.create_partitioned_model.PostgresCreatePartitionedModel(
             name="IssueAggregate",
             fields=[
                 (
@@ -559,11 +476,6 @@ class Migration(migrations.Migration):
         glitchtip.model_utils.TestDefaultPartition(
             model_name="IssueAggregate",
             name="default",
-        )
-        if not getattr(settings, "GLITCHTIP_ADVANCED_PARTITIONING", False)
-        else migrations.RunPython(
-            code=migrations.RunPython.noop,
-            reverse_code=migrations.RunPython.noop,
         ),
         django.contrib.postgres.operations.TrigramExtension(),
         migrations.AddIndex(

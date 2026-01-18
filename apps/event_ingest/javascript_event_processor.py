@@ -213,7 +213,11 @@ class JavascriptEventProcessor:
             map_file = None
             for debug_bundle in self.debug_bundles:
                 # Match by debug_id if both have it
-                if debug_id and debug_bundle.debug_id and str(debug_id) == str(debug_bundle.debug_id):
+                if (
+                    debug_id
+                    and debug_bundle.debug_id
+                    and str(debug_id) == str(debug_bundle.debug_id)
+                ):
                     minified_file = debug_bundle.file
                     map_file = debug_bundle.sourcemap_file
                     break
@@ -228,7 +232,7 @@ class JavascriptEventProcessor:
                     minified_file = debug_bundle.file
                     map_file = debug_bundle.sourcemap_file
                     break
-            
+
             if map_file:
                 frames_with_source.append((frame, map_file, minified_file))
 

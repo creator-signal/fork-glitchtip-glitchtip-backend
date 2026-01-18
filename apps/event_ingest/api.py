@@ -11,6 +11,7 @@ from ninja.errors import ValidationError
 
 from apps.event_ingest.interfaces import IngestTaskMessage
 from apps.issue_events.constants import IssueEventType
+from glitchtip.partition_manager import UUID7Helper
 
 from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
@@ -70,12 +71,14 @@ def event_store(
             payload.user = EventUser(ip_address=client_ip)
 
     issue_type = IssueEventType.ERROR if payload.exception else IssueEventType.DEFAULT
+    primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
         payload=payload.dict() | {"type": issue_type},
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
+        uuid=primary_id.hex,
     )
     task_result = ingest_event.enqueue(serialize_for_vtasks(asdict(issue_event)))
     result = {"event_id": payload.event_id.hex}
@@ -117,12 +120,14 @@ def event_security(
             event.user.ip_address = client_ip
         else:
             event.user = EventUser(ip_address=client_ip)
+    primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
         payload=event.dict(by_alias=True),
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
+        uuid=primary_id.hex,
     )
     ingest_event.enqueue(serialize_for_vtasks(asdict(issue_event)))
     return HttpResponse(status=201)
