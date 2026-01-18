@@ -35,6 +35,7 @@ from ..shared.schema.exception import (
     EventException,
     ValueEventException,
 )
+from ..shared.schema.threads import ValueEventThread
 from ..shared.schema.user import EventUser
 from ..shared.schema.utils import report_error_on_fail
 
@@ -262,6 +263,9 @@ class WebIngestIssueEvent(BaseIssueEvent):
     errors: list[Any] | None = None
 
     exception: IngestValueEventException | None = None
+    threads: Annotated[ValueEventThread | None, WrapValidator(report_error_on_fail)] = (
+        None
+    )
     message: str | EventMessage | None = None
     template: EventTemplate | None = None
 
@@ -441,6 +445,7 @@ class TaskIssueEvent(BaseIssueEvent):
     server_name: str | None = None
     debug_meta: DebugMeta | None = None
     exception: IngestValueEventException | None = None
+    threads: ValueEventThread | None = None
     message: str | EventMessage | None = None
     logentry: EventMessage | None = None
     transaction: str | None = None
