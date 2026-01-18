@@ -484,6 +484,39 @@ def get_and_create_releases(
     ]
 
 
+def hydrate_stacktrace(event: TaskIssueEvent):
+    """
+    If an exception has no stacktrace, attempt to find one in threads.
+    """
+    if not event.exception or not event.exception.values:
+        return
+
+    if not event.threads or not event.threads.values:
+        return
+
+    threads = event.threads.values
+    for exception in event.exception.values:
+        if exception.stacktrace:
+            continue
+
+        # Match Priority 1: thread.id == exception.thread_id
+        match = None
+        if exception.thread_id is not None:
+            match = next(
+                (t for t in threads if str(t.id) == str(exception.thread_id)), None
+            )
+
+        # Match Priority 2: thread.current is True
+        if not match:
+            match = next((t for t in threads if t.current), None)
+
+        if match and match.stacktrace:
+            if hasattr(match.stacktrace, "model_copy"):
+                exception.stacktrace = match.stacktrace.model_copy(deep=True)
+            else:
+                exception.stacktrace = match.stacktrace.copy(deep=True)
+
+
 def process_issue_events(
     messages: list[IssueTaskMessage], read_only_db: str = "default"
 ):
@@ -586,6 +619,7 @@ def process_issue_events(
     q_objects = Q()
     for ingest_event in messages:
         event = ingest_event.payload
+        hydrate_stacktrace(event)
         event.contexts = generate_contexts(event)
         event_tags = generate_tags(event)
         title = ""
@@ -654,6 +688,7 @@ def process_issue_events(
                 "extra",
                 "user",
                 "exception",
+                "threads",
                 "breadcrumbs",
                 "errors",
             },
