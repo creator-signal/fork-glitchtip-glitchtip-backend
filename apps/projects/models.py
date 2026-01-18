@@ -198,20 +198,21 @@ class ProjectKey(CreatedModel):
 
 class ProjectStatisticBase(AggregationModel):
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    pk = models.CompositePrimaryKey("project", "organization", "date")
 
     class Meta:
-        unique_together = (("project", "date"),)
         abstract = True
 
 
 class TransactionEventProjectHourlyStatistic(ProjectStatisticBase):
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
-        pass
+    pass
 
 
 class IssueEventProjectHourlyStatistic(ProjectStatisticBase):
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
-        pass
+    pass
 
 
 class ProjectAlertStatus(models.IntegerChoices):

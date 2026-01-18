@@ -1,19 +1,22 @@
-import uuid
-
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
-from psql_partition.models import PostgresPartitionedModel
-from psql_partition.types import PostgresPartitioningMethod
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
+from glitchtip.partition_manager import UUID7Helper
 from sentry.constants import MAX_CULPRIT_LENGTH
 
 from .constants import MAX_TAG_LENGTH, EventStatus, IssueEventType, LogLevel
+from .managers import EventManager
 from .utils import base32_encode
+
+
+def _generate_uuid7():
+    """Generate UUIDv7 for IssueEvent default."""
+    return UUID7Helper.from_datetime()
 
 
 class DeferedFieldManager(models.Manager):
@@ -41,19 +44,18 @@ class IssueTag(AggregationModel):
     """
 
     issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
     tag_key = models.ForeignKey(TagKey, on_delete=models.CASCADE)
     tag_value = models.ForeignKey(TagValue, on_delete=models.CASCADE)
     count = models.PositiveIntegerField(default=1)
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["issue", "date", "tag_key", "tag_value"],
-                name="issue_tag_key_value_unique",
-            )
-        ]
+    pk = models.CompositePrimaryKey(
+        "issue", "organization", "date", "tag_key", "tag_value"
+    )
 
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
+    class Meta:
         pass
 
 
@@ -67,8 +69,7 @@ class IssueAggregate(AggregationModel):
     )
     pk = models.CompositePrimaryKey("issue", "organization", "date")
 
-    class PartitioningMeta(AggregationModel.PartitioningMeta):
-        pass
+    # PartitioningMeta removed to detach from psql_partition
 
 
 class Issue(SoftDeleteModel):
@@ -186,27 +187,70 @@ class UserReport(CreatedModel):
         ]
 
 
-class IssueEvent(PostgresPartitionedModel, models.Model):
-    # Fields ordered for optimal data alignment: 16-byte, 8-byte, 2-byte, then variable-width
-    # This reduces padding and improves CPU cache utilization
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+class IssueEvent(models.Model):
+    """
+    Dual-ID Schema with Optimized Column Alignment
+
+    Column alignment (reduces padding, improves CPU cache):
+    - 16-byte: UUIDs (id, event_id)
+    - 8-byte: Timestamps and ForeignKeys (timestamp, received, issue, release, organization)
+    - 2-byte: SmallIntegers (type, level)
+    - Variable: Text/JSON fields (title, transaction, data, tags, hashes)
+
+    Dual-ID Strategy:
+    - id: Server-generated UUIDv7 (partition key, contains timestamp)
+    - event_id: Client-provided UUIDv4 (nullable, for SDK compatibility)
+
+    Partitioning:
+    - Uses native Python PartitionManager
+    - Partitioned by RANGE on id (UUIDv7)
+    - Sub-partitioned by HASH on organization_id
+    """
+
+    # 16-byte alignment: UUIDs
+    id = models.UUIDField(
+        default=_generate_uuid7,
+        editable=False,
+        help_text="Server-generated UUIDv7 (partition key, contains timestamp)",
+    )
+    # Primary Key is composite (id, organization) to allow HASH sub-partitioning by organization
+    pk = models.CompositePrimaryKey("id", "organization")
+
+    event_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Client-provided event ID from Sentry SDK (UUIDv4)",
+    )
+
+    # 8-byte alignment: Timestamps
     timestamp = models.DateTimeField(help_text="Time at which event happened")
     received = models.DateTimeField(help_text="Time at which GlitchTip accepted event")
+
+    # 8-byte alignment: Foreign keys
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
     release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
+
+    # 2-byte alignment: Small integers
     type = models.PositiveSmallIntegerField(default=0, choices=IssueEventType.choices)
     level = models.PositiveSmallIntegerField(
         choices=LogLevel.choices, default=LogLevel.ERROR
     )
+
+    # Variable-width fields
     title = models.CharField(max_length=255)
     transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
     data = models.JSONField()
-    # This could be HStore, but jsonb is just as good and removes need for
-    # 'django.contrib.postgres' which makes several unnecessary SQL calls
     tags = models.JSONField()
-    hashes = ArrayField(models.CharField(max_length=32), db_default=[])
+    hashes = ArrayField(models.TextField(), db_default=[])
+
+    # Use custom manager for smart partition-aware queries
+    objects = EventManager()
 
     class Meta:
         indexes = [
@@ -214,16 +258,18 @@ class IssueEvent(PostgresPartitionedModel, models.Model):
             GinIndex(fields=["hashes"]),
         ]
 
-    class PartitioningMeta:
-        method = PostgresPartitioningMethod.RANGE
-        key = ["received"]
-
     def __str__(self):
         return self.eventID
 
     @property
     def eventID(self):
-        return self.id.hex
+        """
+        Return the event ID for API responses.
+
+        V2 Strategy: Prefer client-provided event_id if available,
+        otherwise use server-generated id.
+        """
+        return (self.event_id or self.id).hex
 
     @property
     def message(self):

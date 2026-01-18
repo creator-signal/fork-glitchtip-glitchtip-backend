@@ -13,7 +13,7 @@ class PerformanceModelTestCase(TestCase):
             start_timestamp=now,
             timestamp=now + timedelta(seconds=1),
         )
-        self.assertEqual(transaction.duration, timedelta(seconds=1))
+        self.assertEqual(transaction.duration_timedelta, timedelta(seconds=1))
         self.assertEqual(transaction.duration_ms, 1000)
 
         # Do not allow negative durations
@@ -22,5 +22,5 @@ class PerformanceModelTestCase(TestCase):
             start_timestamp=now,
             timestamp=now - timedelta(seconds=1),
         )
-        self.assertEqual(transaction.duration, timedelta(seconds=0))
+        self.assertEqual(transaction.duration_timedelta, timedelta(seconds=0))
         self.assertEqual(transaction.duration_ms, 0)

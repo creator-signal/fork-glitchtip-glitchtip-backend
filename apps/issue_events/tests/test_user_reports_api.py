@@ -25,17 +25,17 @@ class IssuesUserReportTestCase(GlitchTipTestCaseMixin, TestCase):
             "issue_events.UserReport",
             project=self.project,
             issue=self.event.issue,
-            event_id=self.event.pk.hex,
+            event_id=self.event.id.hex,
         )
 
     def test_events_user_report(self):
-        url = get_issue_event_url(self.event.issue_id, self.event.pk.hex)
+        url = get_issue_event_url(self.event.issue_id, self.event.id.hex)
 
         res = self.client.get(url)
         self.assertContains(res, self.user_report.email)
         self.assertContains(res, self.user_report.name)
         self.assertContains(res, self.user_report.comments)
-        self.assertEqual(res.json()["userReport"]["eventID"], self.event.pk.hex)
+        self.assertEqual(res.json()["userReport"]["eventID"], self.event.id.hex)
 
     def test_issues_user_report_list(self):
         event2 = baker.make("issue_events.IssueEvent", issue__project=self.project)
@@ -43,7 +43,7 @@ class IssuesUserReportTestCase(GlitchTipTestCaseMixin, TestCase):
             "issue_events.UserReport",
             project=self.project,
             issue=event2.issue,
-            event_id=event2.pk.hex,
+            event_id=event2.id.hex,
         )
         url = list_user_reports_url(self.event.issue.id)
         res = self.client.get(url)

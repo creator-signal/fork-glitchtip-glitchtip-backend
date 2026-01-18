@@ -22,6 +22,25 @@ from ..webhooks import send_uptime_as_webhook
 
 
 class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from datetime import datetime, timedelta, timezone
+
+        from glitchtip.partition_manager import PartitionManager
+
+        # Create partitions for 2020-01-01 to 2020-01-07 to cover test data
+        manager = PartitionManager()
+        start_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        end_date = start_date + timedelta(days=7)
+        manager.create_partitions_for_date_range(
+            parent_table="uptime_monitorcheck",
+            start_date=start_date,
+            end_date=end_date,
+            partition_interval="DAY",
+            key_type="uuid7",
+        )
+
     def create_user_and_project(self):
         self.create_logged_in_user()
 

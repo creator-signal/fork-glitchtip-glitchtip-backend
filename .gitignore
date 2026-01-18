@@ -232,3 +232,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+STORAGE_V2.md

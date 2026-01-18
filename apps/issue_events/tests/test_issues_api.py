@@ -51,7 +51,7 @@ class IssueAPITestCase(GlitchTestCase):
             "issue_events.UserReport",
             project=self.project,
             issue=issue,
-            event_id=event.pk.hex,
+            event_id=event.id.hex,
             _quantity=1,
         )
         baker.make("issue_events.Comment", issue=issue, _quantity=3)

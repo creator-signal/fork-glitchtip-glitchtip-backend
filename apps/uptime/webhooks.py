@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
@@ -17,14 +18,23 @@ from .models import MonitorCheck
 
 def send_uptime_as_webhook(
     recipient: AlertRecipient,
-    monitor_check_id: int,
+    monitor_check_id: tuple | list | int,
     went_down: bool,
     last_change: datetime,
 ):
     """
     Notification about uptime event via webhook.
     """
-    monitor_check = MonitorCheck.objects.get(pk=monitor_check_id)
+    if isinstance(monitor_check_id, (list, tuple)):
+        mid = (
+            UUID(monitor_check_id[0])
+            if isinstance(monitor_check_id[0], str)
+            else monitor_check_id[0]
+        )
+        oid = int(monitor_check_id[1])
+        monitor_check = MonitorCheck.objects.get(id=mid, organization_id=oid)
+    else:
+        monitor_check = MonitorCheck.objects.get(id=monitor_check_id)
     monitor = monitor_check.monitor
 
     message = (

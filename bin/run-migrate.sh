@@ -6,4 +6,4 @@ echo "Run Django migrations"
 echo "Create Django cache table, if needed"
 ./manage.py createcachetable
 echo "Create and delete Postgres partitions"
-./manage.py pgpartition --yes
+./manage.py maintain_partitions
