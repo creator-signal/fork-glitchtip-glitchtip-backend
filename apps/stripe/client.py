@@ -25,7 +25,7 @@ STRIPE_URL = "https://api.stripe.com/v1"
 HEADERS = {
     "Authorization": f"Bearer {settings.STRIPE_SECRET_KEY}",
     "Content-Type": "application/x-www-form-urlencoded",
-    "Stripe-Version": "2025-03-31.basil",
+    "Stripe-Version": "2025-12-15.clover",
 }
 
 AIOTupleParams: TypeAlias = list[tuple[str, str]]
@@ -126,9 +126,9 @@ async def list_products() -> AsyncGenerator[list[ProductExpandedPrice], None]:
         yield page
 
 
-async def list_subscriptions() -> AsyncGenerator[
-    list[SubscriptionExpandCustomer], None
-]:
+async def list_subscriptions() -> (
+    AsyncGenerator[list[SubscriptionExpandCustomer], None]
+):
     """Yield each subscription with associated price and customer"""
     params = {"expand": ["data.customer"]}
     async for page in _paginated_stripe_get(
@@ -178,6 +178,7 @@ async def create_session(
         "customer_update[address]": "auto",
         "customer_update[name]": "auto",
         "tax_id_collection[enabled]": True,
+        "subscription_data[billing_mode][type]": "classic",
         "success_url": domain
         + "/"
         + organization_slug
@@ -202,7 +203,11 @@ async def create_portal_session(customer_id: str, organization_slug: str):
 
 
 async def create_subscription(customer: str, price: str) -> Subscription:
-    params = {"customer": customer, "items[][price]": price}
+    params = {
+        "customer": customer,
+        "items[][price]": price,
+        "billing_mode[type]": "classic",
+    }
     response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
 
