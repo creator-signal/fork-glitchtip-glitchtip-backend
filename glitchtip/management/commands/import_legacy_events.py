@@ -59,6 +59,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Show detailed progress information",
         )
+        parser.add_argument(
+            "--delete-source",
+            action="store_true",
+            help="Delete source table (issue_events_issueevent_archive) after successful import (DANGEROUS)",
+        )
 
     def handle(self, *args, **options):
         batch_size = options["batch_size"]
@@ -67,6 +72,7 @@ class Command(BaseCommand):
         verbose = options["verbose"]
         start_date = options["start_date"]
         end_date = options["end_date"]
+        delete_source = options["delete_source"]
 
         # Parse date filters
         start_dt = None
@@ -182,6 +188,12 @@ class Command(BaseCommand):
                     f"\n✓ Successfully imported {imported_count} events to V2 table"
                 )
             )
+
+            if delete_source and not dry_run:
+                self.stdout.write(self.style.WARNING("\nDeleting source table..."))
+                with connection.cursor() as cursor:
+                    cursor.execute("DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;")
+                self.stdout.write(self.style.SUCCESS("✓ Source table deleted."))
 
         except Exception as e:
             logger.exception("Error during event import")
