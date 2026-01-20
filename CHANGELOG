@@ -10,6 +10,12 @@
 - Add TRUSTED_PROXIES env var (defaults to "*") for granian support.
 - Remove unused SetRemoteAddrFromForwardedFor middleware (was never enabled)
 - Optional metrics endpoint is now just "/metrics" and not in openapi schema
+- Improve sourcemap compatibility by fixing an issue where some sentry sdk tools did not follow redirects
+- Add backend support to event threads interface. Notably, this enables stacktraces to show up when using Swift.
+- Switch to uuid7 primary id for events. Maintain existing sentry-sdk sent event id compatibility. This enables faster fetching of events, as partition table is known by uuid7 time.
+- Database column alignment optimizations
+- Unify Postgres Partitioning strategy. Remove support for pg-partman. Remove django-postgres-extras. Custom GlitchTip PartitionManager handles partitions.
+- All-in-one GlitchTip (combined web+worker process) is now considered stable
 
 # v5.2.0
 
