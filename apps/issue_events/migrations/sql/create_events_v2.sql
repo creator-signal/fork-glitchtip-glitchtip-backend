@@ -76,6 +76,3 @@ ALTER TABLE issue_events_issueevent
     ADD CONSTRAINT issue_events_issueevent_level_check
     CHECK (level >= 0 AND level <= 5);
 
--- Default partition to catch all other values (safety net and for old/future events)
-CREATE TABLE IF NOT EXISTS issue_events_issueevent_default
-    PARTITION OF issue_events_issueevent DEFAULT;

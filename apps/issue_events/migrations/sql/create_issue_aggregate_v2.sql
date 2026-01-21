@@ -21,6 +21,4 @@ ALTER TABLE issue_events_issueaggregate
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
--- Default partition (safety net)
-CREATE TABLE IF NOT EXISTS issue_events_issueaggregate_default
-    PARTITION OF issue_events_issueaggregate DEFAULT;
+
