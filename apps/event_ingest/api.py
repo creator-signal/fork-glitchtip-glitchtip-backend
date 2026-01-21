@@ -52,7 +52,7 @@ def get_ip_address(request: EventAuthHttpRequest) -> str | None:
 
 
 @router.post("/{project_id}/store/", response=EventIngestOut)
-def event_store(
+async def event_store(
     request: EventAuthHttpRequest,
     payload: EventIngestSchema,
     project_id: int,
@@ -61,7 +61,7 @@ def event_store(
     Event store is the original event ingest API from OSS Sentry but is used less often
     Unlike Envelope, it accepts only one Issue event.
     """
-    if cache.add("uuid" + payload.event_id.hex, True) is False:
+    if await cache.aadd("uuid" + payload.event_id.hex, True) is False:
         raise ValidationError([{"message": "Duplicate event id"}])
 
     if client_ip := get_ip_address(request):
@@ -80,7 +80,7 @@ def event_store(
         update_first_event=request.auth.first_event is None,
         uuid=primary_id.hex,
     )
-    task_result = ingest_event.enqueue(serialize_for_vtasks(asdict(issue_event)))
+    task_result = await ingest_event.aenqueue(serialize_for_vtasks(asdict(issue_event)))
     result = {"event_id": payload.event_id.hex}
     if settings.IS_LOAD_TEST:
         result["task_id"] = task_result.task_id
@@ -104,7 +104,7 @@ def event_envelope(
 
 
 @router.post("/{project_id}/security/")
-def event_security(
+async def event_security(
     request: EventAuthHttpRequest,
     payload: SecuritySchema,
     project_id: int,
@@ -129,5 +129,5 @@ def event_security(
         update_first_event=request.auth.first_event is None,
         uuid=primary_id.hex,
     )
-    ingest_event.enqueue(serialize_for_vtasks(asdict(issue_event)))
+    await ingest_event.aenqueue(serialize_for_vtasks(asdict(issue_event)))
     return HttpResponse(status=201)
