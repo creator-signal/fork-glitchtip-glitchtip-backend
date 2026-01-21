@@ -155,7 +155,7 @@ async def get_event_json(
     request: AuthHttpRequest, organization_slug: str, issue_id: int, event_id: uuid.UUID
 ):
     qs = get_queryset(request, organization_slug=organization_slug, issue_id=issue_id)
-    obj = await qs.filter(id=event_id).aget()
+    obj = await qs.filter(id=event_id).afirst()
     if not obj:
-        return Http404()
+        raise Http404()
     return obj
