@@ -73,7 +73,7 @@ def create_initial_partitions(apps, schema_editor):
         start_date=start_date,
         end_date=end_date,
         partition_interval="DAY",
-        hash_buckets=16,  # Default safe value
+        hash_buckets=None,  # Default safe value
         hash_column="organization_id",
         key_type="uuid7",
     )
