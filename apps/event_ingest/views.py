@@ -1,8 +1,10 @@
+import io
 import logging
 import uuid
 from dataclasses import asdict
 
 import orjson
+from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
@@ -57,12 +59,12 @@ def handle_supported_payload_error(
 
 
 @csrf_exempt
-def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
+async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
 
     try:
-        project = event_auth(request)
+        project = await event_auth(request)
     except ThrottleException as e:
         response = HttpResponse("Too Many Requests", status=429)
         response["Retry-After"] = str(e.retry_after)
@@ -79,8 +81,14 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     update_first_event = project.first_event is None
     client_ip = get_ip_address(request)
 
+    try:
+        body = await sync_to_async(lambda: request.body)()
+    except RequestDataTooBig as e:
+        return HttpResponseForbidden(f"{e}", status=413)
+    stream = io.BytesIO(body)
+
     # Read and validate Envelope Header
-    header_line = request.readline()
+    header_line = stream.readline()
     if not header_line:
         return JsonResponse({"detail": "Empty request body"}, status=400)
     try:
@@ -99,7 +107,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     # Loop through items
     while True:
         # Read Item Header line
-        item_header_line = request.readline()
+        item_header_line = stream.readline()
         if not item_header_line:
             break  # End of stream, normal exit
 
@@ -127,10 +135,7 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         read_failed = False
         try:
             if item_header.length is not None and item_header.length >= 0:
-                try:
-                    payload_bytes = request.read(item_header.length)
-                except RequestDataTooBig as e:
-                    return HttpResponseForbidden(f"{e}", status=413)
+                payload_bytes = stream.read(item_header.length)
                 if len(payload_bytes) != item_header.length:
                     logger.warning(
                         f"Read incomplete payload for type {item_header.type}. "
@@ -139,10 +144,10 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     read_failed = True  # Treat as read failure
                 else:
                     # Consume the trailing newline after length-specified payload
-                    request.readline()
+                    stream.readline()
             else:
                 # Read newline-terminated payload (common for JSON items without length)
-                payload_bytes = request.readline()
+                payload_bytes = stream.readline()
         except Exception as e:  # Catch potential read errors
             set_level("error")
             capture_exception(e)
@@ -190,8 +195,8 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                         uuid=primary_id.hex,
                     )
-                    if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_event.enqueue(
+                    if await cache.aadd("uuid" + item.event_id.hex, True):
+                        await ingest_event.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
 
@@ -206,8 +211,8 @@ def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         update_first_event=update_first_event,
                         uuid=primary_id.hex,
                     )
-                    if cache.add("uuid" + item.event_id.hex, True):
-                        ingest_transaction.enqueue(
+                    if await cache.aadd("uuid" + item.event_id.hex, True):
+                        await ingest_transaction.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
 
