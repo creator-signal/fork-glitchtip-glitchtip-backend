@@ -407,6 +407,19 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             }
         ]
 
+    @mock.patch("django.http.HttpRequest.body", new_callable=mock.PropertyMock)
+    def test_request_data_too_big(self, mock_body):
+        from django.core.exceptions import RequestDataTooBig
+
+        mock_body.side_effect = RequestDataTooBig("Payload too large")
+        res = self.client.post(
+            self.url,
+            list_to_envelope(self.django_event),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 413)
+        self.assertIn("Payload too large", res.content.decode())
+
     def test_accept_transaction_without_platform_defaults_to_other(self):
         """
         Transactions without a 'platform' field should be accepted and
