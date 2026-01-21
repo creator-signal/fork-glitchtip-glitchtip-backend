@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, connections
@@ -139,7 +140,7 @@ def get_project_auth_info_row(project_id: int, sentry_key: UUID):
         return cursor.fetchone()
 
 
-def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
+async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Return the valid and accepting events project based on a request.
 
@@ -157,7 +158,7 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
 
     # block cache check should be right before database call
     block_cache_key = EVENT_BLOCK_CACHE_KEY + str(project_id)
-    if block_value := cache.get(block_cache_key):
+    if block_value := await cache.aget(block_cache_key):
         if block_value.startswith("t"):
             if throttle := deserialize_throttle(block_value):
                 org_throttle, project_throttle = throttle
@@ -169,10 +170,10 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
 
-    row = get_project_auth_info_row(project_id, sentry_key)
+    row = await sync_to_async(get_project_auth_info_row)(project_id, sentry_key)
 
     if not row:
-        cache.set(block_cache_key, "v", REJECTION_WAIT)
+        await cache.aset(block_cache_key, "v", REJECTION_WAIT)
         raise REJECTION_MAP["v"]
 
     project = ProjectAuthInfo(
@@ -194,10 +195,10 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         or project.organization.event_throttle_rate == 100
         or project.event_throttle_rate == 100
     ):
-        cache.set(block_cache_key, "t", REJECTION_WAIT)
+        await cache.aset(block_cache_key, "t", REJECTION_WAIT)
         raise ThrottleException(600)
     if project.organization.event_throttle_rate or project.event_throttle_rate:
-        cache.set(
+        await cache.aset(
             block_cache_key,
             serialize_throttle(
                 project.organization.event_throttle_rate,
@@ -222,11 +223,11 @@ def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
         settings.BILLING_ENABLED
         and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
     ):
-        check_organization_throttle.enqueue(project.organization_id)
+        await check_organization_throttle.aenqueue(project.organization_id)
     return project
 
 
-def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
+async def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
     Throttling is also handled here.
@@ -236,4 +237,4 @@ def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
         raise HttpError(
             503, "Events are not currently being accepted due to maintenance."
         )
-    return get_project(request)
+    return await get_project(request)
