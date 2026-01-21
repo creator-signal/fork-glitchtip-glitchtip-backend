@@ -263,7 +263,9 @@ class PartitionManager:
         sqls = []
 
         if hash_buckets is None:
-            hash_buckets = getattr(settings, "PARTITION_HASH_BUCKETS", 16)
+            # Hash buckets are used to distribute data across multiple tables
+            # to avoid hot spots and improve performance.
+            hash_buckets = settings.PARTITION_HASH_BUCKETS
 
         # Ensure timezone-aware datetimes
         if start_date.tzinfo is None:

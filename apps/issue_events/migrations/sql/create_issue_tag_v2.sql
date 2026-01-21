@@ -22,16 +22,3 @@ ALTER TABLE issue_events_issuetag
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
-ALTER TABLE issue_events_issuetag
-    ADD CONSTRAINT issue_events_issuetag_tag_key_id_fkey
-    FOREIGN KEY (tag_key_id) REFERENCES issue_events_tagkey(id)
-    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
-
-ALTER TABLE issue_events_issuetag
-    ADD CONSTRAINT issue_events_issuetag_tag_value_id_fkey
-    FOREIGN KEY (tag_value_id) REFERENCES issue_events_tagvalue(id)
-    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
-
--- Default partition
-CREATE TABLE IF NOT EXISTS issue_events_issuetag_default
-    PARTITION OF issue_events_issuetag DEFAULT;
