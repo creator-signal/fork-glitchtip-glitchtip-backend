@@ -135,7 +135,10 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         read_failed = False
         try:
             if item_header.length is not None and item_header.length >= 0:
-                payload_bytes = stream.read(item_header.length)
+                try:
+                    payload_bytes = stream.read(item_header.length)
+                except RequestDataTooBig as e:
+                    return HttpResponseForbidden(f"{e}", status=413)
                 if len(payload_bytes) != item_header.length:
                     logger.warning(
                         f"Read incomplete payload for type {item_header.type}. "
