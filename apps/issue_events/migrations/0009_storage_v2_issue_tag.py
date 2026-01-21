@@ -89,15 +89,6 @@ class Migration(migrations.Migration):
                     sql=get_sql_content(__file__, "create_issue_tag_v2.sql"),
                     reverse_sql="DROP TABLE IF EXISTS issue_events_issuetag CASCADE;",
                 ),
-                # Ensure default partition attached
-                RunSQL(
-                    sql="""
-                    DROP TABLE IF EXISTS issue_events_issuetag_default;
-                    CREATE TABLE issue_events_issuetag_default
-                    PARTITION OF issue_events_issuetag DEFAULT;
-                    """,
-                    reverse_sql="",
-                ),
             ],
         ),
         migrations.RunPython(

@@ -91,7 +91,7 @@ def create_initial_partitions(apps, schema_editor):
         start_date=start_date,
         end_date=end_date,
         partition_interval="DAY",
-        hash_buckets=16,  # Default safe value
+        hash_buckets=None,  # Default safe value
         hash_column="organization_id",
         key_type="uuid7",
     )
@@ -148,9 +148,38 @@ def migrate_legacy_data(apps, schema_editor):
         if not rows:
             print("No legacy events found.")
         else:
+            # Determine valid date range for partitions we just created
+            # Logic must match create_initial_partitions to ensure coverage
+            now = datetime.now(timezone.utc)
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Find min date from rows to match create_initial_partitions logic
+            # create_initial_partitions uses min(received) of top 10k. 
+            # Since we fetched the same top 10k (deterministic order), we can find it here.
+            min_received = min(r[2] for r in rows) if rows else None
+            
+            if min_received:
+                if min_received.tzinfo is None:
+                    min_received = min_received.replace(tzinfo=timezone.utc)
+                min_date = (min_received - timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                if min_date < start_date:
+                    start_date = min_date
+
+            # End date is fixed at today + 7 days (partition logic)
+            # Partitions created: [start_date, target_end)
+            # Actually, create_initial_partitions ensures end_date is at least target_end
+            target_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=7)
+            end_date = target_end
+            
+            print(f"Filtering legacy events to valid partition range: {start_date} to {end_date}")
+
             # Prepare bulk insert
             # We construct the VALUES list manually to ensure correct types
             values = []
+            skipped_count = 0
+            
             for row in rows:
                 (
                     old_id,
@@ -169,6 +198,14 @@ def migrate_legacy_data(apps, schema_editor):
                 ) = row
 
                 if organization_id is None:
+                    continue
+
+                # Filter out-of-range events that would crash migration (no partition)
+                if received.tzinfo is None:
+                    received = received.replace(tzinfo=timezone.utc)
+                    
+                if received < start_date or received >= end_date:
+                    skipped_count += 1
                     continue
 
                 # Re-mint ID using received time
@@ -207,7 +244,7 @@ def migrate_legacy_data(apps, schema_editor):
                 ON CONFLICT DO NOTHING;
                 """
                 cursor.executemany(insert_sql, values)
-                print(f"Migrated {len(values)} events.")
+                print(f"Migrated {len(values)} events (Skipped {skipped_count} out of range).")
 
         # Cleanup
         retain_data = (

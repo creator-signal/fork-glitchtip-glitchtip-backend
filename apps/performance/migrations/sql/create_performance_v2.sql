@@ -29,10 +29,6 @@ ALTER TABLE performance_transactionevent
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
--- Default partition
-CREATE TABLE IF NOT EXISTS performance_transactionevent_default
-    PARTITION OF performance_transactionevent DEFAULT;
-
 
 -- TransactionGroupAggregate
 -- Partitioning: Range by date -> Hash by organization_id (handled by partitions)
@@ -58,7 +54,3 @@ ALTER TABLE performance_transactiongroupaggregate
     ADD CONSTRAINT performance_transactiongroupaggregate_organization_id_fkey
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
-
--- Default partition
-CREATE TABLE IF NOT EXISTS performance_transactiongroupaggregate_default
-    PARTITION OF performance_transactiongroupaggregate DEFAULT;
