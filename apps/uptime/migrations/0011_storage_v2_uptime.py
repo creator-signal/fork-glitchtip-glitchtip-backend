@@ -73,7 +73,7 @@ def create_initial_partitions(apps, schema_editor):
         start_date=start_date,
         end_date=end_date,
         partition_interval="DAY",
-        hash_buckets=16,  # Default safe value
+        hash_buckets=None,  # Default safe value
         hash_column="organization_id",
         key_type="uuid7",
     )
@@ -122,7 +122,30 @@ def migrate_legacy_data(apps, schema_editor):
         if not rows:
             print("No legacy uptime checks found.")
         else:
+            # Determine valid date range for partitions we just created
+            now = datetime.now(timezone.utc)
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Find min date from rows to match create_initial_partitions logic
+            min_start = min(r[1] for r in rows) if rows else None
+            
+            if min_start:
+                if min_start.tzinfo is None:
+                    min_start = min_start.replace(tzinfo=timezone.utc)
+                min_date = (min_start - timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                if min_date < start_date:
+                    start_date = min_date
+
+            target_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=7)
+            end_date = target_end
+            
+            print(f"Filtering legacy uptime checks to valid partition range: {start_date} to {end_date}")
+
             values = []
+            skipped_count = 0
+
             for row in rows:
                 (
                     monitor_id,
@@ -134,6 +157,14 @@ def migrate_legacy_data(apps, schema_editor):
                     data,
                     organization_id,
                 ) = row
+
+                # Filter out-of-range checks
+                if start_check.tzinfo is None:
+                    start_check = start_check.replace(tzinfo=timezone.utc)
+                    
+                if start_check < start_date or start_check >= end_date:
+                    skipped_count += 1
+                    continue
 
                 # Re-mint ID as UUIDv7 using start_check time
                 new_id = UUID7Helper.from_datetime(start_check)
@@ -161,7 +192,7 @@ def migrate_legacy_data(apps, schema_editor):
                 ON CONFLICT DO NOTHING;
                 """
                 cursor.executemany(insert_sql, values)
-                print(f"Migrated {len(values)} uptime checks.")
+                print(f"Migrated {len(values)} uptime checks (Skipped {skipped_count} out of range).")
 
         # Cleanup
         retain_data = (

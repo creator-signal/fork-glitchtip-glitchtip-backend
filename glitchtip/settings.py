@@ -105,6 +105,8 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", global_settings.DATA_UPLOAD_MAX_MEMORY_SIZE
 )
 
+PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
+
 # Events and associated data older than this will be deleted from the database
 GLITCHTIP_MAX_EVENT_LIFE_DAYS = env.int("GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=90)
 GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS = env.int(

@@ -149,19 +149,6 @@ class Migration(migrations.Migration):
                     DROP TABLE IF EXISTS performance_transactiongroupaggregate CASCADE;
                     """,
                 ),
-                # Ensure default partitions are attached properly (fixes check violation issues)
-                RunSQL(
-                    sql="""
-                    DROP TABLE IF EXISTS performance_transactionevent_default;
-                    CREATE TABLE performance_transactionevent_default
-                    PARTITION OF performance_transactionevent DEFAULT;
-
-                    DROP TABLE IF EXISTS performance_transactiongroupaggregate_default;
-                    CREATE TABLE performance_transactiongroupaggregate_default
-                    PARTITION OF performance_transactiongroupaggregate DEFAULT;
-                    """,
-                    reverse_sql="",
-                ),
             ],
         ),
         migrations.RunPython(

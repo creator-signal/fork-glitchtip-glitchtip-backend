@@ -20,9 +20,6 @@ ALTER TABLE projects_issueeventprojecthourlystatistic
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
-CREATE TABLE IF NOT EXISTS projects_issueeventprojecthourlystatistic_default
-    PARTITION OF projects_issueeventprojecthourlystatistic DEFAULT;
-
 
 -- TransactionEventProjectHourlyStatistic
 CREATE TABLE IF NOT EXISTS projects_transactioneventprojecthourlystatistic (
@@ -43,5 +40,3 @@ ALTER TABLE projects_transactioneventprojecthourlystatistic
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
-CREATE TABLE IF NOT EXISTS projects_transactioneventprojecthourlystatistic_default
-    PARTITION OF projects_transactioneventprojecthourlystatistic DEFAULT;
