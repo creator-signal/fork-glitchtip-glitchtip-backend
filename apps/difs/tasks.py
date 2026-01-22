@@ -56,15 +56,20 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
     event_json = event.dict()
 
     for dif in difs:
-        if StacktraceProcessor.is_supported(event_json, dif) is False:
+        is_supported = StacktraceProcessor.is_supported(event_json, dif)
+        if is_supported is False:
             continue
         blobs = [dif.file.blob]
         with difs_concat_file_blobs_to_disk(blobs) as symbol_file:
             remapped_stacktrace = StacktraceProcessor.resolve_stacktrace(
-                event_json, symbol_file.name
+                event_json,
+                symbol_file.name,
+                project_id=project_id,
+                debug_id=dif.data.get("debug_id"),
             )
             if remapped_stacktrace is not None and remapped_stacktrace.score > 0:
                 resolved_stracktrackes.append(remapped_stacktrace)
+
     if len(resolved_stracktrackes) > 0:
         best_remapped_stacktrace = max(
             resolved_stracktrackes, key=lambda item: item.score
