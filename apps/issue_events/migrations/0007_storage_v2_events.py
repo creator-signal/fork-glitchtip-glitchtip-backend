@@ -152,12 +152,12 @@ def migrate_legacy_data(apps, schema_editor):
             # Logic must match create_initial_partitions to ensure coverage
             now = datetime.now(timezone.utc)
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            
+
             # Find min date from rows to match create_initial_partitions logic
-            # create_initial_partitions uses min(received) of top 10k. 
+            # create_initial_partitions uses min(received) of top 10k.
             # Since we fetched the same top 10k (deterministic order), we can find it here.
             min_received = min(r[2] for r in rows) if rows else None
-            
+
             if min_received:
                 if min_received.tzinfo is None:
                     min_received = min_received.replace(tzinfo=timezone.utc)
@@ -170,16 +170,20 @@ def migrate_legacy_data(apps, schema_editor):
             # End date is fixed at today + 7 days (partition logic)
             # Partitions created: [start_date, target_end)
             # Actually, create_initial_partitions ensures end_date is at least target_end
-            target_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=7)
+            target_end = now.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) + timedelta(days=7)
             end_date = target_end
-            
-            print(f"Filtering legacy events to valid partition range: {start_date} to {end_date}")
+
+            print(
+                f"Filtering legacy events to valid partition range: {start_date} to {end_date}"
+            )
 
             # Prepare bulk insert
             # We construct the VALUES list manually to ensure correct types
             values = []
             skipped_count = 0
-            
+
             for row in rows:
                 (
                     old_id,
@@ -203,7 +207,7 @@ def migrate_legacy_data(apps, schema_editor):
                 # Filter out-of-range events that would crash migration (no partition)
                 if received.tzinfo is None:
                     received = received.replace(tzinfo=timezone.utc)
-                    
+
                 if received < start_date or received >= end_date:
                     skipped_count += 1
                     continue
@@ -244,7 +248,9 @@ def migrate_legacy_data(apps, schema_editor):
                 ON CONFLICT DO NOTHING;
                 """
                 cursor.executemany(insert_sql, values)
-                print(f"Migrated {len(values)} events (Skipped {skipped_count} out of range).")
+                print(
+                    f"Migrated {len(values)} events (Skipped {skipped_count} out of range)."
+                )
 
         # Cleanup
         retain_data = (
