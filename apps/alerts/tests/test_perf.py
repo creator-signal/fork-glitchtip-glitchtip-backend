@@ -39,15 +39,17 @@ class PartitionPruningTestCase(GlitchTipTestCase):
                 target_query = sql
                 break
 
-        self.assertIsNotNone(target_query, "Could not find the target aggregation query")
-        
+        self.assertIsNotNone(
+            target_query, "Could not find the target aggregation query"
+        )
+
         # Level 1 Pruning: ID Range
         self.assertIn(
             '"issue_events_issueevent"."id" >=',
             target_query,
             "Query does not contain ID filter for partition pruning",
         )
-        
+
         # Level 2 Pruning: Organization Hash
         self.assertIn(
             '"issue_events_issueevent"."organization_id" =',
