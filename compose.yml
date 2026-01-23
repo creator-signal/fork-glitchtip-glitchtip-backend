@@ -29,18 +29,12 @@ services:
     #tty: true
     build: .
     user: root # Allows for usage of ipdb, apt, etc in dev
-    command: ./bin/run-granian.sh --reload --reload-ignore-worker-failure --access-log
+    command: ./bin/run-all-in-one.sh --reload --reload-ignore-worker-failure
+    #command: ./bin/run-granian.sh --reload --reload-ignore-worker-failure --access-log
     #command: python app.py
     #command: ./manage.py runserver 0.0.0.0:8000
     depends_on: *default-depends_on
     volumes: *default-volumes
     ports:
       - "8000:8000"
-    environment: *default-environment
-  worker:
-    build: .
-    user: root
-    command: bin/run-worker.sh
-    depends_on: *default-depends_on
-    volumes: *default-volumes
     environment: *default-environment
