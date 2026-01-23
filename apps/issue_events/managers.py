@@ -135,24 +135,12 @@ class EventManager(models.Manager):
                 end=now()
             )
         """
-        if start and end:
-            try:
-                start_uuid, end_uuid = UUID7Helper.get_range_for_date(start, end)
-                return self.filter(
-                    id__gte=start_uuid,
-                    id__lt=end_uuid,
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to convert time range to UUID range: {e}, "
-                    f"falling back to received column"
-                )
-                # Fallback to standard datetime filtering
-                return self.filter(received__gte=start, received__lt=end)
+        qs = self.all()
+        if start:
+            start_uuid = UUID7Helper._uuid7_for_timestamp(start, min_random=True)
+            qs = qs.filter(received__gte=start, id__gte=start_uuid)
+        if end:
+            end_uuid = UUID7Helper._uuid7_for_timestamp(end, min_random=True)
+            qs = qs.filter(received__lt=end, id__lt=end_uuid)
 
-        elif start:
-            return self.filter(received__gte=start)
-        elif end:
-            return self.filter(received__lt=end)
-
-        return self.all()
+        return qs
