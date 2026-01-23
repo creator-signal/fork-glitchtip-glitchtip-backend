@@ -63,6 +63,22 @@ test:
         POSTGRES_VERSION: '18'
         CACHE_IMAGE: 'valkey/valkey:9'
 
+e2e:
+  image: docker:29
+  services:
+    - docker:29-dind
+  variables:
+    GLITCHTIP_URL: "http://docker:8000"
+  script:
+    - apk add --no-cache python3 py3-pip bash curl
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install requests
+    - docker compose -f compose.e2e.yml up -d --wait
+    - python3 integration_tests/test_e2e.py
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+
 lint:
   image: python:3.13-slim
   script:
