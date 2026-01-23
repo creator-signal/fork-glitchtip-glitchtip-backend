@@ -133,11 +133,11 @@ class WebhookTestCase(GlitchTipTestCase):
         )
         issue = baker.make("issue_events.Issue", project=project)
 
-        baker.make("issue_events.IssueEvent", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue, organization=issue.project.organization)
         process_event_alerts.call()
         self.assertEqual(Notification.objects.count(), 0)
 
-        baker.make("issue_events.IssueEvent", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue, organization=issue.project.organization)
         process_event_alerts.call()
         self.assertEqual(
             Notification.objects.filter(
@@ -170,8 +170,8 @@ class WebhookTestCase(GlitchTipTestCase):
         issue.project = project
         issue.save()
 
-        baker.make("issue_events.IssueEvent", issue=issue)
-        baker.make("issue_events.IssueEvent", issue=issue)
+        baker.make("issue_events.IssueEvent", issue=issue, organization=issue.project.organization)
+        baker.make("issue_events.IssueEvent", issue=issue, organization=issue.project.organization)
         process_event_alerts.call()
 
         mock_post.assert_called_once()
