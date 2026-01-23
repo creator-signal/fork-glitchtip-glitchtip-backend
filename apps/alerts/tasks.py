@@ -66,6 +66,7 @@ def process_event_alerts():
             .exclude(notification__project_alert=alert)
             .annotate(num_events=Count("issueevent"))
             .filter(num_events__gte=quantity_in_timespan)
+            .values_list("id", flat=True)
         )
         if issue_ids:
             issues = issues.filter(id__in=issue_ids)

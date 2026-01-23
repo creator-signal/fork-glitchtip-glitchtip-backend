@@ -54,3 +54,15 @@ class PartitionPruningTestCase(GlitchTipTestCase):
             target_query,
             "Query does not contain organization_id filter for hash partition pruning",
         )
+
+        # Optimization verification: Ensure we are only selecting the ID, not the full object
+        self.assertIn(
+            'SELECT "issue_events_issue"."id" AS "id" FROM',
+            target_query,
+            "Query should select only the ID column (values_list optimization)",
+        )
+        self.assertNotIn(
+            'SELECT "issue_events_issue"."title"',
+            target_query,
+            "Query is selecting unnecessary columns (title), implying full object fetch",
+        )
