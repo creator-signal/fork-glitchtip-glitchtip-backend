@@ -7,6 +7,7 @@ from django.utils import timezone
 from django_valkey import get_valkey_connection
 
 from apps.issue_events.models import Issue
+from glitchtip.partition_manager import UUID7Helper
 
 from .constants import ISSUE_IDS_KEY
 from .models import Notification, ProjectAlert
@@ -41,7 +42,7 @@ def process_event_alerts():
 
     project_alerts = ProjectAlert.objects.filter(
         quantity__isnull=False, timespan_minutes__isnull=False
-    )
+    ).select_related("project")
     if issue_ids == []:
         return  # There are no new issues, no work to do
 
@@ -52,11 +53,15 @@ def process_event_alerts():
 
     for alert in project_alerts:
         start_time = now - timedelta(minutes=alert.timespan_minutes)
+        # Pruning partition optimization
+        start_uuid = UUID7Helper._uuid7_for_timestamp(start_time, min_random=True)
         quantity_in_timespan = alert.quantity
         issues = (
             Issue.objects.filter(
                 project_id=alert.project_id,
                 issueevent__received__gte=start_time,
+                issueevent__id__gte=start_uuid,
+                issueevent__organization_id=alert.project.organization_id,
             )
             .exclude(notification__project_alert=alert)
             .annotate(num_events=Count("issueevent"))
