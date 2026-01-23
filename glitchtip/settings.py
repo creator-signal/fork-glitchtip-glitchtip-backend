@@ -479,10 +479,18 @@ for db_config in DATABASES.values():
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
     )
     db_config.setdefault("DISABLE_SERVER_SIDE_CURSORS", True)
-    pooling_already_configured = "pool" in db_config.get("OPTIONS", {})
+
+    # Check if 'OPTIONS' exists and if 'pool' is already defined (e.g. via specific dict config)
+    options = db_config.setdefault("OPTIONS", {})
+    pooling_already_configured = "pool" in options
+
+    # Django Connection Pooling requires CONN_MAX_AGE = 0
     if not pooling_already_configured and db_config["CONN_MAX_AGE"] == 0:
-        db_config.setdefault("OPTIONS", {})
-        db_config["OPTIONS"]["pool"] = True
+        options["pool"] = {
+            "min_size": env.int("DATABASE_POOL_MIN_SIZE", 2),
+            "max_size": env.int("DATABASE_POOL_MAX_SIZE", 20),
+            "timeout": env.int("DATABASE_POOL_TIMEOUT", 30),
+        }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
