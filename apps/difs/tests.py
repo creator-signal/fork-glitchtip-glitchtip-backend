@@ -259,7 +259,9 @@ class IOSSymbolicationTestCase(GlitchTestCase):
     def setUp(self):
         self.client.force_login(self.user)
 
-    def create_source_bundle(self, debug_id, source_code, file_path="/Users/test/ContentView.swift"):
+    def create_source_bundle(
+        self, debug_id, source_code, file_path="/Users/test/ContentView.swift"
+    ):
         manifest = {
             "files": {
                 f"files{file_path}": {

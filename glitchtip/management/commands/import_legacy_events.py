@@ -192,7 +192,9 @@ class Command(BaseCommand):
             if delete_source and not dry_run:
                 self.stdout.write(self.style.WARNING("\nDeleting source table..."))
                 with connection.cursor() as cursor:
-                    cursor.execute("DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;")
+                    cursor.execute(
+                        "DROP TABLE IF EXISTS issue_events_issueevent_archive CASCADE;"
+                    )
                 self.stdout.write(self.style.SUCCESS("✓ Source table deleted."))
 
         except Exception as e:
