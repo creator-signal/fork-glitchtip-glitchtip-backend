@@ -37,8 +37,11 @@ test:
     SECRET_KEY: testing
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
+    VALKEY_URL: "redis://redis:6379"
   services:
     - postgres:$POSTGRES_VERSION
+    - name: $CACHE_IMAGE
+      alias: redis
   cache:
     - key:
         files:
@@ -55,8 +58,10 @@ test:
     matrix:
       - PYTHON_VERSION: '3.12'
         POSTGRES_VERSION: '14'
+        CACHE_IMAGE: 'redis:7'
       - PYTHON_VERSION: '3.14'
         POSTGRES_VERSION: '18'
+        CACHE_IMAGE: 'valkey/valkey:9'
 
 lint:
   image: python:3.13-slim
