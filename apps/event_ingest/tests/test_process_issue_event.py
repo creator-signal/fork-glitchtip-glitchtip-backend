@@ -1,7 +1,12 @@
+import json
 import os
 import shutil
+import tempfile
 import uuid
+import zipfile
+from hashlib import sha1
 
+from django.core.files import File as DjangoFile
 from django.tasks import task_backends
 from django.test import override_settings
 from django.urls import reverse
@@ -490,6 +495,127 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 429)
 
+    def create_source_bundle_with_debug_symbols(self, debug_id):
+        source_code = """import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        Button("Trigger Error") {
+            triggerError()
+        }
+    }
+
+    func triggerError() {
+        throw NSError(domain: "TestError", code: 1)
+    }
+}
+"""
+        file_path = "/Users/test/ContentView.swift"
+
+        manifest = {
+            "files": {
+                f"files{file_path}": {
+                    "type": "source",
+                    "path": file_path,
+                }
+            },
+            "arch": "arm64",
+            "code_id": "testcodeid123",
+            "debug_id": debug_id,
+            "object_name": "TestApp.debug.dylib",
+        }
+
+        in_memory_buffer = tempfile.NamedTemporaryFile(delete=False)
+        with zipfile.ZipFile(in_memory_buffer, mode="w") as zipf:
+            zipf.writestr("manifest.json", json.dumps(manifest))
+            zipf.writestr(f"files{file_path}", source_code)
+
+        in_memory_buffer.seek(0)
+        content = in_memory_buffer.read()
+        checksum = sha1(content).hexdigest()
+
+        fileblob = baker.make("files.FileBlob", checksum=checksum)
+        in_memory_buffer.seek(0)
+        fileblob.blob.save("source_bundle.zip", DjangoFile(in_memory_buffer))
+        in_memory_buffer.close()
+
+        file = baker.make("files.File", checksum=checksum, blob=fileblob)
+
+        source_dif = baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=file,
+            name="TestApp.debug.dylib",
+            data={
+                "kind": "src",
+                "debug_id": debug_id,
+                "arch": "arm64",
+                "symbol_type": "native",
+                "features": ["sources"],
+            },
+        )
+
+        return source_dif
+
+    def test_ios_event_with_source_context(self):
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+
+        self.create_source_bundle_with_debug_symbols(debug_id)
+
+        payload = {
+            "platform": "cocoa",
+            "contexts": {
+                "device": {"arch": "arm64"},
+                "os": {"name": "iOS", "version": "17.0"},
+            },
+            "exception": {
+                "values": [
+                    {
+                        "type": "NSError",
+                        "value": "Test error from iOS",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "function": "$s12ErrorFactory11ContentViewV07triggerA0yyF",
+                                    "filename": "/Users/test/ContentView.swift",
+                                    "lineno": 10,
+                                    "in_app": True,
+                                    "image_addr": "0x100000000",
+                                    "instruction_addr": "0x100001000",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        }
+
+        self.process_events(payload)
+
+        event = IssueEvent.objects.first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.data["platform"], "cocoa")
+
+        exception = event.data["exception"]["values"][0]
+        self.assertIn("stacktrace", exception)
+        frames = exception["stacktrace"]["frames"]
+        self.assertEqual(len(frames), 1)
+
+    def test_ios_real_error_factory_payload(self):
+        """Test with real payload captured from Error Factory iOS app"""
+        payload = self.get_json_data("events/test_data/ios_error_factory.json")["data"]
+
+
+        self.process_events(payload)
+
+        event = IssueEvent.objects.first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.data["platform"], "cocoa")
+
+        thread = event.data["threads"]["values"][0]
+        self.assertIn("stacktrace", thread)
+        frames = thread["stacktrace"]["frames"]
+        self.assertEqual(len(frames), 61)
 
 class SentryCompatTestCase(EventIngestTestCase):
     """

@@ -1,5 +1,7 @@
 import contextlib
+import json
 import tempfile
+import zipfile
 from hashlib import sha1
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +10,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.difs.stacktrace_processor import (
+    digest_symbol,
+    extract_source_from_bundle,
+    find_source_bundle,
+)
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
 from apps.files.models import File
 from glitchtip.test_utils import generators  # noqa: F401
@@ -242,3 +249,128 @@ class DifsTasksTestCase(GlitchTestCase):
         chunks = [fileblob1.checksum, fileblob2.checksum]
         with self.assertRaises(ChecksumMismatched):
             difs_create_file_from_chunks("123", checksum, chunks)
+
+
+class IOSSymbolicationTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def create_source_bundle(self, debug_id, source_code, file_path="/Users/test/ContentView.swift"):
+        manifest = {
+            "files": {
+                f"files{file_path}": {
+                    "type": "source",
+                    "path": file_path,
+                }
+            },
+            "arch": "arm64",
+            "code_id": "testcodeid123",
+            "debug_id": debug_id,
+            "object_name": "TestApp.debug.dylib",
+        }
+
+        in_memory_buffer = tempfile.NamedTemporaryFile(delete=False)
+        with zipfile.ZipFile(in_memory_buffer, mode="w") as zipf:
+            zipf.writestr("manifest.json", json.dumps(manifest))
+            zipf.writestr(f"files{file_path}", source_code)
+
+        in_memory_buffer.seek(0)
+        content = in_memory_buffer.read()
+        checksum = sha1(content).hexdigest()
+
+        fileblob = baker.make("files.FileBlob", checksum=checksum)
+        in_memory_buffer.seek(0)
+        fileblob.blob.save("source_bundle.zip", DjangoFile(in_memory_buffer))
+        in_memory_buffer.close()
+
+        file = baker.make("files.File", checksum=checksum, blob=fileblob)
+
+        dif = baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=file,
+            data={
+                "kind": "src",
+                "debug_id": debug_id,
+                "arch": "arm64",
+                "symbol_type": "native",
+                "features": ["sources"],
+            },
+        )
+        return dif
+
+    def test_digest_symbol_accepts_lang_unknown(self):
+        """Test that we do not reject symbols with lang = unkown"""
+        mock_symbol = MagicMock()
+        mock_symbol.lang = "unknown"
+        mock_symbol.symbol = "+[SentrySDKInternal captureError:]"
+        mock_symbol.full_path = None
+        mock_symbol.line = 0
+
+        result = digest_symbol([mock_symbol])
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.symbol, "+[SentrySDKInternal captureError:]")
+
+    def test_find_source_bundle_by_debug_id(self):
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        source_code = "import SwiftUI\n\nstruct ContentView: View {}\n"
+
+        dif = self.create_source_bundle(debug_id, source_code)
+
+        found_bundle = find_source_bundle(self.project.id, debug_id)
+
+        self.assertIsNotNone(found_bundle)
+        self.assertEqual(found_bundle.id, dif.id)
+        self.assertEqual(found_bundle.data["kind"], "src")
+        self.assertEqual(found_bundle.data["debug_id"], debug_id)
+
+    def test_find_source_bundle_not_found(self):
+        debug_id = "00000000-0000-0000-0000-000000000000"
+
+        found_bundle = find_source_bundle(self.project.id, debug_id)
+
+        self.assertIsNone(found_bundle)
+
+    def test_find_source_bundle_wrong_project(self):
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        other_project = baker.make("projects.Project", organization=self.organization)
+
+        self.create_source_bundle(debug_id, "test code")
+
+        found_bundle = find_source_bundle(other_project.id, debug_id)
+
+        self.assertIsNone(found_bundle)
+
+    def test_extract_source_from_bundle(self):
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        source_code = """import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        Text("Hello")
+    }
+}
+"""
+        file_path = "/Users/test/ContentView.swift"
+        dif = self.create_source_bundle(debug_id, source_code, file_path)
+
+        lines = extract_source_from_bundle(dif, file_path)
+
+        self.assertIsNotNone(lines)
+        self.assertEqual(len(lines), 7)
+        self.assertEqual(lines[0], "import SwiftUI")
+        self.assertEqual(lines[2], "struct ContentView: View {")
+        self.assertEqual(lines[4], '        Text("Hello")')
+
+    def test_extract_source_from_bundle_nonexistent_file(self):
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        dif = self.create_source_bundle(debug_id, "test code")
+
+        lines = extract_source_from_bundle(dif, "/NonExistent.swift")
+
+        self.assertIsNone(lines)
