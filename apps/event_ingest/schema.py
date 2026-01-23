@@ -92,7 +92,7 @@ TruncatedStr = Annotated[str, WrapValidator(truncate_on_error)]
 class EventMessage(LaxIngestSchema):
     formatted: TruncatedStr = Field(max_length=8192, default="")
     message: str | None = None
-    params: list[CoercedStr] | dict[str, str] | None = None
+    params: list[CoercedStr | None] | dict[str, CoercedStr | None] | None = None
 
     @model_validator(mode="after")
     def set_formatted(self) -> "EventMessage":
@@ -173,7 +173,7 @@ class RequestEnv(LaxIngestSchema):
 
 QueryString = str | ListKeyValue | dict[str, str | dict[str, Any] | None]
 """Raw URL querystring, list, or dict"""
-KeyValueFormat = list[list[str | None]] | dict[str, CoercedStr | None]
+KeyValueFormat = list[list[CoercedStr | None]] | dict[str, CoercedStr | None]
 """
 key-values in list or dict format. Example {browser: firefox} or [[browser, firefox]]
 """

@@ -605,7 +605,6 @@ struct ContentView: View {
         """Test with real payload captured from Error Factory iOS app"""
         payload = self.get_json_data("events/test_data/ios_error_factory.json")["data"]
 
-
         self.process_events(payload)
 
         event = IssueEvent.objects.first()
@@ -616,6 +615,7 @@ struct ContentView: View {
         self.assertIn("stacktrace", thread)
         frames = thread["stacktrace"]["frames"]
         self.assertEqual(len(frames), 61)
+
 
 class SentryCompatTestCase(EventIngestTestCase):
     """

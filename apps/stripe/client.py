@@ -126,9 +126,9 @@ async def list_products() -> AsyncGenerator[list[ProductExpandedPrice], None]:
         yield page
 
 
-async def list_subscriptions() -> (
-    AsyncGenerator[list[SubscriptionExpandCustomer], None]
-):
+async def list_subscriptions() -> AsyncGenerator[
+    list[SubscriptionExpandCustomer], None
+]:
     """Yield each subscription with associated price and customer"""
     params = {"expand": ["data.customer"]}
     async for page in _paginated_stripe_get(
