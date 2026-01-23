@@ -603,8 +603,8 @@ struct ContentView: View {
 
     def test_ios_real_error_factory_payload(self):
         """Test with real payload captured from Error Factory iOS app"""
-        envelope_data = self.get_json_data("events/test_data/ios_error_factory.json")
-        payload = envelope_data["request"]["envelope"]["items"][0]["data"]
+        payload = self.get_json_data("events/test_data/ios_error_factory.json")["data"]
+
 
         self.process_events(payload)
 
