@@ -67,12 +67,13 @@ async def heartbeat_check(
     when the service is up.
     """
     monitor = await aget_object_or_404(
-        Monitor.objects.with_check_annotations(),
+        Monitor.objects.with_check_annotations().select_related("organization"),
         organization__slug=organization_slug,
         endpoint_id=endpoint_id,
     )
     monitor_check = await MonitorCheck.objects.acreate(
         monitor=monitor,
+        organization=monitor.organization,
         is_up=True,
         reason=None,
         is_change=monitor.latest_is_up is not True,
@@ -81,7 +82,10 @@ async def heartbeat_check(
         last_change = monitor.last_change
         if last_change:
             last_change = last_change.isoformat()
-        await send_monitor_notification.aenqueue(monitor_check.pk, False, last_change)
+        monitor_check_pk = [str(monitor_check.id), monitor.organization.id]
+        await send_monitor_notification.aenqueue(
+            monitor.id, monitor_check_pk, False, last_change
+        )
 
     return monitor_check
 
