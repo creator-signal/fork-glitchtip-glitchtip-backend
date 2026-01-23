@@ -38,4 +38,4 @@ fi
 
 # Run Granian
 
-exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --log-level $G_LOG_LEVEL --no-ws "$@"
+exec granian --interface asginl glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --log-level $G_LOG_LEVEL --no-ws "$@"
