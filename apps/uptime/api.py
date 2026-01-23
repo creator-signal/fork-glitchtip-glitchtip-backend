@@ -82,7 +82,10 @@ async def heartbeat_check(
         last_change = monitor.last_change
         if last_change:
             last_change = last_change.isoformat()
-        await send_monitor_notification.aenqueue(monitor_check.pk, False, last_change)
+        monitor_check_pk = [str(monitor_check.id), monitor.organization.id]
+        await send_monitor_notification.aenqueue(
+            monitor.id, monitor_check_pk, False, last_change
+        )
 
     return monitor_check
 
