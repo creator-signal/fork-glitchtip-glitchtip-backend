@@ -304,6 +304,7 @@ class IOSSymbolicationTestCase(GlitchTestCase):
         return dif
 
     def test_digest_symbol_accepts_lang_unknown(self):
+        """Test that we do not reject symbols with lang = unkown"""
         mock_symbol = MagicMock()
         mock_symbol.lang = "unknown"
         mock_symbol.symbol = "+[SentrySDKInternal captureError:]"
