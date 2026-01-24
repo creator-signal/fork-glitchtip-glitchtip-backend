@@ -87,21 +87,6 @@ async def event_store(
     return result
 
 
-@router.post("/{int:project_id}/envelope/", response=EnvelopeIngestOut)
-def event_envelope(
-    request: EventAuthHttpRequest,
-    payload: EnvelopeSchema,
-    project_id: int,
-):
-    """
-    Envelopes can contain various types of data.
-    GlitchTip supports issue events and transaction events.
-    Ignore other data types.
-    Do support multiple valid events
-    Make as few io calls as possible. Some language SDKs (PHP) cannot run async code
-    and will block while waiting for GlitchTip to respond.
-    """
-
 
 @router.post("/{project_id}/security/")
 async def event_security(

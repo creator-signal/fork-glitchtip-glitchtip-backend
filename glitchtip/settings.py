@@ -15,14 +15,11 @@ import warnings
 from datetime import timedelta
 
 import environ
-import sentry_sdk
 from corsheaders.defaults import default_headers
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
-from django.http import UnreadablePostError
 from django.utils.csp import CSP
 from django_vtasks.scheduler import crontab
-from sentry_sdk.integrations.django import DjangoIntegration
 
 env = environ.FileAwareEnv(
     ALLOWED_HOSTS=(list, ["*"]),
@@ -138,19 +135,6 @@ if "BASE_PATH" in os.environ or "FORCE_SCRIPT_NAME" in os.environ:
 
 # GlitchTip can track GlitchTip's own errors.
 # If enabling this, use a different server to avoid infinite loops.
-def before_send(event, hint):
-    """Don't log useless, inactionable errors in Sentry."""
-    if "log_record" in hint:
-        if hint["log_record"].name == "django.security.DisallowedHost":
-            return None
-    if "exc_info" in hint:
-        _, exc_value, _ = hint["exc_info"]
-        if isinstance(exc_value, UnreadablePostError):
-            return None
-
-    return event
-
-
 SENTRY_DSN = env.str("SENTRY_DSN", None)
 # Optionally allow a different DSN for the frontend
 SENTRY_FRONTEND_DSN = env.str("SENTRY_FRONTEND_DSN", SENTRY_DSN)
@@ -159,19 +143,32 @@ SENTRY_SAMPLE_RATE = env.float("SENTRY_SAMPLE_RATE", 1.0)
 # Set traces_sample_rate to 1.0 to capture 100%. Recommended to keep this value low.
 SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", 0.01)
 
-
-# Ignore whitenoise served static routes
-def traces_sampler(sampling_context):
-    if (
-        sampling_context.get("wsgi_environ", {})
-        .get("PATH_INFO", "")
-        .startswith(STATIC_URL)
-    ):
-        return 0.0
-    return SENTRY_TRACES_SAMPLE_RATE
-
-
 if SENTRY_DSN:
+    import sentry_sdk
+    from django.http import UnreadablePostError
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    def before_send(event, hint):
+        """Don't log useless, inactionable errors in Sentry."""
+        if "log_record" in hint:
+            if hint["log_record"].name == "django.security.DisallowedHost":
+                return None
+        if "exc_info" in hint:
+            _, exc_value, _ = hint["exc_info"]
+            if isinstance(exc_value, UnreadablePostError):
+                return None
+        return event
+
+    # Ignore whitenoise served static routes
+    def traces_sampler(sampling_context):
+        if (
+            sampling_context.get("wsgi_environ", {})
+            .get("PATH_INFO", "")
+            .startswith(STATIC_URL)
+        ):
+            return 0.0
+        return SENTRY_TRACES_SAMPLE_RATE
+
     release = "glitchtip@" + GLITCHTIP_VERSION if GLITCHTIP_VERSION else None
     sentry_sdk.init(
         dsn=SENTRY_DSN,
@@ -214,12 +211,16 @@ AIOHTTP_CONFIG = {
 }
 
 # Application definition
+ENABLE_ADMIN = env.bool("ENABLE_ADMIN", True)
+ENABLE_OPENAPI = env.bool("ENABLE_OPENAPI", True)
+
 WEB_INSTALLED_APPS = [
-    "django.contrib.admin",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "ninja",
 ]
+if ENABLE_ADMIN:
+    WEB_INSTALLED_APPS.insert(0, "django.contrib.admin")
 
 
 INSTALLED_APPS = [
