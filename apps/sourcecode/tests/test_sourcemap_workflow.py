@@ -94,7 +94,7 @@ class SourceCodeTestCase(GlitchTestCase):
             "api:artifact_bundle_assemble", args=[self.organization.slug]
         )
         envelope_url = (
-            reverse("api:event_envelope", args=[self.project.id])
+            reverse("event_envelope", args=[self.project.id])
             + f"?sentry_key={self.projectkey.public_key}"
         )
 
