@@ -74,10 +74,23 @@ e2e:
     - python3 -m venv .venv
     - source .venv/bin/activate
     - pip install requests
-    - docker compose -f compose.e2e.yml up -d --wait
+    - echo "Running e2e with COMPOSE_FILES=${COMPOSE_FILES}"
+    - docker compose ${COMPOSE_FILES} build
+    - docker compose ${COMPOSE_FILES} up -d --wait
     - python3 integration_tests/test_e2e.py
+  after_script:
+    - docker compose ${COMPOSE_FILES} logs
+    - docker compose ${COMPOSE_FILES} down -v
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
+  parallel:
+    matrix:
+      # All-in-one with valkey (default production-like setup)
+      - COMPOSE_FILES: "-f compose.e2e.yml"
+      # All-in-one without valkey (postgres for cache/tasks)
+      - COMPOSE_FILES: "-f compose.e2e.yml -f compose.e2e.no-valkey.yml"
+      # Separate web + worker with valkey
+      - COMPOSE_FILES: "-f compose.e2e.yml -f compose.e2e.web-worker.yml"
 
 lint:
   image: python:3.13-slim

@@ -1,3 +1,7 @@
+# Base e2e compose file for all-in-one mode with valkey
+# Override with compose.e2e.no-valkey.yml for postgres-only mode
+# Override with compose.e2e.web-worker.yml for separate web + worker mode
+
 x-environment: &default-environment
   DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
   VALKEY_URL: redis://valkey:6379
@@ -8,32 +12,35 @@ x-environment: &default-environment
   EMAIL_BACKEND: "django.core.mail.backends.console.EmailBackend"
   ENABLE_OBSERVABILITY_API: "true"
   LOG_LEVEL: INFO
-  GLITCHTIP_EMBED_WORKER: "true"
+
+x-healthcheck: &glitchtip-healthcheck
+  test: ["CMD-SHELL", "python3 /code/healthcheck.py || exit 1"]
+  interval: 5s
+  timeout: 5s
+  retries: 30
+  start_period: 30s
 
 services:
   postgres:
     image: postgres:18
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+
   valkey:
     image: valkey/valkey:9
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+
   glitchtip:
     build: .
-    user: root
     command: ./bin/run-all-in-one.sh
     depends_on:
       postgres:
@@ -43,8 +50,4 @@ services:
     ports:
       - "8000:8000"
     environment: *default-environment
-    healthcheck:
-      test: ["CMD-SHELL", "python3 /code/healthcheck.py || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+    healthcheck: *glitchtip-healthcheck
