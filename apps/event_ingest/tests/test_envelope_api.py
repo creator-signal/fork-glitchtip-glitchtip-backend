@@ -24,7 +24,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
     def setUp(self):
         super().setUp()
         cache.clear()
-        self.url = reverse("api:event_envelope", args=[self.project.id]) + self.params
+        self.url = reverse("event_envelope", args=[self.project.id]) + self.params
         self.django_event = self.get_json_data(
             "apps/event_ingest/tests/test_data/envelopes/django_message.json"
         )
@@ -99,7 +99,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertTrue(TransactionEvent.objects.exists())
 
     def test_invalid_dsn(self):
-        url = reverse("api:event_envelope", args=[self.project.id]) + "?sentry_key=aaaa"
+        url = reverse("event_envelope", args=[self.project.id]) + "?sentry_key=aaaa"
         data = self.get_payload("events/test_data/transactions/django_simple.json")
         res = self.client.post(
             url,
