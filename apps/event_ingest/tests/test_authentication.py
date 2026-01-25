@@ -13,7 +13,7 @@ class AuthenticationTestCase(TestCase):
 
     def setUp(self):
         self.url = (
-            reverse("api:event_envelope", args=[self.project.id])
+            reverse("event_envelope", args=[self.project.id])
             + f"?sentry_key={self.project_key.public_key}"
         )
 
@@ -28,4 +28,4 @@ class AuthenticationTestCase(TestCase):
 
     def test_invalid_project_id(self):
         with self.assertRaises(NoReverseMatch):
-            reverse("api:event_envelope", args=[f"{self.project.id}''"])
+            reverse("event_envelope", args=[f"{self.project.id}''"])

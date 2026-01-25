@@ -48,6 +48,7 @@ api = NinjaAPI(
     title="GlitchTip API",
     urls_namespace="api",
     auth=[TokenAuth(), SessionAuth()],
+    openapi_url="/openapi.json" if settings.ENABLE_OPENAPI else None,
 )
 
 api.add_router("0", api_tokens_router)
