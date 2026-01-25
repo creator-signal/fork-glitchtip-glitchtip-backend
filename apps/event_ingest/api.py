@@ -16,7 +16,6 @@ from glitchtip.partition_manager import UUID7Helper
 from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     CSPIssueEventSchema,
-    EnvelopeSchema,
     EventIngestSchema,
     EventUser,
     SecuritySchema,
@@ -85,7 +84,6 @@ async def event_store(
     if settings.IS_LOAD_TEST:
         result["task_id"] = task_result.task_id
     return result
-
 
 
 @router.post("/{project_id}/security/")
