@@ -1,3 +1,5 @@
+import logging
+
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
@@ -27,6 +29,8 @@ from apps.uptime.models import MonitorCheck
 
 from .constants import OrganizationUserRole
 from .fields import OrganizationSlugField
+
+logger = logging.getLogger(__name__)
 
 
 class OrganizationManager(OrgManager):
@@ -275,10 +279,28 @@ class Organization(SharedBaseModel, OrganizationBase):
         )
 
     @property
-    def email(self):
-        """Used to identify billing contact for stripe."""
-        billing_contact = self.owner.organization_user.user
-        return billing_contact.email
+    def email(self) -> str | None:
+        """
+        Used to identify billing contact for stripe.
+
+        Returns the email of the designated OrganizationOwner (billing contact).
+        Falls back to the first user with OWNER role if no OrganizationOwner exists.
+        """
+        try:
+            billing_contact = self.owner.organization_user.user
+            return billing_contact.email
+        except self._org_owner_model.DoesNotExist:
+            logger.warning(
+                "Organization %s (id=%s) has no OrganizationOwner. "
+                "This indicates a data integrity issue.",
+                self.slug,
+                self.id,
+            )
+            # Fallback to first user with OWNER role
+            first_owner = self.owners.first()
+            if first_owner:
+                return first_owner.email
+            return None
 
     def get_user_scopes(self, user):
         org_user = self.organization_users.get(user=user)
