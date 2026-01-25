@@ -7,9 +7,12 @@ from model_bakery import baker
 class AuthenticationTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
+        cls.user = baker.make("users.User")
         cls.project = baker.make("projects.Project")
         cls.project_key = cls.project.projectkey_set.first()
         cls.organization = cls.project.organization
+        # Add user to organization to create OrganizationOwner (billing contact)
+        cls.organization.add_user(cls.user)
 
     def setUp(self):
         self.url = (
