@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -152,6 +153,19 @@ def get_dsn(org_slug, project_slug):
         keys = resp.json()
         if keys:
             dsn = keys[0]["dsn"]["public"]
+            # In CI, the DSN might have localhost but we need to use the actual host
+            # Replace localhost with the host from BASE_URL
+            base_parsed = urlparse(BASE_URL)
+            dsn_parsed = urlparse(dsn)
+            if (
+                dsn_parsed.hostname == "localhost"
+                and base_parsed.hostname != "localhost"
+            ):
+                # Replace localhost with the actual host
+                dsn = dsn.replace(
+                    f"localhost:{dsn_parsed.port or 80}",
+                    f"{base_parsed.hostname}:{base_parsed.port or dsn_parsed.port or 80}",
+                )
             print(f"DSN: {dsn}")
             return dsn
     print(f"Failed to get DSN: {resp.text}")
