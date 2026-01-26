@@ -83,6 +83,7 @@ def seed_data(request: HttpRequest):
                 project=project3.slug,
                 issue_quantity=55,
                 events_quantity_per=1,
+                over_days=0,  # Use today to ensure partition exists
             )
 
     return HttpResponse()
