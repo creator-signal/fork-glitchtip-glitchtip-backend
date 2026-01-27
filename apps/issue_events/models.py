@@ -253,13 +253,13 @@ class IssueEvent(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["issue", "-received"]),
-            models.Index(
-                fields=["release"], name="issue_events_issueevent_release_id_idx"
-            ),
+            # Use -id (UUIDv7) instead of -received for ordering - enables partition pruning
+            # TODO: Remove `received` field entirely and generate from UUIDv7 timestamp
+            models.Index(fields=["issue", "-id"], name="issueevent_issue_id_idx"),
+            models.Index(fields=["release"], name="issueevent_release_idx"),
             models.Index(
                 fields=["event_id"],
-                name="issue_events_issueevent_event_id_idx",
+                name="issueevent_event_id_idx",
                 condition=models.Q(event_id__isnull=False),
             ),
             GinIndex(fields=["hashes"]),

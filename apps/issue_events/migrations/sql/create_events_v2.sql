@@ -52,18 +52,20 @@ ALTER TABLE issue_events_issueevent
     ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 -- Indexes on parent table (will be inherited by partitions)
-CREATE INDEX IF NOT EXISTS issue_events_issueevent_issue_received_idx
-    ON issue_events_issueevent (issue_id, received DESC);
+-- Use id (UUIDv7) for ordering instead of received - enables partition pruning
+-- TODO: Remove `received` field entirely and generate from UUIDv7 timestamp
+CREATE INDEX IF NOT EXISTS issueevent_issue_id_idx
+    ON issue_events_issueevent (issue_id, id DESC);
 
-CREATE INDEX IF NOT EXISTS issue_events_issueevent_hashes_idx
+CREATE INDEX IF NOT EXISTS issueevent_hashes_idx
     ON issue_events_issueevent USING GIN (hashes);
 
-CREATE INDEX IF NOT EXISTS issue_events_issueevent_release_id_idx
+CREATE INDEX IF NOT EXISTS issueevent_release_idx
     ON issue_events_issueevent (release_id);
 
 -- Partial index for client-provided event_ids (sparse - only when NOT NULL)
 -- This enables fast lookups for SDK-provided event IDs without indexing all NULLs
-CREATE INDEX IF NOT EXISTS issue_events_issueevent_event_id_idx
+CREATE INDEX IF NOT EXISTS issueevent_event_id_idx
     ON issue_events_issueevent (event_id)
     WHERE event_id IS NOT NULL;
 
