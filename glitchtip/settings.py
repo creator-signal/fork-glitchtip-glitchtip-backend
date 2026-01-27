@@ -120,6 +120,8 @@ GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
 GLITCHTIP_THROTTLE_CHECK_INTERVAL = env.int("GLITCHTIP_THROTTLE_CHECK_INTERVAL", 5000)
 SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
 
+GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
+
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 
