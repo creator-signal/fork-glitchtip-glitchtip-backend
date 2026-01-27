@@ -1,11 +1,13 @@
 import logging
+from datetime import timedelta
 
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import Count, F, OuterRef, Q, Subquery, Sum
+from django.db.models import Count, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from organizations.abstract import SharedBaseModel
@@ -34,29 +36,54 @@ logger = logging.getLogger(__name__)
 
 
 class OrganizationManager(OrgManager):
-    def with_event_counts(self, current_period=True):
+    def with_event_counts(self, current_period=True, start=None, end=None):
         queryset = self
         subscription_filter = Q()
         event_subscription_filter = Q()
         checks_subscription_filter = Q()
-        if current_period and settings.BILLING_ENABLED:
+        if start and end:
+            queryset = queryset.annotate(cycle_start=Value(start), cycle_end=Value(end))
             subscription_filter = Q(
-                created__gte=OuterRef(
-                    "stripe_primary_subscription__current_period_start"
-                ),
-                created__lt=OuterRef("stripe_primary_subscription__current_period_end"),
+                created__gte=OuterRef("cycle_start"),
+                created__lt=OuterRef("cycle_end"),
             )
             event_subscription_filter = Q(
-                date__gte=OuterRef("stripe_primary_subscription__current_period_start"),
-                date__lt=OuterRef("stripe_primary_subscription__current_period_end"),
+                date__gte=OuterRef("cycle_start"),
+                date__lt=OuterRef("cycle_end"),
             )
             checks_subscription_filter = Q(
-                start_check__gte=OuterRef(
-                    "stripe_primary_subscription__current_period_start"
-                ),
-                start_check__lt=OuterRef(
-                    "stripe_primary_subscription__current_period_end"
-                ),
+                start_check__gte=OuterRef("cycle_start"),
+                start_check__lt=OuterRef("cycle_end"),
+            )
+        elif current_period and settings.BILLING_ENABLED:
+            now = timezone.now()
+            thirty_days_ago = now - timedelta(days=30)
+
+            # Use subscription cycle if available, else current period, else rolling 30 days
+            cycle_start = Coalesce(
+                "stripe_primary_subscription__subscription_cycle_start",
+                "stripe_primary_subscription__current_period_start",
+                Value(thirty_days_ago),
+            )
+            cycle_end = Coalesce(
+                "stripe_primary_subscription__subscription_cycle_end",
+                "stripe_primary_subscription__current_period_end",
+                Value(now),
+            )
+
+            queryset = queryset.annotate(cycle_start=cycle_start, cycle_end=cycle_end)
+
+            subscription_filter = Q(
+                created__gte=OuterRef("cycle_start"),
+                created__lt=OuterRef("cycle_end"),
+            )
+            event_subscription_filter = Q(
+                date__gte=OuterRef("cycle_start"),
+                date__lt=OuterRef("cycle_end"),
+            )
+            checks_subscription_filter = Q(
+                start_check__gte=OuterRef("cycle_start"),
+                start_check__lt=OuterRef("cycle_end"),
             )
 
         # Subquery for Issue Events Sum

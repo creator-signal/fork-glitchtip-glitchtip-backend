@@ -67,7 +67,14 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
 
     class Meta:
         model = StripeSubscription
-        fields = ["created", "current_period_start", "current_period_end", "start_date"]
+        fields = [
+            "created",
+            "current_period_start",
+            "current_period_end",
+            "start_date",
+            "subscription_cycle_start",
+            "subscription_cycle_end",
+        ]
 
     @staticmethod
     def resolve_price(obj: StripeSubscription):
@@ -76,6 +83,14 @@ class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
     @staticmethod
     def resolve_product(obj: StripeSubscription):
         return obj.price.product
+
+    @staticmethod
+    def resolve_subscription_cycle_start(obj: StripeSubscription):
+        return obj.subscription_cycle_start or obj.current_period_start
+
+    @staticmethod
+    def resolve_subscription_cycle_end(obj: StripeSubscription):
+        return obj.subscription_cycle_end or obj.current_period_end
 
 
 class PriceIDSchema(CamelSchema):

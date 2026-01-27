@@ -202,11 +202,12 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     return PortalSession.model_validate_json(response)
 
 
-async def create_subscription(customer: str, price: str) -> Subscription:
+async def create_subscription(customer: str, price: str, **kwargs) -> Subscription:
     params = {
         "customer": customer,
         "items[][price]": price,
         "billing_mode[type]": "classic",
+        **kwargs,
     }
     response = await stripe_post("subscriptions", params)
     return Subscription.model_validate_json(response)
