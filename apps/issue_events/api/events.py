@@ -39,7 +39,8 @@ async def get_user_report(event_id: uuid.UUID) -> UserReport | None:
 async def list_issue_event(
     request: AuthHttpRequest, response: HttpResponse, issue_id: int
 ):
-    return get_queryset(request, issue_id=issue_id).order_by("-received")
+    # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
+    return get_queryset(request, issue_id=issue_id).order_by("-id")
 
 
 @router.get(
@@ -49,12 +50,11 @@ async def list_issue_event(
 )
 @has_permission(["event:read", "event:write", "event:admin"])
 async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
-    qs = get_queryset(request, issue_id).order_by("-received")
+    # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
+    qs = get_queryset(request, issue_id).order_by("-id")
     qs = qs.annotate(
         previous=Subquery(
-            qs.filter(received__lt=OuterRef("received"))
-            .order_by("-received")
-            .values("id")[:1]
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
         ),
     )
     event = await qs.afirst()
@@ -73,17 +73,12 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
 @has_permission(["event:read", "event:write", "event:admin"])
 async def get_issue_event(request: AuthHttpRequest, issue_id: int, event_id: uuid.UUID):
     qs = get_queryset(request, issue_id)
+    # Use id (UUIDv7) for prev/next navigation - enables partition pruning
     qs = qs.annotate(
         previous=Subquery(
-            qs.filter(received__lt=OuterRef("received"))
-            .order_by("-received")
-            .values("id")[:1]
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
         ),
-        next=Subquery(
-            qs.filter(received__gt=OuterRef("received"))
-            .order_by("received")
-            .values("id")[:1]
-        ),
+        next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
     event = await qs.filter(id=event_id).afirst()
     if not event:
@@ -105,9 +100,10 @@ async def list_project_issue_event(
     organization_slug: str,
     project_slug: str,
 ):
+    # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
     return get_queryset(
         request, organization_slug=organization_slug, project_slug=project_slug
-    ).order_by("-received")
+    ).order_by("-id")
 
 
 @router.get(
@@ -125,17 +121,12 @@ async def get_project_issue_event(
     qs = get_queryset(
         request, organization_slug=organization_slug, project_slug=project_slug
     )
+    # Use id (UUIDv7) for prev/next navigation - enables partition pruning
     qs = qs.annotate(
         previous=Subquery(
-            qs.filter(received__lt=OuterRef("received"))
-            .order_by("-received")
-            .values("id")[:1]
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
         ),
-        next=Subquery(
-            qs.filter(received__gt=OuterRef("received"))
-            .order_by("received")
-            .values("id")[:1]
-        ),
+        next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
     event = await qs.filter(id=event_id).afirst()
     if not event:

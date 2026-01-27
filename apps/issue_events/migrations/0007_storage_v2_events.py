@@ -219,12 +219,12 @@ def migrate_legacy_data(apps, schema_editor):
                 # but cursor.executemany or simple execute with params handles it.
                 # We will use mogrify-like approach or executemany.
                 # Actually, executemany with a single INSERT statement is best.
+                # Note: `received` is not stored - it's derived from UUIDv7 id
                 values.append(
                     (
                         str(new_id),
                         str(old_id),  # event_id
                         timestamp,
-                        received,
                         issue_id,
                         organization_id,
                         release_id,
@@ -242,9 +242,9 @@ def migrate_legacy_data(apps, schema_editor):
             if values:
                 insert_sql = """
                 INSERT INTO issue_events_issueevent (
-                    id, event_id, timestamp, received, issue_id, organization_id, release_id,
+                    id, event_id, timestamp, issue_id, organization_id, release_id,
                     type, level, title, transaction, data, tags, hashes, created
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING;
                 """
                 cursor.executemany(insert_sql, values)

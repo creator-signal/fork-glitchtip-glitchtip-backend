@@ -6,7 +6,6 @@ based on UUID version detection.
 """
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -65,26 +64,9 @@ class EventManager(models.Manager):
 
         # Detect UUID version and optimize query accordingly
         if uuid_val.version == 7:
-            # UUIDv7: Extract timestamp for partition targeting
-            try:
-                event_time = UUID7Helper.extract_datetime(uuid_val)
-
-                # Add time-based filter to enable PostgreSQL partition pruning
-                # Use a tolerance window to account for clock skew
-                tolerance = timedelta(hours=1)
-                return self.filter(
-                    id=uuid_val,
-                    received__gte=event_time - tolerance,
-                    received__lte=event_time + tolerance,
-                ).get()
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to extract timestamp from UUIDv7 {uuid_val}, "
-                    f"falling back to standard lookup: {e}"
-                )
-                # Fallback to standard lookup without partition targeting
-                return self.get(id=uuid_val)
+            # UUIDv7: Direct lookup - the id itself is the partition key
+            # PostgreSQL will prune partitions automatically based on the UUID range
+            return self.get(id=uuid_val)
 
         elif uuid_val.version == 4:
             # UUIDv4: This is a client-provided event_id
@@ -136,11 +118,13 @@ class EventManager(models.Manager):
             )
         """
         qs = self.all()
+        # Filter by UUID range only - UUIDv7 encodes timestamp so this is equivalent
+        # to time-based filtering and enables PostgreSQL partition pruning
         if start:
             start_uuid = UUID7Helper._uuid7_for_timestamp(start, min_random=True)
-            qs = qs.filter(received__gte=start, id__gte=start_uuid)
+            qs = qs.filter(id__gte=start_uuid)
         if end:
             end_uuid = UUID7Helper._uuid7_for_timestamp(end, min_random=True)
-            qs = qs.filter(received__lt=end, id__lt=end_uuid)
+            qs = qs.filter(id__lt=end_uuid)
 
         return qs

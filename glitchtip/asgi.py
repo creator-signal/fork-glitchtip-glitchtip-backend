@@ -11,13 +11,13 @@ import os
 
 from django.core.asgi import get_asgi_application
 
+from glitchtip.startup import print_startup_banner
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "glitchtip.settings")
 
 application = get_asgi_application()
 
 # Print startup banner
-from glitchtip.startup import print_startup_banner
-
 print_startup_banner()
 
 if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":

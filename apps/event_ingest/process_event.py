@@ -44,6 +44,7 @@ from apps.performance.models import (
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
+from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
 from sentry.eventtypes.error import ErrorEvent
 from sentry.utils.strings import truncatechars
@@ -862,7 +863,8 @@ def process_issue_events(
 
         issue_events.append(
             IssueEvent(
-                id=processing_event.uuid or processing_event.payload.event_id,
+                # UUIDv7 id encodes received time (millisecond precision)
+                id=UUID7Helper.from_datetime(processing_event.received),
                 event_id=processing_event.payload.event_id,
                 issue_id=processing_event.issue_id,
                 organization_id=processing_event.organization_id,
@@ -871,7 +873,6 @@ def process_issue_events(
                 if processing_event.level
                 else LogLevel.ERROR,
                 timestamp=processing_event.payload.timestamp,
-                received=processing_event.received,
                 title=remove_bad_chars(processing_event.title),
                 transaction=processing_event.transaction,
                 data=remove_bad_chars(processing_event.event_data),
