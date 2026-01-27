@@ -1,5 +1,7 @@
 # State-only migration to sync model with indexes created in 0007_storage_v2_events SQL
 # These indexes already exist in the database, this just updates Django's model state.
+# Note: Uses OLD long names that were in the original SQL file. Migration 0011 will
+# rename them to shorter names.
 
 from django.db import migrations, models
 
@@ -24,6 +26,8 @@ class Migration(migrations.Migration):
                         null=True,
                     ),
                 ),
+                # These use the OLD long names from original SQL file
+                # Migration 0011 will rename them to shorter names
                 migrations.AddIndex(
                     model_name="issueevent",
                     index=models.Index(
