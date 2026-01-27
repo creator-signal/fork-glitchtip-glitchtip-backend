@@ -234,3 +234,4 @@ __marimo__/
 .streamlit/secrets.toml
 STORAGE_V2.md
 bin/sentry-cli
+.ai_memory.md
