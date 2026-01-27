@@ -219,7 +219,6 @@ class IssueEvent(models.Model):
     event_id = models.UUIDField(
         null=True,
         blank=True,
-        db_index=True,
         help_text="Client-provided event ID from Sentry SDK (UUIDv4)",
     )
 
@@ -255,6 +254,14 @@ class IssueEvent(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["issue", "-received"]),
+            models.Index(
+                fields=["release"], name="issue_events_issueevent_release_id_idx"
+            ),
+            models.Index(
+                fields=["event_id"],
+                name="issue_events_issueevent_event_id_idx",
+                condition=models.Q(event_id__isnull=False),
+            ),
             GinIndex(fields=["hashes"]),
         ]
 
