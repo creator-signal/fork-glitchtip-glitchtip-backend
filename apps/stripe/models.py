@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import IntegrityError, models
 from django.db.models.expressions import OuterRef, Subquery
@@ -53,7 +54,7 @@ class StripeProduct(StripeModel):
                     name=product.name,
                     description=product.description if product.description else "",
                     events=product.metadata["events"],
-                    is_public=product.metadata.get("is_public") == "true",
+                    is_public=product.metadata.get("is_public", "").lower() == "true",
                 )
                 for product in products_page
             ]
@@ -63,6 +64,15 @@ class StripeProduct(StripeModel):
                     price=product.default_price.unit_amount / 100,
                     nickname=product.default_price.nickname or "",
                     product_id=product.id,
+                    no_throttle=product.default_price.metadata.get(
+                        "no_throttle", ""
+                    ).lower()
+                    == "true"
+                    if product.default_price.metadata
+                    else False,
+                    interval=product.default_price.recurring.get("interval", "month")
+                    if product.default_price.recurring
+                    else "month",
                 )
                 for product in products_page
                 if product.default_price
@@ -78,7 +88,13 @@ class StripeProduct(StripeModel):
             price_updated = await StripePrice.objects.abulk_create(
                 prices,
                 update_conflicts=True,
-                update_fields=["price", "nickname", "product_id"],
+                update_fields=[
+                    "price",
+                    "nickname",
+                    "product_id",
+                    "no_throttle",
+                    "interval",
+                ],
                 unique_fields=["stripe_id"],
             )
             logger.info(f"Created/updated {len(price_updated)} prices in Django")
@@ -103,6 +119,8 @@ class StripePrice(StripeModel):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     nickname = models.CharField(max_length=255)
     product = models.ForeignKey(StripeProduct, on_delete=models.CASCADE)
+    no_throttle = models.BooleanField(default=False)
+    interval = models.CharField(max_length=20, default="month")
 
     def __str__(self):
         return f"{self.nickname} {self.price} {self.stripe_id}"
@@ -122,6 +140,12 @@ class StripePrice(StripeModel):
                     price=price.unit_amount / 100,
                     nickname=price.nickname or "",
                     product_id=price.product,
+                    no_throttle=price.metadata.get("no_throttle", "").lower() == "true"
+                    if price.metadata
+                    else False,
+                    interval=price.recurring.get("interval", "month")
+                    if price.recurring
+                    else "month",
                 )
                 for price in prices_page
                 if price.unit_amount is not None and price.product in known_product_ids
@@ -129,7 +153,13 @@ class StripePrice(StripeModel):
             await StripePrice.objects.abulk_create(
                 prices,
                 update_conflicts=True,
-                update_fields=["price", "nickname", "product_id"],
+                update_fields=[
+                    "price",
+                    "nickname",
+                    "product_id",
+                    "no_throttle",
+                    "interval",
+                ],
                 unique_fields=["stripe_id"],
             )
 
@@ -154,6 +184,8 @@ class StripeSubscription(StripeModel):
         default=CollectionMethod.CHARGE_AUTOMATICALLY,
     )
     start_date = models.DateTimeField()
+    subscription_cycle_start = models.DateTimeField(null=True, blank=True)
+    subscription_cycle_end = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.stripe_id}"
@@ -297,13 +329,26 @@ class StripeSubscription(StripeModel):
                                 exc_info=True,
                             )
                             continue
+
+                    # For annual plans, we want to anchor the cycle to one month
+                    cycle_start = unix_to_datetime(
+                        subscription.items.data[0].current_period_start
+                    )
+                    cycle_end = unix_to_datetime(
+                        subscription.items.data[0].current_period_end
+                    )
+                    # Check if the price interval is 'year'
+                    # We can use our local price object if we just synced it or fetch it
+                    # To be efficient we can look it up from DB once before bulk create
+                    # but for now let's use the price object from Stripe data
+                    if price.recurring and price.recurring.get("interval") == "year":
+                        cycle_end = cycle_start + relativedelta(months=1)
+
                     subscription_objects.append(
                         StripeSubscription(
                             stripe_id=subscription.id,
                             created=unix_to_datetime(subscription.created),
-                            current_period_start=unix_to_datetime(
-                                subscription.items.data[0].current_period_start
-                            ),
+                            current_period_start=cycle_start,
                             current_period_end=unix_to_datetime(
                                 subscription.items.data[0].current_period_end
                             ),
@@ -312,6 +357,8 @@ class StripeSubscription(StripeModel):
                             status=subscription.status,
                             start_date=unix_to_datetime(subscription.start_date),
                             collection_method=subscription.collection_method,
+                            subscription_cycle_start=cycle_start,
+                            subscription_cycle_end=cycle_end,
                         )
                     )
 
@@ -327,6 +374,8 @@ class StripeSubscription(StripeModel):
                     "status",
                     "start_date",
                     "collection_method",
+                    "subscription_cycle_start",
+                    "subscription_cycle_end",
                 ],
                 unique_fields=["stripe_id"],
             )
