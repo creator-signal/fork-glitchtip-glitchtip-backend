@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS issue_events_issueevent (
 
     -- 8-byte alignment (timestamps)
     timestamp TIMESTAMPTZ NOT NULL,
-    received TIMESTAMPTZ NOT NULL,
+    -- Note: `received` is derived from UUIDv7 id (millisecond precision)
     created timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
 
     -- 8-byte alignment (foreign keys - bigint)
@@ -52,8 +52,8 @@ ALTER TABLE issue_events_issueevent
     ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 -- Indexes on parent table (will be inherited by partitions)
--- Use id (UUIDv7) for ordering instead of received - enables partition pruning
--- TODO: Remove `received` field entirely and generate from UUIDv7 timestamp
+-- Use id (UUIDv7) for ordering - enables partition pruning
+-- `received` is derived from UUIDv7 timestamp (millisecond precision)
 CREATE INDEX IF NOT EXISTS issueevent_issue_id_idx
     ON issue_events_issueevent (issue_id, id DESC);
 

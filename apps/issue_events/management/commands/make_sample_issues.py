@@ -14,6 +14,7 @@ from apps.issue_events.models import (
     TagValue,
 )
 from glitchtip.base_commands import MakeSampleCommand
+from glitchtip.partition_manager import UUID7Helper
 from glitchtip.utils import get_random_string
 
 from .issue_generator import CULPRITS, EXCEPTIONS, SDKS, TITLE_CHOICES, generate_tags
@@ -171,6 +172,8 @@ class Command(MakeSampleCommand):
                 received = timestamp + timezone.timedelta(milliseconds=1)
                 events.append(
                     IssueEvent(
+                        # UUIDv7 id encodes received time (millisecond precision)
+                        id=UUID7Helper.from_datetime(received),
                         level=level,
                         data={
                             "title": title,
@@ -179,7 +182,6 @@ class Command(MakeSampleCommand):
                             "exception": random.choice(EXCEPTIONS),
                         },
                         timestamp=timestamp,
-                        received=received,
                         tags=tags,
                         organization=self.project.organization,
                     )

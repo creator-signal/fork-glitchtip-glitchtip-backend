@@ -163,6 +163,11 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
         return obj.id.hex
 
     @staticmethod
+    def resolve_event_id(obj: IssueEvent):
+        # Return client-provided event_id if available, else server id (for Sentry compatibility)
+        return obj.eventID
+
+    @staticmethod
     def resolve_type(obj: IssueEvent):
         return obj.get_type_display()
 
@@ -286,7 +291,7 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     Represents a more raw view of the event, built with open source (legacy) Sentry compatibility
     """
 
-    event_id: str = Field(validation_alias="id.hex")
+    event_id: str
     timestamp: float = Field()
     x_datetime: datetime = Field(
         validation_alias="timestamp", serialization_alias="datetime"
@@ -309,6 +314,11 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     class Meta:
         model = IssueEvent
         fields = ["title", "transaction", "tags", "hashes"]
+
+    @staticmethod
+    def resolve_event_id(obj: IssueEvent):
+        # Return client-provided event_id if available, else server id (for Sentry compatibility)
+        return obj.eventID
 
     @staticmethod
     def resolve_type(obj: IssueEvent):

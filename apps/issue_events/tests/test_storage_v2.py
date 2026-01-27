@@ -31,7 +31,6 @@ class UUID7EventCreationTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test Event",
@@ -57,7 +56,6 @@ class UUID7EventCreationTestCase(TestCase):
             organization=issue.project.organization,
             event_id=client_uuid,  # Client-provided
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test Event with Client ID",
@@ -82,7 +80,6 @@ class UUID7EventCreationTestCase(TestCase):
             organization=issue.project.organization,
             event_id=client_uuid,
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test",
@@ -99,7 +96,6 @@ class UUID7EventCreationTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test",
@@ -126,7 +122,6 @@ class EventManagerLookupTestCase(TransactionTestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=received_time,
-            received=received_time,
             type=0,
             level=4,
             title="Test Event",
@@ -150,7 +145,6 @@ class EventManagerLookupTestCase(TransactionTestCase):
             organization=issue.project.organization,
             event_id=client_uuid,
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test Event",
@@ -172,7 +166,6 @@ class EventManagerLookupTestCase(TransactionTestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=django_timezone.now(),
-            received=django_timezone.now(),
             type=0,
             level=4,
             title="Test Event",
@@ -211,7 +204,6 @@ class UUID7TimestampTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=received_time,
-            received=received_time,
             type=0,
             level=4,
             title="Test Event",
@@ -239,7 +231,6 @@ class UUID7TimestampTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=t1,
-            received=t1,
             type=0,
             level=4,
             title="Event 1",
@@ -254,7 +245,6 @@ class UUID7TimestampTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=t2,
-            received=t2,
             type=0,
             level=4,
             title="Event 2",
@@ -269,7 +259,6 @@ class UUID7TimestampTestCase(TestCase):
             issue=issue,
             organization=issue.project.organization,
             timestamp=t3,
-            received=t3,
             type=0,
             level=4,
             title="Event 3",
@@ -302,7 +291,6 @@ class EventTimeRangeQueryTestCase(TransactionTestCase):
                 issue=issue,
                 organization=issue.project.organization,
                 timestamp=event_time,
-                received=event_time,
                 type=0,
                 level=4,
                 title=f"Event Day {i}",
@@ -364,7 +352,8 @@ class ColumnAlignmentTestCase(TestCase):
         )
 
         # Verify timestamp fields come before smallint fields
-        timestamp_fields = ["timestamp", "received"]
+        # Note: `received` is no longer stored - it's derived from UUIDv7 id
+        timestamp_fields = ["timestamp"]
         smallint_fields = ["type", "level"]
 
         for ts_field in timestamp_fields:

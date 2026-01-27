@@ -27,7 +27,7 @@ class IssueHashPagination(AsyncLinkHeaderPagination):
                     issue__project_id=issue_hash.project_id,
                 )
                 .select_related("issue")
-                .order_by("-received")
+                .order_by("-id")  # UUIDv7 ordering = time ordering
                 .afirst()
             )
         return result
