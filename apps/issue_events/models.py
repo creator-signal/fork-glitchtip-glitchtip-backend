@@ -224,7 +224,7 @@ class IssueEvent(models.Model):
 
     # 8-byte alignment: Timestamps
     timestamp = models.DateTimeField(help_text="Time at which event happened")
-    received = models.DateTimeField(help_text="Time at which GlitchTip accepted event")
+    # Note: `received` is now a property derived from UUIDv7 id (millisecond precision)
 
     # 8-byte alignment: Foreign keys
     issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
@@ -253,8 +253,8 @@ class IssueEvent(models.Model):
 
     class Meta:
         indexes = [
-            # Use -id (UUIDv7) instead of -received for ordering - enables partition pruning
-            # TODO: Remove `received` field entirely and generate from UUIDv7 timestamp
+            # Use -id (UUIDv7) for ordering - enables partition pruning
+            # `received` is now a property derived from UUIDv7 timestamp
             models.Index(fields=["issue", "-id"], name="issueevent_issue_id_idx"),
             models.Index(fields=["release"], name="issueevent_release_idx"),
             models.Index(
@@ -277,6 +277,18 @@ class IssueEvent(models.Model):
         otherwise use server-generated id.
         """
         return (self.event_id or self.id).hex
+
+    @property
+    def received(self):
+        """
+        Time at which GlitchTip accepted the event.
+
+        Derived from UUIDv7 id which encodes millisecond-precision timestamp.
+        This replaces the old stored `received` field for V2 storage.
+        """
+        from glitchtip.partition_manager import UUID7Helper
+
+        return UUID7Helper.extract_datetime(self.id)
 
     @property
     def message(self):

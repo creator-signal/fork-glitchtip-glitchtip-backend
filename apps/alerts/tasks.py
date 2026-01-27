@@ -59,7 +59,7 @@ def process_event_alerts():
         issues = (
             Issue.objects.filter(
                 project_id=alert.project_id,
-                issueevent__received__gte=start_time,
+                # Filter by UUIDv7 which encodes timestamp (enables partition pruning)
                 issueevent__id__gte=start_uuid,
                 issueevent__organization_id=alert.project.organization_id,
             )

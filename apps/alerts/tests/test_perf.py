@@ -31,8 +31,9 @@ class PartitionPruningTestCase(GlitchTipTestCase):
         for query in queries:
             sql = query["sql"]
             # Look for the aggregation query on issue_events_issueevent
+            # Note: We filter by id (UUIDv7) instead of received for partition pruning
             if (
-                'received" >=' in sql
+                '"issue_events_issueevent"."id" >=' in sql
                 and "issue_events_issueevent" in sql
                 and "GROUP BY" in sql
             ):
