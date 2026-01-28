@@ -7,7 +7,7 @@ WORKERS=${GRANIAN_WORKERS:-${WEB_CONCURRENCY:-1}}
 
 # Host and port with defaults (could also just use GRANIAN_HOST/GRANIAN_PORT directly)
 HOST=${GRANIAN_HOST:-0.0.0.0}
-PORT=${GRANIAN_PORT:-8000}
+PORT=${GRANIAN_PORT:-${PORT:-8000}}
 
 # Use async by default
 USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
