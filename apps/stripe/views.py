@@ -3,6 +3,7 @@ import logging
 import time
 
 import aiohttp
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.cache import cache
 from django.http import (
@@ -110,21 +111,30 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
 
     if (price_id := subscription.items.data[0].price.id) is None:
         return
+
+    current_period_start = unix_to_datetime(
+        subscription.items.data[0].current_period_start
+    )
+    current_period_end = unix_to_datetime(subscription.items.data[0].current_period_end)
+    cycle_start = current_period_start
+    cycle_end = current_period_end
+    price = subscription.items.data[0].price
+    if price.recurring and price.recurring.get("interval") == "year":
+        cycle_end = cycle_start + relativedelta(months=1)
+
     stripe_subscription, created = await StripeSubscription.objects.aupdate_or_create(
         stripe_id=subscription.id,
         defaults={
             "created": unix_to_datetime(subscription.created),
-            "current_period_start": unix_to_datetime(
-                subscription.items.data[0].current_period_start
-            ),
-            "current_period_end": unix_to_datetime(
-                subscription.items.data[0].current_period_end
-            ),
+            "current_period_start": current_period_start,
+            "current_period_end": current_period_end,
             "price_id": price_id,
             "organization_id": organization.id,
             "status": subscription.status,
             "start_date": unix_to_datetime(subscription.start_date),
             "collection_method": subscription.collection_method,
+            "subscription_cycle_start": cycle_start,
+            "subscription_cycle_end": cycle_end,
         },
     )
     if stripe_subscription.status in ACTIVE_SUBSCRIPTION_STATUSES:
