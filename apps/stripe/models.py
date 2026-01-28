@@ -231,7 +231,7 @@ class StripeSubscription(StripeModel):
         async for subscription in cls.objects.filter(
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
             current_period_end__lt=(timezone.now() - timedelta(days=2)),
-        ):
+        ).select_related("price"):
             try:
                 fetched_sub = await fetch_subscription(subscription.stripe_id)
             except StripeResourceNotFound:
@@ -249,6 +249,18 @@ class StripeSubscription(StripeModel):
             )
             subscription.start_date = unix_to_datetime(fetched_sub.start_date)
             subscription.collection_method = fetched_sub.collection_method
+
+            # For annual plans, we want to anchor the cycle to one month
+            cycle_start = subscription.current_period_start
+            cycle_end = subscription.current_period_end
+            if subscription.price.interval == "year" or (
+                fetched_sub.items.data[0].price.recurring
+                and fetched_sub.items.data[0].price.recurring.get("interval") == "year"
+            ):
+                cycle_end = cycle_start + relativedelta(months=1)
+
+            subscription.subscription_cycle_start = cycle_start
+            subscription.subscription_cycle_end = cycle_end
             await subscription.asave()
 
     @classmethod
