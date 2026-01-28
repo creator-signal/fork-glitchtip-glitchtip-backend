@@ -31,9 +31,6 @@ router = Router()
 
 
 @router.post(
-    "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/"
-)
-@router.post(
     "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble"
 )
 async def difs_assemble_api(
@@ -95,7 +92,10 @@ async def difs_assemble_api(
 
 
 @router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/")
-@router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing")
+@router.post(
+    "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing",
+    include_in_schema=False,
+)
 async def project_reprocessing(
     request: AuthHttpRequest,
     organization_slug: str,
