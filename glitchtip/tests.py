@@ -69,6 +69,26 @@ class APIRootTestCase(TestCase):
         self.assertContains(res, user.email)
 
 
+class APICatchallTestCase(TestCase):
+    """Unmatched API paths should return JSON 404, not CSRF error page"""
+
+    def test_unmatched_path_returns_json_404(self):
+        res = self.client.get("/api/0/nonexistent/path/")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res["Content-Type"], "application/json; charset=utf-8")
+        self.assertEqual(res.json(), {"detail": "Not found"})
+
+    def test_unmatched_post_returns_json_404(self):
+        res = self.client.post("/api/0/nonexistent/path/")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res["Content-Type"], "application/json; charset=utf-8")
+
+    def test_unmatched_path_no_trailing_slash(self):
+        res = self.client.get("/api/0/nonexistent/path")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res["Content-Type"], "application/json; charset=utf-8")
+
+
 class InternalHealthTestCase(TestCase):
     def setUp(self):
         self.url = "/api/0/internal/health"

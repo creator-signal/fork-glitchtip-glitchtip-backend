@@ -10,6 +10,7 @@ from apps.projects.models import Project
 from apps.sourcecode.models import DebugSymbolBundle
 from apps.sourcecode.schema import DebugSymbolBundleSchema
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.decorators import optional_slash
 from glitchtip.api.permissions import has_permission
 
 from .models import Release
@@ -412,10 +413,10 @@ async def get_project_release_file(
     )
 
 
-@router.post("/organizations/{slug:organization_slug}/releases/{str:version}/assemble/")
-@router.post(
-    "/organizations/{slug:organization_slug}/releases/{str:version}/assemble",
-    include_in_schema=False,
+@optional_slash(
+    router,
+    "post",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/assemble/",
 )
 @has_permission(["project:releases", "project:write", "project:admin"])
 async def assemble_release(
