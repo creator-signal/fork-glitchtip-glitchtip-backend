@@ -148,10 +148,12 @@ class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
     ]
 
     def max_events(self, obj):
-        return obj.stripe_primary_subscription.price.product.events
+        if obj.stripe_primary_subscription:
+            return obj.stripe_primary_subscription.price.product.events
 
     def current_period_end(self, obj):
-        return obj.stripe_primary_subscription.current_period_end
+        if obj.stripe_primary_subscription:
+            return obj.stripe_primary_subscription.current_period_end
 
     def get_queryset(self, request):
         qs = Organization.objects.with_event_counts().select_related(
