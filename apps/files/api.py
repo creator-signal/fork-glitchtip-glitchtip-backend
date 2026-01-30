@@ -13,6 +13,7 @@ from ninja.files import UploadedFile
 
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.decorators import optional_slash
 from glitchtip.api.permissions import has_permission
 
 from .models import FileBlob
@@ -45,7 +46,7 @@ class GzipChunk(BytesIO):
 router = Router()
 
 
-@router.get("organizations/{slug:organization_slug}/chunk-upload/")
+@optional_slash(router, "get", "organizations/{slug:organization_slug}/chunk-upload/")
 async def get_chunk_upload_info(request: AuthHttpRequest, organization_slug: str):
     """Get server settings for chunk file upload"""
     url = settings.GLITCHTIP_URL.geturl() + reverse(
@@ -64,11 +65,7 @@ async def get_chunk_upload_info(request: AuthHttpRequest, organization_slug: str
     }
 
 
-@router.post("organizations/{slug:organization_slug}/chunk-upload/")
-@router.post(
-    "organizations/{slug:organization_slug}/chunk-upload",
-    include_in_schema=False,
-)
+@optional_slash(router, "post", "organizations/{slug:organization_slug}/chunk-upload/")
 @has_permission(["project:write", "project:admin", "project:releases"])
 async def chunk_upload(
     request: AuthHttpRequest,

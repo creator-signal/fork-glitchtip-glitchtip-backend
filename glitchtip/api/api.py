@@ -8,7 +8,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import aget_user
 from django.http import HttpRequest
-from ninja import Field, ModelSchema, NinjaAPI, Schema
+from ninja import Field, ModelSchema, NinjaAPI, Router, Schema
 
 from apps.alerts.api import router as alerts_router
 from apps.api_tokens.api import router as api_tokens_router
@@ -71,6 +71,23 @@ api.add_router("0", users_router)
 api.add_router("0", wizard_router)
 api.add_router("0", releases_router)
 api.add_router("embed", embed_router)
+
+# Fallback router for unmatched /api/0/... paths - must be added last
+# Returns JSON 404 instead of CSRF error page for debugging
+fallback_router = Router()
+
+
+@fallback_router.api_operation(
+    ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    "/{path:path}",
+    auth=None,
+    include_in_schema=False,
+)
+def api_fallback_404(request: HttpRequest, path: str):
+    return api.create_response(request, {"detail": "Not found"}, status=404)
+
+
+api.add_router("0", fallback_router)
 
 
 @api.exception_handler(ThrottleException)
@@ -210,3 +227,5 @@ async def api_root(request: HttpRequest):
         "user": user_data,
         "auth": auth_data,
     }
+
+

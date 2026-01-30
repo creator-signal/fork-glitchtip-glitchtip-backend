@@ -19,6 +19,7 @@ from apps.files.models import File, FileBlob
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.decorators import optional_slash
 
 from .models import DebugInformationFile
 from .schema import AssemblePayload
@@ -30,8 +31,8 @@ MAX_UPLOAD_BLOB_SIZE = 32 * 1024 * 1024  # 32MB
 router = Router()
 
 
-@router.post(
-    "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble"
+@optional_slash(
+    router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/"
 )
 async def difs_assemble_api(
     request: AuthHttpRequest,
@@ -91,10 +92,8 @@ async def difs_assemble_api(
     return responses
 
 
-@router.post("projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/")
-@router.post(
-    "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing",
-    include_in_schema=False,
+@optional_slash(
+    router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/"
 )
 async def project_reprocessing(
     request: AuthHttpRequest,
@@ -191,7 +190,9 @@ async def create_dif_from_read_only_file(proguard_file, project, proguard_id, fi
         return result
 
 
-@router.post("projects/{slug:organization_slug}/{slug:project_slug}/files/dsyms/")
+@optional_slash(
+    router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/files/dsyms/"
+)
 async def dsyms(
     request: AuthHttpRequest,
     organization_slug: str,
