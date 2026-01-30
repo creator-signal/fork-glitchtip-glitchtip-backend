@@ -51,12 +51,16 @@ async def update_price(price: Price):
     ):
         return
 
+    metadata = price.metadata or {}
+    no_throttle = metadata.get("no_throttle", "").lower() == "true"
+
     await StripePrice.objects.aupdate_or_create(
         stripe_id=price.id,
         defaults={
             "product_id": price.product,
             "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
+            "no_throttle": no_throttle,
         },
     )
 
