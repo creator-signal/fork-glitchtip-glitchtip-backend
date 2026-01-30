@@ -29,7 +29,7 @@ class StripeBaseAdmin(admin.ModelAdmin):
 class StripePriceInline(admin.StackedInline):
     model = StripePrice
     extra = 0
-    readonly_fields = ["stripe_id", "nickname", "price"]
+    readonly_fields = ["stripe_id", "nickname", "no_throttle", "price"]
 
 
 class StripeProductAdmin(StripeBaseAdmin):

@@ -256,7 +256,7 @@ class TestStripeWebhookView(TestCase):
                     "type": "one_time",
                     "unit_amount": 2000,  # $20.00
                     "unit_amount_decimal": "2000",
-                    "metadata": {},
+                    "metadata": {"no_throttle": "true"},
                 }
             },
             "api_version": "",
@@ -275,6 +275,7 @@ class TestStripeWebhookView(TestCase):
         price = await StripePrice.objects.aget(stripe_id="price_test")
         self.assertEqual(price.price, 20.00)  # Check decimal conversion
         self.assertEqual(price.nickname, "Test Price")
+        self.assertTrue(price.no_throttle)
 
     @override_settings(
         STRIPE_WEBHOOK_SECRET="test_webhook_secret",
