@@ -1,3 +1,4 @@
+import json
 from typing import Annotated, Literal, Union
 from urllib.parse import urlparse
 
@@ -5,6 +6,25 @@ from pydantic import WrapValidator, field_validator, model_validator
 
 from ..schema.base import LaxIngestSchema
 from ..schema.utils import invalid_to_none
+
+MAX_VAR_SIZE = 16 * 1024  # 16KB per individual var value
+
+
+def _truncate_var_value(value: str | dict | list) -> str | dict | list:
+    """Truncate a single var value if it exceeds MAX_VAR_SIZE."""
+    if isinstance(value, str):
+        if len(value) > MAX_VAR_SIZE:
+            return f"[Truncated: {len(value)} bytes]"
+        return value
+
+    # For dict/list, serialize to check size
+    try:
+        serialized = json.dumps(value, default=str)
+        if len(serialized) > MAX_VAR_SIZE:
+            return f"[Truncated: {len(serialized)} bytes]"
+    except (TypeError, ValueError):
+        pass
+    return value
 
 
 class PosixSignal(LaxIngestSchema):
@@ -102,6 +122,14 @@ class StackTraceFrame(LaxIngestSchema):
         if context:
             return [line if line else "" for line in context]
         return None
+
+    @field_validator("vars")
+    @classmethod
+    def truncate_large_vars(cls, vars_dict: dict | None) -> dict | None:
+        """Truncate individual var values exceeding MAX_VAR_SIZE to prevent oversized payloads."""
+        if vars_dict is None:
+            return None
+        return {k: _truncate_var_value(v) for k, v in vars_dict.items()}
 
 
 class StackTrace(LaxIngestSchema):

@@ -1,5 +1,6 @@
 # 6.0.0
 
+- Fix: Truncate oversized stack trace frame `vars` on ingestion to prevent 2MB+ event payloads from recursive error capture
 - Upgrade to Django 6.0
 - Switch Celery to django-vtasks
 - Switch Cache to django-vcache
