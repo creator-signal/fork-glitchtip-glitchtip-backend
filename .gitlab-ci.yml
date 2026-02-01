@@ -31,16 +31,18 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == 'web'
     - if: $CI_PIPELINE_SOURCE == 'schedule'
 
-test:
-  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+# Old stack test: standard PostgreSQL 14 without pg_duckdb
+test-old:
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.12-$BASE_LAYER
   variables:
     SECRET_KEY: testing
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres"
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
     VALKEY_URL: "redis://redis:6379"
   services:
-    - postgres:$POSTGRES_VERSION
-    - name: $CACHE_IMAGE
+    - postgres:14
+    - name: redis:7
       alias: redis
   cache:
     - key:
@@ -54,14 +56,50 @@ test:
     - uv cache prune --ci
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
-  parallel:
-    matrix:
-      - PYTHON_VERSION: '3.12'
-        POSTGRES_VERSION: '14'
-        CACHE_IMAGE: 'redis:7'
-      - PYTHON_VERSION: '3.14'
-        POSTGRES_VERSION: '18'
-        CACHE_IMAGE: 'valkey/valkey:9'
+
+# New stack test: pg_duckdb with MinIO for cold storage
+test-new:
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.14-$BASE_LAYER
+  variables:
+    SECRET_KEY: testing
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres"
+    ENABLE_TEST_API: "true"
+    ENABLE_OPEN_USER_REGISTRATION: "true"
+    VALKEY_URL: "redis://redis:6379"
+    GLITCHTIP_COLD_STORAGE_BUCKET: glitchtip-cold
+    AWS_ACCESS_KEY_ID: minioadmin
+    AWS_SECRET_ACCESS_KEY: minioadmin
+    AWS_S3_ENDPOINT_URL: "http://minio:9000"
+  services:
+    - name: pgduckdb/pgduckdb:18-v1.1.1
+      alias: postgres
+      command: ["postgres", "-c", "shared_preload_libraries=pg_duckdb"]
+    - name: valkey/valkey:9
+      alias: redis
+    - name: minio/minio:latest
+      alias: minio
+      command: ["server", "/data"]
+      variables:
+        MINIO_ROOT_USER: minioadmin
+        MINIO_ROOT_PASSWORD: minioadmin
+  cache:
+    - key:
+        files:
+          - uv.lock
+      paths:
+        - $UV_CACHE_DIR
+  script:
+    # Create MinIO bucket for cold storage tests
+    - apt-get update && apt-get install -y curl
+    - curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+    - chmod +x /usr/local/bin/mc
+    - mc alias set myminio http://minio:9000 minioadmin minioadmin
+    - mc mb --ignore-existing myminio/glitchtip-cold || true
+    - uv sync --frozen --no-install-project
+    - uv run ./manage.py test
+    - uv cache prune --ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
 
 e2e:
   image: docker:29
