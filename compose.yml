@@ -10,6 +10,15 @@ x-environment: &default-environment
   #IS_LOAD_TEST: "true"
   VTASKS_CONCURRENCY: 4
   LOG_LEVEL: INFO
+  # Self-logging (GlitchTip logs to itself)
+  GLITCHTIP_ENABLE_LOGS: "true"
+  SENTRY_ENABLE_LOGS: "true"
+  SENTRY_DSN: "http://e25c388ace0e4bb88bfb41f8df8070b3@localhost:8000/1"
+  # Cold storage settings (MinIO for local S3-compatible storage)
+  GLITCHTIP_COLD_STORAGE_BUCKET: glitchtip-cold
+  AWS_ACCESS_KEY_ID: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin
+  AWS_S3_ENDPOINT_URL: http://minio:9000
 
 x-depends_on: &default-depends_on
   - postgres
@@ -18,11 +27,44 @@ x-volumes: &default-volumes
   - .:/code
 services:
   postgres:
-    image: postgres:18
+    # Use pg_duckdb image for cold storage features (S3/Parquet archival)
+    # Falls back gracefully if standard postgres is used instead
+    image: pgduckdb/pgduckdb:18-v1.1.1
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_duckdb
   valkey:
     image: valkey/valkey:9
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # MinIO Console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  # Create the bucket on startup
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing myminio/glitchtip-cold;
+      exit 0;
+      "
   web:
     # Uncomment for breakpoint
     #stdin_open: true
@@ -38,3 +80,5 @@ services:
     ports:
       - "8000:8000"
     environment: *default-environment
+volumes:
+  minio-data:

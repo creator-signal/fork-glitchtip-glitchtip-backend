@@ -24,6 +24,7 @@ from apps.difs.models import DebugInformationFile
 from apps.observability.utils import clear_metrics_cache
 from apps.projects.models import (
     IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
     TransactionEventProjectHourlyStatistic,
 )
 from apps.sourcecode.models import DebugSymbolBundle
@@ -117,6 +118,18 @@ class OrganizationManager(OrgManager):
             output_field=models.BigIntegerField(),
         )
 
+        # Subquery for Log Events Sum
+        log_subquery = Subquery(
+            LogProjectHourlyStatistic.objects.filter(
+                Q(project__organization=OuterRef("pk")), event_subscription_filter
+            )
+            .values("project__organization")
+            .annotate(sum_count=Sum("count"))
+            .values("sum_count")
+            .order_by(),
+            output_field=models.BigIntegerField(),
+        )
+
         # Subquery for Uptime Checks Count
         # Assumes MonitorCheck relates to Monitor which relates to Organization
         uptime_check_subquery = Subquery(
@@ -179,6 +192,7 @@ class OrganizationManager(OrgManager):
         return queryset.annotate(
             issue_event_count=Coalesce(issue_event_subquery, 0),
             transaction_count=Coalesce(transaction_subquery, 0),
+            log_count=Coalesce(log_subquery, 0),
             # Use Coalesce for count as well, safer if no checks exist
             uptime_check_event_count=Coalesce(uptime_check_subquery, 0),
             # Calculate total file size, Coalesce each part, sum, then convert/divide
@@ -196,14 +210,18 @@ class OrganizationManager(OrgManager):
                 output_field=models.BigIntegerField(),
             ),
         ).annotate(
-            # Calculate total using F expressions referring to the fields just annotated
-            total_event_count=F("issue_event_count")
-            + F("transaction_count")
-            + F("uptime_check_event_count")
-            # Note: Adding file_size (in MB) directly to event counts might be conceptually odd.
-            # Verify if this addition is intended business logic.
-            # If file_size should not be part of 'total_event_count', remove it here.
-            + F("file_size"),
+            # Calculate weighted total for quota purposes
+            # Weights: errors=1.0, transactions=0.1, logs=0.1, uptime=1.0, file_size=1.0
+            # Using integer math: multiply by 10, sum, divide by 10
+            # This gives: issues + uptime + file_size + (transactions + logs) / 10
+            total_event_count=(
+                F("issue_event_count") * 10
+                + F("transaction_count")  # 0.1 weight
+                + F("log_count")  # 0.1 weight
+                + F("uptime_check_event_count") * 10
+                + F("file_size") * 10
+            )
+            / 10,
         )
 
 
