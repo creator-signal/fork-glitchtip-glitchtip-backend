@@ -142,6 +142,7 @@ class StripeAPITestCase(TestCase):
                 "fileSizeMb": 2,
                 "transactionEventCount": 1,
                 "uptimeCheckEventCount": 0,
+                "logEventCount": 0,
             },
         )
 

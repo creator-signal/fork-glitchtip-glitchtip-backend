@@ -29,6 +29,7 @@ class OrganizationInfo:
     is_accepting_events: bool
     event_throttle_rate: int
     scrub_ip_addresses: bool
+    log_throttle_rate: int = 0
 
 
 @dataclass
@@ -39,6 +40,7 @@ class ProjectAuthInfo:
     organization_id: int
     first_event: datetime | None
     organization: OrganizationInfo
+    log_throttle_rate: int = 0
 
     @property
     def should_scrub_ip_addresses(self):
@@ -79,30 +81,69 @@ REJECTION_MAP: dict[Literal["v", "t"], Exception] = {
 REJECTION_WAIT = 30
 
 
-def serialize_throttle(org_throttle: int, project_throttle: int) -> str:
-    """
-    Format example "t:30:0" means throttle with 30% org throttle and 0% (disabled)
-    project throttle
-    """
-    return f"t:{org_throttle}:{project_throttle}"
+@dataclass
+class ThrottleRates:
+    """Throttle rates for events and logs at org and project levels."""
+
+    org_event: int = 0
+    proj_event: int = 0
+    org_log: int = 0
+    proj_log: int = 0
+
+    @property
+    def max_event_throttle(self) -> int:
+        return max(self.org_event, self.proj_event)
+
+    @property
+    def max_log_throttle(self) -> int:
+        return max(self.org_log, self.proj_log)
+
+    def is_accepting_events(self) -> bool:
+        """Probabilistic check if events should be accepted."""
+        return _is_accepting(self.org_event) and _is_accepting(self.proj_event)
+
+    def is_accepting_logs(self) -> bool:
+        """Probabilistic check if logs should be accepted."""
+        return _is_accepting(self.org_log) and _is_accepting(self.proj_log)
 
 
-def deserialize_throttle(input: str) -> None | tuple[int, int]:
-    """Return (org_throttle, project_throttle) as integer %"""
-    if input == "t":
-        return 0, 0
-    if input.startswith("t:"):
-        parts = input.split(":", 2)
-        if len(parts) == 3:
-            return int(parts[1]), int(parts[2])
-    return None
-
-
-def is_accepting_events(throttle_rate: int) -> bool:
-    """Consider throttle to determine if event are being accepted"""
+def _is_accepting(throttle_rate: int) -> bool:
+    """Probabilistic acceptance based on throttle rate."""
     if throttle_rate == 0:
         return True
     return random.randint(0, 100) > throttle_rate
+
+
+def serialize_throttle(
+    org_event: int, proj_event: int, org_log: int = 0, proj_log: int = 0
+) -> str:
+    """
+    Format: "t:org_event:proj_event:org_log:proj_log"
+    Example: "t:30:0:50:0" means 30% org event throttle, 50% org log throttle
+    """
+    return f"t:{org_event}:{proj_event}:{org_log}:{proj_log}"
+
+
+def deserialize_throttle(input: str) -> ThrottleRates | None:
+    """Parse cached throttle string into ThrottleRates."""
+    if input == "t":
+        return ThrottleRates()
+    if input.startswith("t:"):
+        parts = input.split(":")
+        if len(parts) >= 3:
+            # Support both old format (3 parts) and new format (5 parts)
+            org_event = int(parts[1])
+            proj_event = int(parts[2])
+            org_log = int(parts[3]) if len(parts) > 3 else 0
+            proj_log = int(parts[4]) if len(parts) > 4 else 0
+            return ThrottleRates(org_event, proj_event, org_log, proj_log)
+    return None
+
+
+# Keep for backwards compatibility
+def is_accepting_events(throttle_rate: int) -> bool:
+    """Consider throttle to determine if events are being accepted"""
+    return _is_accepting(throttle_rate)
 
 
 def calculate_retry_after(throttle: int):
@@ -161,11 +202,18 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     if block_value := await cache.aget(block_cache_key):
         if block_value.startswith("t"):
             if throttle := deserialize_throttle(block_value):
-                org_throttle, project_throttle = throttle
-                if not is_accepting_events(org_throttle) or not is_accepting_events(
-                    project_throttle
+                # If both events AND logs are 100% throttled, reject immediately
+                if (
+                    throttle.max_event_throttle == 100
+                    and throttle.max_log_throttle == 100
                 ):
-                    raise ThrottleException(calculate_retry_after(max(throttle)))
+                    raise ThrottleException(600)
+                # If only events are throttled but not 100%, do probabilistic check
+                if not throttle.is_accepting_events():
+                    raise ThrottleException(
+                        calculate_retry_after(throttle.max_event_throttle)
+                    )
+                # If events pass but logs are throttled, continue - handle per-item in envelope
         else:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
@@ -186,37 +234,51 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             is_accepting_events=row[4],
             event_throttle_rate=row[5],
             scrub_ip_addresses=row[6],
+            log_throttle_rate=row[9] if len(row) > 9 else 0,
         ),
         first_event=row[7],
+        log_throttle_rate=row[8] if len(row) > 8 else 0,
     )
 
-    if (
-        not project.organization.is_accepting_events
-        or project.organization.event_throttle_rate == 100
-        or project.event_throttle_rate == 100
+    # Build throttle rates
+    throttle = ThrottleRates(
+        org_event=project.organization.event_throttle_rate,
+        proj_event=project.event_throttle_rate,
+        org_log=project.organization.log_throttle_rate,
+        proj_log=project.log_throttle_rate,
+    )
+
+    # If not accepting events at all, or both event and log throttles are 100%, reject immediately
+    if not project.organization.is_accepting_events or (
+        throttle.max_event_throttle == 100 and throttle.max_log_throttle == 100
     ):
         await cache.aset(block_cache_key, "t", REJECTION_WAIT)
         raise ThrottleException(600)
-    if project.organization.event_throttle_rate or project.event_throttle_rate:
+
+    # Cache throttle rates for both events and logs
+    if (
+        throttle.org_event
+        or throttle.proj_event
+        or throttle.org_log
+        or throttle.proj_log
+    ):
         await cache.aset(
             block_cache_key,
             serialize_throttle(
-                project.organization.event_throttle_rate,
-                project.event_throttle_rate,
+                throttle.org_event,
+                throttle.proj_event,
+                throttle.org_log,
+                throttle.proj_log,
             ),
             REJECTION_WAIT,
         )
-        if not is_accepting_events(
-            project.organization.event_throttle_rate
-        ) or not is_accepting_events(project.event_throttle_rate):
-            raise ThrottleException(
-                calculate_retry_after(
-                    max(
-                        project.organization.event_throttle_rate,
-                        project.event_throttle_rate,
-                    )
-                )
-            )
+
+    # Check event throttling
+    # 100% throttle uses fixed 600 second retry, partial throttle uses calculated retry
+    if throttle.max_event_throttle == 100:
+        raise ThrottleException(600)
+    elif not throttle.is_accepting_events():
+        raise ThrottleException(calculate_retry_after(throttle.max_event_throttle))
 
     # Check throttle needs every 1 out of X requests
     if (

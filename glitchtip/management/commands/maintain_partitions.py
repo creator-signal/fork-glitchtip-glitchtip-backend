@@ -61,6 +61,7 @@ class Command(BaseCommand):
             "performance_transactiongroupaggregate",
             "projects_issueeventprojecthourlystatistic",
             "projects_transactioneventprojecthourlystatistic",
+            "projects_logprojecthourlystatistic",
         ]
         start_of_week = start_date_daily - timedelta(days=start_date_daily.weekday())
         end_date_weekly = start_of_week + timedelta(weeks=4)
