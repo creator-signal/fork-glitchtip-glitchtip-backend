@@ -49,8 +49,10 @@ def difs_assemble(project_slug, name, checksum, chunks, debug_id):
 
 
 def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int):
-    difs = DebugInformationFile.objects.filter(project_id=project_id).order_by(
-        "-created"
+    difs = (
+        DebugInformationFile.objects.filter(project_id=project_id)
+        .select_related("file", "file__blob")
+        .order_by("-created")
     )
     resolved_stracktrackes = []
     event_json = event.dict()
@@ -88,7 +90,7 @@ def update_frames(event: ErrorIssueEventSchema, frames):
 
 
 def difs_get_file_from_chunks(checksum, chunks):
-    files = File.objects.filter(checksum=checksum)
+    files = File.objects.filter(checksum=checksum).select_related("blob")
 
     for file in files:
         blob = file.blob
