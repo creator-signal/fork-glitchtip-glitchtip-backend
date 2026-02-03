@@ -776,6 +776,27 @@ def process_issue_events(
         .filter(q_objects)
         .values("value", "project_id", "issue_id", "issue__status")
     )
+
+    # Build a dict for O(1) lookups instead of iterating the queryset per event
+    hash_dict: dict[tuple[int, str], dict] = {
+        (h["project_id"], h["value"].hex): h for h in hash_queryset
+    }
+
+    # Primary fallback: check the primary for hashes not found on the replica.
+    # Avoids unnecessary IntegrityErrors caused by replication lag.
+    if read_only_db != "default":
+        missing_q = Q()
+        for pe in processing_events:
+            if (pe.project_id, pe.issue_hash) not in hash_dict:
+                missing_q |= Q(project_id=pe.project_id, value=pe.issue_hash)
+        if missing_q:
+            for h in (
+                IssueHash.objects.using("default")
+                .filter(missing_q)
+                .values("value", "project_id", "issue_id", "issue__status")
+            ):
+                hash_dict[(h["project_id"], h["value"].hex)] = h
+
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
     # Group events by time and project for event count statistics
@@ -798,15 +819,11 @@ def process_issue_events(
         }
         if level := processing_event.level:
             issue_defaults["level"] = level
-        for hash_obj in hash_queryset:
-            if (
-                hash_obj["value"].hex == processing_event.issue_hash
-                and hash_obj["project_id"] == project_id
-            ):
-                processing_event.issue_id = hash_obj["issue_id"]
-                if hash_obj["issue__status"] == EventStatus.RESOLVED:
-                    issues_to_reopen.append(hash_obj["issue_id"])
-                break
+        hash_obj = hash_dict.get((project_id, processing_event.issue_hash))
+        if hash_obj:
+            processing_event.issue_id = hash_obj["issue_id"]
+            if hash_obj["issue__status"] == EventStatus.RESOLVED:
+                issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
             with connection.cursor() as cursor:
