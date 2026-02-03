@@ -128,25 +128,16 @@ build_arm_x86:
     - mv dist/glitchtip-frontend/browser/* dist/
     - rmdir dist/glitchtip-frontend/browser/
 
-    # --- Updated Version Parsing ---
-    # Git tag (e.g., v5.0.1)
-    - VERSION_V_FULL=${CI_COMMIT_REF_NAME}
+    # Version parsing (e.g., v5.0.1 -> 5.0.1, 5.0, 5)
+    - VERSION_FULL=${CI_COMMIT_REF_NAME#*v}
+    - VERSION_MINOR=${VERSION_FULL%.*}
+    - VERSION_MAJOR=${VERSION_FULL%%.*}
 
-    # No-v versions (e.g., 5.0.1, 5.0, 5)
-    - VERSION_NO_V_FULL=${CI_COMMIT_REF_NAME#*v}
-    - VERSION_NO_V_MINOR=${VERSION_NO_V_FULL%.*}
-    - VERSION_NO_V_MAJOR=${VERSION_NO_V_FULL%%.*}
-
-    # V-prefixed versions (e.g., v5.0, v5)
-    - VERSION_V_MINOR="v${VERSION_NO_V_MINOR}"
-    - VERSION_V_MAJOR="v${VERSION_NO_V_MAJOR}"
-
-    # Quoted to handle colons in echo
-    - 'echo "Building tags: latest, ${VERSION_NO_V_FULL}, ${VERSION_NO_V_MINOR}, ${VERSION_NO_V_MAJOR}, ${VERSION_V_FULL}, ${VERSION_V_MINOR}, ${VERSION_V_MAJOR}"'
+    - 'echo "Building tags: latest, ${VERSION_FULL}, ${VERSION_MINOR}, ${VERSION_MAJOR}"'
 
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker buildx create --use
-    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push -t ${DOCKER_CI_REGISTRY_IMAGE}:latest -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_NO_V_MAJOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_V_MAJOR} --build-arg IS_CI="True" --build-arg GLITCHTIP_VERSION=${VERSION_NO_V_FULL} --build-arg COLLECT_STATIC="True" .
+    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push -t ${DOCKER_CI_REGISTRY_IMAGE}:latest -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MAJOR} --build-arg IS_CI="True" --build-arg GLITCHTIP_VERSION=${VERSION_FULL} --build-arg COLLECT_STATIC="True" .
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
