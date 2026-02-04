@@ -250,7 +250,7 @@ class TestStripeWebhookView(TestCase):
                     "lookup_key": None,
                     "nickname": "Test Price",
                     "product": product.stripe_id,
-                    "recurring": None,
+                    "recurring": {"interval": "year"},
                     "tax_behavior": "unspecified",
                     "tiers_mode": None,
                     "type": "one_time",
@@ -275,6 +275,7 @@ class TestStripeWebhookView(TestCase):
         price = await StripePrice.objects.aget(stripe_id="price_test")
         self.assertEqual(price.price, 20.00)  # Check decimal conversion
         self.assertEqual(price.nickname, "Test Price")
+        self.assertEqual(price.interval, "year")
         self.assertTrue(price.no_throttle)
 
     @override_settings(

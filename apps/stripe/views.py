@@ -61,6 +61,9 @@ async def update_price(price: Price):
             "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
             "no_throttle": no_throttle,
+            "interval": (
+                price.recurring.get("interval", "month") if price.recurring else "month"
+            ),
         },
     )
 
