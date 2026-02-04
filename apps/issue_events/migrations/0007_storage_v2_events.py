@@ -1,6 +1,8 @@
 # Generated manually for Storage Engine V2
 # Implements dual-ID schema (server UUIDv7 + client UUIDv4) with nested partitioning
 
+import os
+
 import django.contrib.postgres.fields
 import apps.issue_events.models
 from datetime import datetime, timedelta, timezone
@@ -21,6 +23,7 @@ def create_initial_partitions(apps, schema_editor):
     """
     from glitchtip.partition_manager import PartitionManager
 
+    event_limit = int(os.environ.get("GLITCHTIP_MIGRATION_EVENT_LIMIT", "1000"))
     manager = PartitionManager(db_connection=schema_editor.connection.alias)
     now = datetime.now(timezone.utc)
 
@@ -41,24 +44,25 @@ def create_initial_partitions(apps, schema_editor):
                 """
             )
             if cursor.fetchone()[0]:
-                # Find the oldest date among the recent 10,000 events (matching migration logic)
+                # Find the oldest date among the recent events (matching migration logic)
                 cursor.execute(
                     """
-                    SELECT min(received) 
+                    SELECT min(received)
                     FROM (
-                        SELECT received 
-                        FROM issue_events_issueevent_archive 
+                        SELECT received
+                        FROM issue_events_issueevent_archive
                         ORDER BY received DESC, id DESC
-                        LIMIT 10000
+                        LIMIT %s
                     ) as sub;
-                    """
+                    """,
+                    [event_limit],
                 )
                 min_received = cursor.fetchone()[0]
                 if min_received:
                     # If we found data, ensure start_date covers it
                     if min_received.tzinfo is None:
                         min_received = min_received.replace(tzinfo=timezone.utc)
-                    # Subtract 1 day as a safety buffer to ensure all 10k rows are covered
+                    # Subtract 1 day as a safety buffer to ensure all rows are covered
                     min_date = (min_received - timedelta(days=1)).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )
@@ -103,15 +107,17 @@ def create_initial_partitions(apps, schema_editor):
 
 def migrate_legacy_data(apps, schema_editor):
     """
-    Migrate the most recent 10,000 events from the archive table to the new V2 table.
+    Migrate recent events from the archive table to the new V2 table.
+    Configurable via GLITCHTIP_MIGRATION_EVENT_LIMIT (default 1000).
     - Re-mints ID as UUIDv7 (preserving timestamp)
     - Sets event_id = old.id
     - Populates organization_id via join
     """
     from glitchtip.partition_manager import UUID7Helper
-    import os
 
-    # Use raw cursor to avoid model state issues
+    event_limit = int(os.environ.get("GLITCHTIP_MIGRATION_EVENT_LIMIT", "1000"))
+    insert_batch_size = 500
+
     with schema_editor.connection.cursor() as cursor:
         # Check if archive exists
         cursor.execute(
@@ -126,10 +132,43 @@ def migrate_legacy_data(apps, schema_editor):
         if not cursor.fetchone()[0]:
             return
 
-        print("Migrating recent legacy events...")
+        print(f"Migrating up to {event_limit} recent legacy events...")
 
-        # Fetch recent events
-        # We fetch columns that match the new schema + old ID
+        # Determine valid date range for partitions (matches create_initial_partitions)
+        now = datetime.now(timezone.utc)
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        cursor.execute(
+            """
+            SELECT min(received)
+            FROM (
+                SELECT received
+                FROM issue_events_issueevent_archive
+                ORDER BY received DESC, id DESC
+                LIMIT %s
+            ) as sub;
+            """,
+            [event_limit],
+        )
+        min_received = cursor.fetchone()[0]
+        if min_received:
+            if min_received.tzinfo is None:
+                min_received = min_received.replace(tzinfo=timezone.utc)
+            min_date = (min_received - timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            if min_date < start_date:
+                start_date = min_date
+
+        end_date = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=7)
+
+        print(
+            f"Valid partition range: {start_date} to {end_date}"
+        )
+
+        # Fetch events
         cursor.execute(
             """
             SELECT
@@ -140,49 +179,27 @@ def migrate_legacy_data(apps, schema_editor):
                 (SELECT project.organization_id FROM projects_project project JOIN issue_events_issue issue ON issue.project_id = project.id WHERE issue.id = archive.issue_id) as organization_id
             FROM issue_events_issueevent_archive archive
             ORDER BY archive.received DESC, archive.id DESC
-            LIMIT 10000
-            """
+            LIMIT %s
+            """,
+            [event_limit],
         )
+
         rows = cursor.fetchall()
 
         if not rows:
             print("No legacy events found.")
         else:
-            # Determine valid date range for partitions we just created
-            # Logic must match create_initial_partitions to ensure coverage
-            now = datetime.now(timezone.utc)
-            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            insert_sql = """
+                INSERT INTO issue_events_issueevent (
+                    id, event_id, timestamp, issue_id, organization_id, release_id,
+                    type, level, title, transaction, data, tags, hashes, created
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING;
+            """
 
-            # Find min date from rows to match create_initial_partitions logic
-            # create_initial_partitions uses min(received) of top 10k.
-            # Since we fetched the same top 10k (deterministic order), we can find it here.
-            min_received = min(r[2] for r in rows) if rows else None
-
-            if min_received:
-                if min_received.tzinfo is None:
-                    min_received = min_received.replace(tzinfo=timezone.utc)
-                min_date = (min_received - timedelta(days=1)).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-                if min_date < start_date:
-                    start_date = min_date
-
-            # End date is fixed at today + 7 days (partition logic)
-            # Partitions created: [start_date, target_end)
-            # Actually, create_initial_partitions ensures end_date is at least target_end
-            target_end = now.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) + timedelta(days=7)
-            end_date = target_end
-
-            print(
-                f"Filtering legacy events to valid partition range: {start_date} to {end_date}"
-            )
-
-            # Prepare bulk insert
-            # We construct the VALUES list manually to ensure correct types
-            values = []
+            total_migrated = 0
             skipped_count = 0
+            batch = []
 
             for row in rows:
                 (
@@ -204,7 +221,6 @@ def migrate_legacy_data(apps, schema_editor):
                 if organization_id is None:
                     continue
 
-                # Filter out-of-range events that would crash migration (no partition)
                 if received.tzinfo is None:
                     received = received.replace(tzinfo=timezone.utc)
 
@@ -212,18 +228,12 @@ def migrate_legacy_data(apps, schema_editor):
                     skipped_count += 1
                     continue
 
-                # Re-mint ID using received time
                 new_id = UUID7Helper.from_datetime(received)
 
-                # Append to values list. Note: data/tags (json) and hashes (array) need adaptation if using raw SQL strings,
-                # but cursor.executemany or simple execute with params handles it.
-                # We will use mogrify-like approach or executemany.
-                # Actually, executemany with a single INSERT statement is best.
-                # Note: `received` is not stored - it's derived from UUIDv7 id
-                values.append(
+                batch.append(
                     (
                         str(new_id),
-                        str(old_id),  # event_id
+                        str(old_id),
                         timestamp,
                         issue_id,
                         organization_id,
@@ -232,25 +242,27 @@ def migrate_legacy_data(apps, schema_editor):
                         level,
                         title,
                         transaction,
-                        data,  # psycopg2 adapts dict to jsonb
-                        tags,  # psycopg2 adapts dict to jsonb
-                        hashes,  # psycopg2 adapts list to array
-                        received,  # created (backfill with received)
+                        data,
+                        tags,
+                        hashes,
+                        received,
                     )
                 )
 
-            if values:
-                insert_sql = """
-                INSERT INTO issue_events_issueevent (
-                    id, event_id, timestamp, issue_id, organization_id, release_id,
-                    type, level, title, transaction, data, tags, hashes, created
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING;
-                """
-                cursor.executemany(insert_sql, values)
-                print(
-                    f"Migrated {len(values)} events (Skipped {skipped_count} out of range)."
-                )
+                if len(batch) >= insert_batch_size:
+                    cursor.executemany(insert_sql, batch)
+                    total_migrated += len(batch)
+                    batch = []
+
+            if batch:
+                cursor.executemany(insert_sql, batch)
+                total_migrated += len(batch)
+
+            del rows  # Free fetched data
+
+            print(
+                f"Migrated {total_migrated} events (skipped {skipped_count} out of range)."
+            )
 
         # Cleanup
         retain_data = (
