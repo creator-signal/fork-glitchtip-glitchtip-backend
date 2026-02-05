@@ -1,12 +1,15 @@
 #!/usr/bin/env sh
 set -e
 
-# Run initialization commands
-python manage.py migrate --no-input --skip-checks
-python manage.py maintain_partitions
+# Run initialization commands unless SKIP_INIT is set
+# Set SKIP_INIT=true when running migrations as a pre-deploy hook
+if [ "${SKIP_INIT}" != "True" ] && [ "${SKIP_INIT}" != "true" ] && [ "${SKIP_INIT}" != "1" ]; then
+    python manage.py migrate --no-input --skip-checks
+    python manage.py maintain_partitions
 
-# Create cache table if django.contrib.sessions is installed
-python -c "import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'glitchtip.settings'); django.setup(); from django.conf import settings; from django.core.management import call_command; call_command('createcachetable') if 'django.contrib.sessions' in settings.INSTALLED_APPS else None"
+    # Create cache table if django.contrib.sessions is installed
+    python -c "import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'glitchtip.settings'); django.setup(); from django.conf import settings; from django.core.management import call_command; call_command('createcachetable') if 'django.contrib.sessions' in settings.INSTALLED_APPS else None"
+fi
 
 # Enable embedded worker
 export GLITCHTIP_EMBED_WORKER=true
