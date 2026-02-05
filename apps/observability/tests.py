@@ -66,28 +66,27 @@ class ObservabilityTestCase(TestCase):
 
     def test_project_metric(self):
         clear_metrics_cache()
-        # create new org
-        org = baker.make("organizations_ext.Organization")
-
-        # no projects yet
+        # Get baseline project count
         metrics = self._get_metrics()
-        projs_metric = get_sample_value(
+        before_projs_metric = get_sample_value(
             metrics,
-            "glitchtip_projects",
+            "glitchtip_projects_total",
             "gauge",
-            {"organization": org.slug},
+            {},
         )
-        self.assertEqual(projs_metric or 0, 0)
+        before_projs_metric = before_projs_metric or 0.0
 
-        # create new project
+        # create new org and project
         clear_metrics_cache()
+        org = baker.make("organizations_ext.Organization")
         baker.make("projects.Project", organization=org)
-        # test
+
+        # test total increased by 1
         metrics = self._get_metrics()
         projs_metric = get_sample_value(
             metrics,
-            "glitchtip_projects",
+            "glitchtip_projects_total",
             "gauge",
-            {"organization": org.slug},
+            {},
         )
-        self.assertEqual(projs_metric, 1)
+        self.assertEqual(projs_metric, before_projs_metric + 1)
