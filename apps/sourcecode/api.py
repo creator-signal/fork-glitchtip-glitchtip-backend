@@ -1,6 +1,7 @@
 from django.shortcuts import aget_object_or_404
 from ninja import Router
 
+from apps.files.models import FileBlob
 from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
@@ -24,6 +25,17 @@ async def artifact_bundle_assemble(
     organization = await aget_object_or_404(
         Organization, slug=organization_slug, users=user_id
     )
+
+    existing_chunks = [
+        checksum
+        async for checksum in FileBlob.objects.filter(
+            checksum__in=payload.chunks
+        ).values_list("checksum", flat=True)
+    ]
+    missing_chunks = list(set(payload.chunks) - set(existing_chunks))
+
+    if missing_chunks:
+        return {"state": "not_found", "missingChunks": missing_chunks}
 
     await assemble_artifacts_task.aenqueue(
         organization.id,

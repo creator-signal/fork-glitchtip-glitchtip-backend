@@ -21,6 +21,7 @@ AssembleState = Literal["created", "error", "not_found", "assembling", "ok"]
 
 class AssembleResponse(Schema):
     state: AssembleState
+    missingChunks: list[str] = []
 
 
 class DebugSymbolBundleSchema(CamelSchema):
