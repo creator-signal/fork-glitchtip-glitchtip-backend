@@ -52,7 +52,9 @@ def get_monitor_queryset(user_id: int, organization_slug: str):
 
 
 async def fetch_checks_lateral(
-    monitor_ids: list[int], limit: int = 60
+    monitor_ids: list[int],
+    organization_ids: list[int],
+    limit: int = 60,
 ) -> dict[int, list[MonitorCheck]]:
     """
     Efficiently fetch top N checks per monitor using LATERAL JOIN.
@@ -61,6 +63,7 @@ async def fetch_checks_lateral(
     - Uses the (monitor_id, start_check DESC) index efficiently
     - Stops scanning after `limit` rows per monitor (early termination)
     - No need to process all historical checks
+    - Filters by organization_id for partition pruning
 
     Returns a dict mapping monitor_id -> list of MonitorCheck instances.
     """
@@ -70,12 +73,12 @@ async def fetch_checks_lateral(
     sql = """
         SELECT c.id, c.organization_id, c.monitor_id, c.start_check,
                c.response_time, c.reason, c.is_up, c.is_change, c.data
-        FROM unnest(%(monitor_ids)s::int[]) AS m(id)
+        FROM unnest(%(monitor_ids)s::int[], %(organization_ids)s::int[]) AS m(id, org_id)
         CROSS JOIN LATERAL (
             SELECT id, organization_id, monitor_id, start_check,
                    response_time, reason, is_up, is_change, data
             FROM uptime_monitorcheck
-            WHERE monitor_id = m.id
+            WHERE monitor_id = m.id AND organization_id = m.org_id
             ORDER BY start_check DESC
             LIMIT %(limit)s
         ) c
@@ -84,7 +87,14 @@ async def fetch_checks_lateral(
 
     def execute_query():
         with connection.cursor() as cursor:
-            cursor.execute(sql, {"monitor_ids": monitor_ids, "limit": limit})
+            cursor.execute(
+                sql,
+                {
+                    "monitor_ids": monitor_ids,
+                    "organization_ids": organization_ids,
+                    "limit": limit,
+                },
+            )
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -115,7 +125,10 @@ async def attach_checks_to_monitors(
     if not monitors:
         return monitors
     monitor_ids = [m.id for m in monitors]
-    checks_by_monitor = await fetch_checks_lateral(monitor_ids, limit)
+    organization_ids = [m.organization_id for m in monitors]
+    checks_by_monitor = await fetch_checks_lateral(
+        monitor_ids, organization_ids, limit
+    )
     for monitor in monitors:
         # Use Django's prefetch cache so serializers see the checks
         monitor._prefetched_objects_cache = {
