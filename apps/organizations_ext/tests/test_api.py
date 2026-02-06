@@ -46,6 +46,22 @@ class OrganizationsAPITestCase(TestCase):
             "Org projects should contain teams id/name",
         )
 
+    def test_organizations_retrieve_access(self):
+        """
+        Ensure 'access' field reflects correct organization user's role
+        """
+        self.org_user.role = OrganizationUserRole.MEMBER
+        self.org_user.save()
+
+        organization_2 = baker.make("organizations_ext.Organization")
+        organization_2.add_user(self.user)
+
+        url = reverse("api:get_organization", args=[organization_2.slug])
+        res = self.client.get(url)
+        data = res.json()["access"]
+        owner_scopes = OrganizationUserRole.get_role(OrganizationUserRole.OWNER)["scopes"]
+        self.assertCountEqual(data, owner_scopes)
+
     def test_organizations_create(self):
         data = {"name": "test"}
         res = self.client.post(self.url, data, content_type="application/json")
