@@ -72,8 +72,9 @@ async def list_organizations(
 async def get_organization(request: AuthHttpRequest, organization_slug: str):
     """Return Organization with project and team details."""
     return await aget_object_or_404(
-        get_organizations_queryset(request.auth.user_id, add_details=True),
-        slug=organization_slug,
+        get_organizations_queryset(
+            request.auth.user_id, add_details=True, organization_slug=organization_slug
+        )
     )
 
 
@@ -121,7 +122,6 @@ async def update_organization(
             add_details=True,
             organization_slug=organization_slug,
         ),
-        slug=organization_slug,
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
