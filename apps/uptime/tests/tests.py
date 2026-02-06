@@ -53,7 +53,7 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
                 Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60
             )
             baker.make(Monitor, url=test_url, monitor_type=MonitorType.GET, interval=60)
-            baker.make(MonitorCheck, monitor=mon1)
+            baker.make(MonitorCheck, monitor=mon1, organization=mon1.organization)
 
         # Run through a full interval to ensure we hit the monitors
         async def run_loop():
