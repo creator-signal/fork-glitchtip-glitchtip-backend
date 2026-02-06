@@ -30,12 +30,14 @@ class UptimeAPITestCase(GlitchTestCase):
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=False,
             start_check="2021-09-19T15:39:31Z",
         )
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=True,
             is_change=True,
             start_check="2021-09-19T15:40:31Z",
@@ -63,6 +65,7 @@ class UptimeAPITestCase(GlitchTestCase):
                 baker.make(
                     "uptime.MonitorCheck",
                     monitor=monitor,
+                    organization=monitor.organization,
                     is_up=is_up,
                     start_check=current_time,
                 )
@@ -190,6 +193,7 @@ class UptimeAPITestCase(GlitchTestCase):
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=False,
             is_change=True,
             start_check="2021-09-19T15:39:31Z",
@@ -197,6 +201,7 @@ class UptimeAPITestCase(GlitchTestCase):
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=True,
             is_change=True,
             start_check=now,
@@ -220,6 +225,7 @@ class UptimeAPITestCase(GlitchTestCase):
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=False,
             start_check="2021-09-19T15:39:31Z",
         )
@@ -302,6 +308,7 @@ class UptimeAPITestCase(GlitchTestCase):
         baker.make(
             "uptime.MonitorCheck",
             monitor=monitor,
+            organization=monitor.organization,
             is_up=False,
             start_check="2021-09-19T15:39:31Z",
         )
