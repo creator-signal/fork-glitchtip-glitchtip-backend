@@ -27,12 +27,17 @@ class MonitorManager(models.Manager):
             latest_is_up=Subquery(
                 MonitorCheck.objects.filter(
                     monitor_id=OuterRef("id"),
+                    organization_id=OuterRef("organization_id"),
                 )
                 .order_by("-start_check")
                 .values("is_up")[:1]
             ),
             last_change=Subquery(
-                MonitorCheck.objects.filter(monitor_id=OuterRef("id"), is_change=True)
+                MonitorCheck.objects.filter(
+                    monitor_id=OuterRef("id"),
+                    organization_id=OuterRef("organization_id"),
+                    is_change=True,
+                )
                 .order_by("-start_check")
                 .values("start_check")[:1]
             ),
