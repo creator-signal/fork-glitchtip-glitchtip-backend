@@ -1,3 +1,16 @@
+# 6.0.5
+
+- Feat: Ingest Sentry SDK feedback and user_report envelope items, stored as UserReport (fixes #107)
+- Fix: Maintenance cleanup no longer times out on large partitioned tables
+- Fix: Coerce non-string logentry params and strip NUL bytes from event text fields
+- Fix: Correct organization user scopes on organization retrieve
+- Fix: Check for missing chunks in artifact bundle assemble
+- Fix: Allow blank/null options field in User model
+- Fix: Remove stale `received` column reference from `import_legacy_events`
+- Fix: Remove per-organization label from projects metric to reduce cardinality
+- Perf: Add organization_id filter to uptime MonitorCheck queries for partition pruning
+- Add SKIP_INIT env var to all-in-one script
+
 # 6.0.0
 
 - Fix: Truncate oversized stack trace frame `vars` on ingestion to prevent 2MB+ event payloads from recursive error capture
