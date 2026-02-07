@@ -43,10 +43,13 @@ logger = logging.getLogger(__name__)
 
 
 CoercedStr = Annotated[
-    str, BeforeValidator(lambda v: str(v) if isinstance(v, (bool, list)) else v)
+    str,
+    BeforeValidator(lambda v: v if v is None or isinstance(v, str) else str(v)),
 ]
 """
-Coerced Str that will coerce bool/list to str when found
+Coerced Str that will coerce any non-string, non-None value to str.
+None is passed through so that `CoercedStr | None` union types still
+resolve None correctly.
 """
 
 

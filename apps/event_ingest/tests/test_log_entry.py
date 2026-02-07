@@ -36,6 +36,35 @@ class LogEntryTestCase(SimpleTestCase):
         event = WebIngestIssueEvent(**data)
         self.assertEqual(event.logentry.params["name"], None)
 
+    def test_logentry_params_list_with_dict(self):
+        """Params list containing dict values should be coerced to strings."""
+        data = {
+            "logentry": {
+                "message": "FTL exception for locale [%s], message '%s', args %r: %s",
+                "params": [
+                    "en",
+                    None,
+                    {},
+                    "FluentJit(...)",
+                ],
+            },
+        }
+        event = WebIngestIssueEvent(**data)
+        self.assertIsInstance(event.logentry.params[2], str)
+        self.assertIsNone(event.logentry.params[1])
+
+    def test_logentry_params_list_with_mixed_types(self):
+        """Params with int, float, bool, dict should all coerce to str."""
+        data = {
+            "logentry": {
+                "message": "%s %s %s %s",
+                "params": [42, 3.14, True, {"key": "val"}],
+            },
+        }
+        event = WebIngestIssueEvent(**data)
+        for p in event.logentry.params:
+            self.assertIsInstance(p, str)
+
     def test_tags_coercion_in_list(self):
         """
         Verify that tags in list format are coerced to strings if they are bools.
