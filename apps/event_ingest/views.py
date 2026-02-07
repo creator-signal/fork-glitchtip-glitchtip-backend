@@ -7,6 +7,7 @@ import orjson
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
+from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -17,6 +18,7 @@ from sentry_sdk import capture_exception, set_context, set_level
 
 from apps.event_ingest.interfaces import IngestTaskMessage
 from apps.issue_events.constants import IssueEventType
+from apps.issue_events.models import IssueEvent, UserReport
 from glitchtip.api.exceptions import ThrottleException
 from glitchtip.partition_manager import UUID7Helper
 
@@ -218,6 +220,46 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         await ingest_transaction.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
+
+                elif item_header.type in ("user_report", "feedback"):
+                    data = orjson.loads(payload_bytes)
+                    if item_header.type == "feedback":
+                        fb = (data.get("contexts") or {}).get("feedback") or {}
+                        assoc_id = fb.get("associated_event_id")
+                        event_id = uuid.UUID(assoc_id) if assoc_id else None
+                        name = (fb.get("name") or "")[:128]
+                        email = (fb.get("contact_email") or "")[:254]
+                        comments = fb.get("message") or ""
+                    else:
+                        raw_id = data.get("event_id")
+                        event_id = uuid.UUID(raw_id) if raw_id else None
+                        name = (data.get("name") or "")[:128]
+                        email = (data.get("email") or "")[:254]
+                        comments = data.get("comments") or ""
+
+                    issue_id = None
+                    if event_id:
+                        issue_event = (
+                            await IssueEvent.objects.filter(
+                                event_id=event_id,
+                            )
+                            .only("issue_id")
+                            .afirst()
+                        )
+                        if issue_event:
+                            issue_id = issue_event.issue_id
+
+                    try:
+                        await UserReport.objects.acreate(
+                            project_id=project_id,
+                            issue_id=issue_id,
+                            event_id=event_id or uuid.uuid4(),
+                            name=name,
+                            email=email,
+                            comments=comments,
+                        )
+                    except IntegrityError:
+                        pass  # Duplicate report, ignore
 
             except ValidationError as e:
                 # Payload validation failed for a supported type. Log it.

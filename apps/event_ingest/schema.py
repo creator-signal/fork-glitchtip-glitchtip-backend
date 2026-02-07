@@ -371,14 +371,13 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     sent_at: datetime = Field(default_factory=now)
 
 
-SupportedItemType = Literal["transaction", "event"]
+SupportedItemType = Literal["transaction", "event", "user_report", "feedback"]
 IgnoredItemType = Literal[
     "log",
     "session",
     "sessions",
     "client_report",
     "attachment",
-    "user_report",
     "check_in",
     "profile",
     "replay_recording",
