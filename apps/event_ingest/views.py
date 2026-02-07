@@ -2,6 +2,7 @@ import io
 import logging
 import uuid
 from dataclasses import asdict
+from datetime import timedelta
 
 import orjson
 from asgiref.sync import sync_to_async
@@ -239,9 +240,16 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
 
                     issue_id = None
                     if event_id:
+                        # Constrain to recent UUID7 range + org for partition pruning
+                        # Feedback is typically about an event that just happened
+                        recent_lower = UUID7Helper.from_datetime(
+                            timezone.now() - timedelta(hours=1)
+                        )
                         issue_event = (
                             await IssueEvent.objects.filter(
                                 event_id=event_id,
+                                id__gte=recent_lower,
+                                organization_id=project.organization_id,
                             )
                             .only("issue_id")
                             .afirst()
