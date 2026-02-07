@@ -1172,3 +1172,20 @@ class SentryCompatTestCase(EventIngestTestCase):
             "long_key_" + "b" * 280: "normal_value",
         }
         self.submit_event(event)
+
+    def test_nul_bytes_stripped_from_transaction(self):
+        """NUL bytes in transaction/culprit should be stripped before DB insert."""
+        self.process_events([{"transaction": "foo\x00bar", "message": "nul test"}])
+        event = IssueEvent.objects.first()
+        self.assertNotIn("\x00", event.transaction)
+        self.assertIn("foobar", event.transaction)
+
+    def test_nul_bytes_stripped_from_tags(self):
+        """NUL bytes in tag keys/values should be stripped before DB insert."""
+        self.process_events(
+            [{"tags": {"key\x00bad": "val\x00ue"}, "message": "nul tag test"}]
+        )
+        event = IssueEvent.objects.first()
+        for key, value in event.tags.items():
+            self.assertNotIn("\x00", key)
+            self.assertNotIn("\x00", value)

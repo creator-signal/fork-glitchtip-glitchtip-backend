@@ -891,10 +891,10 @@ def process_issue_events(
                 else LogLevel.ERROR,
                 timestamp=processing_event.payload.timestamp,
                 title=remove_bad_chars(processing_event.title),
-                transaction=processing_event.transaction,
+                transaction=remove_bad_chars(processing_event.transaction),
                 data=remove_bad_chars(processing_event.event_data),
                 hashes=[processing_event.issue_hash],
-                tags=processing_event.event_tags,
+                tags=remove_bad_chars(processing_event.event_tags),
                 release_id=processing_event.release_id,
             )
         )
@@ -1074,10 +1074,12 @@ TagStats = defaultdict[
 
 
 def update_tags(processing_events: list[ProcessingEvent]):
-    # Truncate long values
+    # Truncate long values and strip NUL bytes
     for processing_event in processing_events:
         processing_event.event_tags = {
-            str(key)[:MAX_TAG_LENGTH]: str(value)[:MAX_TAG_LENGTH]
+            remove_bad_chars(str(key))[:MAX_TAG_LENGTH]: remove_bad_chars(str(value))[
+                :MAX_TAG_LENGTH
+            ]
             for key, value in processing_event.event_tags.items()
         }
     keys = sorted({key for d in processing_events for key in d.event_tags.keys()})
