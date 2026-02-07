@@ -25,11 +25,14 @@ from .authentication import EventAuthHttpRequest, event_auth
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
+    FeedbackPayload,
     ItemHeaderSchema,
     TransactionEventSchema,
+    UserReportPayload,
+    UserReportTaskMessage,
     WebIngestIssueEvent,
 )
-from .tasks import ingest_event, ingest_transaction
+from .tasks import ingest_event, ingest_transaction, ingest_user_report
 from .utils import serialize_for_vtasks
 
 logger = logging.getLogger(__name__)
@@ -218,6 +221,25 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         await ingest_transaction.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
+
+                elif item_header.type in ("user_report", "feedback"):
+                    if item_header.type == "feedback":
+                        item = FeedbackPayload.model_validate_json(
+                            payload_bytes
+                        )
+                    else:
+                        item = UserReportPayload.model_validate_json(
+                            payload_bytes
+                        )
+                    report_data = item.to_user_report_data()
+                    msg = UserReportTaskMessage(
+                        project_id=project_id,
+                        organization_id=project.organization_id,
+                        **report_data,
+                    )
+                    await ingest_user_report.aenqueue(
+                        serialize_for_vtasks(msg.model_dump())
+                    )
 
             except ValidationError as e:
                 # Payload validation failed for a supported type. Log it.

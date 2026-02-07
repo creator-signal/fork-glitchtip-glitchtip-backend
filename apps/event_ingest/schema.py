@@ -374,14 +374,13 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     sent_at: datetime = Field(default_factory=now)
 
 
-SupportedItemType = Literal["transaction", "event"]
+SupportedItemType = Literal["transaction", "event", "user_report", "feedback"]
 IgnoredItemType = Literal[
     "log",
     "session",
     "sessions",
     "client_report",
     "attachment",
-    "user_report",
     "check_in",
     "profile",
     "replay_recording",
@@ -395,6 +394,59 @@ class ItemHeaderSchema(LaxIngestSchema):
     content_type: str | None = None
     type: SupportedItemType | IgnoredItemType
     length: int | None = None
+
+
+class FeedbackContext(LaxIngestSchema):
+    message: str = ""
+    name: str = ""
+    contact_email: str = ""
+    associated_event_id: str | None = None
+
+
+class FeedbackPayload(LaxIngestSchema):
+    """New SDK (v8+) feedback envelope payload"""
+
+    event_id: uuid.UUID | None = None
+    contexts: dict[str, Any]
+
+    def to_user_report_data(self) -> dict[str, Any]:
+        fb = FeedbackContext.model_validate(
+            (self.contexts.get("feedback") or {})
+        )
+        return {
+            "event_id": fb.associated_event_id,
+            "name": fb.name[:128],
+            "email": fb.contact_email[:254],
+            "comments": fb.message,
+        }
+
+
+class UserReportPayload(LaxIngestSchema):
+    """Old SDK user_report envelope payload"""
+
+    event_id: uuid.UUID | None = None
+    name: str = ""
+    email: str = ""
+    comments: str = ""
+
+    def to_user_report_data(self) -> dict[str, Any]:
+        return {
+            "event_id": str(self.event_id) if self.event_id else None,
+            "name": self.name[:128],
+            "email": self.email[:254],
+            "comments": self.comments,
+        }
+
+
+class UserReportTaskMessage(LaxIngestSchema):
+    """Interchange message for user report/feedback processing"""
+
+    project_id: int
+    organization_id: int
+    event_id: str | None = None
+    name: str = ""
+    email: str = ""
+    comments: str = ""
 
 
 class EnvelopeSchema(RootModel[list[dict[str, Any]]]):
