@@ -474,6 +474,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, data, content_type="application/x-sentry-envelope"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         report = UserReport.objects.get()
         self.assertEqual(report.name, "Jane")
@@ -507,6 +508,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, data, content_type="application/x-sentry-envelope"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         report = UserReport.objects.get()
         self.assertEqual(report.comments, "Great product!")
@@ -546,6 +548,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, data, content_type="application/x-sentry-envelope"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         report = UserReport.objects.get()
         self.assertEqual(report.issue_id, event.issue_id)
@@ -573,6 +576,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         res = self.client.post(
             self.url, data, content_type="application/x-sentry-envelope"
         )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
         report = UserReport.objects.get()
         self.assertEqual(report.comments, "Anonymous feedback")
