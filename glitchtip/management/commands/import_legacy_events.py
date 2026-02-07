@@ -353,17 +353,19 @@ class Command(BaseCommand):
             return 0
 
         # Prepare INSERT statement with column alignment
+        # Note: `received` is not a column — the received timestamp is encoded
+        # in the UUIDv7 id and can be derived via UUID7Helper.extract_datetime().
         insert_sql = """
         INSERT INTO issue_events_issueevent (
             id, event_id,
-            timestamp, received,
+            timestamp,
             issue_id, release_id,
             type, level,
             title, transaction, data, tags, hashes,
             organization_id
         ) VALUES (
             %s, %s,
-            %s, %s,
+            %s,
             %s, %s,
             %s, %s,
             %s, %s, %s, %s, %s,
@@ -396,10 +398,9 @@ class Command(BaseCommand):
             # Prepare row for insertion
             values.append(
                 (
-                    new_id,  # id (server UUIDv7)
+                    new_id,  # id (UUIDv7 encoding the received timestamp)
                     old_id,  # event_id (original client UUID)
                     timestamp,
-                    received,
                     issue_id,
                     release_id,
                     event_type,
