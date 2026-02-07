@@ -9,7 +9,7 @@ from django.test.client import FakePayload
 from django.urls import reverse
 from freezegun import freeze_time
 
-from apps.issue_events.models import IssueEvent
+from apps.issue_events.models import IssueEvent, UserReport
 from apps.performance.models import TransactionEvent
 
 from .utils import EventIngestTestCase, list_to_envelope
@@ -453,3 +453,132 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "other",
             "TransactionEvent platform should default to 'other' when missing.",
         )
+
+    def test_user_report_envelope(self):
+        """Old SDK user_report envelope items should create a UserReport."""
+        event_id = uuid.uuid4().hex
+        data = "\n".join(
+            [
+                json.dumps({"event_id": event_id}),
+                json.dumps({"type": "user_report"}),
+                json.dumps(
+                    {
+                        "event_id": event_id,
+                        "name": "Jane",
+                        "email": "jane@example.com",
+                        "comments": "It broke!",
+                    }
+                ),
+            ]
+        )
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
+        report = UserReport.objects.get()
+        self.assertEqual(report.name, "Jane")
+        self.assertEqual(report.email, "jane@example.com")
+        self.assertEqual(report.comments, "It broke!")
+        self.assertEqual(report.project_id, self.project.id)
+
+    def test_feedback_envelope(self):
+        """New SDK feedback envelope items should create a UserReport."""
+        feedback_id = uuid.uuid4().hex
+        data = "\n".join(
+            [
+                json.dumps({"event_id": feedback_id}),
+                json.dumps({"type": "feedback"}),
+                json.dumps(
+                    {
+                        "event_id": feedback_id,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "platform": "javascript",
+                        "contexts": {
+                            "feedback": {
+                                "message": "Great product!",
+                                "contact_email": "john@test.com",
+                                "name": "John",
+                            }
+                        },
+                    }
+                ),
+            ]
+        )
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
+        report = UserReport.objects.get()
+        self.assertEqual(report.comments, "Great product!")
+        self.assertEqual(report.email, "john@test.com")
+        self.assertEqual(report.name, "John")
+
+    def test_feedback_with_associated_event(self):
+        """Feedback with associated_event_id should link to the issue."""
+        # First create an issue event
+        res = self.client.post(
+            self.url,
+            list_to_envelope(self.django_event),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+        event = IssueEvent.objects.first()
+
+        # Now send feedback referencing that event
+        feedback_id = uuid.uuid4().hex
+        data = "\n".join(
+            [
+                json.dumps({"event_id": feedback_id}),
+                json.dumps({"type": "feedback"}),
+                json.dumps(
+                    {
+                        "event_id": feedback_id,
+                        "contexts": {
+                            "feedback": {
+                                "message": "This error is annoying",
+                                "associated_event_id": event.event_id.hex,
+                            }
+                        },
+                    }
+                ),
+            ]
+        )
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
+        report = UserReport.objects.get()
+        self.assertEqual(report.issue_id, event.issue_id)
+        self.assertEqual(report.comments, "This error is annoying")
+
+    def test_feedback_without_contact_info(self):
+        """Feedback with no name/email should still be accepted."""
+        feedback_id = uuid.uuid4().hex
+        data = "\n".join(
+            [
+                json.dumps({"event_id": feedback_id}),
+                json.dumps({"type": "feedback"}),
+                json.dumps(
+                    {
+                        "event_id": feedback_id,
+                        "contexts": {
+                            "feedback": {
+                                "message": "Anonymous feedback",
+                            }
+                        },
+                    }
+                ),
+            ]
+        )
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
+        report = UserReport.objects.get()
+        self.assertEqual(report.comments, "Anonymous feedback")
+        self.assertEqual(report.name, "")
+        self.assertEqual(report.email, "")
