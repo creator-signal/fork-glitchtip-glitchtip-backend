@@ -2,7 +2,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from django.conf import settings
-from django.core.validators import MaxValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Count, Q, QuerySet
 from django.db.models.functions import Cast
@@ -37,6 +37,11 @@ class Project(CreatedModel, SoftDeleteModel):
         default=0,
         validators=[MaxValueValidator(100)],
         help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
+    )
+    downsample_rate = models.FloatField(
+        default=0.1,
+        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
+        help_text="Fraction of non-representative events to keep full data during downsampling (0.0=no downsampling)",
     )
 
     class Meta:

@@ -244,7 +244,7 @@ class IssueEvent(models.Model):
     # Variable-width fields
     title = models.CharField(max_length=255)
     transaction = models.CharField(max_length=MAX_CULPRIT_LENGTH)
-    data = models.JSONField()
+    data = models.JSONField(null=True, blank=True)
     tags = models.JSONField()
     hashes = ArrayField(models.TextField(), db_default=[])
 
@@ -293,13 +293,19 @@ class IssueEvent(models.Model):
     @property
     def message(self):
         """Often the title and message are the same. If message isn't stored, assume it's the title"""
+        if self.data is None:
+            return self.title
         return self.data.get("message", self.title)
 
     @property
     def metadata(self):
         """Return metadata if exists, else return just the title as metadata"""
+        if self.data is None:
+            return {"title": self.title}
         return self.data.get("metadata", {"title": self.title})
 
     @property
     def platform(self):
+        if self.data is None:
+            return None
         return self.data.get("platform")

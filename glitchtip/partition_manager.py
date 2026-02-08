@@ -345,6 +345,39 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def set_partition_comment(self, partition_name: str, comment: str) -> None:
+        """
+        Set a comment on a partition table.
+
+        Args:
+            partition_name: Partition table name
+            comment: Comment text to set
+        """
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(f"COMMENT ON TABLE {partition_name} IS %s", [comment])
+
+    def get_partition_comment(self, partition_name: str) -> str | None:
+        """
+        Get the comment on a partition table.
+
+        Args:
+            partition_name: Partition table name
+
+        Returns:
+            Comment text, or None if no comment is set
+        """
+        sql = """
+        SELECT obj_description(c.oid)
+        FROM pg_class c
+        WHERE c.relname = %s;
+        """
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(sql, [partition_name])
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+            return None
+
     def drop_old_partitions(self, parent_table: str, max_days: int) -> int:
         """
         Identify and drop partitions older than max_days.

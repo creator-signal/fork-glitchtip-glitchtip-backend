@@ -56,6 +56,8 @@ def to_camel_with_lower_id(string: str) -> str:
 
 
 def get_entries(data):
+    if data is None:
+        return []
     entries = []
     if exception := data.get("exception"):
         if isinstance(exception, list):  # Old format, delete after 2025

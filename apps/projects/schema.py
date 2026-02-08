@@ -22,6 +22,7 @@ class NameSlugProjectSchema(CamelSchema, ModelSchema):
 class ProjectIn(NameSlugProjectSchema):
     platform: str | None = None  # This shouldn't be needed, but is.
     event_throttle_rate: int | None = None  # This shouldn't be needed, but is.
+    downsample_rate: float | None = None
 
     class Meta(NameSlugProjectSchema.Meta):
         model = Project
@@ -30,6 +31,7 @@ class ProjectIn(NameSlugProjectSchema):
             "slug",
             "platform",
             "event_throttle_rate",  # Not in Sentry OSS
+            "downsample_rate",
             # "default_rules",
         ]
 
@@ -62,6 +64,7 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
             "slug",
             "platform",
             "event_throttle_rate",  # Not in Sentry OSS
+            "downsample_rate",
         ]
 
     @staticmethod

@@ -181,18 +181,26 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     @staticmethod
     def resolve_contexts(obj: IssueEvent):
+        if obj.data is None:
+            return None
         return obj.data.get("contexts")
 
     @staticmethod
     def resolve_context(obj: IssueEvent):
+        if obj.data is None:
+            return None
         return obj.data.get("extra")
 
     @staticmethod
     def resolve_user(obj: IssueEvent):
+        if obj.data is None:
+            return None
         return obj.data.get("user")
 
     @staticmethod
     def resolve_sdk(obj: IssueEvent):
+        if obj.data is None:
+            return None
         return obj.data.get("sdk")
 
     @staticmethod
@@ -205,6 +213,8 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     @staticmethod
     def resolve_entries(obj: IssueEvent):
+        if obj.data is None:
+            return []
         return get_entries(obj.data)
 
 
