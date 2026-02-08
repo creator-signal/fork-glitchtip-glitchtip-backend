@@ -118,20 +118,19 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         try:
             item_header = ItemHeaderSchema.model_validate_json(item_header_line)
         except ValidationError as e:
+            if any(err["type"] == "json_invalid" for err in e.errors()):
+                # Not valid JSON — corrupted/binary data, typically
+                # from a tunnel proxy mangling binary envelope payloads.
+                break
+            # Valid JSON that our schema doesn't understand — worth
+            # knowing about in case the SDK spec evolved.
             set_level("warning")
-            # Log context about the invalid line itself
             set_context(
-                "invalid item header line",
+                "invalid item header",
                 {"line": item_header_line.decode(errors="replace")[:1024]},
             )
             capture_exception(e)
-            logger.warning(
-                f"Item Header validation error on {request.path}. Skipping rest of envelope.",
-                exc_info=e,
-            )
-            # If an item header is invalid, it's hard to know how to recover.
-            # Safest might be to stop processing this envelope.
-            break  # Exit the loop
+            break
 
         # Read Payload (conditionally depends on type)
         payload_bytes = b""
@@ -224,13 +223,9 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
 
                 elif item_header.type in ("user_report", "feedback"):
                     if item_header.type == "feedback":
-                        item = FeedbackPayload.model_validate_json(
-                            payload_bytes
-                        )
+                        item = FeedbackPayload.model_validate_json(payload_bytes)
                     else:
-                        item = UserReportPayload.model_validate_json(
-                            payload_bytes
-                        )
+                        item = UserReportPayload.model_validate_json(payload_bytes)
                     report_data = item.to_user_report_data()
                     msg = UserReportTaskMessage(
                         project_id=project_id,
