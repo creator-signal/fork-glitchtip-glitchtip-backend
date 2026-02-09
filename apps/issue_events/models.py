@@ -34,7 +34,14 @@ class TagKey(models.Model):
 
 
 class TagValue(models.Model):
-    value = models.CharField(max_length=MAX_TAG_LENGTH, unique=True)
+    value = models.CharField(max_length=MAX_TAG_LENGTH)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["value"], name="issue_events_tagvalue_unique_value"
+            ),
+        ]
 
 
 class IssueTag(AggregationModel):
