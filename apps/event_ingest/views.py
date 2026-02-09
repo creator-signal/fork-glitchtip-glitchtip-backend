@@ -242,19 +242,8 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     # Check if logs feature is enabled
                     from django.conf import settings
 
-                    from .authentication import _is_accepting
-
                     if not getattr(settings, "GLITCHTIP_ENABLE_LOGS", False):
                         # Silently ignore logs when feature is disabled
-                        continue
-
-                    # Check log throttle - probabilistic rejection per request
-                    org_log_throttle = project.organization.log_throttle_rate
-                    proj_log_throttle = project.log_throttle_rate
-                    if not _is_accepting(org_log_throttle) or not _is_accepting(
-                        proj_log_throttle
-                    ):
-                        # Logs throttled for this request, skip silently
                         continue
 
                     # Log envelope payload contains multiple log items
