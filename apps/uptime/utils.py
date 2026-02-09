@@ -6,7 +6,11 @@ from ssl import SSLError
 
 import aiohttp
 from aiohttp import ClientTimeout
-from aiohttp.client_exceptions import ClientConnectorError, ClientResponseError
+from aiohttp.client_exceptions import (
+    ClientConnectorError,
+    ClientResponseError,
+    ServerConnectionError,
+)
 from django.conf import settings
 from django.utils import timezone
 
@@ -82,7 +86,7 @@ async def fetch(session, monitor):
         monitor["reason"] = MonitorCheckReason.SSL
     except asyncio.TimeoutError:
         monitor["reason"] = MonitorCheckReason.TIMEOUT
-    except ClientConnectorError:
+    except (ClientConnectorError, ServerConnectionError):
         monitor["reason"] = MonitorCheckReason.NETWORK
     except (OSError, ClientResponseError) as e:
         logger.warning(f"Monitor {monitor['id']} check failed", exc_info=e)
