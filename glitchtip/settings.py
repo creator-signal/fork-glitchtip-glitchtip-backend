@@ -99,7 +99,7 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
 )
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
-    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", global_settings.DATA_UPLOAD_MAX_MEMORY_SIZE
+    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", 5 * 1024 * 1024  # 5 MB
 )
 
 PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
