@@ -1,3 +1,15 @@
+# 6.0.6
+
+- Fix: Debug information file assembly now works with object storage backends (S3, GCS, DigitalOcean Spaces)
+- Fix: Clean up alerts notification M2M table during issue maintenance to prevent ForeignKey violations
+- Fix: Handle ServerDisconnectedError as network error in uptime checks
+- Fix: Silently discard binary-corrupted envelope item headers
+- Perf: Optimize maintenance cleanup queries for partitioned tables (file cleanup, issue cleanup, transaction group cleanup)
+- Perf: Drop unused varchar_pattern_ops index on TagValue.value
+- Refactor: Align ORM model state with actual SQL schema for IssueTag and TransactionEvent
+- Disable WebSocket handling in granian (not used by GlitchTip)
+- Increase default decompressed payload size limit from 2.5 MB to 5 MB
+
 # 6.0.5
 
 - Feat: Ingest Sentry SDK feedback and user_report envelope items, stored as UserReport (fixes #107)
