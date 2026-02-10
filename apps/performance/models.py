@@ -46,11 +46,10 @@ class TransactionEvent(models.Model):
     pk = models.CompositePrimaryKey("id", "organization")
 
     event_id = models.UUIDField(default=uuid.uuid4, editable=False, null=True)
-    trace_id = models.UUIDField(db_index=True)
+    trace_id = models.UUIDField()
 
     # 8-byte alignment
     start_timestamp = models.DateTimeField(
-        db_index=True,
         help_text="Datetime reported by client as the time the measurement started",
     )
     timestamp = models.DateTimeField(
@@ -64,7 +63,7 @@ class TransactionEvent(models.Model):
     group = models.ForeignKey(TransactionGroup, on_delete=models.CASCADE)
 
     # Other fields
-    duration = models.PositiveIntegerField(db_index=True, help_text="Milliseconds")
+    duration = models.PositiveIntegerField(help_text="Milliseconds")
     data = models.JSONField(help_text="General event data that is searchable")
     tags = models.JSONField(default=dict)
 
