@@ -32,7 +32,9 @@ router = Router()
 
 
 @optional_slash(
-    router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/"
+    router,
+    "post",
+    "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/",
 )
 async def difs_assemble_api(
     request: AuthHttpRequest,
@@ -93,7 +95,9 @@ async def difs_assemble_api(
 
 
 @optional_slash(
-    router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/"
+    router,
+    "post",
+    "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/",
 )
 async def project_reprocessing(
     request: AuthHttpRequest,

@@ -48,9 +48,7 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         """
         # Seed 5 distinct issues
         seed_msgs = [f"error-type-{i}" for i in range(5)]
-        self.process_events(
-            [generate_event(event={"message": m}) for m in seed_msgs]
-        )
+        self.process_events([generate_event(event={"message": m}) for m in seed_msgs])
         self.assertEqual(Issue.objects.count(), 5)
 
         # Batch of 10
@@ -78,9 +76,7 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         """
         # Seed issues
         seed_msgs = [f"seed-error-{i}" for i in range(5)]
-        self.process_events(
-            [generate_event(event={"message": m}) for m in seed_msgs]
-        )
+        self.process_events([generate_event(event={"message": m}) for m in seed_msgs])
 
         # Batch matching existing issues
         with CaptureQueriesContext(connection) as ctx_existing:

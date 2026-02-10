@@ -53,9 +53,7 @@ class SourceCodeAPITestCase(GlitchTestCase):
         baker.make("files.FileBlob", checksum=chunk1)
         baker.make("files.FileBlob", checksum=chunk2)
         version = "app@v1"
-        baker.make(
-            "releases.Release", version=version, organization=self.organization
-        )
+        baker.make("releases.Release", version=version, organization=self.organization)
         data = {
             "checksum": chunk1,
             "chunks": [chunk1, chunk2],

@@ -160,13 +160,11 @@ def migrate_legacy_data(apps, schema_editor):
             if min_date < start_date:
                 start_date = min_date
 
-        end_date = now.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) + timedelta(days=7)
-
-        print(
-            f"Valid partition range: {start_date} to {end_date}"
+        end_date = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            days=7
         )
+
+        print(f"Valid partition range: {start_date} to {end_date}")
 
         # Fetch events
         cursor.execute(

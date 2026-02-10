@@ -39,23 +39,23 @@ class MaintenanceTestCase(TestCase):
 
     def test_cleanup_handles_all_fk_relations(self):
         """
-        Verify cleanup correctly handles CASCADE FK relations to Issue.
+        Verify cleanup correctly handles all FK relations to Issue, including
+        auto-created M2M through tables.
 
-        Partitioned FK tables must have a =None filter in the queryset to
-        avoid cascading deletes into partitioned sub-tables.
-        Non-partitioned FK tables must be explicitly deleted per batch
-        and should NOT be filtered (otherwise issues are never cleaned up).
+        Since _raw_delete() bypasses Django's collector, ALL FK tables must
+        be handled explicitly:
+        - Partitioned FK tables: must have an exclude(Exists()) in the queryset
+          so the issue is kept alive while data exists.
+        - Non-partitioned FK tables (including M2M through tables): must be
+          explicitly deleted per batch before deleting the issue.
         """
         for rel in Issue._meta.related_objects:
             if rel.on_delete != models.CASCADE:
-                continue
-            if rel.related_model._meta.auto_created:
                 continue
             accessor = rel.get_accessor_name()
             db_table = rel.related_model._meta.db_table
             partitioned = _is_table_partitioned(db_table)
             with self.subTest(relation=accessor, partitioned=partitioned):
-                # Create issue before freeze so last_seen is old enough
                 issue = baker.make("issue_events.Issue")
                 kwargs = {rel.field.name: issue}
                 for f in rel.related_model._meta.concrete_fields:
@@ -76,13 +76,13 @@ class MaintenanceTestCase(TestCase):
                     self.assertTrue(
                         Issue.objects.filter(id=issue.id).exists(),
                         f"Issue with {accessor} (partitioned table {db_table}) "
-                        f"was deleted — add {accessor}=None filter to "
+                        f"was deleted — add exclude(Exists()) filter to "
                         f"cleanup_old_issues()",
                     )
                 else:
                     self.assertFalse(
                         Issue.objects.filter(id=issue.id).exists(),
                         f"Issue with {accessor} (non-partitioned table "
-                        f"{db_table}) was NOT deleted — DB CASCADE should "
-                        f"handle this, remove any {accessor}=None filter",
+                        f"{db_table}) was NOT deleted — add explicit delete "
+                        f"for this table in cleanup_old_issues()",
                     )

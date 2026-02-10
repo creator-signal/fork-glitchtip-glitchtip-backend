@@ -227,5 +227,3 @@ async def api_root(request: HttpRequest):
         "user": user_data,
         "auth": auth_data,
     }
-
-
