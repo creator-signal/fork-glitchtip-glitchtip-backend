@@ -183,6 +183,8 @@ if SENTRY_DSN:
         sample_rate=SENTRY_SAMPLE_RATE,
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         traces_sampler=traces_sampler,
+        max_value_length=2048,
+        max_breadcrumbs=50,
     )
 
 
