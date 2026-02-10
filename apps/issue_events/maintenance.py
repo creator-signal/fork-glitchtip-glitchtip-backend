@@ -5,6 +5,8 @@ from django.conf import settings
 from django.db.models import Exists, OuterRef
 from django.utils.timezone import now
 
+from apps.alerts.models import Notification
+
 from .models import Comment, Issue, IssueAggregate, IssueHash, IssueTag, UserReport
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,9 @@ def cleanup_old_issues():
         if not batch_ids:
             break
         # Delete from non-partitioned FK tables first (small tables)
+        Notification.issues.through.objects.filter(
+            issue_id__in=batch_ids
+        )._raw_delete(queryset.db)
         IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
