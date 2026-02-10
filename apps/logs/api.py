@@ -45,7 +45,7 @@ LEVEL_MAP = {
 DEFAULT_LOOKBACK_DAYS = 7
 
 # Days of hot storage before data is archived to cold
-HOT_STORAGE_DAYS = getattr(settings, "GLITCHTIP_LOG_HOT_STORAGE_DAYS", 7)
+HOT_STORAGE_DAYS = getattr(settings, "GLITCHTIP_LOGS_HOT_DAYS", 7)
 
 
 def decode_cursor(cursor_str: str | None) -> UUID | None:

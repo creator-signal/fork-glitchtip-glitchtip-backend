@@ -284,7 +284,7 @@ class Command(BaseCommand):
             hot_count = cursor.fetchone()[0]
 
             cursor.execute(
-                "SELECT COUNT(*) FROM logs_logevent_all WHERE organization_id = %s",
+                "SELECT COUNT(*) FROM logs_logevent WHERE organization_id = %s",
                 [self.org.id],
             )
             total_count = cursor.fetchone()[0]
@@ -390,14 +390,14 @@ class Command(BaseCommand):
 
         # Count query
         count_sql = f"""
-            SELECT COUNT(*) FROM logs_logevent_all
+            SELECT COUNT(*) FROM logs_logevent
             WHERE {where_sql}
         """
 
         # Timed query with LIMIT
         select_sql = f"""
             SELECT id, level, body, service
-            FROM logs_logevent_all
+            FROM logs_logevent
             WHERE {where_sql}
             ORDER BY id DESC
             LIMIT 100

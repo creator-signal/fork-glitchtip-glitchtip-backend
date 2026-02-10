@@ -11,7 +11,7 @@ from django.conf import settings
 from .cold_storage import (
     ColdStorageConfig,
     archive_and_swap_partition,
-    delete_cold_partition,
+    cleanup_all_cold_storage,
     get_partitions_older_than,
     is_pg_duckdb_available,
 )
@@ -74,29 +74,9 @@ def archive_old_partitions(days: int):
 
 def delete_expired_cold_storage(days: int):
     """Delete cold storage files older than `days`."""
-    # Get cold partitions (archive views) older than retention
-    partitions = get_partitions_older_than(
-        "logs_logevent", days, partition_suffix="_archive"
-    )
-
-    if not partitions:
-        logger.debug(f"No cold log partitions older than {days} days to delete")
-        return
-
-    logger.info(f"Deleting {len(partitions)} expired cold log partitions")
-
-    config = ColdStorageConfig.from_settings()
-    deleted = 0
-
-    for name, date in partitions:
-        try:
-            delete_cold_partition(name, config=config)
-            deleted += 1
-            logger.info(f"Deleted cold log partition {name}")
-        except Exception as e:
-            logger.error(f"Error deleting cold log partition {name}: {e}")
-
-    logger.info(f"Cold storage cleanup complete: {deleted} deleted")
+    deleted = cleanup_all_cold_storage(retention_days=days)
+    if deleted:
+        logger.info(f"Cold storage cleanup complete: {deleted} files deleted")
 
 
 def delete_old_hot_partitions(days: int):
@@ -115,7 +95,9 @@ def delete_old_hot_partitions(days: int):
     for name, date in partitions:
         try:
             with connection.cursor() as cursor:
-                # Drop the partition table
+                cursor.execute(
+                    f"ALTER TABLE logs_logevent DETACH PARTITION {name};"
+                )
                 cursor.execute(f"DROP TABLE IF EXISTS {name} CASCADE;")
             logger.info(f"Deleted log partition {name}")
         except Exception as e:
