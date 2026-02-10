@@ -8,8 +8,8 @@ from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
-from ..models import File, FileBlob
 from ..maintenance import cleanup_old_files
+from ..models import File, FileBlob
 from .test_api import generate_file
 
 
