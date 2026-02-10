@@ -12,8 +12,9 @@ from .base import BaseEvent
 def get_crash_location(data):
     frame = get_crash_frame_from_event_data(
         data,
-        frame_filter=lambda x: x.get("function")
-        not in (None, "<redacted>", "<unknown>"),
+        frame_filter=lambda x: (
+            x.get("function") not in (None, "<redacted>", "<unknown>")
+        ),
     )
     if frame is not None:
         func = get_function_name_for_frame(frame, data.get("platform"))

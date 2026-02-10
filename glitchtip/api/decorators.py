@@ -26,7 +26,9 @@ def optional_slash(router, method: str, path: str, **kwargs):
         # Canonical path (with slash) - included in OpenAPI schema
         getattr(router, method)(path_with_slash, **kwargs)(func)
         # Alternate path (without slash) - hidden from schema
-        getattr(router, method)(path_without_slash, include_in_schema=False, **kwargs)(func)
+        getattr(router, method)(path_without_slash, include_in_schema=False, **kwargs)(
+            func
+        )
         return func
 
     return decorator

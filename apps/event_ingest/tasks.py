@@ -51,9 +51,7 @@ async def ingest_user_report(tasks: list):
 
     # Bulk lookup: one query for all associated events
     if event_id_map:
-        recent_lower = UUID7Helper.from_datetime(
-            timezone.now() - timedelta(weeks=1)
-        )
+        recent_lower = UUID7Helper.from_datetime(timezone.now() - timedelta(weeks=1))
         org_ids = {msg.organization_id for msg in messages if msg.event_id}
         async for evt in (
             IssueEvent.objects.filter(

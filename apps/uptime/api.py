@@ -126,9 +126,7 @@ async def attach_checks_to_monitors(
         return monitors
     monitor_ids = [m.id for m in monitors]
     organization_ids = [m.organization_id for m in monitors]
-    checks_by_monitor = await fetch_checks_lateral(
-        monitor_ids, organization_ids, limit
-    )
+    checks_by_monitor = await fetch_checks_lateral(monitor_ids, organization_ids, limit)
     for monitor in monitors:
         # Use Django's prefetch cache so serializers see the checks
         monitor._prefetched_objects_cache = {

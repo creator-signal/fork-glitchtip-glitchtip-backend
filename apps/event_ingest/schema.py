@@ -410,9 +410,7 @@ class FeedbackPayload(LaxIngestSchema):
     contexts: dict[str, Any]
 
     def to_user_report_data(self) -> dict[str, Any]:
-        fb = FeedbackContext.model_validate(
-            (self.contexts.get("feedback") or {})
-        )
+        fb = FeedbackContext.model_validate((self.contexts.get("feedback") or {}))
         return {
             "event_id": fb.associated_event_id,
             "name": fb.name[:128],

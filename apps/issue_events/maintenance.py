@@ -52,9 +52,9 @@ def cleanup_old_issues():
         if not batch_ids:
             break
         # Delete from non-partitioned FK tables first (small tables)
-        Notification.issues.through.objects.filter(
-            issue_id__in=batch_ids
-        )._raw_delete(queryset.db)
+        Notification.issues.through.objects.filter(issue_id__in=batch_ids)._raw_delete(
+            queryset.db
+        )
         IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)

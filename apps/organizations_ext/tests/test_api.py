@@ -59,7 +59,9 @@ class OrganizationsAPITestCase(TestCase):
         url = reverse("api:get_organization", args=[organization_2.slug])
         res = self.client.get(url)
         data = res.json()["access"]
-        owner_scopes = OrganizationUserRole.get_role(OrganizationUserRole.OWNER)["scopes"]
+        owner_scopes = OrganizationUserRole.get_role(OrganizationUserRole.OWNER)[
+            "scopes"
+        ]
         self.assertCountEqual(data, owner_scopes)
 
     def test_organizations_create(self):
