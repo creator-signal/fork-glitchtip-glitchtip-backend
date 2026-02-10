@@ -110,10 +110,14 @@ def is_pg_duckdb_available() -> bool:
     This is the "progressive enhancement" check - if False, cold storage
     features are disabled but GlitchTip continues to work normally.
 
-    We check both that the extension is installed AND that the duckdb
-    schema exists (which indicates pg_duckdb was loaded via
-    shared_preload_libraries).
+    Checks GLITCHTIP_ENABLE_DUCKDB setting first:
+    - "true"/"false": Returns immediately without hitting the DB
+    - None (unset): Falls through to DB check
     """
+    setting = getattr(settings, "GLITCHTIP_ENABLE_DUCKDB", None)
+    if setting is not None:
+        return setting.lower() == "true"
+
     try:
         with connection.cursor() as cursor:
             # Check extension exists
@@ -324,53 +328,6 @@ def archive_partition_to_s3(
         raise
 
 
-def create_archive_view(
-    partition_name: str,
-    s3_path: str,
-    table_name: str = "logs_logevent",
-) -> str:
-    """
-    Create a view that reads from the S3 Parquet file.
-
-    This view replaces the original partition, allowing seamless
-    SQL access to archived data.
-
-    Args:
-        partition_name: Original partition name (becomes view name)
-        s3_path: S3 path to the Parquet file
-        table_name: Parent table name
-
-    Returns:
-        Name of the created view
-    """
-    view_name = f"{partition_name}_archive"
-
-    with connection.cursor() as cursor:
-        # Create view pointing to S3 Parquet using read_parquet()
-        # pg_duckdb requires r['colname'] syntax for column access
-        # Note: DuckDB uses 'json' not 'jsonb', but it's compatible when queried
-        # Timestamp is derived from UUIDv7 id, not stored separately
-        create_view_sql = f"""
-            CREATE OR REPLACE VIEW {view_name} AS
-            SELECT
-                r['id']::uuid AS id,
-                r['trace_id']::uuid AS trace_id,
-                r['organization_id']::bigint AS organization_id,
-                r['project_id']::bigint AS project_id,
-                r['span_id']::bigint AS span_id,
-                r['level']::smallint AS level,
-                r['severity_number']::smallint AS severity_number,
-                r['body']::text AS body,
-                r['service']::varchar(255) AS service,
-                r['data']::json AS data
-            FROM read_parquet('{s3_path}') r;
-        """
-        cursor.execute(create_view_sql)
-
-    logger.info(f"Created archive view {view_name} pointing to {s3_path}")
-    return view_name
-
-
 def detach_partition(partition_name: str, parent_table: str = "logs_logevent") -> None:
     """
     Detach a partition from its parent table.
@@ -436,45 +393,16 @@ def archive_and_swap_partition(
         logger.info(f"No data archived from {partition_name}")
         # Still proceed to drop empty partition
 
-    # Step 2: Record archived date in metadata table (for query routing)
-    record_archived_date(date_str, table_name)
-
-    # Step 3: Detach partition from parent table
+    # Step 2: Detach partition from parent table
     detach_partition(partition_name, table_name)
 
-    # Step 4: Drop the original partition (and its hash sub-partitions via CASCADE)
+    # Step 3: Drop the original partition (and its hash sub-partitions via CASCADE)
     drop_partition(partition_name)
 
     logger.info(
         f"Successfully archived {partition_name}: {len(archived_files)} org files"
     )
     return True
-
-
-def record_archived_date(date_str: str, table_name: str = "logs_logevent") -> None:
-    """
-    Record that a date has been archived to cold storage.
-
-    This metadata helps query routing determine which dates need
-    to query cold storage vs hot storage.
-    """
-    from django.core.cache import cache
-
-    # Use cache to track archived dates (simple approach)
-    # For production, consider a dedicated metadata table
-    cache_key = f"cold_archived_dates:{table_name}"
-    archived_dates = cache.get(cache_key, set())
-    archived_dates.add(date_str)
-    cache.set(cache_key, archived_dates, timeout=None)  # No expiry
-    logger.debug(f"Recorded archived date: {date_str}")
-
-
-def get_archived_dates(table_name: str = "logs_logevent") -> set[str]:
-    """Get the set of dates that have been archived to cold storage."""
-    from django.core.cache import cache
-
-    cache_key = f"cold_archived_dates:{table_name}"
-    return cache.get(cache_key, set())
 
 
 def get_partitions_older_than(
@@ -639,7 +567,9 @@ def cleanup_cold_storage_for_org(
     """
     Delete cold storage files older than retention period for an org.
 
-    Computes paths directly - no LIST operations needed.
+    Computes paths directly from a 30-day window before the retention cutoff.
+    No external state (cache/DB) needed - storage.delete() is a no-op on
+    most backends if the file doesn't exist.
 
     Args:
         org_id: Organization ID
@@ -665,30 +595,20 @@ def cleanup_cold_storage_for_org(
     cutoff = timezone.now() - timedelta(days=retention_days)
     deleted_count = 0
 
-    # We need to know which dates have been archived
-    # This is a limitation - we need some way to know what exists
-    # Option 1: Track in database/cache (current approach via record_archived_date)
-    # Option 2: Use a reasonable range and try to delete (no-op if missing)
-
-    archived_dates = get_archived_dates(table_name)
-
-    for date_str in archived_dates:
+    # Sweep a 30-day window before the retention cutoff.
+    # Files older than cutoff-30d would have been cleaned in prior runs.
+    cleanup_window_days = 30
+    for day_offset in range(cleanup_window_days):
+        file_date = cutoff - timedelta(days=day_offset)
+        date_str = file_date.strftime("%Y%m%d")
+        storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
         try:
-            file_date = datetime.strptime(date_str, "%Y%m%d")
-            file_date = timezone.make_aware(file_date)
-
-            if file_date < cutoff:
-                storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
-                try:
-                    if storage.exists(storage_path):
-                        storage.delete(storage_path)
-                        deleted_count += 1
-                        logger.debug(f"Deleted {storage_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete {storage_path}: {e}")
-
-        except ValueError:
-            continue
+            storage.delete(storage_path)
+            deleted_count += 1
+            logger.debug(f"Deleted {storage_path}")
+        except Exception:
+            # Most backends no-op on missing files; ignore errors
+            pass
 
     if deleted_count:
         logger.info(f"Deleted {deleted_count} cold files for org {org_id}")
@@ -772,7 +692,3 @@ def delete_cold_partition(
                 logger.info(f"Deleted cold storage file: {storage_path}")
         except Exception as e:
             logger.warning(f"Failed to delete {storage_path}: {e}")
-
-    from .combined_view import rebuild_combined_view
-
-    rebuild_combined_view()

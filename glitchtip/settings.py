@@ -133,8 +133,9 @@ GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3
 # Files are stored under cold_storage/ prefix to avoid collisions
 GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)
 
-# Days to keep logs in hot storage (PostgreSQL) before archiving to cold
-GLITCHTIP_LOG_HOT_STORAGE_DAYS = env.int("GLITCHTIP_LOG_HOT_STORAGE_DAYS", 7)
+# Explicitly enable/disable pg_duckdb cold storage. Set to "true" or "false".
+# When unset (None), auto-detects by querying the database.
+GLITCHTIP_ENABLE_DUCKDB = env.str("GLITCHTIP_ENABLE_DUCKDB", None)
 
 # Cold storage cleanup: True = GT deletes old files, False = use S3 lifecycle policies
 # High-scale deployments should disable this and configure lifecycle policies on the bucket
