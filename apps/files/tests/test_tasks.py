@@ -9,7 +9,7 @@ from model_bakery import baker
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
 from ..models import File, FileBlob
-from ..tasks import cleanup_old_files
+from ..maintenance import cleanup_old_files
 from .test_api import generate_file
 
 

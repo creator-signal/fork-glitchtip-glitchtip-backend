@@ -1,6 +1,11 @@
 import logging
+from datetime import timedelta
 
-from .models import TransactionGroup
+from django.conf import settings
+from django.db.models import Exists, OuterRef
+from django.utils.timezone import now
+
+from .models import TransactionEvent, TransactionGroup, TransactionGroupAggregate
 
 logger = logging.getLogger(__name__)
 
@@ -14,29 +19,31 @@ def cleanup_old_transaction_events():
     use different partition intervals, a group's events can be dropped before
     its aggregates — so we must check both are gone before deleting the group.
 
-    Uses _raw_delete() instead of .delete() to bypass Django's collector, which
-    would run unindexed queries against every sub-partition of both tables.
-    If a new FK referencing TransactionGroup is added, the DB will raise
-    IntegrityError here — add the corresponding filter to the queryset below.
+    Optimizations:
+    - created__lt filter skips groups too new to have lost all partitions.
+    - NOT EXISTS subqueries short-circuit on the first matching row instead
+      of joining all partitions (important for partition-heavy tables).
+    - ID collection + batch delete keeps CASCADE FK work per statement small.
     """
-    queryset = TransactionGroup.objects.filter(
-        transactionevent=None,
-        transactiongroupaggregate=None,
-    ).order_by("id")
+    cutoff = now() - timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS)
+    queryset = (
+        TransactionGroup.objects.filter(created__lt=cutoff)
+        .exclude(Exists(TransactionEvent.objects.filter(group_id=OuterRef("id"))))
+        .exclude(
+            Exists(TransactionGroupAggregate.objects.filter(group_id=OuterRef("id")))
+        )
+        .order_by("id")
+    )
 
     total_deleted = 0
     while True:
-        try:
-            empty_group_delimiter = queryset.values_list("id", flat=True)[
-                1000:1001
-            ].get()
-            count = queryset.filter(id__lte=empty_group_delimiter)._raw_delete(
-                queryset.db
-            )
-            total_deleted += count
-        except TransactionGroup.DoesNotExist:
+        batch_ids = list(queryset.values_list("id", flat=True)[:500])
+        if not batch_ids:
             break
+        count = TransactionGroup.objects.filter(id__in=batch_ids)._raw_delete(
+            queryset.db
+        )
+        total_deleted += count
 
-    total_deleted += queryset._raw_delete(queryset.db)
     if total_deleted:
         logger.info("Deleted %d empty transaction groups", total_deleted)

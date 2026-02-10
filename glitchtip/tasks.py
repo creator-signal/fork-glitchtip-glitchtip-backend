@@ -3,7 +3,7 @@ import asyncio
 from django.core.management import call_command
 from django.tasks import task
 
-from apps.files.tasks import cleanup_old_files
+from apps.files.maintenance import cleanup_old_files
 from apps.issue_events.maintenance import cleanup_old_issues
 from apps.performance.maintenance import cleanup_old_transaction_events
 from apps.sourcecode.maintenance import cleanup_old_debug_symbol_bundles
