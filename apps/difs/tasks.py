@@ -108,10 +108,9 @@ def difs_create_file_from_chunks(name, checksum, chunks):
     size = 0
 
     for blob in blobs:
-        size = size + blob.blob.size
-
-        with open(blob.blob.path, "rb") as binary_file:
+        with blob.blob.open("rb") as binary_file:
             content = binary_file.read()
+            size += len(content)
             total_checksum.update(content)
 
     total_checksum = total_checksum.hexdigest()
@@ -128,9 +127,8 @@ def difs_create_file_from_chunks(name, checksum, chunks):
 def difs_concat_file_blobs_to_disk(blobs):
     output = tempfile.NamedTemporaryFile()
     for blob in blobs:
-        with open(blob.blob.path, "rb") as binary_file:
-            content = binary_file.read()
-            output.write(content)
+        with blob.blob.open("rb") as binary_file:
+            output.write(binary_file.read())
 
     output.flush()
     output.seek(0)
