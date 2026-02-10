@@ -1,5 +1,9 @@
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import connection, models
 from django.utils import timezone
+from freezegun import freeze_time
 from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTipTestCase
@@ -22,11 +26,19 @@ class TasksTestCase(GlitchTipTestCase):
     def test_cleanup_old_events(self):
         groups = baker.make("performance.TransactionGroup", _quantity=2)
         baker.make("performance.TransactionEvent", group=groups[0])
-        cleanup_old_transaction_events()
+        with freeze_time(
+            timezone.now()
+            + timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1)
+        ):
+            cleanup_old_transaction_events()
         self.assertEqual(TransactionGroup.objects.count(), 1)
 
         TransactionEvent.objects.all().delete()
-        cleanup_old_transaction_events()
+        with freeze_time(
+            timezone.now()
+            + timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1)
+        ):
+            cleanup_old_transaction_events()
         self.assertEqual(TransactionGroup.objects.count(), 0)
 
     def test_cleanup_handles_all_fk_relations(self):
@@ -58,7 +70,13 @@ class TasksTestCase(GlitchTipTestCase):
                         kwargs[f.name] = timezone.now()
                 baker.make(rel.related_model, **kwargs)
 
-                cleanup_old_transaction_events()
+                with freeze_time(
+                    timezone.now()
+                    + timedelta(
+                        days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1
+                    )
+                ):
+                    cleanup_old_transaction_events()
 
                 if partitioned:
                     self.assertTrue(
