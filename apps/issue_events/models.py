@@ -54,8 +54,10 @@ class IssueTag(AggregationModel):
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    tag_key = models.ForeignKey(TagKey, on_delete=models.CASCADE)
-    tag_value = models.ForeignKey(TagValue, on_delete=models.CASCADE)
+    tag_key = models.ForeignKey(TagKey, on_delete=models.CASCADE, db_constraint=False)
+    tag_value = models.ForeignKey(
+        TagValue, on_delete=models.CASCADE, db_constraint=False
+    )
     count = models.PositiveIntegerField(default=1)
 
     pk = models.CompositePrimaryKey(
