@@ -2,9 +2,12 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.models import Exists, OuterRef
 from django.utils.timezone import now
 
-from .models import Comment, Issue, IssueHash, UserReport
+from apps.alerts.models import Notification
+
+from .models import Comment, Issue, IssueAggregate, IssueHash, IssueTag, UserReport
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +27,24 @@ def cleanup_old_issues():
     Non-partitioned FK tables (IssueHash, Comment, UserReport) are explicitly
     deleted per batch — Django does not set ON DELETE CASCADE at the DB level.
 
-    If a new FK from a *partitioned* table is added, add a =None filter below.
-    If a new FK from a *non-partitioned* table is added, add it to the
+    NOT EXISTS subqueries short-circuit on the first matching row instead
+    of joining all partitions (important for partition-heavy tables).
+
+    If a new FK from a *partitioned* table is added, add an exclude(Exists())
+    below. If a new FK from a *non-partitioned* table is added, add it to the
     explicit delete step. Either way, the test will catch the omission.
     """
+    from .models import IssueEvent
+
     days = settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS
 
-    queryset = Issue.objects.filter(
-        issueevent=None,
-        issueaggregate=None,
-        issuetag=None,
-        last_seen__lt=now() - timedelta(days=days),
-    ).order_by("id")
+    queryset = (
+        Issue.objects.filter(last_seen__lt=now() - timedelta(days=days))
+        .exclude(Exists(IssueEvent.objects.filter(issue_id=OuterRef("id"))))
+        .exclude(Exists(IssueAggregate.objects.filter(issue_id=OuterRef("id"))))
+        .exclude(Exists(IssueTag.objects.filter(issue_id=OuterRef("id"))))
+        .order_by("id")
+    )
 
     total_deleted = 0
     while True:
@@ -43,6 +52,9 @@ def cleanup_old_issues():
         if not batch_ids:
             break
         # Delete from non-partitioned FK tables first (small tables)
+        Notification.issues.through.objects.filter(issue_id__in=batch_ids)._raw_delete(
+            queryset.db
+        )
         IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)

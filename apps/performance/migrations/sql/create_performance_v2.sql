@@ -24,6 +24,10 @@ ALTER TABLE performance_transactionevent
     FOREIGN KEY (group_id) REFERENCES performance_transactiongroup(id)
     ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
+-- Indexes
+CREATE INDEX IF NOT EXISTS transactionevent_group_id_idx
+    ON performance_transactionevent (group_id);
+
 ALTER TABLE performance_transactionevent
     ADD CONSTRAINT performance_transactionevent_organization_id_fkey
     FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
