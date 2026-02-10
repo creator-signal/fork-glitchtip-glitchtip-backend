@@ -10,10 +10,6 @@ x-environment: &default-environment
   #IS_LOAD_TEST: "true"
   VTASKS_CONCURRENCY: 4
   LOG_LEVEL: INFO
-  # Self-logging (GlitchTip logs to itself)
-  GLITCHTIP_ENABLE_LOGS: "true"
-  SENTRY_ENABLE_LOGS: "true"
-  SENTRY_DSN: "http://e25c388ace0e4bb88bfb41f8df8070b3@localhost:8000/1"
   # Cold storage settings (MinIO for local S3-compatible storage)
   GLITCHTIP_COLD_STORAGE_BUCKET: glitchtip-cold
   AWS_ACCESS_KEY_ID: minioadmin
@@ -32,9 +28,6 @@ services:
     image: pgduckdb/pgduckdb:18-v1.1.1
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
-    command: >
-      postgres
-      -c shared_preload_libraries=pg_duckdb
   valkey:
     image: valkey/valkey:9
   minio:
