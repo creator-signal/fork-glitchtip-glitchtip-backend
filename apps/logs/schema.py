@@ -41,12 +41,6 @@ class LogEventSchema(CamelSchema):
         return f"{obj.span_id:016x}"
 
 
-class LogEventDetailSchema(LogEventSchema):
-    """Extended schema for single log event detail."""
-
-    organization_id: int = Field(alias="organizationId")
-
-
 class LogFilterSchema(Schema):
     """Schema for log filtering parameters."""
 
