@@ -99,7 +99,8 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
 )
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
-    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", 5 * 1024 * 1024  # 5 MB
+    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
+    5 * 1024 * 1024,  # 5 MB
 )
 
 PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
@@ -124,6 +125,8 @@ GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
+
+GLITCHTIP_ENABLE_MCP = env.bool("GLITCHTIP_ENABLE_MCP", False)
 
 # For development purposes only, prints out inbound event store json
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
@@ -274,6 +277,7 @@ INSTALLED_APPS += [
     "apps.files",
     "apps.issue_events",
     "apps.event_ingest",
+    "apps.mcp",
     "import_export",  # Contains import management command, keep under apps.importer
 ]
 

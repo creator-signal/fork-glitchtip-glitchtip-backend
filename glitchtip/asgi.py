@@ -25,6 +25,30 @@ if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":
 
     application = get_worker_application(application)
 
+
+class MCPDjangoDispatcher:
+    """Route /mcp* requests to the MCP Starlette app, everything else to Django."""
+
+    def __init__(self, django_app, mcp_app, mcp_prefix="/mcp"):
+        self.django_app = django_app
+        self.mcp_app = mcp_app
+        self.mcp_prefix = mcp_prefix
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith(self.mcp_prefix):
+            await self.mcp_app(scope, receive, send)
+        else:
+            await self.django_app(scope, receive, send)
+
+
+from django.conf import settings  # noqa: E402
+
+if settings.GLITCHTIP_ENABLE_MCP:
+    from apps.mcp.server import mcp as _mcp_server
+
+    _mcp_app = _mcp_server.streamable_http_app()
+    application = MCPDjangoDispatcher(django_app=application, mcp_app=_mcp_app)
+
 # Wrap application with granian proxy headers support
 # This allows granian to properly handle X-Forwarded-For and X-Forwarded-Proto headers
 # when running behind a reverse proxy (nginx, traefik, k8s ingress, etc.)
