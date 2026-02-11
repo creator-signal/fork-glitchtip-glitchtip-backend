@@ -43,6 +43,7 @@ dependencies = [
     "django-vcache>=0.1.1",
     "uuid6>=2024.1.12",
     "mcp[cli]>=1.9",
+    "duckdb>=1.2.0",
 ]
 
 [dependency-groups]

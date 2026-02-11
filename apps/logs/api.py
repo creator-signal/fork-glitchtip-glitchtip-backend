@@ -223,20 +223,20 @@ def query_cold_storage(
     cursor_position: UUID | None = None,
 ) -> list[LogEventRow]:
     """
-    Query logs from cold storage (per-org Parquet files via DuckDB).
+    Query logs from cold storage (per-org Parquet files via standalone DuckDB).
 
     Uses glob pattern to read all files for the org, then filters by
-    UUIDv7 timestamp. DuckDB's predicate pushdown enables row group
-    skipping based on the UUID filter for efficiency.
+    UUIDv7 timestamp. DuckDB runs in-process — no PostgreSQL extension
+    required, no connection pooling interaction.
     """
     from .cold_storage import (
         COLD_STORAGE_PREFIX,
         ColdStorageConfig,
-        is_pg_duckdb_available,
-        setup_duckdb_s3_credentials,
+        get_duckdb_connection,
+        is_duckdb_available,
     )
 
-    if not is_pg_duckdb_available():
+    if not is_duckdb_available():
         return []
 
     config = ColdStorageConfig.from_settings()
@@ -244,88 +244,71 @@ def query_cold_storage(
         return []
 
     # Use glob pattern to read all files for this org
-    # pg_duckdb doesn't support array syntax, but globs work
     glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/logs_logevent/org_{organization_id}/*.parquet"
 
-    # Build WHERE clause using r['column'] syntax required by pg_duckdb
-    where_parts = [f"r['organization_id'] = {organization_id}"]
+    # Build WHERE clause — standalone DuckDB uses standard SQL column names
+    where_parts = [f"organization_id = {organization_id}"]
 
-    # Time range via UUIDv7 bounds - this enables efficient filtering
+    # Time range via UUIDv7 bounds
     start_uuid, end_uuid = UUID7Helper.get_range_for_date(start_dt, end_dt)
-    where_parts.append(f"r['id'] >= '{start_uuid}'::UUID")
-    where_parts.append(f"r['id'] < '{end_uuid}'::UUID")
+    where_parts.append(f"id >= '{start_uuid}'")
+    where_parts.append(f"id < '{end_uuid}'")
 
     if project_ids:
         ids_str = ",".join(str(p) for p in project_ids)
-        where_parts.append(f"r['project_id'] IN ({ids_str})")
+        where_parts.append(f"project_id IN ({ids_str})")
 
     if level_values:
         lvls_str = ",".join(str(lv) for lv in level_values)
-        where_parts.append(f"r['level'] IN ({lvls_str})")
+        where_parts.append(f"level IN ({lvls_str})")
 
     if service:
-        # Escape single quotes
         svc = service.replace("'", "''")
-        where_parts.append(f"r['service'] ILIKE '%{svc}%'")
+        where_parts.append(f"service ILIKE '%{svc}%'")
 
     if trace_id:
-        # Validate as UUID to prevent SQL injection (user-controlled string)
+        # Validate as UUID to prevent injection
         try:
             validated_trace = UUID(trace_id)
         except (ValueError, AttributeError):
             pass
         else:
-            where_parts.append(f"r['trace_id'] = '{validated_trace}'::UUID")
+            where_parts.append(f"trace_id = '{validated_trace}'")
 
     if query:
-        # Escape single quotes
         q = query.replace("'", "''")
-        where_parts.append(f"r['body'] ILIKE '%{q}%'")
+        where_parts.append(f"body ILIKE '%{q}%'")
 
     # Cursor-based pagination
     if cursor_position:
-        where_parts.append(f"r['id'] < '{cursor_position}'::UUID")
+        where_parts.append(f"id < '{cursor_position}'")
 
     where_sql = " AND ".join(where_parts)
 
     try:
-        setup_duckdb_s3_credentials(config)
+        duck_conn = get_duckdb_connection(config)
+        try:
+            sql = f"""
+                SELECT id, trace_id, organization_id, project_id, span_id,
+                       level, severity_number, body, service, data
+                FROM read_parquet('{glob_path}')
+                WHERE {where_sql}
+                ORDER BY id DESC
+                LIMIT {limit};
+            """
+            result = duck_conn.execute(sql)
 
-        with connections["default"].cursor() as cursor:
-            cursor.execute("SET duckdb.force_execution = true;")
-            try:
-                # pg_duckdb requires r['column'] syntax for read_parquet
-                sql = f"""
-                    SELECT r['id']::uuid AS id,
-                           r['trace_id']::uuid AS trace_id,
-                           r['organization_id']::bigint AS organization_id,
-                           r['project_id']::bigint AS project_id,
-                           r['span_id']::bigint AS span_id,
-                           r['level']::smallint AS level,
-                           r['severity_number']::smallint AS severity_number,
-                           r['body']::text AS body,
-                           r['service']::varchar AS service,
-                           r['data']::json AS data
-                    FROM read_parquet('{glob_path}') r
-                    WHERE {where_sql}
-                    ORDER BY r['id'] DESC
-                    LIMIT {limit};
-                """
-                cursor.execute(sql)
-
-                results = []
-                for row in cursor.fetchall():
-                    results.append(_row_to_log_event(row))
-                return results
-            finally:
-                cursor.execute("RESET duckdb.force_execution;")
+            results = []
+            for row in result.fetchall():
+                results.append(_row_to_log_event(row))
+            return results
+        finally:
+            duck_conn.close()
 
     except Exception as e:
         error_str = str(e)
-        # Handle missing files gracefully
         if "No files found" in error_str or "Could not open" in error_str:
             return []
-        # Log unexpected DuckDB errors rather than silently swallowing
         logger.warning("Cold storage query failed: %s", e)
         return []
 
@@ -429,12 +412,12 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
     # Try cold storage
     from .cold_storage import (
         ColdStorageConfig,
+        get_duckdb_connection,
         get_org_cold_s3_path,
-        is_pg_duckdb_available,
-        setup_duckdb_s3_credentials,
+        is_duckdb_available,
     )
 
-    if not is_pg_duckdb_available():
+    if not is_duckdb_available():
         return None
 
     config = ColdStorageConfig.from_settings()
@@ -445,24 +428,21 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
     s3_path = get_org_cold_s3_path(config, "logs_logevent", organization_id, date_str)
 
     try:
-        setup_duckdb_s3_credentials(config)
-
-        with connections["default"].cursor() as cursor:
-            cursor.execute("SET duckdb.force_execution = true;")
-            try:
-                sql = f"""
-                    SELECT id, trace_id, organization_id, project_id, span_id,
-                           level, severity_number, body, service, data
-                    FROM read_parquet('{s3_path}')
-                    WHERE id = '{log_id}'::UUID AND organization_id = {organization_id}
-                    LIMIT 1;
-                """
-                cursor.execute(sql)
-                row = cursor.fetchone()
-                if row:
-                    return _row_to_log_event(row)
-            finally:
-                cursor.execute("RESET duckdb.force_execution;")
+        duck_conn = get_duckdb_connection(config)
+        try:
+            sql = f"""
+                SELECT id, trace_id, organization_id, project_id, span_id,
+                       level, severity_number, body, service, data
+                FROM read_parquet('{s3_path}')
+                WHERE id = '{log_id}' AND organization_id = {organization_id}
+                LIMIT 1;
+            """
+            result = duck_conn.execute(sql)
+            row = result.fetchone()
+            if row:
+                return _row_to_log_event(row)
+        finally:
+            duck_conn.close()
 
     except Exception as e:
         error_str = str(e)

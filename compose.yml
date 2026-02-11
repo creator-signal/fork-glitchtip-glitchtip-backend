@@ -18,9 +18,7 @@ x-volumes: &default-volumes
   - .:/code
 services:
   postgres:
-    # Use pg_duckdb image for cold storage features (S3/Parquet archival)
-    # Falls back gracefully if standard postgres is used instead
-    image: pgduckdb/pgduckdb:18-v1.1.1
+    image: postgres:17
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
   valkey:

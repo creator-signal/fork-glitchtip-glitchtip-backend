@@ -31,7 +31,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == 'web'
     - if: $CI_PIPELINE_SOURCE == 'schedule'
 
-# Old stack test: standard PostgreSQL 14 without pg_duckdb
+# Old stack test: standard PostgreSQL 14 (no DuckDB cold storage)
 test-old:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.12-$BASE_LAYER
   variables:
@@ -57,7 +57,7 @@ test-old:
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
-# New stack test: pg_duckdb with MinIO for cold storage
+# New stack test: PostgreSQL 17 with MinIO for DuckDB cold storage
 test-new:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.14-$BASE_LAYER
   variables:
@@ -66,14 +66,14 @@ test-new:
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
     VALKEY_URL: "redis://redis:6379"
+    GLITCHTIP_ENABLE_DUCKDB: "true"
     GLITCHTIP_COLD_STORAGE_BUCKET: glitchtip-cold
     AWS_ACCESS_KEY_ID: minioadmin
     AWS_SECRET_ACCESS_KEY: minioadmin
     AWS_S3_ENDPOINT_URL: "http://minio:9000"
   services:
-    - name: pgduckdb/pgduckdb:18-v1.1.1
+    - name: postgres:17
       alias: postgres
-      command: ["postgres", "-c", "shared_preload_libraries=pg_duckdb"]
     - name: valkey/valkey:9
       alias: redis
     - name: minio/minio:latest

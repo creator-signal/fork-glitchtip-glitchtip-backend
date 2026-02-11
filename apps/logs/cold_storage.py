@@ -1,13 +1,18 @@
 """
-Cold storage utilities for archiving log partitions to S3 via pg_duckdb.
+Cold storage utilities for archiving log partitions to Parquet via standalone DuckDB.
 
-This module implements the "progressive enhancement" pattern:
-- If pg_duckdb is installed: Archive partitions to Parquet on S3
-- If not: Gracefully skip archival (partitions stay in Postgres or get dropped)
+Auto-enables when a storage bucket is configured (GLITCHTIP_COLD_STORAGE_BUCKET
+or AWS_STORAGE_BUCKET_NAME). Old log partitions are archived to Parquet files
+and queryable via DuckDB's in-process engine.
+
+Uses standalone DuckDB (not pg_duckdb extension) so cold storage works with
+any PostgreSQL provider including RDS, Aurora, Cloud SQL, etc. No Postgres
+extensions required — DuckDB runs in the Python process, completely
+independent of database connection pooling.
 
 Architecture (per-org files):
 1. Export each org's data from a partition to separate Parquet files
-2. Path structure: cold_storage/logs/org_{id}/{date}.parquet
+2. Path structure: cold_storage/{table}/org_{id}/{date}.parquet
 3. Query cold storage by computing paths from (org_id, date_range)
 4. No cross-org data in same file - enables future sharding
 
@@ -103,76 +108,60 @@ def get_cold_storage_backend(config: ColdStorageConfig | None = None):
     return None
 
 
-def is_pg_duckdb_available() -> bool:
+def is_duckdb_available() -> bool:
     """
-    Check if pg_duckdb extension is installed and usable.
+    Check if DuckDB cold storage is enabled.
 
-    This is the "progressive enhancement" check - if False, cold storage
-    features are disabled but GlitchTip continues to work normally.
-
-    Checks GLITCHTIP_ENABLE_DUCKDB setting first:
-    - "true"/"false": Returns immediately without hitting the DB
-    - None (unset): Falls through to DB check
+    Auto-enables when a storage bucket is configured (either
+    GLITCHTIP_COLD_STORAGE_BUCKET or AWS_STORAGE_BUCKET_NAME).
+    Override with GLITCHTIP_ENABLE_DUCKDB=false to disable even when
+    storage exists (e.g., horizontally-scaled PaaS with S3 for media only).
     """
-    setting = getattr(settings, "GLITCHTIP_ENABLE_DUCKDB", None)
-    if setting is not None:
-        return setting.lower() == "true"
+    override = getattr(settings, "GLITCHTIP_ENABLE_DUCKDB", None)
+    if override is not None:
+        return str(override).lower() == "true"
 
-    try:
-        with connection.cursor() as cursor:
-            # Check extension exists
-            cursor.execute(
-                "SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb' LIMIT 1;"
-            )
-            if cursor.fetchone() is None:
-                return False
-
-            # Check duckdb schema exists (requires shared_preload_libraries)
-            cursor.execute(
-                "SELECT 1 FROM pg_namespace WHERE nspname = 'duckdb' LIMIT 1;"
-            )
-            return cursor.fetchone() is not None
-    except Exception:
-        return False
+    # Auto-detect: enable if a storage bucket is available
+    bucket = getattr(settings, "GLITCHTIP_COLD_STORAGE_BUCKET", None)
+    if not bucket:
+        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
+    return bool(bucket)
 
 
-def setup_duckdb_s3_credentials(config: ColdStorageConfig) -> None:
+def get_duckdb_connection(config: ColdStorageConfig | None = None):
     """
-    Configure DuckDB's S3 credentials within pg_duckdb.
+    Create a standalone DuckDB connection configured for S3 access.
 
-    Must be called once per session before any S3 operations.
-    Uses duckdb.create_simple_secret() to configure S3 access.
+    Returns an in-process DuckDB connection with httpfs loaded and S3
+    credentials configured. Each call creates a fresh connection —
+    no session state leaks, no interaction with PostgreSQL connection pooling.
     """
-    with connection.cursor() as cursor:
-        # Clean endpoint URL (remove protocol prefix)
-        endpoint = ""
-        use_ssl = "true"
-        if config.endpoint_url:
-            endpoint = config.endpoint_url.replace("http://", "").replace(
-                "https://", ""
-            )
-            use_ssl = "true" if config.endpoint_url.startswith("https") else "false"
+    import duckdb
 
-        # Create S3 secret for DuckDB
-        # All parameters are text type
-        cursor.execute(
-            """
-            SELECT duckdb.create_simple_secret(
-                %s,  -- type
-                %s,  -- key_id
-                %s,  -- secret
-                '',  -- session_token
-                '',  -- region
-                'path',  -- url_style
-                '',  -- provider
-                %s,  -- endpoint
-                '',  -- scope
-                '',  -- validation
-                %s   -- use_ssl
-            );
-            """,
-            ["S3", config.access_key_id, config.secret_access_key, endpoint, use_ssl],
-        )
+    if config is None:
+        config = ColdStorageConfig.from_settings()
+
+    conn = duckdb.connect()
+
+    # Load httpfs for S3 access
+    conn.install_extension("httpfs")
+    conn.load_extension("httpfs")
+
+    # Configure S3 credentials
+    if config.access_key_id:
+        conn.execute(f"SET s3_access_key_id = '{config.access_key_id}';")
+    if config.secret_access_key:
+        conn.execute(f"SET s3_secret_access_key = '{config.secret_access_key}';")
+
+    if config.endpoint_url:
+        # Strip protocol prefix for DuckDB
+        endpoint = config.endpoint_url.replace("http://", "").replace("https://", "")
+        use_ssl = "true" if config.endpoint_url.startswith("https") else "false"
+        conn.execute(f"SET s3_endpoint = '{endpoint}';")
+        conn.execute(f"SET s3_use_ssl = {use_ssl};")
+        conn.execute("SET s3_url_style = 'path';")
+
+    return conn
 
 
 def get_org_cold_s3_path(
@@ -204,8 +193,9 @@ def archive_partition_per_org(
     Each organization's data is exported to a separate file:
     cold_storage/logs/org_{id}/{date}.parquet
 
-    The data is sorted by (service, level, id) to enable
-    efficient row group skipping during searches.
+    Reads from PostgreSQL via Django's connection, writes Parquet via
+    standalone DuckDB. No pg_duckdb extension required — works with
+    RDS, Aurora, Cloud SQL, and any other PostgreSQL provider.
 
     Args:
         partition_name: Name of the partition to archive (e.g., "logs_logevent_20260115")
@@ -216,8 +206,8 @@ def archive_partition_per_org(
     Returns:
         List of (org_id, s3_path) tuples for archived files
     """
-    if not is_pg_duckdb_available():
-        logger.info("pg_duckdb not available, skipping archival")
+    if not is_duckdb_available():
+        logger.info("duckdb not available, skipping archival")
         return []
 
     if config is None:
@@ -226,11 +216,8 @@ def archive_partition_per_org(
     archived_files = []
 
     try:
-        setup_duckdb_s3_credentials(config)
-
         with connection.cursor() as cursor:
             # Find all orgs with data in this partition
-            # This query runs on PostgreSQL (not DuckDB)
             cursor.execute(
                 f"SELECT DISTINCT organization_id FROM {partition_name} ORDER BY organization_id;"
             )
@@ -244,28 +231,61 @@ def archive_partition_per_org(
                 f"Archiving {partition_name} for {len(org_ids)} orgs: {org_ids}"
             )
 
-            # Enable DuckDB execution for exports
-            cursor.execute("SET duckdb.force_execution = true;")
-            try:
-                # Export each org's data to a separate file
-                for org_id in org_ids:
-                    s3_path = get_org_cold_s3_path(
-                        config, table_name, org_id, date_str
-                    )
+            # Export each org's data to a separate Parquet file
+            for org_id in org_ids:
+                s3_path = get_org_cold_s3_path(config, table_name, org_id, date_str)
 
-                    # Export org's data, sorted for optimal row group skipping
-                    export_sql = f"""
-                        COPY (
-                            SELECT * FROM {partition_name}
-                            WHERE organization_id = %s
-                            ORDER BY service, level, id
-                        ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                    """
-                    cursor.execute(export_sql, [org_id])
+                # Read org's data from PostgreSQL, sorted for optimal row group skipping
+                cursor.execute(
+                    f"""
+                    SELECT id, trace_id, organization_id, project_id, span_id,
+                           level, severity_number, body, service, data
+                    FROM {partition_name}
+                    WHERE organization_id = %s
+                    ORDER BY service, level, id
+                    """,
+                    [org_id],
+                )
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+
+                if not rows:
+                    continue
+
+                # Write to S3 via standalone DuckDB
+                import json
+
+                # Normalize values for DuckDB (UUIDs to strings, dicts to JSON)
+                clean_rows = []
+                for row in rows:
+                    clean_row = []
+                    for val in row:
+                        if isinstance(val, dict):
+                            clean_row.append(json.dumps(val))
+                        elif hasattr(val, "hex"):  # UUID
+                            clean_row.append(str(val))
+                        else:
+                            clean_row.append(val)
+                    clean_rows.append(clean_row)
+
+                duck_conn = get_duckdb_connection(config)
+                try:
+                    # DuckDB can create tables from Python data via VALUES
+                    # or by registering a view over Python objects
+                    duck_conn.execute(
+                        f"CREATE TABLE export_data({', '.join(columns)})"
+                    )
+                    duck_conn.executemany(
+                        f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
+                        clean_rows,
+                    )
+                    duck_conn.execute(
+                        f"COPY export_data TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                    )
                     archived_files.append((org_id, s3_path))
                     logger.debug(f"Archived org {org_id} to {s3_path}")
-            finally:
-                cursor.execute("RESET duckdb.force_execution;")
+                finally:
+                    duck_conn.close()
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
@@ -312,10 +332,10 @@ def archive_and_swap_partition(
         config: Cold storage configuration
 
     Returns:
-        True if archival succeeded, False if skipped (pg_duckdb not available)
+        True if archival succeeded, False if skipped (duckdb not available)
     """
-    if not is_pg_duckdb_available():
-        logger.info("pg_duckdb not available, skipping archival workflow")
+    if not is_duckdb_available():
+        logger.info("duckdb not available, skipping archival workflow")
         return False
 
     if config is None:
@@ -431,8 +451,8 @@ def query_cold_storage(
     """
     Query cold storage for an org's data within a date range.
 
-    Uses glob pattern to read all files for the org, then filters.
-    pg_duckdb doesn't support array syntax in read_parquet().
+    Uses standalone DuckDB to read Parquet files from S3.
+    No PostgreSQL extension required.
 
     Args:
         org_id: Organization ID
@@ -447,62 +467,50 @@ def query_cold_storage(
     Returns:
         List of row dicts from cold storage
     """
-    if not is_pg_duckdb_available():
+    if not is_duckdb_available():
         return []
 
     if config is None:
         config = ColdStorageConfig.from_settings()
 
-    # Use glob pattern - pg_duckdb doesn't support array syntax
+    # Use glob pattern to read all files for this org
     glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/*.parquet"
 
-    # Build WHERE clause using r['column'] syntax required by pg_duckdb
-    where_parts = [f"r['organization_id'] = {org_id}"]
+    # Build WHERE clause
+    where_parts = [f"organization_id = {org_id}"]
     if filters:
         if "level" in filters:
-            where_parts.append(f"r['level'] = {int(filters['level'])}")
+            where_parts.append(f"level = {int(filters['level'])}")
         if "service" in filters:
             svc = filters["service"].replace("'", "''")
-            where_parts.append(f"r['service'] = '{svc}'")
+            where_parts.append(f"service = '{svc}'")
         if "body_search" in filters:
-            # Escape single quotes in search term
             term = filters["body_search"].replace("'", "''")
-            where_parts.append(f"r['body'] ILIKE '%{term}%'")
+            where_parts.append(f"body ILIKE '%{term}%'")
 
     where_clause = " AND ".join(where_parts)
 
     try:
-        setup_duckdb_s3_credentials(config)
-
-        with connection.cursor() as cursor:
-            cursor.execute("SET duckdb.force_execution = true;")
-            try:
-                # pg_duckdb requires r['column'] syntax for read_parquet
-                query = f"""
-                    SELECT r['id']::uuid AS id,
-                           r['trace_id']::uuid AS trace_id,
-                           r['organization_id']::bigint AS organization_id,
-                           r['project_id']::bigint AS project_id,
-                           r['span_id']::bigint AS span_id,
-                           r['level']::smallint AS level,
-                           r['severity_number']::smallint AS severity_number,
-                           r['body']::text AS body,
-                           r['service']::varchar AS service,
-                           r['data']::json AS data
-                    FROM read_parquet('{glob_path}') r
-                    WHERE {where_clause}
-                    ORDER BY r['id'] DESC
-                    LIMIT {limit} OFFSET {offset};
-                """
-                cursor.execute(query)
-                columns = [desc[0] for desc in cursor.description]
-                return [dict(zip(columns, row)) for row in cursor.fetchall()]
-            finally:
-                cursor.execute("RESET duckdb.force_execution;")
+        duck_conn = get_duckdb_connection(config)
+        try:
+            query = f"""
+                SELECT id, trace_id, organization_id, project_id, span_id,
+                       level, severity_number, body, service, data
+                FROM read_parquet('{glob_path}')
+                WHERE {where_clause}
+                ORDER BY id DESC
+                LIMIT {limit} OFFSET {offset};
+            """
+            result = duck_conn.execute(query)
+            columns = [desc[0] for desc in result.description]
+            return [dict(zip(columns, row)) for row in result.fetchall()]
+        finally:
+            duck_conn.close()
 
     except Exception as e:
+        error_str = str(e)
         # Handle missing files gracefully
-        if "No files found" in str(e) or "Could not open" in str(e):
+        if "No files found" in error_str or "Could not open" in error_str:
             logger.debug(f"No cold storage files found for org {org_id} in date range")
             return []
         logger.error(f"Cold storage query failed: {e}")
@@ -612,5 +620,3 @@ def cleanup_all_cold_storage(
 
     logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
     return total_deleted
-
-
