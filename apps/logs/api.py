@@ -17,6 +17,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import set_pagination_headers
 from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
+
 from .constants import LogLevel
 from .models import LogService, compute_service_hash
 from .schema import (
