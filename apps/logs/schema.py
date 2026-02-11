@@ -3,6 +3,7 @@ from uuid import UUID
 
 from ninja import Field, Schema
 
+from apps.shared.schema.fields import RelativeDateTime
 from glitchtip.schema import CamelSchema
 
 from .constants import LogLevel
@@ -51,8 +52,8 @@ class LogFilterSchema(Schema):
         default=None, alias="traceId", description="Filter by trace ID"
     )
     query: str | None = Field(default=None, description="Search in log body")
-    start: datetime | None = Field(default=None, description="Start of time range")
-    end: datetime | None = Field(default=None, description="End of time range")
+    start: RelativeDateTime | None = Field(default=None, description="Start of time range")
+    end: RelativeDateTime | None = Field(default=None, description="End of time range")
     cursor: str | None = Field(default=None, description="Pagination cursor")
     limit: int = Field(default=100, ge=1, le=200, description="Results per page")
 
@@ -65,8 +66,8 @@ class LogStatsFilterSchema(Schema):
     service: list[str] | None = Field(
         default=None, description="Filter by service names"
     )
-    start: datetime | None = Field(default=None, description="Start of time range")
-    end: datetime | None = Field(default=None, description="End of time range")
+    start: RelativeDateTime | None = Field(default=None, description="Start of time range")
+    end: RelativeDateTime | None = Field(default=None, description="End of time range")
 
 
 class LogStatsSeriesSchema(CamelSchema):

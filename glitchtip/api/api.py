@@ -134,6 +134,7 @@ class SettingsOut(CamelSchema):
     version: str
     server_time_zone: str
     glitchtip_instance_name: str | None
+    enabled_features: list[str]
 
 
 @api.get("settings/", response=SettingsOut, by_alias=True, auth=None)
@@ -169,6 +170,10 @@ async def get_settings(request: HttpRequest):
             enable_social_apps_user_registration or no_users
         )
 
+    enabled_features = []
+    if settings.GLITCHTIP_ENABLE_LOGS:
+        enabled_features.append("logs")
+
     return {
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
@@ -186,6 +191,7 @@ async def get_settings(request: HttpRequest):
         "version": settings.GLITCHTIP_VERSION,
         "server_time_zone": settings.TIME_ZONE,
         "glitchtip_instance_name": settings.GLITCHTIP_INSTANCE_NAME,
+        "enabled_features": enabled_features,
     }
 
 
