@@ -1,10 +1,8 @@
 """
-Tests for cold storage functionality with pg_duckdb.
+Tests for cold storage functionality with standalone DuckDB.
 
-These tests are skipped when pg_duckdb is not available.
-pg_duckdb requires shared_preload_libraries=pg_duckdb in postgresql.conf
-and the extension installed. Tests check availability at runtime since
-the test database may be configured differently than the main database.
+DuckDB runs in-process (no PostgreSQL extension required).
+Tests that need S3 access are skipped when no bucket is configured.
 """
 
 from datetime import timedelta
@@ -15,7 +13,7 @@ from django.utils import timezone
 from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
-from ..cold_storage import ColdStorageConfig, is_pg_duckdb_available
+from ..cold_storage import ColdStorageConfig, is_duckdb_available
 from ..constants import LogLevel
 from ..models import LogEvent
 
@@ -36,8 +34,47 @@ class ColdStorageConfigTestCase(TestCase):
         self.assertEqual(config.bucket, "test-bucket")
 
 
+class DuckDBAvailabilityTestCase(TestCase):
+    """Test DuckDB availability check."""
+
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
+    def test_enabled_via_override(self):
+        self.assertTrue(is_duckdb_available())
+
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
+    def test_disabled_via_override(self):
+        self.assertFalse(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="false",
+        AWS_STORAGE_BUCKET_NAME="my-bucket",
+    )
+    def test_override_takes_precedence_over_bucket(self):
+        """Explicit false overrides auto-detection from bucket config."""
+        self.assertFalse(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET="cold-bucket",
+    )
+    def test_auto_enabled_with_cold_storage_bucket(self):
+        self.assertTrue(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME="my-bucket",
+    )
+    def test_auto_enabled_with_aws_bucket(self):
+        self.assertTrue(is_duckdb_available())
+
+    def test_disabled_without_bucket(self):
+        """No bucket configured = no cold storage."""
+        self.assertFalse(is_duckdb_available())
+
+
 class ColdStoragePathTestCase(TestCase):
-    """Test cold storage path generation (no pg_duckdb required)."""
+    """Test cold storage path generation."""
 
     def test_org_cold_s3_path(self):
         """Test per-org S3 path generation."""
@@ -63,42 +100,60 @@ class ColdStoragePathTestCase(TestCase):
         self.assertEqual(path, "cold_storage/logs_logevent/org_456/20260120.parquet")
 
 
+class DuckDBConnectionTestCase(TestCase):
+    """Test standalone DuckDB connection setup."""
+
+    def test_get_connection_no_s3(self):
+        """Test creating a DuckDB connection without S3 credentials."""
+        from ..cold_storage import get_duckdb_connection
+
+        config = ColdStorageConfig(
+            bucket="test",
+            endpoint_url=None,
+            access_key_id=None,
+            secret_access_key=None,
+        )
+        conn = get_duckdb_connection(config)
+        try:
+            # Should be able to execute basic queries
+            result = conn.execute("SELECT 1").fetchone()
+            self.assertEqual(result[0], 1)
+        finally:
+            conn.close()
+
+    def test_get_connection_with_endpoint(self):
+        """Test creating a DuckDB connection with custom S3 endpoint."""
+        from ..cold_storage import get_duckdb_connection
+
+        config = ColdStorageConfig(
+            bucket="test",
+            endpoint_url="http://minio:9000",
+            access_key_id="minioadmin",
+            secret_access_key="minioadmin",
+        )
+        conn = get_duckdb_connection(config)
+        try:
+            result = conn.execute("SELECT 1").fetchone()
+            self.assertEqual(result[0], 1)
+        finally:
+            conn.close()
+
+
 class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
-    """Test cold storage query functionality (requires pg_duckdb)."""
+    """Test cold storage query functionality."""
 
     def setUp(self):
         self.create_project()
         self.config = ColdStorageConfig.from_settings()
-
-    def _skip_if_no_pg_duckdb(self):
-        """Skip test if pg_duckdb is not available."""
-        if not is_pg_duckdb_available():
-            self.skipTest("pg_duckdb extension not available")
 
     def _skip_if_no_bucket(self):
         """Skip test if no bucket is configured."""
         if not self.config.bucket:
             self.skipTest("No cold storage bucket configured")
 
-    def test_is_pg_duckdb_available_when_present(self):
-        """Test pg_duckdb availability check returns True when available."""
-        self._skip_if_no_pg_duckdb()
-        # If we get here, pg_duckdb is available
-        self.assertTrue(is_pg_duckdb_available())
-
-    def test_setup_credentials(self):
-        """Test S3 credentials setup doesn't error."""
-        self._skip_if_no_pg_duckdb()
-        self._skip_if_no_bucket()
-
-        from ..cold_storage import setup_duckdb_s3_credentials
-
-        # Should not raise
-        setup_duckdb_s3_credentials(self.config)
-
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_query_empty_cold_storage(self):
         """Test querying cold storage when no files exist."""
-        self._skip_if_no_pg_duckdb()
         self._skip_if_no_bucket()
 
         from ..cold_storage import query_cold_storage
@@ -115,76 +170,11 @@ class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(results, [])
 
 
-class ColdStorageExportTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
-    """Test cold storage export functionality (requires pg_duckdb)."""
-
-    def setUp(self):
-        self.create_project()
-        self.config = ColdStorageConfig.from_settings()
-
-    def _skip_if_no_pg_duckdb(self):
-        """Skip test if pg_duckdb is not available."""
-        if not is_pg_duckdb_available():
-            self.skipTest("pg_duckdb extension not available")
-
-    def _skip_if_no_bucket(self):
-        """Skip test if no bucket is configured."""
-        if not self.config.bucket:
-            self.skipTest("No cold storage bucket configured")
-
-    def test_archive_partition_per_org_empty(self):
-        """Test archiving empty partition returns empty list."""
-        self._skip_if_no_pg_duckdb()
-        self._skip_if_no_bucket()
-
-        from ..cold_storage import archive_partition_per_org
-
-        # Archive a non-existent partition
-        result = archive_partition_per_org(
-            partition_name="logs_logevent_19700101",
-            date_str="19700101",
-            config=self.config,
-        )
-
-        # Should return empty list (partition doesn't exist or is empty)
-        self.assertEqual(result, [])
-
-
 class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     """Test cold storage queries via API module."""
 
     def setUp(self):
         self.create_project()
-        self.config = ColdStorageConfig.from_settings()
-
-    def _skip_if_no_pg_duckdb(self):
-        """Skip test if pg_duckdb is not available."""
-        if not is_pg_duckdb_available():
-            self.skipTest("pg_duckdb extension not available")
-
-    def _skip_if_no_bucket(self):
-        """Skip test if no bucket is configured."""
-        if not self.config.bucket:
-            self.skipTest("No cold storage bucket configured")
-
-    def test_query_cold_storage_api_function(self):
-        """Test the API's query_cold_storage function."""
-        self._skip_if_no_pg_duckdb()
-        self._skip_if_no_bucket()
-
-        from ..api import query_cold_storage
-
-        now = timezone.now()
-        start = now - timedelta(days=30)
-
-        # Query should return empty list for non-existent data
-        results = query_cold_storage(
-            organization_id=self.organization.id,
-            start_dt=start,
-            end_dt=now,
-        )
-
-        self.assertEqual(results, [])
 
     def test_query_logs_combined_hot_only(self):
         """Test combined query when all data is in hot storage."""
@@ -244,32 +234,22 @@ class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(results[0].level, LogLevel.ERROR)
 
 
-class NoPgDuckDBTestCase(TestCase):
-    """Tests that verify graceful behavior when pg_duckdb is unavailable."""
+class NoDuckDBTestCase(TestCase):
+    """Tests that verify graceful behavior when DuckDB cold storage is disabled."""
 
-    def test_cold_storage_returns_empty_without_bucket(self):
-        """Test that cold storage returns empty when no bucket configured."""
+    def test_cold_storage_returns_empty_when_disabled(self):
+        """Test that cold storage returns empty when GLITCHTIP_ENABLE_DUCKDB is not set."""
         from ..cold_storage import query_cold_storage
 
-        # Config with no bucket should trigger early return
-        config = ColdStorageConfig(
-            bucket=None,
-            endpoint_url=None,
-            access_key_id=None,
-            secret_access_key=None,
-        )
-
-        # Should return empty list, not error
         results = query_cold_storage(
             org_id=1,
             start_date="20260101",
             end_date="20260101",
-            config=config,
         )
         self.assertEqual(results, [])
 
-    def test_api_cold_storage_returns_empty_without_bucket(self):
-        """Test that API cold storage returns empty when no bucket."""
+    def test_api_cold_storage_returns_empty_when_disabled(self):
+        """Test that API cold storage returns empty when disabled."""
         from datetime import datetime
         from datetime import timezone as dt_timezone
 
@@ -278,11 +258,9 @@ class NoPgDuckDBTestCase(TestCase):
         now = datetime.now(dt_timezone.utc)
         start = now - timedelta(days=1)
 
-        # Without pg_duckdb or bucket, should return empty list
         results = query_cold_storage(
             organization_id=1,
             start_dt=start,
             end_dt=now,
         )
-        # Either returns empty (no pg_duckdb) or empty (no bucket/no data)
         self.assertEqual(results, [])

@@ -13,7 +13,7 @@ from .cold_storage import (
     archive_and_swap_partition,
     cleanup_all_cold_storage,
     get_partitions_older_than,
-    is_pg_duckdb_available,
+    is_duckdb_available,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ def cleanup_old_logs():
     hot_days = getattr(settings, "GLITCHTIP_LOGS_HOT_DAYS", 7)
     cold_days = getattr(settings, "GLITCHTIP_LOGS_COLD_DAYS", 90)
 
-    # Archive hot -> cold (requires pg_duckdb)
-    if is_pg_duckdb_available():
+    # Archive hot -> cold (requires GLITCHTIP_ENABLE_DUCKDB=true)
+    if is_duckdb_available():
         archive_old_partitions(hot_days)
         # Delete expired cold storage
         delete_expired_cold_storage(cold_days)
