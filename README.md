@@ -34,9 +34,14 @@ See [API Documentation](https://app.glitchtip.com/api/docs)
 
 ## Run local dev environment
 
+This repo is the **backend API only**. To get a working web UI, you also need the
+[GlitchTip Frontend](https://gitlab.com/glitchtip/glitchtip-frontend/).
+Without the frontend, you will see `TemplateDoesNotExist` errors when opening the site in a browser.
+
 1. Ensure docker and docker-compose are installed
 2. Execute `docker compose up` (or `make start`)
 3. Execute `docker compose run --rm web ./manage.py migrate` (or `make migrate`)
+4. Clone and run the [frontend](https://gitlab.com/glitchtip/glitchtip-frontend/) with `npm start` — it proxies API requests to the backend automatically
 
 Run tests with `docker compose run --rm web ./manage.py test` (or `make test`) and see the logs with
 `docker compose logs -ft` (or `make logs`).
