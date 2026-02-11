@@ -1,3 +1,4 @@
+import logging
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,8 @@ from .schema import (
     LogStatsFilterSchema,
     LogStatsSchema,
 )
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -266,7 +269,13 @@ def query_cold_storage(
         where_parts.append(f"r['service'] ILIKE '%{svc}%'")
 
     if trace_id:
-        where_parts.append(f"r['trace_id'] = '{trace_id}'::UUID")
+        # Validate as UUID to prevent SQL injection (user-controlled string)
+        try:
+            validated_trace = UUID(trace_id)
+        except (ValueError, AttributeError):
+            pass
+        else:
+            where_parts.append(f"r['trace_id'] = '{validated_trace}'::UUID")
 
     if query:
         # Escape single quotes
@@ -284,40 +293,41 @@ def query_cold_storage(
 
         with connections["default"].cursor() as cursor:
             cursor.execute("SET duckdb.force_execution = true;")
+            try:
+                # pg_duckdb requires r['column'] syntax for read_parquet
+                sql = f"""
+                    SELECT r['id']::uuid AS id,
+                           r['trace_id']::uuid AS trace_id,
+                           r['organization_id']::bigint AS organization_id,
+                           r['project_id']::bigint AS project_id,
+                           r['span_id']::bigint AS span_id,
+                           r['level']::smallint AS level,
+                           r['severity_number']::smallint AS severity_number,
+                           r['body']::text AS body,
+                           r['service']::varchar AS service,
+                           r['data']::json AS data
+                    FROM read_parquet('{glob_path}') r
+                    WHERE {where_sql}
+                    ORDER BY r['id'] DESC
+                    LIMIT {limit};
+                """
+                cursor.execute(sql)
 
-            # pg_duckdb requires r['column'] syntax for read_parquet
-            sql = f"""
-                SELECT r['id']::uuid AS id,
-                       r['trace_id']::uuid AS trace_id,
-                       r['organization_id']::bigint AS organization_id,
-                       r['project_id']::bigint AS project_id,
-                       r['span_id']::bigint AS span_id,
-                       r['level']::smallint AS level,
-                       r['severity_number']::smallint AS severity_number,
-                       r['body']::text AS body,
-                       r['service']::varchar AS service,
-                       r['data']::json AS data
-                FROM read_parquet('{glob_path}') r
-                WHERE {where_sql}
-                ORDER BY r['id'] DESC
-                LIMIT {limit};
-            """
-            cursor.execute(sql)
-
-            results = []
-            for row in cursor.fetchall():
-                results.append(_row_to_log_event(row))
-            return results
+                results = []
+                for row in cursor.fetchall():
+                    results.append(_row_to_log_event(row))
+                return results
+            finally:
+                cursor.execute("RESET duckdb.force_execution;")
 
     except Exception as e:
         error_str = str(e)
         # Handle missing files gracefully
         if "No files found" in error_str or "Could not open" in error_str:
             return []
-        # Handle other DuckDB errors gracefully for cold storage
-        if "duckdb" in error_str.lower():
-            return []
-        raise
+        # Log unexpected DuckDB errors rather than silently swallowing
+        logger.warning("Cold storage query failed: %s", e)
+        return []
 
 
 def query_logs_combined(
@@ -439,18 +449,20 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
 
         with connections["default"].cursor() as cursor:
             cursor.execute("SET duckdb.force_execution = true;")
-
-            sql = f"""
-                SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, data
-                FROM read_parquet('{s3_path}')
-                WHERE id = '{log_id}'::UUID AND organization_id = {organization_id}
-                LIMIT 1;
-            """
-            cursor.execute(sql)
-            row = cursor.fetchone()
-            if row:
-                return _row_to_log_event(row)
+            try:
+                sql = f"""
+                    SELECT id, trace_id, organization_id, project_id, span_id,
+                           level, severity_number, body, service, data
+                    FROM read_parquet('{s3_path}')
+                    WHERE id = '{log_id}'::UUID AND organization_id = {organization_id}
+                    LIMIT 1;
+                """
+                cursor.execute(sql)
+                row = cursor.fetchone()
+                if row:
+                    return _row_to_log_event(row)
+            finally:
+                cursor.execute("RESET duckdb.force_execution;")
 
     except Exception as e:
         error_str = str(e)

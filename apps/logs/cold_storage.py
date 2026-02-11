@@ -246,22 +246,26 @@ def archive_partition_per_org(
 
             # Enable DuckDB execution for exports
             cursor.execute("SET duckdb.force_execution = true;")
+            try:
+                # Export each org's data to a separate file
+                for org_id in org_ids:
+                    s3_path = get_org_cold_s3_path(
+                        config, table_name, org_id, date_str
+                    )
 
-            # Export each org's data to a separate file
-            for org_id in org_ids:
-                s3_path = get_org_cold_s3_path(config, table_name, org_id, date_str)
-
-                # Export org's data, sorted for optimal row group skipping
-                export_sql = f"""
-                    COPY (
-                        SELECT * FROM {partition_name}
-                        WHERE organization_id = %s
-                        ORDER BY service, level, id
-                    ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """
-                cursor.execute(export_sql, [org_id])
-                archived_files.append((org_id, s3_path))
-                logger.debug(f"Archived org {org_id} to {s3_path}")
+                    # Export org's data, sorted for optimal row group skipping
+                    export_sql = f"""
+                        COPY (
+                            SELECT * FROM {partition_name}
+                            WHERE organization_id = %s
+                            ORDER BY service, level, id
+                        ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    """
+                    cursor.execute(export_sql, [org_id])
+                    archived_files.append((org_id, s3_path))
+                    logger.debug(f"Archived org {org_id} to {s3_path}")
+            finally:
+                cursor.execute("RESET duckdb.force_execution;")
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
@@ -472,27 +476,29 @@ def query_cold_storage(
 
         with connection.cursor() as cursor:
             cursor.execute("SET duckdb.force_execution = true;")
-
-            # pg_duckdb requires r['column'] syntax for read_parquet
-            query = f"""
-                SELECT r['id']::uuid AS id,
-                       r['trace_id']::uuid AS trace_id,
-                       r['organization_id']::bigint AS organization_id,
-                       r['project_id']::bigint AS project_id,
-                       r['span_id']::bigint AS span_id,
-                       r['level']::smallint AS level,
-                       r['severity_number']::smallint AS severity_number,
-                       r['body']::text AS body,
-                       r['service']::varchar AS service,
-                       r['data']::json AS data
-                FROM read_parquet('{glob_path}') r
-                WHERE {where_clause}
-                ORDER BY r['id'] DESC
-                LIMIT {limit} OFFSET {offset};
-            """
-            cursor.execute(query)
-            columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            try:
+                # pg_duckdb requires r['column'] syntax for read_parquet
+                query = f"""
+                    SELECT r['id']::uuid AS id,
+                           r['trace_id']::uuid AS trace_id,
+                           r['organization_id']::bigint AS organization_id,
+                           r['project_id']::bigint AS project_id,
+                           r['span_id']::bigint AS span_id,
+                           r['level']::smallint AS level,
+                           r['severity_number']::smallint AS severity_number,
+                           r['body']::text AS body,
+                           r['service']::varchar AS service,
+                           r['data']::json AS data
+                    FROM read_parquet('{glob_path}') r
+                    WHERE {where_clause}
+                    ORDER BY r['id'] DESC
+                    LIMIT {limit} OFFSET {offset};
+                """
+                cursor.execute(query)
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            finally:
+                cursor.execute("RESET duckdb.force_execution;")
 
     except Exception as e:
         # Handle missing files gracefully
