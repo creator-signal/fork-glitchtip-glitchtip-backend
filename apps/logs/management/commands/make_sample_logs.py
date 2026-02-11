@@ -1,16 +1,14 @@
 import random
 from datetime import datetime, timedelta, timezone
 
-from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
 from apps.logs.constants import LogLevel
-from apps.organizations_ext.models import Organization
-from apps.projects.models import Project
+from glitchtip.base_commands import MakeSampleCommand
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 
 
-class Command(BaseCommand):
+class Command(MakeSampleCommand):
     help = "Generate sample log events for testing"
 
     SAMPLE_MESSAGES = [
@@ -48,25 +46,7 @@ class Command(BaseCommand):
     ]
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--quantity",
-            "-n",
-            type=int,
-            default=100,
-            help="Number of log events to generate (default: 100)",
-        )
-        parser.add_argument(
-            "--organization",
-            "-o",
-            type=str,
-            help="Organization slug (uses first organization if not specified)",
-        )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            help="Project slug (uses first project in organization if not specified)",
-        )
+        super().add_arguments(parser)
         parser.add_argument(
             "--days-ago",
             "-d",
@@ -83,68 +63,26 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        super().handle(*args, **options)
         quantity = options["quantity"]
         days_ago = options["days_ago"]
         span_days = options["span_days"]
 
-        # Get organization
-        if options["organization"]:
-            try:
-                organization = Organization.objects.get(slug=options["organization"])
-            except Organization.DoesNotExist:
-                raise CommandError(
-                    f"Organization '{options['organization']}' not found"
-                )
-        else:
-            organization = Organization.objects.first()
-            if not organization:
-                organization, _ = Organization.objects.get_or_create(
-                    slug="org",
-                    defaults={"name": "Test Organization"},
-                )
-                self.stdout.write(f"Created default organization: {organization.slug}")
-
-        # Get project
-        if options["project"]:
-            try:
-                project = Project.objects.get(
-                    slug=options["project"], organization=organization
-                )
-            except Project.DoesNotExist:
-                raise CommandError(
-                    f"Project '{options['project']}' not found in organization '{organization.slug}'"
-                )
-        else:
-            project = Project.objects.filter(organization=organization).first()
-            if not project:
-                project = Project.objects.create(
-                    name="Test Project",
-                    slug="test-project",
-                    organization=organization,
-                )
-                self.stdout.write(f"Created default project: {project.slug}")
-
-        # Calculate time range
         now = datetime.now(timezone.utc)
         start_time = now - timedelta(days=days_ago + span_days)
         end_time = now - timedelta(days=days_ago)
 
         self.stdout.write(
-            f"Generating {quantity} log events for {organization.slug}/{project.slug}"
+            f"Generating {quantity} log events for "
+            f"{self.organization.slug}/{self.project.slug}"
         )
         self.stdout.write(f"Time range: {start_time} to {end_time}")
 
-        # Ensure partitions exist for the date range
         self._ensure_partitions(start_time, end_time)
 
-        # Generate logs using bulk insert for performance
-        logs_created = self._bulk_create_logs(
-            organization, project, quantity, start_time, end_time
-        )
+        logs_created = self._bulk_create_logs(quantity, start_time, end_time)
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Successfully created {logs_created} log events")
-        )
+        self.success_message(f"Successfully created {logs_created} log events")
 
     def _ensure_partitions(self, start_time: datetime, end_time: datetime):
         """Ensure partitions exist for the given time range."""
@@ -173,8 +111,6 @@ class Command(BaseCommand):
 
     def _bulk_create_logs(
         self,
-        organization,
-        project,
         quantity: int,
         start_time: datetime,
         end_time: datetime,
@@ -184,7 +120,6 @@ class Command(BaseCommand):
 
         time_range_seconds = int((end_time - start_time).total_seconds())
 
-        # Level weights
         level_weights = [
             (LogLevel.TRACE, 5),
             (LogLevel.DEBUG, 10),
@@ -198,17 +133,12 @@ class Command(BaseCommand):
 
         rows = []
         for i in range(quantity):
-            # Random timestamp in range
             random_offset = timedelta(seconds=random.randint(0, time_range_seconds))
             log_timestamp = start_time + random_offset
 
-            # Generate UUIDv7 from timestamp
             log_id = UUID7Helper.from_datetime(log_timestamp)
-
-            # Random level
             level = random.choices(levels, weights=weights)[0]
 
-            # Random message
             message_template = random.choice(self.SAMPLE_MESSAGES)
             message = message_template.format(
                 ms=random.randint(10, 500),
@@ -226,15 +156,12 @@ class Command(BaseCommand):
                 days=random.randint(1, 30),
             )
 
-            # Random service
             service = random.choice(self.SAMPLE_SERVICES)
 
-            # Random trace_id (50% chance)
             trace_id = None
             if random.random() > 0.5:
                 trace_id = str(UUID7Helper.from_datetime(log_timestamp))
 
-            # Data
             data = orjson.dumps(
                 {
                     "environment": random.choice(
@@ -248,8 +175,8 @@ class Command(BaseCommand):
                 (
                     str(log_id),
                     trace_id,
-                    organization.id,
-                    project.id,
+                    self.organization.id,
+                    self.project.id,
                     None,  # span_id
                     level,
                     None,  # severity_number
@@ -260,9 +187,8 @@ class Command(BaseCommand):
             )
 
             if (i + 1) % 1000 == 0:
-                self.stdout.write(f"  Prepared {i + 1}/{quantity} logs...")
+                self.progress_tick()
 
-        # Bulk insert
         insert_sql = """
             INSERT INTO logs_logevent (
                 id, trace_id,
