@@ -162,11 +162,13 @@ def get_duckdb_connection(config: ColdStorageConfig | None = None):
     conn.install_extension("httpfs")
     conn.load_extension("httpfs")
 
-    # Configure S3 credentials
+    # Configure S3 credentials (escape single quotes for safety)
     if config.access_key_id:
-        conn.execute(f"SET s3_access_key_id = '{config.access_key_id}';")
+        val = config.access_key_id.replace("'", "''")
+        conn.execute(f"SET s3_access_key_id = '{val}';")
     if config.secret_access_key:
-        conn.execute(f"SET s3_secret_access_key = '{config.secret_access_key}';")
+        val = config.secret_access_key.replace("'", "''")
+        conn.execute(f"SET s3_secret_access_key = '{val}';")
 
     if config.endpoint_url:
         # Strip protocol prefix for DuckDB
@@ -451,84 +453,6 @@ def get_partitions_older_than(
 
     return partitions
 
-
-def query_cold_storage(
-    org_id: int,
-    start_date: str,
-    end_date: str,
-    table_name: str = "logs_logevent",
-    config: ColdStorageConfig | None = None,
-    filters: dict | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict]:
-    """
-    Query cold storage for an org's data within a date range.
-
-    Uses standalone DuckDB to read Parquet files from S3.
-    No PostgreSQL extension required.
-
-    Args:
-        org_id: Organization ID
-        start_date: Start date string (YYYYMMDD) - used for filtering, not path
-        end_date: End date string (YYYYMMDD) - used for filtering, not path
-        table_name: Table name for path construction
-        config: Cold storage configuration
-        filters: Optional dict with filter conditions (level, service, body_search)
-        limit: Max rows to return
-        offset: Rows to skip
-
-    Returns:
-        List of row dicts from cold storage
-    """
-    if not is_duckdb_available():
-        return []
-
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    # Use glob pattern to read all files for this org
-    glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/*.parquet"
-
-    # Build WHERE clause
-    where_parts = [f"organization_id = {org_id}"]
-    if filters:
-        if "level" in filters:
-            where_parts.append(f"level = {int(filters['level'])}")
-        if "service" in filters:
-            svc = filters["service"].replace("'", "''")
-            where_parts.append(f"service = '{svc}'")
-        if "body_search" in filters:
-            term = filters["body_search"].replace("'", "''")
-            where_parts.append(f"body ILIKE '%{term}%'")
-
-    where_clause = " AND ".join(where_parts)
-
-    try:
-        duck_conn = get_duckdb_connection(config)
-        try:
-            query = f"""
-                SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, data
-                FROM read_parquet('{glob_path}')
-                WHERE {where_clause}
-                ORDER BY id DESC
-                LIMIT {limit} OFFSET {offset};
-            """
-            result = duck_conn.execute(query)
-            columns = [desc[0] for desc in result.description]
-            return [dict(zip(columns, row)) for row in result.fetchall()]
-        finally:
-            duck_conn.close()
-
-    except Exception as e:
-        error_str = str(e)
-        # Handle missing files gracefully
-        if "No files found" in error_str or "Could not open" in error_str:
-            logger.debug(f"No cold storage files found for org {org_id} in date range")
-            return []
-        logger.error(f"Cold storage query failed: {e}")
-        raise
 
 
 def cleanup_cold_storage_for_org(

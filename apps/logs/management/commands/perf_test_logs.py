@@ -5,8 +5,6 @@ Tests:
 1. Ingest throughput (bulk insert speed)
 2. Query performance with various filters
 3. Partition pruning effectiveness
-4. Cold storage query performance
-5. Combined view performance
 
 Usage:
     ./manage.py perf_test_logs --generate 100000
@@ -281,18 +279,9 @@ class Command(BaseCommand):
                 "SELECT COUNT(*) FROM logs_logevent WHERE organization_id = %s",
                 [self.org.id],
             )
-            hot_count = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM logs_logevent WHERE organization_id = %s",
-                [self.org.id],
-            )
             total_count = cursor.fetchone()[0]
 
-        cold_count = total_count - hot_count
-        self.stdout.write(f"Hot storage: {hot_count:,} logs")
-        self.stdout.write(f"Cold storage: {cold_count:,} logs")
-        self.stdout.write(f"Total: {total_count:,} logs\n")
+        self.stdout.write(f"Hot storage: {total_count:,} logs\n")
 
         # Define benchmark queries
         now = datetime.now(timezone.utc)
