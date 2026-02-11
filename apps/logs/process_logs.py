@@ -9,7 +9,7 @@ from django.db import connection
 
 from glitchtip.partition_manager import UUID7Helper
 
-from .constants import LogLevel
+from .constants import LEVEL_MAP, LogLevel
 from .models import compute_service_hash
 
 logger = logging.getLogger(__name__)
@@ -80,18 +80,6 @@ def update_service_lookup(service_data: set[tuple[int, str]]) -> None:
             "DO UPDATE SET last_seen = NOW();"
         )
         cursor.execute(sql)
-
-
-# Map string level to LogLevel enum
-LEVEL_MAP = {
-    "trace": LogLevel.TRACE,
-    "debug": LogLevel.DEBUG,
-    "info": LogLevel.INFO,
-    "warn": LogLevel.WARN,
-    "warning": LogLevel.WARN,
-    "error": LogLevel.ERROR,
-    "fatal": LogLevel.FATAL,
-}
 
 
 def validate_timestamp(client_timestamp: datetime, server_time: datetime) -> bool:

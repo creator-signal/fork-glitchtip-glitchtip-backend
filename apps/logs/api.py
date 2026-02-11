@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
@@ -19,7 +21,7 @@ from glitchtip.api.pagination import set_pagination_headers
 from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
 
-from .constants import LogLevel
+from .constants import LEVEL_MAP, LogLevel
 from .models import LogService, compute_service_hash
 from .schema import (
     LogEventSchema,
@@ -32,17 +34,6 @@ from .schema import (
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-# Map string levels to LogLevel enum values
-LEVEL_MAP = {
-    "trace": LogLevel.TRACE,
-    "debug": LogLevel.DEBUG,
-    "info": LogLevel.INFO,
-    "warn": LogLevel.WARN,
-    "warning": LogLevel.WARN,
-    "error": LogLevel.ERROR,
-    "fatal": LogLevel.FATAL,
-}
 
 # Default time range for queries (prevents unbounded queries)
 DEFAULT_LOOKBACK_DAYS = 7
@@ -100,8 +91,6 @@ class LogEventRow:
 
 def _parse_data_field(data) -> dict:
     """Parse data field which may be dict, string, or None."""
-    import json
-
     if data is None:
         return {}
     if isinstance(data, dict):
@@ -246,42 +235,50 @@ def query_cold_storage(
     # Use glob pattern to read all files for this org
     glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/logs_logevent/org_{organization_id}/*.parquet"
 
-    # Build WHERE clause — standalone DuckDB uses standard SQL column names
-    where_parts = [f"organization_id = {organization_id}"]
+    # Build WHERE clause with DuckDB $N positional parameters
+    where_parts = ["organization_id = $1"]
+    params: list = [organization_id]
 
     # Time range via UUIDv7 bounds
     start_uuid, end_uuid = UUID7Helper.get_range_for_date(start_dt, end_dt)
-    where_parts.append(f"id >= '{start_uuid}'")
-    where_parts.append(f"id < '{end_uuid}'")
+    params.extend([str(start_uuid), str(end_uuid)])
+    where_parts.append(f"id >= ${len(params) - 1}")
+    where_parts.append(f"id < ${len(params)}")
 
     if project_ids:
-        ids_str = ",".join(str(p) for p in project_ids)
-        where_parts.append(f"project_id IN ({ids_str})")
+        placeholders = ",".join(
+            f"${len(params) + i + 1}" for i in range(len(project_ids))
+        )
+        params.extend(project_ids)
+        where_parts.append(f"project_id IN ({placeholders})")
 
     if level_values:
-        lvls_str = ",".join(str(lv) for lv in level_values)
-        where_parts.append(f"level IN ({lvls_str})")
+        placeholders = ",".join(
+            f"${len(params) + i + 1}" for i in range(len(level_values))
+        )
+        params.extend(level_values)
+        where_parts.append(f"level IN ({placeholders})")
 
     if service:
-        svc = service.replace("'", "''")
-        where_parts.append(f"service ILIKE '%{svc}%'")
+        params.append(f"%{service}%")
+        where_parts.append(f"service ILIKE ${len(params)}")
 
     if trace_id:
-        # Validate as UUID to prevent injection
         try:
             validated_trace = UUID(trace_id)
         except (ValueError, AttributeError):
             pass
         else:
-            where_parts.append(f"trace_id = '{validated_trace}'")
+            params.append(str(validated_trace))
+            where_parts.append(f"trace_id = ${len(params)}")
 
     if query:
-        q = query.replace("'", "''")
-        where_parts.append(f"body ILIKE '%{q}%'")
+        params.append(f"%{query}%")
+        where_parts.append(f"body ILIKE ${len(params)}")
 
-    # Cursor-based pagination
     if cursor_position:
-        where_parts.append(f"id < '{cursor_position}'")
+        params.append(str(cursor_position))
+        where_parts.append(f"id < ${len(params)}")
 
     where_sql = " AND ".join(where_parts)
 
@@ -294,14 +291,11 @@ def query_cold_storage(
                 FROM read_parquet('{glob_path}')
                 WHERE {where_sql}
                 ORDER BY id DESC
-                LIMIT {limit};
+                LIMIT {int(limit)};
             """
-            result = duck_conn.execute(sql)
+            result = duck_conn.execute(sql, params)
 
-            results = []
-            for row in result.fetchall():
-                results.append(_row_to_log_event(row))
-            return results
+            return [_row_to_log_event(row) for row in result.fetchall()]
         finally:
             duck_conn.close()
 
@@ -309,11 +303,10 @@ def query_cold_storage(
         error_str = str(e)
         if "No files found" in error_str or "Could not open" in error_str:
             return []
-        logger.warning("Cold storage query failed: %s", e)
-        return []
+        raise
 
 
-def query_logs_combined(
+async def query_logs_combined(
     organization_id: int,
     start_dt: datetime,
     end_dt: datetime,
@@ -328,53 +321,58 @@ def query_logs_combined(
     """
     Query logs from both hot and cold storage.
 
-    Hot storage (PostgreSQL) is queried first for recent data.
-    Cold storage (Parquet via DuckDB) is queried for older data if needed.
-
-    Results are merged and sorted by id DESC.
+    When the date range spans both tiers, hot and cold are queried in
+    parallel via asyncio.to_thread. Results are merged and sorted by id DESC.
     """
     now = datetime.now(timezone.utc)
     hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
 
-    results = []
+    kwargs = dict(
+        organization_id=organization_id,
+        project_ids=project_ids,
+        level_values=level_values,
+        service=service,
+        trace_id=trace_id,
+        query=query,
+        limit=limit,
+        cursor_position=cursor_position,
+    )
 
-    # Query hot storage if date range overlaps
-    if end_dt > hot_cutoff:
-        hot_start = max(start_dt, hot_cutoff)
-        hot_results = query_hot_storage(
-            organization_id=organization_id,
-            start_dt=hot_start,
+    needs_hot = end_dt > hot_cutoff
+    needs_cold = start_dt < hot_cutoff
+
+    if needs_hot and needs_cold:
+        # Parallel I/O — hot and cold have disjoint time ranges
+        # PG: sync_to_async (Django connection management, async cursors in 6.1)
+        # DuckDB: asyncio.to_thread (in-process C library, no Django DB)
+        hot_task = sync_to_async(query_hot_storage)(
+            start_dt=max(start_dt, hot_cutoff),
             end_dt=end_dt,
-            project_ids=project_ids,
-            level_values=level_values,
-            service=service,
-            trace_id=trace_id,
-            query=query,
-            limit=limit,
-            cursor_position=cursor_position,
+            **kwargs,
         )
-        results.extend(hot_results)
-
-    # Query cold storage if date range extends before hot cutoff
-    # and we haven't filled the limit yet
-    if start_dt < hot_cutoff and len(results) < limit:
-        cold_end = min(end_dt, hot_cutoff)
-        cold_limit = limit - len(results)
-        # For cold storage, use cursor if hot returned nothing, else use last hot result
-        cold_cursor = cursor_position if not results else results[-1].id
-        cold_results = query_cold_storage(
-            organization_id=organization_id,
+        cold_task = asyncio.to_thread(
+            query_cold_storage,
             start_dt=start_dt,
-            end_dt=cold_end,
-            project_ids=project_ids,
-            level_values=level_values,
-            service=service,
-            trace_id=trace_id,
-            query=query,
-            limit=cold_limit,
-            cursor_position=cold_cursor,
+            end_dt=min(end_dt, hot_cutoff),
+            **kwargs,
         )
-        results.extend(cold_results)
+        hot_results, cold_results = await asyncio.gather(hot_task, cold_task)
+        results = hot_results + cold_results
+    elif needs_hot:
+        results = await sync_to_async(query_hot_storage)(
+            start_dt=max(start_dt, hot_cutoff),
+            end_dt=end_dt,
+            **kwargs,
+        )
+    elif needs_cold:
+        results = await asyncio.to_thread(
+            query_cold_storage,
+            start_dt=start_dt,
+            end_dt=min(end_dt, hot_cutoff),
+            **kwargs,
+        )
+    else:
+        results = []
 
     # Sort combined results by id DESC (most recent first)
     results.sort(key=lambda r: r.id, reverse=True)
@@ -382,34 +380,28 @@ def query_logs_combined(
     return results[:limit]
 
 
-def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
+def _get_log_from_hot(organization_id: int, log_id: UUID) -> LogEventRow | None:
+    """Fetch a single log from hot storage (PostgreSQL)."""
+    sql = """
+        SELECT id, trace_id, organization_id, project_id, span_id,
+               level, severity_number, body, service, data
+        FROM logs_logevent
+        WHERE id = %s AND organization_id = %s
+        LIMIT 1
     """
-    Get a single log by ID, checking both hot and cold storage.
+    read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
+    with connections[read_only_db].cursor() as cursor:
+        cursor.execute(sql, [str(log_id), organization_id])
+        row = cursor.fetchone()
+        if row:
+            return _row_to_log_event(row)
+    return None
 
-    Uses UUIDv7 timestamp to determine which storage tier to query first.
-    """
-    # Extract timestamp from UUIDv7 to know where to look
-    log_time = UUID7Helper.extract_datetime(log_id)
-    now = datetime.now(timezone.utc)
-    hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
 
-    # Try hot storage first if log is recent
-    if log_time > hot_cutoff:
-        sql = """
-            SELECT id, trace_id, organization_id, project_id, span_id,
-                   level, severity_number, body, service, data
-            FROM logs_logevent
-            WHERE id = %s AND organization_id = %s
-            LIMIT 1
-        """
-        read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
-        with connections[read_only_db].cursor() as cursor:
-            cursor.execute(sql, [str(log_id), organization_id])
-            row = cursor.fetchone()
-            if row:
-                return _row_to_log_event(row)
-
-    # Try cold storage
+def _get_log_from_cold(
+    organization_id: int, log_id: UUID, log_time: datetime
+) -> LogEventRow | None:
+    """Fetch a single log from cold storage (DuckDB/Parquet)."""
     from .cold_storage import (
         ColdStorageConfig,
         get_duckdb_connection,
@@ -434,10 +426,10 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
                 SELECT id, trace_id, organization_id, project_id, span_id,
                        level, severity_number, body, service, data
                 FROM read_parquet('{s3_path}')
-                WHERE id = '{log_id}' AND organization_id = {organization_id}
+                WHERE id = $1 AND organization_id = $2
                 LIMIT 1;
             """
-            result = duck_conn.execute(sql)
+            result = duck_conn.execute(sql, [str(log_id), organization_id])
             row = result.fetchone()
             if row:
                 return _row_to_log_event(row)
@@ -455,6 +447,28 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
             raise
 
     return None
+
+
+async def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
+    """
+    Get a single log by ID, checking both hot and cold storage.
+
+    Uses UUIDv7 timestamp to determine which storage tier to query.
+    """
+    log_time = UUID7Helper.extract_datetime(log_id)
+    now = datetime.now(timezone.utc)
+    hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
+
+    # PG: sync_to_async (Django connection management)
+    if log_time > hot_cutoff:
+        result = await sync_to_async(_get_log_from_hot)(organization_id, log_id)
+        if result:
+            return result
+
+    # DuckDB: asyncio.to_thread (in-process, no Django DB)
+    return await asyncio.to_thread(
+        _get_log_from_cold, organization_id, log_id, log_time
+    )
 
 
 @router.get(
@@ -508,7 +522,7 @@ async def list_logs(
     limit = filters.limit
 
     # Fetch limit + 1 to detect if there's a next page
-    results = await sync_to_async(query_logs_combined)(
+    results = await query_logs_combined(
         organization_id=organization.id,
         start_dt=start_dt,
         end_dt=end_dt,
@@ -553,7 +567,7 @@ async def get_log(
         get_organization_for_user(request.auth.user_id, organization_slug)
     )
 
-    log_event = await sync_to_async(get_log_by_id)(organization.id, log_id)
+    log_event = await get_log_by_id(organization.id, log_id)
 
     if not log_event:
         raise Http404("Log event not found")
@@ -561,7 +575,7 @@ async def get_log(
     return log_event
 
 
-def query_log_stats(
+async def query_log_stats(
     organization_id: int,
     start_dt: datetime,
     end_dt: datetime,
@@ -601,11 +615,10 @@ def query_log_stats(
     )
 
     # Build result structure
-    # Collect all hours and levels
     hours_set: set[datetime] = set()
     level_data: dict[int, dict[datetime, int]] = {}
 
-    for row in qs:
+    async for row in qs:
         hour = row["hour"]
         level = row["level"]
         total = row["total"]
@@ -676,7 +689,7 @@ async def get_log_stats(
         service_buckets = [compute_service_hash(s) for s in filters.service]
 
     # Query stats
-    result = await sync_to_async(query_log_stats)(
+    result = await query_log_stats(
         organization_id=organization.id,
         start_dt=start_dt,
         end_dt=end_dt,

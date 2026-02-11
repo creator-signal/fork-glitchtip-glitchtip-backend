@@ -100,26 +100,6 @@ def get_cold_storage_backend(config: ColdStorageConfig | None = None):
     except ImportError:
         pass
 
-    # Fall back: check if default storage is a cloud backend
-    try:
-        default = storages["default"]
-        backend_class = default.__class__.__name__
-        cloud_backends = (
-            "S3Boto3Storage",
-            "S3Storage",
-            "GoogleCloudStorage",
-            "GCloudStorage",
-            "AzureStorage",
-        )
-        if backend_class in cloud_backends:
-            logger.warning(
-                f"Using default storage for cold storage deletion. "
-                f"Bucket may not match cold storage bucket ({config.bucket})."
-            )
-            return default
-    except Exception:
-        pass
-
     return None
 
 
@@ -454,7 +434,6 @@ def get_partitions_older_than(
     return partitions
 
 
-
 def cleanup_cold_storage_for_org(
     org_id: int,
     retention_days: int,
@@ -500,11 +479,11 @@ def cleanup_cold_storage_for_org(
         date_str = file_date.strftime("%Y%m%d")
         storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
         try:
-            storage.delete(storage_path)
-            deleted_count += 1
-            logger.debug(f"Deleted {storage_path}")
+            if storage.exists(storage_path):
+                storage.delete(storage_path)
+                deleted_count += 1
+                logger.debug(f"Deleted {storage_path}")
         except Exception:
-            # Most backends no-op on missing files; ignore errors
             pass
 
     if deleted_count:
