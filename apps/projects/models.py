@@ -216,7 +216,12 @@ class IssueEventProjectHourlyStatistic(ProjectStatisticBase):
 
 
 class LogProjectHourlyStatistic(ProjectStatisticBase):
-    """Hourly log statistics per project, broken down by level and service bucket."""
+    """
+    Hourly log statistics per project, broken down by level and service bucket.
+
+    service_bucket is a hash of the service name (0-255) that caps row growth.
+    See apps.logs.models.compute_service_hash for details.
+    """
 
     level = models.PositiveSmallIntegerField()
     service_bucket = models.PositiveSmallIntegerField(

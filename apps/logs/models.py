@@ -6,16 +6,32 @@ from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LogLevel
 
-# Number of hash buckets for service names in stats (0-255)
+# Cardinality limiter for service names in the hourly statistics table.
+#
+# LogProjectHourlyStatistic has a composite PK:
+#   (project, organization, date, level, service_bucket)
+#
+# Without bucketing, each unique service name would create its own rows.
+# If service names are high-cardinality (e.g. auto-generated, UUIDs, or
+# per-request), the stats table would grow unboundedly. Hashing into 256
+# buckets caps the worst case at 256 * 6 levels * 24 hours = ~37k rows
+# per project per day, regardless of how many distinct services exist.
+#
+# Tradeoff: filtering stats by service name may include collisions from
+# other services that hash to the same bucket. This is acceptable for
+# aggregate charts — exact per-service counts come from the logs table.
 SERVICE_HASH_BUCKETS = 256
 
 
 def compute_service_hash(service_name: str) -> int:
     """
-    Hash a service name to a bucket (0-255).
+    Hash a service name to a bucket (0-255) for statistics aggregation.
 
-    Uses MD5 for fast, uniform distribution. Not cryptographic,
-    just needs to be consistent and well-distributed.
+    Used by LogProjectHourlyStatistic to bound row count when service
+    names have high cardinality. The stats API filters by bucket, so
+    queries like "show me stats for auth-service" hash the name and
+    filter on the bucket. Collisions are rare with typical service counts
+    and acceptable for aggregate charts.
     """
     if not service_name:
         return 0
