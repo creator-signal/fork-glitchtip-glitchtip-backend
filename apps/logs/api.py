@@ -7,15 +7,17 @@ from uuid import UUID
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import connections
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Query, Router
 
 from apps.organizations_ext.models import Organization
 from apps.projects.models import LogProjectHourlyStatistic
 from glitchtip.api.authentication import AuthHttpRequest
+from glitchtip.api.pagination import set_pagination_headers
 from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
+from glitchtip.utils import get_read_db
 
 from .constants import LogLevel
 from .models import LogService, compute_service_hash
@@ -69,52 +71,6 @@ def encode_cursor(position: UUID) -> str:
     return b64encode(querystring.encode()).decode()
 
 
-def build_link_header(
-    request: HttpRequest,
-    has_next: bool,
-    next_cursor: str | None,
-) -> str:
-    """Build Link header for pagination."""
-    base_url = request.build_absolute_uri()
-    # Remove existing cursor from URL
-    parsed = parse.urlparse(base_url)
-    query_params = parse.parse_qs(parsed.query)
-    query_params.pop("cursor", None)
-    base_without_cursor = parse.urlunparse(
-        (
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            "",
-            parse.urlencode(query_params, doseq=True),
-            "",
-        )
-    )
-
-    links = []
-
-    # Previous link (first page, no results going back)
-    links.append(f'<{base_without_cursor}>; rel="previous"; results="false"')
-
-    # Next link
-    if has_next and next_cursor:
-        next_url = (
-            f"{base_without_cursor}{'&' if query_params else '?'}cursor={next_cursor}"
-        )
-        links.append(
-            f'<{next_url}>; rel="next"; results="true"; cursor="{next_cursor}"'
-        )
-    else:
-        links.append(f'<{base_without_cursor}>; rel="next"; results="false"')
-
-    return ", ".join(links)
-
-
-def get_read_db() -> str:
-    """Get the database alias for read operations (replica if available)."""
-    return "read_only" if "read_only" in settings.DATABASES else "default"
-
-
 def get_organization_for_user(user_id: int, organization_slug: str):
     """Get organization queryset filtered by user membership."""
     return Organization.objects.filter(users=user_id, slug=organization_slug)
@@ -157,27 +113,8 @@ def _parse_data_field(data) -> dict:
     return {}
 
 
-def _row_to_log_event(row: tuple, columns: list[str] | None = None) -> LogEventRow:
-    """Convert a database row to LogEventRow."""
-    if columns:
-        # Dict-style access for cold storage results
-        return LogEventRow(
-            id=row[0] if isinstance(row[0], UUID) else UUID(str(row[0])),
-            trace_id=(
-                row[1]
-                if isinstance(row[1], UUID)
-                else (UUID(str(row[1])) if row[1] else None)
-            ),
-            organization_id=row[2],
-            project_id=row[3],
-            span_id=row[4],
-            level=row[5],
-            severity_number=row[6],
-            body=row[7],
-            service=row[8],
-            data=_parse_data_field(row[9]),
-        )
-    # Positional access for hot storage
+def _row_to_log_event(row: tuple) -> LogEventRow:
+    """Convert a database row (positional) to LogEventRow."""
     return LogEventRow(
         id=row[0] if isinstance(row[0], UUID) else UUID(str(row[0])),
         trace_id=(
@@ -600,9 +537,9 @@ async def list_logs(
     if has_next and page_results:
         next_cursor = encode_cursor(page_results[-1].id)
 
-    response["Link"] = build_link_header(request, has_next, next_cursor)
-    response["X-Hits"] = len(page_results)
-    response["X-Max-Hits"] = 1000  # Match standard pagination max_hits
+    set_pagination_headers(
+        response, request, has_next, next_cursor, hits=len(page_results)
+    )
 
     return page_results
 
