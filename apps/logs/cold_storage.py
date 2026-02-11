@@ -33,6 +33,21 @@ logger = logging.getLogger(__name__)
 # Prefix for all cold storage files to prevent collisions with other data
 COLD_STORAGE_PREFIX = "cold_storage"
 
+# DuckDB column types for the logs_logevent export schema.
+# UUIDs and JSONB are exported as VARCHAR strings.
+EXPORT_COLUMN_TYPES = {
+    "id": "VARCHAR",
+    "trace_id": "VARCHAR",
+    "organization_id": "BIGINT",
+    "project_id": "BIGINT",
+    "span_id": "VARCHAR",
+    "level": "SMALLINT",
+    "severity_number": "SMALLINT",
+    "body": "VARCHAR",
+    "service": "VARCHAR",
+    "data": "VARCHAR",
+}
+
 
 @dataclass
 class ColdStorageConfig:
@@ -270,11 +285,10 @@ def archive_partition_per_org(
 
                 duck_conn = get_duckdb_connection(config)
                 try:
-                    # DuckDB can create tables from Python data via VALUES
-                    # or by registering a view over Python objects
-                    duck_conn.execute(
-                        f"CREATE TABLE export_data({', '.join(columns)})"
+                    col_defs = ", ".join(
+                        f"{c} {EXPORT_COLUMN_TYPES[c]}" for c in columns
                     )
+                    duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
                     duck_conn.executemany(
                         f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
                         clean_rows,
