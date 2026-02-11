@@ -21,6 +21,7 @@ class Command(BaseCommand):
             ("issue_events_issueevent", None),  # Use settings
             ("performance_transactionevent", None),  # Use settings
             ("uptime_monitorcheck", None),
+            ("logs_logevent", None),
         ]
         start_date_daily = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date_daily = start_date_daily + timedelta(days=7)
@@ -41,6 +42,10 @@ class Command(BaseCommand):
             )
 
             # Cleanup old partitions
+            # Skip logs - cleanup_old_logs() handles archival-then-drop separately
+            if "logs_logevent" in table:
+                continue
+
             max_days = settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS
             if "uptime" in table:
                 max_days = settings.GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS
@@ -61,6 +66,7 @@ class Command(BaseCommand):
             "performance_transactiongroupaggregate",
             "projects_issueeventprojecthourlystatistic",
             "projects_transactioneventprojecthourlystatistic",
+            "projects_logprojecthourlystatistic",
         ]
         start_of_week = start_date_daily - timedelta(days=start_date_daily.weekday())
         end_date_weekly = start_of_week + timedelta(weeks=4)

@@ -5,6 +5,7 @@ from django.tasks import task
 
 from apps.files.maintenance import cleanup_old_files
 from apps.issue_events.maintenance import cleanup_old_issues
+from apps.logs.maintenance import cleanup_old_logs
 from apps.performance.maintenance import cleanup_old_transaction_events
 from apps.sourcecode.maintenance import cleanup_old_debug_symbol_bundles
 from apps.stripe.maintenance import sync_stripe_models
@@ -20,4 +21,5 @@ def perform_maintenance():
     cleanup_old_files()
     cleanup_old_issues()
     cleanup_old_debug_symbol_bundles()
+    cleanup_old_logs()
     asyncio.run(sync_stripe_models())
