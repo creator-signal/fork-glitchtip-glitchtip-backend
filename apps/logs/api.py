@@ -17,8 +17,6 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import set_pagination_headers
 from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
-from glitchtip.utils import get_read_db
-
 from .constants import LogLevel
 from .models import LogService, compute_service_hash
 from .schema import (
@@ -197,10 +195,10 @@ def query_hot_storage(
     """
     params.append(limit)
 
-    db_alias = get_read_db()
+    read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
     results = []
 
-    with connections[db_alias].cursor() as cursor:
+    with connections[read_only_db].cursor() as cursor:
         cursor.execute(sql, params)
         for row in cursor.fetchall():
             results.append(_row_to_log_event(row))
@@ -410,8 +408,8 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
             WHERE id = %s AND organization_id = %s
             LIMIT 1
         """
-        db_alias = get_read_db()
-        with connections[db_alias].cursor() as cursor:
+        read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
+        with connections[read_only_db].cursor() as cursor:
             cursor.execute(sql, [str(log_id), organization_id])
             row = cursor.fetchone()
             if row:
