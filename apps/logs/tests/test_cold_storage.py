@@ -185,6 +185,8 @@ class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
     def test_query_logs_combined_hot_only(self):
         """Test combined query when all data is in hot storage."""
+        from asgiref.sync import async_to_sync
+
         from ..api import query_logs_combined
 
         now = timezone.now()
@@ -202,7 +204,7 @@ class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
         # Query last 24 hours (all hot storage)
         start = now - timedelta(days=1)
-        results = query_logs_combined(
+        results = async_to_sync(query_logs_combined)(
             organization_id=self.organization.id,
             start_dt=start,
             end_dt=now + timedelta(minutes=1),  # Ensure we capture all logs
@@ -213,6 +215,8 @@ class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
     def test_query_logs_combined_with_filters(self):
         """Test combined query with filters."""
+        from asgiref.sync import async_to_sync
+
         from ..api import query_logs_combined
 
         now = timezone.now()
@@ -230,7 +234,7 @@ class ColdStorageAPIQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         start = now - timedelta(days=1)
 
         # Filter by error level
-        results = query_logs_combined(
+        results = async_to_sync(query_logs_combined)(
             organization_id=self.organization.id,
             start_dt=start,
             end_dt=now + timedelta(minutes=1),

@@ -31,8 +31,8 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == 'web'
     - if: $CI_PIPELINE_SOURCE == 'schedule'
 
-# Old stack test: standard PostgreSQL 14 (no DuckDB cold storage)
-test-old:
+# Minimum supported: Python 3.12, PostgreSQL 14, Redis
+test-min:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.12-$BASE_LAYER
   variables:
     SECRET_KEY: testing
@@ -57,8 +57,8 @@ test-old:
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
-# New stack test: PostgreSQL 17 with MinIO for DuckDB cold storage
-test-new:
+# Latest stack: Python 3.14, PostgreSQL 18, Valkey, S3 cold storage
+test-latest:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.14-$BASE_LAYER
   variables:
     SECRET_KEY: testing
@@ -72,7 +72,7 @@ test-new:
     AWS_SECRET_ACCESS_KEY: minioadmin
     AWS_S3_ENDPOINT_URL: "http://minio:9000"
   services:
-    - name: postgres:17
+    - name: postgres:18
       alias: postgres
     - name: valkey/valkey:9
       alias: redis
