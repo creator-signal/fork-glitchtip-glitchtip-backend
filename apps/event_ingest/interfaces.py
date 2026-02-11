@@ -54,3 +54,15 @@ class IssueUpdate:
 class IssueStats(TypedDict):
     count: int
     organization_id: int | None
+
+
+@dataclass(frozen=True)
+class LogIngestTaskMessage:
+    """A simple, type-hinted data container for validated log events
+    being sent to a task worker.
+    """
+
+    project_id: int
+    organization_id: int
+    received: datetime
+    logs: list[dict]  # List of validated log item dicts

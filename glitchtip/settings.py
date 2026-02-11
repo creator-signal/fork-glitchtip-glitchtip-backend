@@ -99,7 +99,8 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
 )
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
-    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE", 5 * 1024 * 1024  # 5 MB
+    "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
+    5 * 1024 * 1024,  # 5 MB
 )
 
 PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
@@ -122,8 +123,37 @@ SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
 
 GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 
+# Enable/disable logs feature. When False, log events are rejected at ingest.
+GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", False)
+
+# Log retention settings (days)
+GLITCHTIP_LOGS_HOT_DAYS = env.int("GLITCHTIP_LOGS_HOT_DAYS", 7)  # Days in PostgreSQL
+GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3/Parquet
+
+# Cold storage bucket (defaults to AWS_STORAGE_BUCKET_NAME if not set)
+# Files are stored under cold_storage/ prefix to avoid collisions
+GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)
+
+# Override cold storage auto-detection. Set to "false" to disable even when
+# storage is configured (e.g., horizontally-scaled PaaS with S3 for media only).
+# When unset, cold storage auto-enables if a storage bucket is available.
+GLITCHTIP_ENABLE_DUCKDB = env.str("GLITCHTIP_ENABLE_DUCKDB", None)
+
+# Cold storage cleanup: True = GT deletes old files, False = use S3 lifecycle policies
+# High-scale deployments should disable this and configure lifecycle policies on the bucket
+GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED = env.bool(
+    "GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED", True
+)
+
+# Days to retain cold storage files (only used if cleanup is enabled)
+GLITCHTIP_COLD_STORAGE_RETENTION_DAYS = env.int(
+    "GLITCHTIP_COLD_STORAGE_RETENTION_DAYS", 90
+)
+
 # Freezes acceptance of new events, for use during db maintenance
 MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
+
+GLITCHTIP_ENABLE_MCP = env.bool("GLITCHTIP_ENABLE_MCP", False)
 
 # For development purposes only, prints out inbound event store json
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
@@ -144,6 +174,8 @@ SENTRY_FRONTEND_DSN = env.str("SENTRY_FRONTEND_DSN", SENTRY_DSN)
 SENTRY_SAMPLE_RATE = env.float("SENTRY_SAMPLE_RATE", 1.0)
 # Set traces_sample_rate to 1.0 to capture 100%. Recommended to keep this value low.
 SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", 0.01)
+# Enable sentry-sdk logs feature to send logs to the configured DSN
+SENTRY_ENABLE_LOGS = env.bool("SENTRY_ENABLE_LOGS", False)
 
 if SENTRY_DSN:
     import sentry_sdk
@@ -185,6 +217,7 @@ if SENTRY_DSN:
         traces_sampler=traces_sampler,
         max_value_length=2048,
         max_breadcrumbs=50,
+        enable_logs=SENTRY_ENABLE_LOGS,
     )
 
 
@@ -273,7 +306,9 @@ INSTALLED_APPS += [
     "apps.api_tokens",
     "apps.files",
     "apps.issue_events",
+    "apps.logs",
     "apps.event_ingest",
+    "apps.mcp",
     "import_export",  # Contains import management command, keep under apps.importer
 ]
 
