@@ -446,7 +446,10 @@ def get_log_by_id(organization_id: int, log_id: UUID) -> LogEventRow | None:
 
     except Exception as e:
         error_str = str(e)
-        if "No files found" in error_str or "Could not open" in error_str:
+        if any(
+            msg in error_str
+            for msg in ("No files found", "Could not open", "404", "Not Found")
+        ):
             pass  # File doesn't exist, log not in cold storage
         else:
             raise

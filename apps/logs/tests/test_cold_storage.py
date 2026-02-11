@@ -68,6 +68,11 @@ class DuckDBAvailabilityTestCase(TestCase):
     def test_auto_enabled_with_aws_bucket(self):
         self.assertTrue(is_duckdb_available())
 
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+    )
     def test_disabled_without_bucket(self):
         """No bucket configured = no cold storage."""
         self.assertFalse(is_duckdb_available())
