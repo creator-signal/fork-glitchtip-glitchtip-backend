@@ -384,6 +384,7 @@ IgnoredItemType = Literal[
     "profile",
     "replay_recording",
     "replay_event",
+    "replay_video",
     "span",
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
