@@ -262,7 +262,14 @@ class WebIngestIssueEvent(BaseIssueEvent):
     environment: str | None = None
     modules: dict[str, str | None] | None = None
     extra: dict[str, Any] | None = None
-    fingerprint: list[str | None] | None = None
+    fingerprint: Annotated[
+        list[str | None] | None,
+        BeforeValidator(
+            lambda v: [str(item) if not isinstance(item, str) else item for item in v]
+            if isinstance(v, list)
+            else v
+        ),
+    ] = None
     errors: list[Any] | None = None
 
     exception: IngestValueEventException | None = None
