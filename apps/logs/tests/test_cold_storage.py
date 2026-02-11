@@ -161,14 +161,16 @@ class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         """Test querying cold storage when no files exist."""
         self._skip_if_no_bucket()
 
-        from ..cold_storage import query_cold_storage
+        from datetime import datetime
+        from datetime import timezone as dt_timezone
 
-        # Query for a non-existent org's data
+        from ..api import query_cold_storage
+
+        now = datetime.now(dt_timezone.utc)
         results = query_cold_storage(
-            org_id=99999,
-            start_date="20250101",
-            end_date="20250101",
-            config=self.config,
+            organization_id=99999,
+            start_dt=datetime(2025, 1, 1, tzinfo=dt_timezone.utc),
+            end_dt=now,
         )
 
         # Should return empty list, not error
@@ -244,12 +246,18 @@ class NoDuckDBTestCase(TestCase):
 
     def test_cold_storage_returns_empty_when_disabled(self):
         """Test that cold storage returns empty when GLITCHTIP_ENABLE_DUCKDB is not set."""
-        from ..cold_storage import query_cold_storage
+        from datetime import datetime
+        from datetime import timezone as dt_timezone
+
+        from ..api import query_cold_storage
+
+        now = datetime.now(dt_timezone.utc)
+        start = now - timedelta(days=1)
 
         results = query_cold_storage(
-            org_id=1,
-            start_date="20260101",
-            end_date="20260101",
+            organization_id=1,
+            start_dt=start,
+            end_dt=now,
         )
         self.assertEqual(results, [])
 
