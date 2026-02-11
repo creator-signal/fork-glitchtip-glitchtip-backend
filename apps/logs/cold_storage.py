@@ -192,19 +192,6 @@ def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> st
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
 
 
-# Legacy functions for backwards compatibility during migration
-def get_partition_s3_path(
-    config: ColdStorageConfig, table_name: str, partition_name: str
-) -> str:
-    """Generate the S3 path for a partition's Parquet file (legacy, mixed-org)."""
-    return f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/{table_name}/{partition_name}.parquet"
-
-
-def get_partition_storage_path(table_name: str, partition_name: str) -> str:
-    """Get the storage-relative path for a partition's Parquet file (legacy)."""
-    return f"{COLD_STORAGE_PREFIX}/{table_name}/{partition_name}.parquet"
-
-
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -280,48 +267,6 @@ def archive_partition_per_org(
             f"Archived {partition_name}: {len(archived_files)} org files created"
         )
         return archived_files
-
-    except Exception as e:
-        logger.error(f"Failed to archive {partition_name}: {e}")
-        raise
-
-
-def archive_partition_to_s3(
-    partition_name: str,
-    table_name: str = "logs_logevent",
-    config: ColdStorageConfig | None = None,
-) -> str | None:
-    """
-    Archive a partition to S3 as single Parquet file (legacy, mixed-org).
-
-    DEPRECATED: Use archive_partition_per_org for new code.
-    Kept for backwards compatibility with existing archives.
-    """
-    if not is_pg_duckdb_available():
-        logger.info("pg_duckdb not available, skipping archival")
-        return None
-
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    s3_path = get_partition_s3_path(config, table_name, partition_name)
-
-    try:
-        setup_duckdb_s3_credentials(config)
-
-        with connection.cursor() as cursor:
-            cursor.execute("SET duckdb.force_execution = true;")
-
-            export_sql = f"""
-                COPY (
-                    SELECT * FROM {partition_name}
-                    ORDER BY service, level, id
-                ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-            """
-            cursor.execute(export_sql)
-
-        logger.info(f"Archived {partition_name} to {s3_path}")
-        return s3_path
 
     except Exception as e:
         logger.error(f"Failed to archive {partition_name}: {e}")
@@ -663,32 +608,3 @@ def cleanup_all_cold_storage(
     return total_deleted
 
 
-def delete_cold_partition(
-    view_name: str,
-    config: ColdStorageConfig | None = None,
-) -> None:
-    """
-    Delete a cold storage partition (legacy view + storage file).
-
-    DEPRECATED: This is for the old mixed-org archive format.
-    New per-org files are cleaned up via cleanup_cold_storage_for_org.
-    """
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    partition_name = view_name.replace("_archive", "")
-
-    with connection.cursor() as cursor:
-        cursor.execute(f"DROP VIEW IF EXISTS {view_name};")
-    logger.info(f"Dropped archive view {view_name}")
-
-    storage_path = get_partition_storage_path("logs_logevent", partition_name)
-
-    storage = get_cold_storage_backend(config)
-    if storage:
-        try:
-            if storage.exists(storage_path):
-                storage.delete(storage_path)
-                logger.info(f"Deleted cold storage file: {storage_path}")
-        except Exception as e:
-            logger.warning(f"Failed to delete {storage_path}: {e}")
