@@ -1,8 +1,13 @@
 # Generated manually for Logs feature
-# Implements UUIDv7 partitioning with nested HASH by organization_id
+# Squashed from 0001_initial + 0002_add_search_indexes + 0003_add_log_service_lookup
+#
+# Implements UUIDv7 partitioning with nested HASH by organization_id,
+# search indexes (trigram + service), and LogService lookup table.
 
 from datetime import datetime, timedelta, timezone
 
+import django.db.models.deletion
+from django.contrib.postgres.operations import TrigramExtension
 from django.db import migrations, models
 from django.db.migrations import RunSQL, SeparateDatabaseAndState
 
@@ -61,13 +66,16 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("organizations_ext", "0001_squashed_0008_merge_20250210_1625"),
+        ("organizations_ext", "0010_alter_organization_id"),
         ("projects", "0001_squashed_0016_auto_20250125_1733"),
         # Ensure uuid_generate_v7() function exists
         ("issue_events", "0007_storage_v2_events"),
     ]
 
     operations = [
-        # Phase 1: Create partitioned table
+        # Ensure pg_trgm extension is available for GIN trigram indexes
+        TrigramExtension(),
+        # Phase 1: Create partitioned table (SQL includes all indexes)
         SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(
@@ -206,5 +214,40 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             code=create_initial_partitions,
             reverse_code=drop_initial_partitions,
+        ),
+        # Phase 3: LogService lookup table
+        migrations.CreateModel(
+            name="LogService",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(help_text="Service name", max_length=255)),
+                ("first_seen", models.DateTimeField(auto_now_add=True)),
+                ("last_seen", models.DateTimeField(auto_now=True)),
+                (
+                    "organization",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="organizations_ext.organization",
+                    ),
+                ),
+            ],
+            options={
+                "indexes": [
+                    models.Index(fields=["organization"], name="logservice_org_idx")
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("organization", "name"), name="unique_org_service"
+                    )
+                ],
+            },
         ),
     ]
