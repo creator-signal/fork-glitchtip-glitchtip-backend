@@ -15,8 +15,9 @@ from ninja.errors import ValidationError as NinjaValidationError
 from pydantic import ValidationError
 from sentry_sdk import capture_exception, set_context, set_level
 
-from apps.event_ingest.interfaces import IngestTaskMessage
+from apps.event_ingest.interfaces import IngestTaskMessage, LogIngestTaskMessage
 from apps.issue_events.constants import IssueEventType
+from apps.logs.tasks import ingest_logs
 from glitchtip.api.exceptions import ThrottleException
 from glitchtip.partition_manager import UUID7Helper
 
@@ -27,6 +28,7 @@ from .schema import (
     EnvelopeHeaderSchema,
     FeedbackPayload,
     ItemHeaderSchema,
+    LogEnvelopePayload,
     TransactionEventSchema,
     UserReportPayload,
     UserReportTaskMessage,
@@ -234,6 +236,26 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     )
                     await ingest_user_report.aenqueue(
                         serialize_for_vtasks(msg.model_dump())
+                    )
+
+                elif item_header.type == "log":
+                    # Check if logs feature is enabled
+                    from django.conf import settings
+
+                    if not getattr(settings, "GLITCHTIP_ENABLE_LOGS", False):
+                        # Silently ignore logs when feature is disabled
+                        continue
+
+                    # Log envelope payload contains multiple log items
+                    log_payload = LogEnvelopePayload.model_validate_json(payload_bytes)
+                    log_message = LogIngestTaskMessage(
+                        project_id=project_id,
+                        organization_id=project.organization_id,
+                        received=timezone.now(),
+                        logs=[log_item.dict() for log_item in log_payload.items],
+                    )
+                    await ingest_logs.aenqueue(
+                        serialize_for_vtasks(asdict(log_message))
                     )
 
             except ValidationError as e:
