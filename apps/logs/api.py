@@ -22,7 +22,6 @@ from glitchtip.utils import get_read_db
 from .constants import LogLevel
 from .models import LogService, compute_service_hash
 from .schema import (
-    LogEventDetailSchema,
     LogEventSchema,
     LogFilterSchema,
     LogServiceSchema,
@@ -546,7 +545,7 @@ async def list_logs(
 
 @router.get(
     "organizations/{slug:organization_slug}/logs/{uuid:log_id}/",
-    response=LogEventDetailSchema,
+    response=LogEventSchema,
     by_alias=True,
 )
 @has_permission(["event:read", "event:write", "event:admin"])
