@@ -140,21 +140,26 @@ def get_project_auth_info_row(project_id: int, sentry_key: UUID):
         return cursor.fetchone()
 
 
-async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
+async def get_project(
+    request: HttpRequest, sentry_key: UUID | None = None
+) -> ProjectAuthInfo | None:
     """
     Return the valid and accepting events project based on a request.
 
-    Throttle unwanted requests using cache to mitigate repeat attempts
+    Throttle unwanted requests using cache to mitigate repeat attempts.
+    If sentry_key is provided (e.g. extracted from envelope body for tunnel support),
+    skip header-based auth extraction.
     """
     if not request.resolver_match:
         raise ValidationError([{"message": "Invalid project ID"}])
     project_id: int = request.resolver_match.captured_kwargs.get("project_id")
-    try:
-        sentry_key = UUID(auth_from_request(request))
-    except ValueError as err:
-        raise ValidationError(
-            [{"message": "dsn key badly formed hexadecimal UUID string"}]
-        ) from err
+    if sentry_key is None:
+        try:
+            sentry_key = UUID(auth_from_request(request))
+        except ValueError as err:
+            raise ValidationError(
+                [{"message": "dsn key badly formed hexadecimal UUID string"}]
+            ) from err
 
     # block cache check should be right before database call
     block_cache_key = EVENT_BLOCK_CACHE_KEY + str(project_id)
@@ -227,7 +232,9 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     return project
 
 
-async def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
+async def event_auth(
+    request: HttpRequest, sentry_key: UUID | None = None
+) -> ProjectAuthInfo | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
     Throttling is also handled here.
@@ -237,4 +244,4 @@ async def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
         raise HttpError(
             503, "Events are not currently being accepted due to maintenance."
         )
-    return await get_project(request)
+    return await get_project(request, sentry_key=sentry_key)
