@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from django.db import connection
 
 from apps.logs.constants import LogLevel
+from apps.logs.models import LogService
 from glitchtip.base_commands import MakeSampleCommand
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 
@@ -81,6 +82,7 @@ class Command(MakeSampleCommand):
         self._ensure_partitions(start_time, end_time)
 
         logs_created = self._bulk_create_logs(quantity, start_time, end_time)
+        self._ensure_log_services()
 
         self.success_message(f"Successfully created {logs_created} log events")
 
@@ -204,3 +206,10 @@ class Command(MakeSampleCommand):
             cursor.executemany(insert_sql, rows)
 
         return len(rows)
+
+    def _ensure_log_services(self):
+        """Create LogService entries for all sample services."""
+        for name in self.SAMPLE_SERVICES:
+            LogService.objects.update_or_create(
+                organization=self.organization, name=name
+            )
