@@ -117,6 +117,7 @@ class EventsCountSchema(CamelSchema):
     event_count: int
     transaction_event_count: int
     uptime_check_event_count: int
+    log_event_count: int
     file_size_mb: int
 
 
@@ -260,5 +261,6 @@ async def subscription_events_count(request: AuthHttpRequest, organization_slug:
         "event_count": org.issue_event_count,
         "transaction_event_count": org.transaction_count,
         "uptime_check_event_count": org.uptime_check_event_count,
+        "log_event_count": org.log_count,
         "file_size_mb": org.file_size,
     }

@@ -9,6 +9,68 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
 
 
+def _build_link_header(
+    base_url: str,
+    has_next: bool = False,
+    next_cursor: str | None = None,
+    has_previous: bool = False,
+    prev_cursor: str | None = None,
+) -> str:
+    """
+    Build a Sentry-compatible Link header for cursor pagination.
+
+    Shared by both queryset-based (AsyncLinkHeaderPagination) and
+    raw-SQL based APIs (logs, future cold storage queries).
+    """
+    parsed = parse.urlparse(base_url)
+    query_params = parse.parse_qs(parsed.query)
+    query_params.pop("cursor", None)
+    clean_url = parse.urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path, "",
+         parse.urlencode(query_params, doseq=True), "")
+    )
+    separator = "&" if query_params else "?"
+
+    links = []
+    if has_previous and prev_cursor:
+        prev_url = f"{clean_url}{separator}cursor={prev_cursor}"
+        links.append(
+            f'<{prev_url}>; rel="previous"; results="true"; cursor="{prev_cursor}"'
+        )
+    else:
+        links.append(f'<{clean_url}>; rel="previous"; results="false"')
+
+    if has_next and next_cursor:
+        next_url = f"{clean_url}{separator}cursor={next_cursor}"
+        links.append(
+            f'<{next_url}>; rel="next"; results="true"; cursor="{next_cursor}"'
+        )
+    else:
+        links.append(f'<{clean_url}>; rel="next"; results="false"')
+
+    return ", ".join(links)
+
+
+def set_pagination_headers(
+    response: HttpResponse,
+    request: HttpRequest,
+    has_next: bool,
+    next_cursor: str | None = None,
+    hits: int = 0,
+    max_hits: int = 1000,
+) -> None:
+    """
+    Set Sentry-compatible pagination headers on a response.
+
+    Use this for raw-SQL based APIs that can't use AsyncLinkHeaderPagination.
+    """
+    response["Link"] = _build_link_header(
+        request.build_absolute_uri(), has_next=has_next, next_cursor=next_cursor
+    )
+    response["X-Hits"] = hits
+    response["X-Max-Hits"] = max_hits
+
+
 class AsyncLinkHeaderPagination(CursorPagination):
     max_hits = 1000
 

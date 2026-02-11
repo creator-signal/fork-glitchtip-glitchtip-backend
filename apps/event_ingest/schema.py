@@ -374,9 +374,8 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     sent_at: datetime = Field(default_factory=now)
 
 
-SupportedItemType = Literal["transaction", "event", "user_report", "feedback"]
+SupportedItemType = Literal["transaction", "event", "user_report", "feedback", "log"]
 IgnoredItemType = Literal[
-    "log",
     "session",
     "sessions",
     "client_report",
@@ -565,3 +564,28 @@ class IssueTaskMessage(InterchangeEvent):
 
 class InterchangeTransactionEvent(InterchangeEvent):
     payload: TransactionEventSchema
+
+
+# Log Envelope Schemas
+
+
+class LogItemSchema(LaxIngestSchema):
+    """Schema for individual log items from sentry-sdk log envelope."""
+
+    timestamp: float  # Unix timestamp with fractional seconds
+    level: str  # trace, debug, info, warn, error, fatal
+    body: str  # The log message
+    trace_id: str | None = None
+    severity_number: int | None = None  # OTel severity number (1-24)
+
+    @field_validator("level")
+    @classmethod
+    def normalize_level(cls, v: str) -> str:
+        """Normalize level to lowercase."""
+        return v.lower() if v else "info"
+
+
+class LogEnvelopePayload(LaxIngestSchema):
+    """Schema for log envelope payload containing multiple log items."""
+
+    items: list[LogItemSchema]

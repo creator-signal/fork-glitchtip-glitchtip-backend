@@ -101,6 +101,13 @@ class OrganizationThrottleCheckTestCase(TestCase):
         cache.clear()
 
     def test_check_all_organizations_throttle(self):
+        """
+        Test throttle calculation with weighted event counts.
+
+        Event weights: issues=1.0, transactions=0.1, logs=0.1
+        Plan limit: 10 events
+        Throttle thresholds: >100%=10%, >150%=50%, >200%=100%
+        """
         org = self.organization
 
         # No events, no throttle
@@ -109,15 +116,17 @@ class OrganizationThrottleCheckTestCase(TestCase):
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
 
-        # 6 events (of 10), no throttle
+        # 6 weighted events (of 10), no throttle
+        # 3 issues (3.0) + 30 transactions (3.0) = 6.0 weighted events
         self._make_events(3, date=timezone.now() - timedelta(minutes=50))
-        self._make_transaction_events(3, date=timezone.now() - timedelta(minutes=45))
+        self._make_transaction_events(30, date=timezone.now() - timedelta(minutes=45))
         check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
         self.assertEqual(len(mail.outbox), 0)
 
-        # 11 events (of 10), small throttle
+        # 11 weighted events (of 10), small throttle (>100%)
+        # Previous 6.0 + 5 issues (5.0) = 11.0 weighted events
         self._make_events(5, date=timezone.now() - timedelta(minutes=40))
         check_all_organizations_throttle.call()
         org.refresh_from_db()
@@ -136,13 +145,15 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.assertEqual(org.event_throttle_rate, 0)
         self.assertEqual(len(mail.outbox), 1)
 
-        # Throttle again
+        # Throttle again (>150%)
+        # 16 issues = 16.0 weighted events > 15 (150% of 10)
         self._make_events(16, date=now + timedelta(minutes=5))
         check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 50)
 
-        # Throttle 100%
+        # Throttle 100% (>200%)
+        # Previous 16 + 5 = 21 > 20 (200% of 10)
         self._make_events(5, date=now + timedelta(minutes=10))
         check_all_organizations_throttle.call()
         org.refresh_from_db()
