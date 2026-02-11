@@ -126,6 +126,11 @@ GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 # Enable/disable logs feature. When False, log events are rejected at ingest.
 GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", False)
 
+# Enable/disable uptime monitoring. When False, uptime checks are not dispatched
+# and uptime API endpoints are not registered.
+GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
+
+
 # Log retention settings (days)
 GLITCHTIP_LOGS_HOT_DAYS = env.int("GLITCHTIP_LOGS_HOT_DAYS", 7)  # Days in PostgreSQL
 GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3/Parquet
@@ -311,7 +316,6 @@ INSTALLED_APPS += [
     "apps.mcp",
     "import_export",  # Contains import management command, keep under apps.importer
 ]
-
 
 IS_WORKER = env.bool("IS_WORKER", False)
 if not IS_WORKER:
@@ -571,11 +575,13 @@ VTASKS_SCHEDULE = {
         "task": "glitchtip.tasks.perform_maintenance",
         "schedule": crontab(hour=5, minute=0),
     },
-    "uptime-dispatch-checks": {
+}
+
+if GLITCHTIP_ENABLE_UPTIME:
+    VTASKS_SCHEDULE["uptime-dispatch-checks"] = {
         "task": "apps.uptime.tasks.dispatch_checks",
         "schedule": UPTIME_CHECK_INTERVAL,
-    },
-}
+    }
 
 TASKS = {
     "default": {
