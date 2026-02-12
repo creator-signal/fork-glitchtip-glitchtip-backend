@@ -12,6 +12,7 @@ from apps.alerts.webhooks import (
     send_ntfy,
     send_teams_webhook,
     send_webhook,
+    send_zulip_message,
 )
 
 from .models import MonitorCheck
@@ -81,12 +82,26 @@ def _send_uptime_teams(recipient, monitor, subject, message):
     return send_teams_webhook(recipient.url, body, actions)
 
 
+def _send_uptime_zulip(recipient, monitor, subject, message):
+    config = recipient.config or {}
+    content = f"## {subject}\n\n**{monitor.name}**\n{message}\n\n[View Monitor]({monitor.get_detail_url()})"
+    return send_zulip_message(
+        server_url=recipient.url,
+        bot_email=config.get("bot_email", ""),
+        api_key=config.get("api_key", ""),
+        channel=config.get("channel", ""),
+        topic=config.get("topic", "GlitchTip Alerts"),
+        content=content,
+    )
+
+
 UPTIME_NOTIFICATION_HANDLERS = {
     RecipientType.GENERAL_WEBHOOK: _send_uptime_generic,
     RecipientType.DISCORD: _send_uptime_discord,
     RecipientType.GOOGLE_CHAT: _send_uptime_googlechat,
     RecipientType.NTFY: _send_uptime_ntfy,
     RecipientType.MICROSOFT_TEAMS: _send_uptime_teams,
+    RecipientType.ZULIP: _send_uptime_zulip,
 }
 
 

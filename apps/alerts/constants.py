@@ -11,3 +11,4 @@ class RecipientType(models.TextChoices):
     GOOGLE_CHAT = "googlechat", _("Google Chat webhook")
     NTFY = "ntfy", _("ntfy")
     MICROSOFT_TEAMS = "teams", _("Microsoft Teams")
+    ZULIP = "zulip", _("Zulip")

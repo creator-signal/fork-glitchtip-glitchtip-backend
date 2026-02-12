@@ -19,8 +19,10 @@ from ..webhooks import (
     send_issue_as_ntfy,
     send_issue_as_teams_webhook,
     send_issue_as_webhook,
+    send_issue_as_zulip,
     send_test_notification,
     send_webhook,
+    send_zulip_message,
 )
 
 TEST_URL = "https://burkesoftware.rocket.chat/hooks/Y8TttGY7RvN7Qm3gD/rqhHLiRSvYRZ8BhbhhhLYumdMksWnyj3Dqsqt8QKrmbNndXH"
@@ -28,6 +30,13 @@ DISCORD_TEST_URL = "https://discord.com/api/webhooks/not_real_id/not_real_token"
 GOOGLE_CHAT_TEST_URL = "https://chat.googleapis.com/v1/spaces/space_id/messages?key=api_key&token=api_token"
 NTFY_TEST_URL = "https://ntfy.sh/glitchtip-test-topic"
 TEAMS_TEST_URL = "https://example.webhook.office.com/webhookb2/test"
+ZULIP_TEST_URL = "https://zulip.example.com"
+ZULIP_TEST_CONFIG = {
+    "bot_email": "bot@zulip.example.com",
+    "api_key": "test-api-key",
+    "channel": "alerts",
+    "topic": "GlitchTip Alerts",
+}
 
 
 class WebhookTestCase(GlitchTipTestCase):
@@ -614,3 +623,101 @@ class WebhookTestCase(GlitchTipTestCase):
         json_data = json.dumps(payload)
         self.assertIn("GlitchTip Test Notification", json_data)
         self.assertIn(self.project.name, json_data)
+
+    @mock.patch("requests.post")
+    def test_send_zulip_message(self, mock_post):
+        """Verify Zulip transport sends correct auth and form data."""
+        send_zulip_message(
+            ZULIP_TEST_URL,
+            "bot@zulip.example.com",
+            "test-api-key",
+            "alerts",
+            "GlitchTip Alerts",
+            "Hello from GlitchTip",
+        )
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["auth"], ("bot@zulip.example.com", "test-api-key"))
+        self.assertEqual(call_kwargs["data"]["type"], "channel")
+        self.assertEqual(call_kwargs["data"]["to"], "alerts")
+        self.assertEqual(call_kwargs["data"]["topic"], "GlitchTip Alerts")
+        self.assertEqual(call_kwargs["data"]["content"], "Hello from GlitchTip")
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_zulip(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_zulip(
+            ZULIP_TEST_URL,
+            [issue],
+            1,
+            tags_to_add=["custom_tag"],
+            config=ZULIP_TEST_CONFIG,
+        )
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn(str(issue), content)
+        self.assertIn(issue.project.name, content)
+        self.assertIn(self.environment_name, content)
+        self.assertIn(self.release_name, content)
+        self.assertIn("Custom_tag: custom_value", content)
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_zulip_multiple_issues(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        send_issue_as_zulip(
+            ZULIP_TEST_URL, [issue, issue2], 2, config=ZULIP_TEST_CONFIG
+        )
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn("GlitchTip Alert (2 issues)", content)
+
+    @mock.patch("requests.post")
+    def test_send_uptime_events_zulip(self, mock_post):
+        recipient = baker.make(
+            AlertRecipient,
+            recipient_type=RecipientType.ZULIP,
+            url=ZULIP_TEST_URL,
+            config=ZULIP_TEST_CONFIG,
+        )
+
+        send_uptime_as_webhook(recipient, self.monitor_check.id, True, datetime.now())
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn(self.monitor.name, content)
+        self.assertIn(self.expected_message_down, content)
+
+        mock_post.reset_mock()
+
+        send_uptime_as_webhook(recipient, self.monitor_check.id, False, datetime.now())
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn(self.expected_message_up, content)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_with_issue_zulip(self, mock_post):
+        """Test notification uses the Zulip handler when issues exist."""
+        issue = self.generate_issue_with_tags()
+        send_test_notification(
+            ZULIP_TEST_URL,
+            RecipientType.ZULIP,
+            issue.project,
+            config=ZULIP_TEST_CONFIG,
+        )
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn(str(issue), content)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_no_issues_zulip(self, mock_post):
+        """Fallback test notification for Zulip."""
+        send_test_notification(
+            ZULIP_TEST_URL,
+            RecipientType.ZULIP,
+            self.project,
+            config=ZULIP_TEST_CONFIG,
+        )
+        mock_post.assert_called_once()
+        content = mock_post.call_args.kwargs["data"]["content"]
+        self.assertIn("GlitchTip Test Notification", content)
+        self.assertIn(self.project.name, content)
