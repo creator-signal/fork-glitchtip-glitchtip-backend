@@ -181,6 +181,7 @@ async def test_project_alert(
     organization_slug: str,
     project_slug: str,
     alert_id: int,
+    recipient_id: int | None = None,
 ):
     alert = await aget_object_or_404(
         get_project_alert_queryset(
@@ -188,8 +189,11 @@ async def test_project_alert(
         ).select_related("project__organization"),
         id=alert_id,
     )
+    recipients = alert.alertrecipient_set.all()
+    if recipient_id is not None:
+        recipients = recipients.filter(id=recipient_id)
     results = []
-    async for recipient in alert.alertrecipient_set.all():
+    async for recipient in recipients:
         if recipient.recipient_type == RecipientType.EMAIL:
             results.append(
                 {"recipient_type": "email", "status": "skipped", "message": None}
