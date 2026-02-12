@@ -371,8 +371,9 @@ async def update_user_notification_alerts(
     alert = await UserProjectAlert.objects.filter(
         user_id=user_id, project_id=project_id
     ).afirst()
-    if alert and alert_status == -1:
-        await alert.adelete()
+    if alert_status == -1:
+        if alert:
+            await alert.adelete()
     else:
         await UserProjectAlert.objects.aupdate_or_create(
             user_id=user_id, project_id=project_id, defaults={"status": alert_status}

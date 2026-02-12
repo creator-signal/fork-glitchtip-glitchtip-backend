@@ -30,7 +30,6 @@ from apps.sourcecode.api import router as sourcecode_router
 from apps.stats.api import router as stats_router
 from apps.stripe.api import router as stripe_router
 from apps.teams.api import router as teams_router
-from apps.uptime.api import router as uptime_router
 from apps.users.api import router as users_router
 from apps.users.models import User
 from apps.users.schema import UserSchema
@@ -68,7 +67,12 @@ api.add_router("0", stats_router)
 api.add_router("0/stripe", stripe_router)
 api.add_router("0", sourcecode_router)
 api.add_router("0", teams_router)
-api.add_router("0", uptime_router)
+
+if settings.GLITCHTIP_ENABLE_UPTIME:
+    from apps.uptime.api import router as uptime_router
+
+    api.add_router("0", uptime_router)
+
 api.add_router("0", users_router)
 api.add_router("0", wizard_router)
 api.add_router("0", releases_router)
@@ -173,6 +177,10 @@ async def get_settings(request: HttpRequest):
     enabled_features = []
     if settings.GLITCHTIP_ENABLE_LOGS:
         enabled_features.append("logs")
+    if settings.GLITCHTIP_ENABLE_UPTIME:
+        enabled_features.append("uptime")
+    if settings.GLITCHTIP_ENABLE_MCP:
+        enabled_features.append("mcp")
 
     return {
         "social_apps": social_apps,

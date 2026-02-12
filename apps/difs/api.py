@@ -45,7 +45,7 @@ async def difs_assemble_api(
     organization = await aget_object_or_404(
         Organization, slug=organization_slug.lower(), users=request.auth.user_id
     )
-    await aget_object_or_404(
+    project = await aget_object_or_404(
         Project, slug=project_slug.lower(), organization=organization
     )
 
@@ -59,7 +59,7 @@ async def difs_assemble_api(
         debug_id = file.debug_id
         debug_file = await (
             DebugInformationFile.objects.filter(
-                project__slug=project_slug, file__checksum=checksum
+                project=project, file__checksum=checksum
             )
             .select_related("file")
             .afirst()
@@ -89,7 +89,7 @@ async def difs_assemble_api(
             continue
 
         responses[checksum] = {"state": DIF_STATE_CREATED, "missingChunks": []}
-        await difs_assemble.aenqueue(project_slug, name, checksum, chunks, debug_id)
+        await difs_assemble.aenqueue(project.id, name, checksum, chunks, debug_id)
 
     return responses
 
