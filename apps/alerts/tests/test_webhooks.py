@@ -16,13 +16,16 @@ from ..tasks import process_event_alerts
 from ..webhooks import (
     send_issue_as_discord_webhook,
     send_issue_as_googlechat_webhook,
+    send_issue_as_ntfy,
     send_issue_as_webhook,
+    send_test_notification,
     send_webhook,
 )
 
 TEST_URL = "https://burkesoftware.rocket.chat/hooks/Y8TttGY7RvN7Qm3gD/rqhHLiRSvYRZ8BhbhhhLYumdMksWnyj3Dqsqt8QKrmbNndXH"
 DISCORD_TEST_URL = "https://discord.com/api/webhooks/not_real_id/not_real_token"
 GOOGLE_CHAT_TEST_URL = "https://chat.googleapis.com/v1/spaces/space_id/messages?key=api_key&token=api_token"
+NTFY_TEST_URL = "https://ntfy.sh/glitchtip-test-topic"
 
 
 class WebhookTestCase(GlitchTipTestCase):
@@ -155,7 +158,7 @@ class WebhookTestCase(GlitchTipTestCase):
         )
         mock_post.assert_called_once()
         self.assertIn(
-            issue.title, mock_post.call_args[1]["json"]["sections"][0]["activityTitle"]
+            issue.title, mock_post.call_args[1]["json"]["attachments"][0]["title"]
         )
 
     @mock.patch("requests.post")
@@ -382,3 +385,128 @@ class WebhookTestCase(GlitchTipTestCase):
             f'"title": "{self.monitor.name}", "description": "{self.expected_message_up}"',
             json_data,
         )
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_ntfy(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_ntfy(NTFY_TEST_URL, [issue])
+
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Title"], "GlitchTip Alert")
+        self.assertEqual(call_kwargs["headers"]["Markdown"], "yes")
+        body = call_kwargs["data"].decode("utf-8")
+        self.assertIn(self.environment_name, body)
+        self.assertIn(self.release_name, body)
+        self.assertIn(issue.project.name, body)
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_ntfy_with_tags_to_add(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        send_issue_as_ntfy(NTFY_TEST_URL, [issue], 1, tags_to_add=["custom_tag"])
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["data"].decode("utf-8")
+        self.assertIn("Custom_tag: custom_value", body)
+
+    @mock.patch("requests.post")
+    def test_send_issue_as_ntfy_multiple_issues(self, mock_post):
+        issue = self.generate_issue_with_tags()
+        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        send_issue_as_ntfy(NTFY_TEST_URL, [issue, issue2], 2)
+
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Title"], "GlitchTip Alert (2 issues)")
+
+    @mock.patch("requests.post")
+    def test_send_uptime_events_ntfy(self, mock_post):
+        recipient = baker.make(
+            AlertRecipient, recipient_type=RecipientType.NTFY, url=NTFY_TEST_URL
+        )
+
+        send_uptime_as_webhook(
+            recipient,
+            self.monitor_check.id,
+            True,
+            datetime.now(),
+        )
+
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Title"], self.expected_subject)
+        body = call_kwargs["data"].decode("utf-8")
+        self.assertIn(self.monitor.name, body)
+        self.assertIn(self.expected_message_down, body)
+
+        mock_post.reset_mock()
+
+        send_uptime_as_webhook(
+            recipient,
+            self.monitor_check.id,
+            False,
+            datetime.now(),
+        )
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["data"].decode("utf-8")
+        self.assertIn(self.expected_message_up, body)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_with_issue(self, mock_post):
+        """Test notification uses the real issue handler when issues exist."""
+        issue = self.generate_issue_with_tags()
+        send_test_notification(TEST_URL, RecipientType.GENERAL_WEBHOOK, issue.project)
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn(str(issue), json_data)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_with_issue_ntfy(self, mock_post):
+        """Test notification uses the ntfy handler when issues exist."""
+        issue = self.generate_issue_with_tags()
+        send_test_notification(NTFY_TEST_URL, RecipientType.NTFY, issue.project)
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Title"], "GlitchTip Alert")
+        body = call_kwargs["data"].decode("utf-8")
+        self.assertIn(str(issue), body)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_no_issues_webhook(self, mock_post):
+        """Fallback test notification for generic webhook."""
+        send_test_notification(TEST_URL, RecipientType.GENERAL_WEBHOOK, self.project)
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn("GlitchTip Test Notification", json_data)
+        self.assertIn(self.project.name, json_data)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_no_issues_ntfy(self, mock_post):
+        """Fallback test notification for ntfy."""
+        send_test_notification(NTFY_TEST_URL, RecipientType.NTFY, self.project)
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Title"], "GlitchTip Test Notification")
+        body = call_kwargs["data"].decode("utf-8")
+        self.assertIn(self.project.name, body)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_no_issues_discord(self, mock_post):
+        """Fallback test notification for Discord."""
+        send_test_notification(DISCORD_TEST_URL, RecipientType.DISCORD, self.project)
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn("GlitchTip Test Notification", json_data)
+        self.assertIn(self.project.name, json_data)
+
+    @mock.patch("requests.post")
+    def test_send_test_notification_no_issues_googlechat(self, mock_post):
+        """Fallback test notification for Google Chat."""
+        send_test_notification(
+            GOOGLE_CHAT_TEST_URL, RecipientType.GOOGLE_CHAT, self.project
+        )
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn("GlitchTip Test Notification", json_data)
+        self.assertIn(self.project.name, json_data)
