@@ -32,9 +32,9 @@ DIF_STATE_NOT_FOUND = "not_found"
 
 
 @task
-def difs_assemble(project_slug, name, checksum, chunks, debug_id):
+def difs_assemble(project_id, name, checksum, chunks, debug_id):
     try:
-        project = Project.objects.filter(slug=project_slug).get()
+        project = Project.objects.get(id=project_id)
 
         file = difs_get_file_from_chunks(checksum, chunks)
         if file is None:
