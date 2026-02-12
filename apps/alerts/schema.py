@@ -20,6 +20,7 @@ class WebhookAlertRecipientIn(CamelSchema):
         RecipientType.DISCORD,
         RecipientType.GENERAL_WEBHOOK,
         RecipientType.GOOGLE_CHAT,
+        RecipientType.NTFY,
     ]
     url: HttpUrl
     tags_to_add: list[str] | None = Field(default_factory=list)
@@ -35,6 +36,12 @@ class AlertRecipientSchema(CamelSchema, ModelSchema):
     class Meta:
         model = AlertRecipient
         fields = ["id", "recipient_type", "url"]
+
+
+class TestAlertResultSchema(CamelSchema):
+    recipient_type: str
+    status: str  # "sent", "error", "skipped"
+    message: str | None = None
 
 
 class ProjectAlertIn(CamelSchema, ModelSchema):

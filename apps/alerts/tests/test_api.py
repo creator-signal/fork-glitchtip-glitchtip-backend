@@ -1,3 +1,5 @@
+from unittest import mock
+
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -5,6 +7,7 @@ from model_bakery import baker
 from apps.organizations_ext.constants import OrganizationUserRole
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
+from ..constants import RecipientType
 from ..models import ProjectAlert
 
 
@@ -222,3 +225,73 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.delete(url, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertEqual(ProjectAlert.objects.count(), 0)
+
+    @mock.patch("requests.post")
+    def test_test_project_alert(self, mock_post):
+        alert = baker.make(
+            "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.GENERAL_WEBHOOK,
+            url="https://example.com/webhook",
+        )
+        url = reverse(
+            "api:test_project_alert",
+            args=[self.organization.slug, self.project.slug, alert.pk],
+        )
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["recipientType"], "webhook")
+        self.assertEqual(data[0]["status"], "sent")
+        mock_post.assert_called_once()
+
+    @mock.patch("requests.post")
+    def test_test_project_alert_skips_email(self, mock_post):
+        alert = baker.make(
+            "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.EMAIL,
+            url="",
+        )
+        url = reverse(
+            "api:test_project_alert",
+            args=[self.organization.slug, self.project.slug, alert.pk],
+        )
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["status"], "skipped")
+        mock_post.assert_not_called()
+
+    @mock.patch(
+        "apps.alerts.api.send_test_notification",
+        side_effect=Exception("Connection refused"),
+    )
+    def test_test_project_alert_error(self, mock_send):
+        alert = baker.make(
+            "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.NTFY,
+            url="https://ntfy.sh/test-topic",
+        )
+        url = reverse(
+            "api:test_project_alert",
+            args=[self.organization.slug, self.project.slug, alert.pk],
+        )
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["status"], "error")
+        self.assertEqual(data[0]["message"], "Connection refused")

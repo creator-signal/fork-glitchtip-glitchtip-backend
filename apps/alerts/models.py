@@ -39,18 +39,10 @@ class AlertRecipient(models.Model):
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
 
-    @property
-    def is_webhook(self):
-        return self.recipient_type in (
-            RecipientType.DISCORD,
-            RecipientType.GENERAL_WEBHOOK,
-            RecipientType.GOOGLE_CHAT,
-        )
-
     def send(self, notification):
         if self.recipient_type == RecipientType.EMAIL:
             send_email_notification(notification)
-        elif self.is_webhook:
+        else:
             send_webhook_notification(
                 notification,
                 self.url,

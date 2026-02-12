@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -9,8 +10,10 @@ from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
+from .constants import RecipientType
 from .models import AlertRecipient, ProjectAlert
-from .schema import ProjectAlertIn, ProjectAlertSchema
+from .schema import ProjectAlertIn, ProjectAlertSchema, TestAlertResultSchema
+from .webhooks import send_test_notification
 
 router = Router()
 
@@ -140,3 +143,53 @@ async def delete_project_alert(
     if result:
         return 204, None
     raise Http404
+
+
+@router.post(
+    "projects/{slug:organization_slug}/{slug:project_slug}/alerts/{alert_id}/test/",
+    response=list[TestAlertResultSchema],
+    by_alias=True,
+)
+@has_permission(["project:write", "project:admin"])
+async def test_project_alert(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    alert_id: int,
+):
+    alert = await aget_object_or_404(
+        get_project_alert_queryset(
+            request.auth.user_id, organization_slug, project_slug
+        ).select_related("project__organization"),
+        id=alert_id,
+    )
+    results = []
+    async for recipient in alert.alertrecipient_set.all():
+        if recipient.recipient_type == RecipientType.EMAIL:
+            results.append(
+                {"recipient_type": "email", "status": "skipped", "message": None}
+            )
+            continue
+        try:
+            await sync_to_async(send_test_notification)(
+                recipient.url,
+                recipient.recipient_type,
+                alert.project,
+                tags_to_add=recipient.tags_to_add,
+            )
+            results.append(
+                {
+                    "recipient_type": recipient.recipient_type,
+                    "status": "sent",
+                    "message": None,
+                }
+            )
+        except Exception as e:
+            results.append(
+                {
+                    "recipient_type": recipient.recipient_type,
+                    "status": "error",
+                    "message": str(e),
+                }
+            )
+    return results
