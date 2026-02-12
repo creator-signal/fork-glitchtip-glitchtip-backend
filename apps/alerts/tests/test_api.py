@@ -61,6 +61,15 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 "url": "https://example.webhook.office.com/webhookb2/test",
                 "tagsToAdd": [],
             },
+            {
+                "recipientType": "zulip",
+                "url": "https://zulip.example.com",
+                "botEmail": "bot@zulip.example.com",
+                "apiKey": "test-api-key",
+                "channel": "alerts",
+                "topic": "GlitchTip Alerts",
+                "tagsToAdd": [],
+            },
         ]
         data = {
             "name": "foo",
@@ -75,7 +84,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(project_alert.timespan_minutes, data["timespanMinutes"])
         self.assertEqual(project_alert.project, self.project)
         # Check that all recipients were created
-        self.assertEqual(project_alert.alertrecipient_set.count(), 5)
+        self.assertEqual(project_alert.alertrecipient_set.count(), 6)
         for i, recipient in enumerate(project_alert.alertrecipient_set.all()):
             self.assertEqual(recipient.tags_to_add, recipients[i]["tagsToAdd"])
 
@@ -117,6 +126,14 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 "url": "https://chat.googleapis.com/webhook/abc",
                 "tagsToAdd": ["tag3"],
             },
+            {
+                "recipientType": "zulip",
+                "url": "https://zulip.example.com",
+                "botEmail": "bot@zulip.example.com",
+                "apiKey": "test-api-key",
+                "channel": "alerts",
+                "tagsToAdd": [],
+            },
         ]
         data = {
             "timespanMinutes": 500,
@@ -126,7 +143,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         alert.refresh_from_db()
-        self.assertEqual(alert.alertrecipient_set.count(), 3)
+        self.assertEqual(alert.alertrecipient_set.count(), 4)
         for i, recipient in enumerate(alert.alertrecipient_set.all()):
             self.assertEqual(recipient.tags_to_add, recipients[i]["tagsToAdd"])
 
@@ -300,3 +317,116 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["status"], "error")
         self.assertEqual(data[0]["message"], "Connection refused")
+
+    def test_project_alerts_create_zulip(self):
+        """Zulip recipient stores config fields correctly."""
+        url = reverse(
+            "api:create_project_alert", args=[self.organization.slug, self.project.slug]
+        )
+        data = {
+            "name": "zulip-test",
+            "timespanMinutes": 60,
+            "quantity": 2,
+            "alertRecipients": [
+                {
+                    "recipientType": "zulip",
+                    "url": "https://zulip.example.com",
+                    "botEmail": "bot@zulip.example.com",
+                    "apiKey": "test-api-key",
+                    "channel": "alerts",
+                    "topic": "GlitchTip Alerts",
+                    "tagsToAdd": ["env"],
+                }
+            ],
+        }
+        res = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        alert = ProjectAlert.objects.get(name="zulip-test")
+        recipient = alert.alertrecipient_set.first()
+        self.assertEqual(recipient.recipient_type, "zulip")
+        self.assertEqual(recipient.url, "https://zulip.example.com/")
+        self.assertEqual(recipient.config["bot_email"], "bot@zulip.example.com")
+        self.assertEqual(recipient.config["api_key"], "test-api-key")
+        self.assertEqual(recipient.config["channel"], "alerts")
+        self.assertEqual(recipient.config["topic"], "GlitchTip Alerts")
+        self.assertEqual(recipient.tags_to_add, ["env"])
+        # Verify config is returned in API response
+        res_data = res.json()
+        zulip_recipient = res_data["alertRecipients"][0]
+        self.assertEqual(
+            zulip_recipient["config"]["bot_email"], "bot@zulip.example.com"
+        )
+
+    def test_project_alerts_update_zulip_config(self):
+        """Updating a Zulip recipient's config (e.g. rotating API key) works."""
+        alert = baker.make(
+            "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.ZULIP,
+            url="https://zulip.example.com/",
+            config={
+                "bot_email": "bot@zulip.example.com",
+                "api_key": "old-key",
+                "channel": "alerts",
+                "topic": "GlitchTip Alerts",
+            },
+        )
+        url = reverse(
+            "api:update_project_alert",
+            args=[self.organization.slug, self.project.slug, alert.pk],
+        )
+        data = {
+            "timespanMinutes": 60,
+            "quantity": 2,
+            "alertRecipients": [
+                {
+                    "recipientType": "zulip",
+                    "url": "https://zulip.example.com",
+                    "botEmail": "bot@zulip.example.com",
+                    "apiKey": "new-rotated-key",
+                    "channel": "alerts",
+                    "topic": "GlitchTip Alerts",
+                }
+            ],
+        }
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        alert.refresh_from_db()
+        self.assertEqual(alert.alertrecipient_set.count(), 1)
+        recipient = alert.alertrecipient_set.first()
+        self.assertEqual(recipient.config["api_key"], "new-rotated-key")
+
+    @mock.patch("requests.post")
+    def test_test_project_alert_zulip(self, mock_post):
+        """Test endpoint works with Zulip recipient, passing config."""
+        alert = baker.make(
+            "alerts.ProjectAlert", project=self.project, timespan_minutes=60
+        )
+        baker.make(
+            "alerts.AlertRecipient",
+            alert=alert,
+            recipient_type=RecipientType.ZULIP,
+            url="https://zulip.example.com/",
+            config={
+                "bot_email": "bot@zulip.example.com",
+                "api_key": "test-key",
+                "channel": "alerts",
+                "topic": "GlitchTip Alerts",
+            },
+        )
+        url = reverse(
+            "api:test_project_alert",
+            args=[self.organization.slug, self.project.slug, alert.pk],
+        )
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["recipientType"], "zulip")
+        self.assertEqual(data[0]["status"], "sent")
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["auth"], ("bot@zulip.example.com", "test-key"))

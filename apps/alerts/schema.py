@@ -27,8 +27,18 @@ class WebhookAlertRecipientIn(CamelSchema):
     tags_to_add: list[str] | None = Field(default_factory=list)
 
 
+class ZulipAlertRecipientIn(CamelSchema):
+    recipient_type: Literal[RecipientType.ZULIP]
+    url: HttpUrl
+    bot_email: str
+    api_key: str
+    channel: str
+    topic: str = "GlitchTip Alerts"
+    tags_to_add: list[str] | None = Field(default_factory=list)
+
+
 AlertRecipientIn = Annotated[
-    EmailAlertRecipientIn | WebhookAlertRecipientIn,
+    EmailAlertRecipientIn | WebhookAlertRecipientIn | ZulipAlertRecipientIn,
     Field(discriminator="recipient_type"),
 ]
 
@@ -36,7 +46,7 @@ AlertRecipientIn = Annotated[
 class AlertRecipientSchema(CamelSchema, ModelSchema):
     class Meta:
         model = AlertRecipient
-        fields = ["id", "recipient_type", "url"]
+        fields = ["id", "recipient_type", "url", "config", "tags_to_add"]
 
 
 class TestAlertResultSchema(CamelSchema):

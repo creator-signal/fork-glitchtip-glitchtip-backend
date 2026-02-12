@@ -17,6 +17,22 @@ from .webhooks import send_test_notification
 
 router = Router()
 
+RECIPIENT_CONFIG_KEYS = {"bot_email", "api_key", "channel", "topic"}
+
+
+def _prepare_recipient_data(recipient: dict) -> dict:
+    """Move Zulip-specific flat fields into a config dict for storage."""
+    config_data = {}
+    cleaned = {}
+    for key, value in recipient.items():
+        if key in RECIPIENT_CONFIG_KEYS:
+            config_data[key] = value
+        else:
+            cleaned[key] = value
+    if config_data:
+        cleaned["config"] = config_data
+    return cleaned
+
 
 def get_project_alert_queryset(user_id: int, organization_slug: str, project_slug: str):
     return ProjectAlert.objects.filter(
@@ -72,7 +88,10 @@ async def create_project_alert(
     recipients = data.pop("alert_recipients", [])
     project_alert = await project.projectalert_set.acreate(**data)
     await AlertRecipient.objects.abulk_create(
-        [AlertRecipient(alert=project_alert, **recipient) for recipient in recipients]
+        [
+            AlertRecipient(alert=project_alert, **_prepare_recipient_data(recipient))
+            for recipient in recipients
+        ]
     )
     return await get_project_alert_queryset(
         user_id, organization_slug, project_slug
@@ -109,8 +128,14 @@ async def update_project_alert(
         {id async for id in alert.alertrecipient_set.values_list("id", flat=True)}
     )
     for recipient in alert_recipients:
-        new_recipient, created = await AlertRecipient.objects.aget_or_create(
-            alert=alert, **recipient
+        prepared = _prepare_recipient_data(recipient)
+        lookup = {
+            "alert": alert,
+            "recipient_type": prepared.pop("recipient_type"),
+            "url": prepared.pop("url", ""),
+        }
+        new_recipient, created = await AlertRecipient.objects.aupdate_or_create(
+            **lookup, defaults=prepared
         )
         if not created:
             delete_recipient_ids.discard(new_recipient.pk)
@@ -176,6 +201,7 @@ async def test_project_alert(
                 recipient.recipient_type,
                 alert.project,
                 tags_to_add=recipient.tags_to_add,
+                config=recipient.config,
             )
             results.append(
                 {

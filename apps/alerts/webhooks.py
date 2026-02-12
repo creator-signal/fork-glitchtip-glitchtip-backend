@@ -98,6 +98,7 @@ def send_issue_as_webhook(
     issues: list,
     issue_count: int = 1,
     tags_to_add: list[str] | None = None,
+    **kwargs,
 ):
     """
     Notification about issues via webhook.
@@ -167,6 +168,7 @@ def send_issue_as_discord_webhook(
     issues: list,
     issue_count: int = 1,
     tags_to_add: list[str] | None = None,
+    **kwargs,
 ):
     embeds: list[DiscordEmbed] = []
 
@@ -288,6 +290,7 @@ def send_issue_as_googlechat_webhook(
     issues: list,
     issue_count: int = 1,
     tags_to_add: list[str] | None = None,
+    **kwargs,
 ):
     cards = []
     for issue in issues:
@@ -325,6 +328,7 @@ def send_issue_as_ntfy(
     issues: list,
     issue_count: int = 1,
     tags_to_add: list[str] | None = None,
+    **kwargs,
 ):
     title = "GlitchTip Alert"
     if issue_count > 1:
@@ -377,6 +381,7 @@ def send_issue_as_teams_webhook(
     issues: list,
     issue_count: int = 1,
     tags_to_add: list[str] | None = None,
+    **kwargs,
 ):
     title = "GlitchTip Alert"
     if issue_count > 1:
@@ -416,16 +421,59 @@ def send_issue_as_teams_webhook(
     return send_teams_webhook(url, body, actions)
 
 
+def send_zulip_message(server_url, bot_email, api_key, channel, topic, content):
+    """Send a message to a Zulip channel via the native API."""
+    url = f"{server_url.rstrip('/')}/api/v1/messages"
+    data = {"type": "channel", "to": channel, "topic": topic, "content": content}
+    return requests.post(url, data=data, auth=(bot_email, api_key), timeout=10)
+
+
+def send_issue_as_zulip(
+    url,
+    issues: list,
+    issue_count: int = 1,
+    tags_to_add: list[str] | None = None,
+    config: dict | None = None,
+    **kwargs,
+):
+    config = config or {}
+    title = "GlitchTip Alert"
+    if issue_count > 1:
+        title += f" ({issue_count} issues)"
+
+    lines = [f"## {title}", ""]
+    for issue in issues:
+        issue_tags = gather_issue_tags(issue, tags_to_add)
+        lines.append(f"**[{issue}]({issue.get_detail_url()})**")
+        lines.append(f"Project: {issue.project.name}")
+        if issue.culprit:
+            lines.append(f"Culprit: {issue.culprit}")
+        for tag in issue_tags:
+            lines.append(f"{tag.label}: {tag.value}")
+        lines.append("")
+
+    content = "\n".join(lines).rstrip()
+    return send_zulip_message(
+        server_url=url,
+        bot_email=config.get("bot_email", ""),
+        api_key=config.get("api_key", ""),
+        channel=config.get("channel", ""),
+        topic=config.get("topic", "GlitchTip Alerts"),
+        content=content,
+    )
+
+
 ISSUE_NOTIFICATION_HANDLERS = {
     RecipientType.GENERAL_WEBHOOK: send_issue_as_webhook,
     RecipientType.DISCORD: send_issue_as_discord_webhook,
     RecipientType.GOOGLE_CHAT: send_issue_as_googlechat_webhook,
     RecipientType.NTFY: send_issue_as_ntfy,
     RecipientType.MICROSOFT_TEAMS: send_issue_as_teams_webhook,
+    RecipientType.ZULIP: send_issue_as_zulip,
 }
 
 
-def send_test_notification(url, recipient_type, project, tags_to_add=None):
+def send_test_notification(url, recipient_type, project, tags_to_add=None, config=None):
     """Send a test notification to verify recipient configuration."""
     from apps.issue_events.models import Issue
 
@@ -438,7 +486,7 @@ def send_test_notification(url, recipient_type, project, tags_to_add=None):
 
     if issue:
         handler = ISSUE_NOTIFICATION_HANDLERS.get(recipient_type, send_issue_as_webhook)
-        return handler(url, [issue], 1, tags_to_add=tags_to_add)
+        return handler(url, [issue], 1, tags_to_add=tags_to_add, config=config)
 
     # No issues yet — send a basic test via the low-level transport
     title = "GlitchTip Test Notification"
@@ -447,7 +495,17 @@ def send_test_notification(url, recipient_type, project, tags_to_add=None):
         "Your alert recipient is configured correctly."
     )
 
-    if recipient_type == RecipientType.NTFY:
+    if recipient_type == RecipientType.ZULIP:
+        config = config or {}
+        return send_zulip_message(
+            server_url=url,
+            bot_email=config.get("bot_email", ""),
+            api_key=config.get("api_key", ""),
+            channel=config.get("channel", ""),
+            topic=config.get("topic", "GlitchTip Alerts"),
+            content=f"## {title}\n\n{message}",
+        )
+    elif recipient_type == RecipientType.NTFY:
         return send_ntfy(url, title, message, tags=["white_check_mark"])
     elif recipient_type == RecipientType.MICROSOFT_TEAMS:
         card_body = [
@@ -475,9 +533,10 @@ def send_webhook_notification(
     url: str,
     recipient_type: str,
     tags_to_add: list[str] | None = None,
+    config: dict | None = None,
 ):
     issue_count = notification.issues.count()
     issues = notification.issues.all()[: settings.MAX_ISSUES_PER_ALERT]
 
     handler = ISSUE_NOTIFICATION_HANDLERS.get(recipient_type, send_issue_as_webhook)
-    handler(url, issues, issue_count, tags_to_add=tags_to_add)
+    handler(url, issues, issue_count, tags_to_add=tags_to_add, config=config)

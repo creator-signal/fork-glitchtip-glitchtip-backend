@@ -28,6 +28,7 @@ class AlertRecipient(models.Model):
     alert = models.ForeignKey(ProjectAlert, on_delete=models.CASCADE)
     recipient_type = models.CharField(max_length=16, choices=RecipientType.choices)
     url = models.URLField(max_length=2000, blank=True)
+    config = models.JSONField(default=dict, blank=True)
     tags_to_add = ArrayField(
         models.CharField(max_length=255),
         default=list,
@@ -48,6 +49,7 @@ class AlertRecipient(models.Model):
                 self.url,
                 self.recipient_type,
                 tags_to_add=self.tags_to_add,
+                config=self.config,
             )
 
 
