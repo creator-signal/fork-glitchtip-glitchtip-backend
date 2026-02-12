@@ -10,6 +10,7 @@ from apps.alerts.webhooks import (
     send_discord_webhook,
     send_googlechat_webhook,
     send_ntfy,
+    send_teams_webhook,
     send_webhook,
 )
 
@@ -64,11 +65,28 @@ def _send_uptime_ntfy(recipient, monitor, subject, message):
     )
 
 
+def _send_uptime_teams(recipient, monitor, subject, message):
+    body = [
+        {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": subject},
+        {"type": "TextBlock", "weight": "Bolder", "text": monitor.name},
+        {"type": "TextBlock", "text": message, "wrap": True},
+    ]
+    actions = [
+        {
+            "type": "Action.OpenUrl",
+            "title": "View Monitor",
+            "url": monitor.get_detail_url(),
+        }
+    ]
+    return send_teams_webhook(recipient.url, body, actions)
+
+
 UPTIME_NOTIFICATION_HANDLERS = {
     RecipientType.GENERAL_WEBHOOK: _send_uptime_generic,
     RecipientType.DISCORD: _send_uptime_discord,
     RecipientType.GOOGLE_CHAT: _send_uptime_googlechat,
     RecipientType.NTFY: _send_uptime_ntfy,
+    RecipientType.MICROSOFT_TEAMS: _send_uptime_teams,
 }
 
 

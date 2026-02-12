@@ -20,6 +20,7 @@ class WebhookAlertRecipientIn(CamelSchema):
         RecipientType.DISCORD,
         RecipientType.GENERAL_WEBHOOK,
         RecipientType.GOOGLE_CHAT,
+        RecipientType.MICROSOFT_TEAMS,
         RecipientType.NTFY,
     ]
     url: HttpUrl
