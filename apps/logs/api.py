@@ -123,7 +123,7 @@ def _row_to_log_event(row: tuple) -> LogEventRow:
     )
 
 
-def query_hot_storage(
+def _build_hot_where(
     organization_id: int,
     start_dt: datetime,
     end_dt: datetime,
@@ -132,18 +132,12 @@ def query_hot_storage(
     service: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
-    limit: int = 100,
     cursor_position: UUID | None = None,
-) -> list[LogEventRow]:
-    """
-    Query logs from hot storage (PostgreSQL partitioned table).
-
-    Uses UUIDv7 range for efficient partition pruning.
-    """
+) -> tuple[str, list]:
+    """Build WHERE clause and params for hot storage queries."""
     where_clauses = ["organization_id = %s"]
     params: list = [organization_id]
 
-    # Time range via UUIDv7 bounds for partition pruning
     start_uuid, end_uuid = UUID7Helper.get_range_for_date(start_dt, end_dt)
     where_clauses.append("id >= %s")
     where_clauses.append("id < %s")
@@ -171,12 +165,34 @@ def query_hot_storage(
         where_clauses.append("body ILIKE %s")
         params.append(f"%{query}%")
 
-    # Cursor-based pagination: fetch items with id < cursor
     if cursor_position:
         where_clauses.append("id < %s")
         params.append(str(cursor_position))
 
-    where_sql = " AND ".join(where_clauses)
+    return " AND ".join(where_clauses), params
+
+
+def query_hot_storage(
+    organization_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    project_ids: list[int] | None = None,
+    level_values: list[int] | None = None,
+    service: str | None = None,
+    trace_id: str | None = None,
+    query: str | None = None,
+    limit: int = 100,
+    cursor_position: UUID | None = None,
+) -> list[LogEventRow]:
+    """
+    Query logs from hot storage (PostgreSQL partitioned table).
+
+    Uses UUIDv7 range for efficient partition pruning.
+    """
+    where_sql, params = _build_hot_where(
+        organization_id, start_dt, end_dt, project_ids, level_values,
+        service, trace_id, query, cursor_position,
+    )
 
     sql = f"""
         SELECT id, trace_id, organization_id, project_id, span_id,
@@ -197,6 +213,38 @@ def query_hot_storage(
             results.append(_row_to_log_event(row))
 
     return results
+
+
+def count_hot_storage(
+    organization_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    project_ids: list[int] | None = None,
+    level_values: list[int] | None = None,
+    service: str | None = None,
+    trace_id: str | None = None,
+    query: str | None = None,
+    max_hits: int = 1000,
+) -> int:
+    """Bounded count of matching logs in hot storage."""
+    where_sql, params = _build_hot_where(
+        organization_id, start_dt, end_dt, project_ids, level_values,
+        service, trace_id, query,
+    )
+
+    sql = f"""
+        SELECT COUNT(*) FROM (
+            SELECT 1 FROM logs_logevent
+            WHERE {where_sql}
+            LIMIT %s
+        ) bounded
+    """
+    params.append(max_hits)
+
+    read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
+    with connections[read_only_db].cursor() as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchone()[0]
 
 
 def query_cold_storage(
@@ -521,8 +569,7 @@ async def list_logs(
     cursor_position = decode_cursor(filters.cursor)
     limit = filters.limit
 
-    # Fetch limit + 1 to detect if there's a next page
-    results = await query_logs_combined(
+    query_kwargs = dict(
         organization_id=organization.id,
         start_dt=start_dt,
         end_dt=end_dt,
@@ -531,6 +578,11 @@ async def list_logs(
         service=filters.service,
         trace_id=filters.trace_id,
         query=filters.query,
+    )
+
+    # Fetch limit + 1 to detect if there's a next page
+    results = await query_logs_combined(
+        **query_kwargs,
         limit=limit + 1,
         cursor_position=cursor_position,
     )
@@ -539,14 +591,18 @@ async def list_logs(
     has_next = len(results) > limit
     page_results = results[:limit]
 
+    # Bounded count (only on first page to avoid repeated cost)
+    if not cursor_position:
+        hits = await sync_to_async(count_hot_storage)(**query_kwargs)
+    else:
+        hits = len(page_results)
+
     # Build pagination headers
     next_cursor = None
     if has_next and page_results:
         next_cursor = encode_cursor(page_results[-1].id)
 
-    set_pagination_headers(
-        response, request, has_next, next_cursor, hits=len(page_results)
-    )
+    set_pagination_headers(response, request, has_next, next_cursor, hits=hits)
 
     return page_results
 
