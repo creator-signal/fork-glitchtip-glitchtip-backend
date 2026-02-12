@@ -349,11 +349,79 @@ def send_issue_as_ntfy(
     return send_ntfy(url, title, message, click_url=click_url, tags=["warning"])
 
 
+def send_teams_webhook(
+    url: str, card_body: list[dict], actions: list[dict] | None = None
+):
+    """Send an Adaptive Card to a Microsoft Teams Workflows webhook."""
+    payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "contentUrl": None,
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": card_body,
+                    **({"actions": actions} if actions else {}),
+                },
+            }
+        ],
+    }
+    return requests.post(url, json=payload, timeout=10)
+
+
+def send_issue_as_teams_webhook(
+    url,
+    issues: list,
+    issue_count: int = 1,
+    tags_to_add: list[str] | None = None,
+):
+    title = "GlitchTip Alert"
+    if issue_count > 1:
+        title += f" ({issue_count} issues)"
+
+    body: list[dict] = [
+        {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": title}
+    ]
+    actions: list[dict] = []
+
+    for issue in issues:
+        tags = gather_issue_tags(issue, tags_to_add)
+        facts = [{"title": "Project", "value": issue.project.name}]
+        for tag in tags:
+            facts.append({"title": tag.label, "value": tag.value})
+
+        body.append(
+            {
+                "type": "TextBlock",
+                "weight": "Bolder",
+                "color": "Attention",
+                "text": str(issue),
+                "wrap": True,
+            }
+        )
+        if issue.culprit:
+            body.append({"type": "TextBlock", "text": issue.culprit, "wrap": True})
+        body.append({"type": "FactSet", "facts": facts})
+        actions.append(
+            {
+                "type": "Action.OpenUrl",
+                "title": f"View Issue {issue.short_id_display}",
+                "url": issue.get_detail_url(),
+            }
+        )
+
+    return send_teams_webhook(url, body, actions)
+
+
 ISSUE_NOTIFICATION_HANDLERS = {
     RecipientType.GENERAL_WEBHOOK: send_issue_as_webhook,
     RecipientType.DISCORD: send_issue_as_discord_webhook,
     RecipientType.GOOGLE_CHAT: send_issue_as_googlechat_webhook,
     RecipientType.NTFY: send_issue_as_ntfy,
+    RecipientType.MICROSOFT_TEAMS: send_issue_as_teams_webhook,
 }
 
 
@@ -381,6 +449,12 @@ def send_test_notification(url, recipient_type, project, tags_to_add=None):
 
     if recipient_type == RecipientType.NTFY:
         return send_ntfy(url, title, message, tags=["white_check_mark"])
+    elif recipient_type == RecipientType.MICROSOFT_TEAMS:
+        card_body = [
+            {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": title},
+            {"type": "TextBlock", "text": message, "wrap": True},
+        ]
+        return send_teams_webhook(url, card_body)
     elif recipient_type == RecipientType.DISCORD:
         embed = DiscordEmbed(
             title=title, description=message, color=0x4B60B4, url="", fields=[]

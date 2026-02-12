@@ -56,6 +56,11 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 "url": "https://chat.googleapis.com/webhook/abc",
                 "tagsToAdd": ["tag3"],
             },
+            {
+                "recipientType": "teams",
+                "url": "https://example.webhook.office.com/webhookb2/test",
+                "tagsToAdd": [],
+            },
         ]
         data = {
             "name": "foo",
@@ -70,7 +75,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(project_alert.timespan_minutes, data["timespanMinutes"])
         self.assertEqual(project_alert.project, self.project)
         # Check that all recipients were created
-        self.assertEqual(project_alert.alertrecipient_set.count(), 4)
+        self.assertEqual(project_alert.alertrecipient_set.count(), 5)
         for i, recipient in enumerate(project_alert.alertrecipient_set.all()):
             self.assertEqual(recipient.tags_to_add, recipients[i]["tagsToAdd"])
 
