@@ -79,8 +79,6 @@ class LogStatsFilterSchema(Schema):
         default=None, description="Filter by environment names"
     )
 
-    host: list[str] | None = Field(default=None, description="Filter by host names")
-
     start: RelativeDateTime | None = Field(
         default=None, description="Start of time range"
     )

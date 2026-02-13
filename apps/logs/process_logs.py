@@ -10,7 +10,7 @@ from django.db import connection
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
-from .models import compute_service_hash
+from .models import compute_hash_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +19,12 @@ MAX_TIMESTAMP_DRIFT = timedelta(days=1)
 
 
 def update_log_statistics(
-    stats_data: defaultdict[datetime, defaultdict[tuple[int, int, int, str], dict]],
+    stats_data: defaultdict[datetime, defaultdict[tuple[int, int, int, int], dict]],
 ) -> None:
     """
-    Bulk upsert hourly log statistics by project, level, service bucket, and environment.
+    Bulk upsert hourly log statistics by project, level, service bucket, and environment bucket.
 
-    stats_data structure: {hour: {(project_id, level, service_bucket, environment): {"count": N, "organization_id": X}}}
+    stats_data structure: {hour: {(project_id, level, service_bucket, environment_bucket): {"count": N, "organization_id": X}}}
     """
     data = []
     for date, inner_dict in stats_data.items():
@@ -32,7 +32,7 @@ def update_log_statistics(
             project_id,
             level,
             service_bucket,
-            environment,
+            environment_bucket,
         ), stats in inner_dict.items():
             if (organization_id := stats.get("organization_id")) is not None:
                 data.append(
@@ -42,7 +42,7 @@ def update_log_statistics(
                         organization_id,
                         level,
                         service_bucket,
-                        environment,
+                        environment_bucket,
                         stats["count"],
                     ]
                 )
@@ -55,9 +55,9 @@ def update_log_statistics(
     with connection.cursor() as cursor:
         args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO projects_logprojecthourlystatistic (date, project_id, organization_id, level, service_bucket, environment, count)\n"
+            "INSERT INTO projects_logprojecthourlystatistic (date, project_id, organization_id, level, service_bucket, environment_bucket, count)\n"
             f"VALUES {args_str}\n"
-            "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment)\n"
+            "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment_bucket)\n"
             "DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
@@ -146,9 +146,9 @@ def process_log_events(messages: list) -> int:
     log_rows = []
     rejected_count = 0
 
-    # Track statistics by hour, project, level, service bucket, and environment
+    # Track statistics by hour, project, level, service bucket, and environment bucket
     project_hourly_stats: defaultdict[
-        datetime, defaultdict[tuple[int, int, int, str], dict]
+        datetime, defaultdict[tuple[int, int, int, int], dict]
     ] = defaultdict(lambda: defaultdict(lambda: {"count": 0, "organization_id": None}))
 
     # Track unique resources for lookup table
@@ -211,18 +211,9 @@ def process_log_events(messages: list) -> int:
             body = log_item.get("body", "")
             severity_number = log_item.get("severity_number")
 
-            # Extract service from attributes or OTel service.name
-            service = (
-                log_item.get("sentry.service", "")
-                or log_item.get("service.name", "")
-                or log_item.get("service", "")
-            )
-            # Extract environment from OTel deployment.environment or environment
-            environment = log_item.get("deployment.environment", "") or log_item.get(
-                "environment", ""
-            )
-            # Extract host from OTel host.name or host
-            host = log_item.get("host.name", "") or log_item.get("host", "")
+            service = log_item.get("service", "")
+            environment = log_item.get("environment", "")
+            host = log_item.get("host", "")
 
             # Build data dict for any extra attributes
             data = {}
@@ -233,12 +224,8 @@ def process_log_events(messages: list) -> int:
                 "trace_id",
                 "span_id",
                 "severity_number",
-                "sentry.service",
-                "service.name",
                 "service",
-                "deployment.environment",
                 "environment",
-                "host.name",
                 "host",
             }
             for key, value in log_item.items():
@@ -262,10 +249,11 @@ def process_log_events(messages: list) -> int:
                 )
             )
 
-            # Track statistics - truncate to hour, group by project, level, service bucket, and environment
+            # Track statistics - truncate to hour, group by project, level, service bucket, and environment bucket
             hour_received = log_timestamp.replace(minute=0, second=0, microsecond=0)
-            service_bucket = compute_service_hash(service)
-            stats_key = (project_id, level, service_bucket, environment)
+            service_bucket = compute_hash_bucket(service)
+            environment_bucket = compute_hash_bucket(environment)
+            stats_key = (project_id, level, service_bucket, environment_bucket)
             project_stats = project_hourly_stats[hour_received][stats_key]
             project_stats["count"] += 1
             project_stats["organization_id"] = organization_id

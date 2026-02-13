@@ -22,7 +22,7 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
-from .models import LogResource, compute_service_hash
+from .models import LogResource, compute_hash_bucket
 from .schema import (
     LogEventSchema,
     LogFilterSchema,
@@ -164,12 +164,12 @@ def _build_hot_where(
         params.append(f"%{service}%")
 
     if environment:
-        where_clauses.append("environment ILIKE %s")
-        params.append(f"%{environment}%")
+        where_clauses.append("environment = %s")
+        params.append(environment)
 
     if host:
-        where_clauses.append("host ILIKE %s")
-        params.append(f"%{host}%")
+        where_clauses.append("host = %s")
+        params.append(host)
 
     if trace_id:
         where_clauses.append("trace_id = %s")
@@ -349,12 +349,12 @@ def query_cold_storage(
         where_parts.append(f"service ILIKE ${len(params)}")
 
     if environment:
-        params.append(f"%{environment}%")
-        where_parts.append(f"environment ILIKE ${len(params)}")
+        params.append(environment)
+        where_parts.append(f"environment = ${len(params)}")
 
     if host:
-        params.append(f"%{host}%")
-        where_parts.append(f"host ILIKE ${len(params)}")
+        params.append(host)
+        where_parts.append(f"host = ${len(params)}")
 
     if trace_id:
         try:
@@ -689,7 +689,7 @@ async def query_log_stats(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service_buckets: list[int] | None = None,
-    environments: list[str] | None = None,
+    environment_buckets: list[int] | None = None,
 ) -> dict:
     """
     Query log statistics from PostgreSQL.
@@ -714,8 +714,8 @@ async def query_log_stats(
     if service_buckets:
         qs = qs.filter(service_bucket__in=service_buckets)
 
-    if environments:
-        qs = qs.filter(environment__in=environments)
+    if environment_buckets:
+        qs = qs.filter(environment_bucket__in=environment_buckets)
 
     # Group by hour and level, sum counts
     qs = (
@@ -797,7 +797,12 @@ async def get_log_stats(
     # Parse service filters to hash buckets
     service_buckets = None
     if filters.service:
-        service_buckets = [compute_service_hash(s) for s in filters.service]
+        service_buckets = [compute_hash_bucket(s) for s in filters.service]
+
+    # Parse environment filters to hash buckets
+    environment_buckets = None
+    if filters.environment:
+        environment_buckets = [compute_hash_bucket(e) for e in filters.environment]
 
     # Query stats
     result = await query_log_stats(
@@ -807,7 +812,7 @@ async def get_log_stats(
         project_ids=filters.project,
         level_values=level_values,
         service_buckets=service_buckets,
-        environments=filters.environment,
+        environment_buckets=environment_buckets,
     )
 
     return result
