@@ -32,7 +32,7 @@ fi
 
 if [ "$USE_ASYNC_SERVER" = "true" ]; then
     echo "Start GlitchTip with ${WORKERS} granian worker(s) (ASGI)"
-    exec granian --interface asginl glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --no-ws "$@"
+    exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --no-ws "$@"
 else
     echo "Start GlitchTip with ${WORKERS} granian worker(s) (WSGI)"
     exec granian --interface wsgi glitchtip.wsgi:application --host $HOST --port $PORT --workers $WORKERS "$@"

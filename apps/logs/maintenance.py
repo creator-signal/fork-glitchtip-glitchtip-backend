@@ -95,9 +95,7 @@ def delete_old_hot_partitions(days: int):
     for name, date in partitions:
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    f"ALTER TABLE logs_logevent DETACH PARTITION {name};"
-                )
+                cursor.execute(f"ALTER TABLE logs_logevent DETACH PARTITION {name};")
                 cursor.execute(f"DROP TABLE IF EXISTS {name} CASCADE;")
             logger.info(f"Deleted log partition {name}")
         except Exception as e:

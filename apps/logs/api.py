@@ -190,8 +190,15 @@ def query_hot_storage(
     Uses UUIDv7 range for efficient partition pruning.
     """
     where_sql, params = _build_hot_where(
-        organization_id, start_dt, end_dt, project_ids, level_values,
-        service, trace_id, query, cursor_position,
+        organization_id,
+        start_dt,
+        end_dt,
+        project_ids,
+        level_values,
+        service,
+        trace_id,
+        query,
+        cursor_position,
     )
 
     sql = f"""
@@ -228,8 +235,14 @@ def count_hot_storage(
 ) -> int:
     """Bounded count of matching logs in hot storage."""
     where_sql, params = _build_hot_where(
-        organization_id, start_dt, end_dt, project_ids, level_values,
-        service, trace_id, query,
+        organization_id,
+        start_dt,
+        end_dt,
+        project_ids,
+        level_values,
+        service,
+        trace_id,
+        query,
     )
 
     sql = f"""
