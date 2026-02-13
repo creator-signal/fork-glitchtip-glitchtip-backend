@@ -7,8 +7,9 @@ CREATE TABLE IF NOT EXISTS projects_logprojecthourlystatistic (
     date TIMESTAMPTZ NOT NULL,
     level SMALLINT NOT NULL,
     service_bucket SMALLINT NOT NULL DEFAULT 0,
+    environment VARCHAR(255) NOT NULL DEFAULT '',
     count INTEGER CHECK (count >= 0),
-    PRIMARY KEY (project_id, organization_id, date, level, service_bucket)
+    PRIMARY KEY (project_id, organization_id, date, level, service_bucket, environment)
 ) PARTITION BY RANGE (date);
 
 ALTER TABLE projects_logprojecthourlystatistic

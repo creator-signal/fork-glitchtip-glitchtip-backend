@@ -105,6 +105,18 @@ class LogEvent(models.Model):
         default="",
         help_text="Service name that emitted the log",
     )
+    environment = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Deployment environment (e.g. production, staging)",
+    )
+    host = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Host name that emitted the log",
+    )
     data = models.JSONField(
         default=dict,
         blank=True,
@@ -120,6 +132,19 @@ class LogEvent(models.Model):
             # Filter by level
             models.Index(
                 fields=["organization", "level", "-id"], name="logevent_org_level_idx"
+            ),
+            # Filter by service
+            models.Index(
+                fields=["organization", "service", "-id"], name="logevent_org_svc_idx"
+            ),
+            # Filter by environment
+            models.Index(
+                fields=["organization", "environment", "-id"],
+                name="logevent_org_env_idx",
+            ),
+            # Filter by host
+            models.Index(
+                fields=["organization", "host", "-id"], name="logevent_org_host_idx"
             ),
             # Trace correlation
             models.Index(
@@ -143,30 +168,43 @@ class LogEvent(models.Model):
         return UUID7Helper.extract_datetime(self.id)
 
 
-class LogService(models.Model):
+class LogResource(models.Model):
     """
-    Lookup table for unique service names per organization.
+    Lookup table for unique resource names (service, environment, host) per organization.
 
-    This allows the UI to show a dropdown of known services without
+    This allows the UI to show dropdowns of known values without
     querying the large logs table. Updated during log ingestion.
     """
+
+    class ResourceType(models.TextChoices):
+        SERVICE = "service", "service"
+        ENVIRONMENT = "environment", "environment"
+        HOST = "host", "host"
 
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    name = models.CharField(max_length=255, help_text="Service name")
+    name = models.CharField(max_length=255, help_text="Resource name")
+    type = models.CharField(
+        max_length=20,
+        choices=ResourceType.choices,
+        default=ResourceType.SERVICE,
+        help_text="Type of resource (service/environment/host)",
+    )
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["organization", "name"], name="unique_org_service"
+                fields=["organization", "name", "type"], name="unique_org_resource"
             )
         ]
         indexes = [
-            models.Index(fields=["organization"], name="logservice_org_idx"),
+            models.Index(
+                fields=["organization", "type"], name="logresource_org_type_idx"
+            ),
         ]
 
     def __str__(self):
-        return self.name
+        return f"{self.type}: {self.name}"

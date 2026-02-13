@@ -183,8 +183,8 @@ class Command(BaseCommand):
         insert_sql = """
             INSERT INTO logs_logevent (
                 id, trace_id, organization_id, project_id, span_id,
-                level, severity_number, body, service, data
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                level, severity_number, body, service, environment, host, data
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING;
         """
 
@@ -219,10 +219,11 @@ class Command(BaseCommand):
                 if random.random() > 0.5:
                     trace_id = str(UUID7Helper.from_datetime(log_timestamp))
 
+                environment = random.choice(["production", "staging", "dev"])
+                host = f"server-{random.randint(1, 20)}.example.com"
+
                 data = orjson.dumps(
                     {
-                        "environment": random.choice(["production", "staging", "dev"]),
-                        "host": f"server-{random.randint(1, 20)}.example.com",
                         "request_id": f"req-{random.randint(100000, 999999)}",
                     }
                 ).decode("utf-8")
@@ -238,6 +239,8 @@ class Command(BaseCommand):
                         None,  # severity_number
                         message,
                         service,
+                        environment,
+                        host,
                         data,
                     )
                 )
@@ -317,6 +320,18 @@ class Command(BaseCommand):
                 "filters": {"service": "api-gateway"},
             },
             {
+                "name": "Last 7 days + environment filter",
+                "start": now - timedelta(days=7),
+                "end": now,
+                "filters": {"environment": "production"},
+            },
+            {
+                "name": "Last 7 days + host filter",
+                "start": now - timedelta(days=7),
+                "end": now,
+                "filters": {"host": "server-1.example.com"},
+            },
+            {
                 "name": "Last 7 days + body search",
                 "start": now - timedelta(days=7),
                 "end": now,
@@ -371,6 +386,12 @@ class Command(BaseCommand):
         if "service" in filters:
             where_clauses.append("service = %s")
             params.append(filters["service"])
+        if "environment" in filters:
+            where_clauses.append("environment = %s")
+            params.append(filters["environment"])
+        if "host" in filters:
+            where_clauses.append("host = %s")
+            params.append(filters["host"])
         if "body_search" in filters:
             where_clauses.append("body ILIKE %s")
             params.append(f"%{filters['body_search']}%")
@@ -385,7 +406,7 @@ class Command(BaseCommand):
 
         # Timed query with LIMIT
         select_sql = f"""
-            SELECT id, level, body, service
+            SELECT id, level, body, service, environment, host
             FROM logs_logevent
             WHERE {where_sql}
             ORDER BY id DESC

@@ -17,6 +17,8 @@ class LogEventSchema(CamelSchema):
     level: str
     body: str
     service: str
+    environment: str
+    host: str
     trace_id: UUID | None = Field(None, alias="traceID")
     span_id: str | None = Field(None, alias="spanID")
     severity_number: int | None = None
@@ -48,6 +50,8 @@ class LogFilterSchema(Schema):
     project: list[int] | None = Field(default=None, description="Filter by project IDs")
     level: list[str] | None = Field(default=None, description="Filter by log levels")
     service: str | None = Field(default=None, description="Filter by service name")
+    environment: str | None = Field(default=None, description="Filter by environment")
+    host: str | None = Field(default=None, description="Filter by host name")
     trace_id: str | None = Field(
         default=None, alias="traceId", description="Filter by trace ID"
     )
@@ -64,13 +68,23 @@ class LogStatsFilterSchema(Schema):
     """Schema for log stats filtering parameters."""
 
     project: list[int] | None = Field(default=None, description="Filter by project IDs")
+
     level: list[str] | None = Field(default=None, description="Filter by log levels")
+
     service: list[str] | None = Field(
         default=None, description="Filter by service names"
     )
+
+    environment: list[str] | None = Field(
+        default=None, description="Filter by environment names"
+    )
+
+    host: list[str] | None = Field(default=None, description="Filter by host names")
+
     start: RelativeDateTime | None = Field(
         default=None, description="Start of time range"
     )
+
     end: RelativeDateTime | None = Field(default=None, description="End of time range")
 
 
@@ -88,8 +102,9 @@ class LogStatsSchema(CamelSchema):
     series: list[LogStatsSeriesSchema]
 
 
-class LogServiceSchema(CamelSchema):
-    """Schema for service name in list."""
+class LogResourceSchema(CamelSchema):
+    """Schema for resource name in list."""
 
     name: str
+    type: str
     last_seen: datetime
