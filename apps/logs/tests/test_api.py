@@ -34,6 +34,9 @@ class LogsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "project": self.project,
             "level": LogLevel.INFO,
             "body": "Test log message",
+            "service": "web",
+            "environment": "prod",
+            "host": "host-1",
         }
         defaults.update(kwargs)
         return LogEvent.objects.create(**defaults)
@@ -52,6 +55,39 @@ class LogsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 3)
+        self.assertEqual(data[0]["service"], "web")
+        self.assertEqual(data[0]["environment"], "prod")
+        self.assertEqual(data[0]["host"], "host-1")
+
+    def test_list_logs_filter_by_environment(self):
+        """Test filtering logs by environment"""
+        self.create_log(environment="prod", body="Prod log")
+        self.create_log(environment="staging", body="Staging log")
+
+        url = reverse(
+            "api:list_logs", kwargs={"organization_slug": self.organization.slug}
+        )
+        res = self.client.get(url, {"environment": "prod"})
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["environment"], "prod")
+
+    def test_list_logs_filter_by_host(self):
+        """Test filtering logs by host"""
+        self.create_log(host="host-1", body="Host 1 log")
+        self.create_log(host="host-2", body="Host 2 log")
+
+        url = reverse(
+            "api:list_logs", kwargs={"organization_slug": self.organization.slug}
+        )
+        res = self.client.get(url, {"host": "host-1"})
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["host"], "host-1")
 
     def test_list_logs_ordered_by_id_desc(self):
         """Test that logs are ordered by id descending (newest first)"""
@@ -319,6 +355,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=2),
             level=LogLevel.INFO,
             service_bucket=0,
+            environment="prod",
             count=10,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -327,6 +364,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=2),
             level=LogLevel.ERROR,
             service_bucket=0,
+            environment="prod",
             count=3,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -335,6 +373,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.INFO,
             service_bucket=0,
+            environment="prod",
             count=15,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -343,6 +382,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.ERROR,
             service_bucket=0,
+            environment="staging",
             count=5,
         )
         # Add stats for "worker" service
@@ -352,6 +392,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.ERROR,
             service_bucket=self.worker_bucket,
+            environment="prod",
             count=7,
         )
 
@@ -377,7 +418,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertIn("error", series_names)
         self.assertIn("info", series_names)
 
-        # Check totals (includes all service buckets)
+        # Check totals (includes all service buckets and environments)
         info_series = next(s for s in data["series"] if s["name"] == "info")
         error_series = next(s for s in data["series"] if s["name"] == "error")
         self.assertEqual(sum(info_series["data"]), 25)  # 10 + 15
@@ -412,6 +453,21 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         error_series = next(s for s in data["series"] if s["name"] == "error")
         self.assertEqual(sum(error_series["data"]), 7)  # Only worker errors
 
+    def test_get_log_stats_filter_by_environment(self):
+        """Test filtering stats by environment."""
+        url = reverse(
+            "api:get_log_stats", kwargs={"organization_slug": self.organization.slug}
+        )
+        # Filter by "staging" environment
+        res = self.client.get(url, {"environment": ["staging"], "level": ["error"]})
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        # Should have error series with staging stats only
+        error_series = next(s for s in data["series"] if s["name"] == "error")
+        self.assertEqual(sum(error_series["data"]), 5)  # Only staging errors
+
     def test_get_log_stats_empty(self):
         """Test stats for org with no data."""
         # Create new org with no stats
@@ -427,31 +483,39 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(data["series"], [])
 
 
-class LogServicesAPITestCase(GlitchTipTestCaseMixin, TestCase):
-    """Test log services list API endpoint."""
+class LogResourcesAPITestCase(GlitchTipTestCaseMixin, TestCase):
+    """Test log resources list API endpoint."""
 
     def setUp(self):
         self.create_logged_in_user()
-        from ..models import LogService
+        from ..models import LogResource
 
-        # Create some service entries
-        LogService.objects.create(
+        # Create some resource entries
+        LogResource.objects.create(
             organization=self.organization,
             name="api-gateway",
+            type=LogResource.ResourceType.SERVICE,
         )
-        LogService.objects.create(
+        LogResource.objects.create(
             organization=self.organization,
             name="worker",
+            type=LogResource.ResourceType.SERVICE,
         )
-        LogService.objects.create(
+        LogResource.objects.create(
             organization=self.organization,
-            name="scheduler",
+            name="prod",
+            type=LogResource.ResourceType.ENVIRONMENT,
+        )
+        LogResource.objects.create(
+            organization=self.organization,
+            name="host-1",
+            type=LogResource.ResourceType.HOST,
         )
 
-    def test_list_services(self):
-        """Test listing services for an organization."""
+    def test_list_resources(self):
+        """Test listing resources for an organization."""
         url = reverse(
-            "api:list_log_services",
+            "api:list_log_resources",
             kwargs={"organization_slug": self.organization.slug},
         )
         res = self.client.get(url)
@@ -459,19 +523,34 @@ class LogServicesAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
 
-        self.assertEqual(len(data), 3)
-        service_names = [s["name"] for s in data]
-        self.assertIn("api-gateway", service_names)
-        self.assertIn("worker", service_names)
-        self.assertIn("scheduler", service_names)
+        self.assertEqual(len(data), 4)
+        resource_names = [r["name"] for r in data]
+        self.assertIn("api-gateway", resource_names)
+        self.assertIn("prod", resource_names)
+        self.assertIn("host-1", resource_names)
 
-    def test_list_services_empty(self):
-        """Test listing services for org with no services."""
+    def test_list_resources_filter_by_type(self):
+        """Test filtering resources by type."""
+        url = reverse(
+            "api:list_log_resources",
+            kwargs={"organization_slug": self.organization.slug},
+        )
+        res = self.client.get(url, {"resource_type": "environment"})
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "prod")
+        self.assertEqual(data[0]["type"], "environment")
+
+    def test_list_resources_empty(self):
+        """Test listing resources for org with no data."""
         new_org = baker.make("organizations_ext.Organization")
         new_org.add_user(self.user)
 
         url = reverse(
-            "api:list_log_services", kwargs={"organization_slug": new_org.slug}
+            "api:list_log_resources", kwargs={"organization_slug": new_org.slug}
         )
         res = self.client.get(url)
 

@@ -585,6 +585,9 @@ class LogItemSchema(LaxIngestSchema):
     timestamp: float  # Unix timestamp with fractional seconds
     level: str  # trace, debug, info, warn, error, fatal
     body: str  # The log message
+    service: str = ""
+    environment: str = ""
+    host: str = ""
     trace_id: str | None = None
     severity_number: int | None = None  # OTel severity number (1-24)
 

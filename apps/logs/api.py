@@ -22,11 +22,11 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
-from .models import LogService, compute_service_hash
+from .models import LogResource, compute_service_hash
 from .schema import (
     LogEventSchema,
     LogFilterSchema,
-    LogServiceSchema,
+    LogResourceSchema,
     LogStatsFilterSchema,
     LogStatsSchema,
 )
@@ -81,6 +81,8 @@ class LogEventRow:
     severity_number: int | None
     body: str
     service: str
+    environment: str
+    host: str
     data: dict
 
     @property
@@ -119,7 +121,9 @@ def _row_to_log_event(row: tuple) -> LogEventRow:
         severity_number=row[6],
         body=row[7],
         service=row[8],
-        data=_parse_data_field(row[9]),
+        environment=row[9],
+        host=row[10],
+        data=_parse_data_field(row[11]),
     )
 
 
@@ -130,6 +134,8 @@ def _build_hot_where(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
     cursor_position: UUID | None = None,
@@ -157,6 +163,14 @@ def _build_hot_where(
         where_clauses.append("service ILIKE %s")
         params.append(f"%{service}%")
 
+    if environment:
+        where_clauses.append("environment ILIKE %s")
+        params.append(f"%{environment}%")
+
+    if host:
+        where_clauses.append("host ILIKE %s")
+        params.append(f"%{host}%")
+
     if trace_id:
         where_clauses.append("trace_id = %s")
         params.append(trace_id)
@@ -179,6 +193,8 @@ def query_hot_storage(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
     limit: int = 100,
@@ -196,6 +212,8 @@ def query_hot_storage(
         project_ids,
         level_values,
         service,
+        environment,
+        host,
         trace_id,
         query,
         cursor_position,
@@ -203,7 +221,7 @@ def query_hot_storage(
 
     sql = f"""
         SELECT id, trace_id, organization_id, project_id, span_id,
-               level, severity_number, body, service, data
+               level, severity_number, body, service, environment, host, data
         FROM logs_logevent
         WHERE {where_sql}
         ORDER BY id DESC
@@ -229,6 +247,8 @@ def count_hot_storage(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
     max_hits: int = 1000,
@@ -241,6 +261,8 @@ def count_hot_storage(
         project_ids,
         level_values,
         service,
+        environment,
+        host,
         trace_id,
         query,
     )
@@ -267,6 +289,8 @@ def query_cold_storage(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
     limit: int = 100,
@@ -324,6 +348,14 @@ def query_cold_storage(
         params.append(f"%{service}%")
         where_parts.append(f"service ILIKE ${len(params)}")
 
+    if environment:
+        params.append(f"%{environment}%")
+        where_parts.append(f"environment ILIKE ${len(params)}")
+
+    if host:
+        params.append(f"%{host}%")
+        where_parts.append(f"host ILIKE ${len(params)}")
+
     if trace_id:
         try:
             validated_trace = UUID(trace_id)
@@ -348,7 +380,7 @@ def query_cold_storage(
         try:
             sql = f"""
                 SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, data
+                       level, severity_number, body, service, environment, host, data
                 FROM read_parquet('{glob_path}')
                 WHERE {where_sql}
                 ORDER BY id DESC
@@ -374,6 +406,8 @@ async def query_logs_combined(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
     trace_id: str | None = None,
     query: str | None = None,
     limit: int = 100,
@@ -393,6 +427,8 @@ async def query_logs_combined(
         project_ids=project_ids,
         level_values=level_values,
         service=service,
+        environment=environment,
+        host=host,
         trace_id=trace_id,
         query=query,
         limit=limit,
@@ -445,7 +481,7 @@ def _get_log_from_hot(organization_id: int, log_id: UUID) -> LogEventRow | None:
     """Fetch a single log from hot storage (PostgreSQL)."""
     sql = """
         SELECT id, trace_id, organization_id, project_id, span_id,
-               level, severity_number, body, service, data
+               level, severity_number, body, service, environment, host, data
         FROM logs_logevent
         WHERE id = %s AND organization_id = %s
         LIMIT 1
@@ -485,7 +521,7 @@ def _get_log_from_cold(
         try:
             sql = f"""
                 SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, data
+                       level, severity_number, body, service, environment, host, data
                 FROM read_parquet('{s3_path}')
                 WHERE id = $1 AND organization_id = $2
                 LIMIT 1;
@@ -589,6 +625,8 @@ async def list_logs(
         project_ids=filters.project,
         level_values=level_values,
         service=filters.service,
+        environment=filters.environment,
+        host=filters.host,
         trace_id=filters.trace_id,
         query=filters.query,
     )
@@ -651,6 +689,7 @@ async def query_log_stats(
     project_ids: list[int] | None = None,
     level_values: list[int] | None = None,
     service_buckets: list[int] | None = None,
+    environments: list[str] | None = None,
 ) -> dict:
     """
     Query log statistics from PostgreSQL.
@@ -674,6 +713,9 @@ async def query_log_stats(
 
     if service_buckets:
         qs = qs.filter(service_bucket__in=service_buckets)
+
+    if environments:
+        qs = qs.filter(environment__in=environments)
 
     # Group by hour and level, sum counts
     qs = (
@@ -765,36 +807,42 @@ async def get_log_stats(
         project_ids=filters.project,
         level_values=level_values,
         service_buckets=service_buckets,
+        environments=filters.environment,
     )
 
     return result
 
 
 @router.get(
-    "organizations/{slug:organization_slug}/logs/services/",
-    response=list[LogServiceSchema],
+    "organizations/{slug:organization_slug}/logs/resources/",
+    response=list[LogResourceSchema],
     by_alias=True,
 )
 @has_permission(["event:read", "event:write", "event:admin"])
-async def list_log_services(
+async def list_log_resources(
     request: AuthHttpRequest,
     organization_slug: str,
+    resource_type: str | None = None,
 ):
     """
-    List unique service names for an organization.
+    List unique resource names (service, environment, host) for an organization.
 
-    Returns services ordered by last_seen (most recent first).
+    Returns resources ordered by last_seen (most recent first).
     Used to populate filter dropdowns in the UI.
     """
     organization = await aget_object_or_404(
         get_organization_for_user(request.auth.user_id, organization_slug)
     )
 
-    services = [
-        s
-        async for s in LogService.objects.filter(organization=organization)
-        .order_by("-last_seen")
-        .values("name", "last_seen")[:100]  # Limit to 100 most recent
+    qs = LogResource.objects.filter(organization=organization)
+    if resource_type:
+        qs = qs.filter(type=resource_type)
+
+    resources = [
+        r
+        async for r in qs.order_by("-last_seen").values("name", "type", "last_seen")[
+            :100
+        ]  # Limit to 100 most recent
     ]
 
-    return services
+    return resources

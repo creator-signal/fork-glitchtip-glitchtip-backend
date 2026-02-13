@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from django.db import connection
 
 from apps.logs.constants import LogLevel
-from apps.logs.models import LogService
+from apps.logs.models import LogResource
 from glitchtip.base_commands import MakeSampleCommand
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 
@@ -46,6 +46,11 @@ class Command(MakeSampleCommand):
         "cache-manager",
     ]
 
+    SAMPLE_ENVIRONMENTS = ["production", "staging", "development", "testing"]
+    SAMPLE_HOSTS = [f"web-{i}.example.com" for i in range(1, 6)] + [
+        f"worker-{i}.example.com" for i in range(1, 4)
+    ]
+
     def add_arguments(self, parser):
         super().add_arguments(parser)
         parser.add_argument(
@@ -82,7 +87,7 @@ class Command(MakeSampleCommand):
         self._ensure_partitions(start_time, end_time)
 
         logs_created = self._bulk_create_logs(quantity, start_time, end_time)
-        self._ensure_log_services()
+        self._ensure_log_resources()
 
         self.success_message(f"Successfully created {logs_created} log events")
 
@@ -159,6 +164,8 @@ class Command(MakeSampleCommand):
             )
 
             service = random.choice(self.SAMPLE_SERVICES)
+            environment = random.choice(self.SAMPLE_ENVIRONMENTS)
+            host = random.choice(self.SAMPLE_HOSTS)
 
             trace_id = None
             if random.random() > 0.5:
@@ -166,10 +173,8 @@ class Command(MakeSampleCommand):
 
             data = orjson.dumps(
                 {
-                    "environment": random.choice(
-                        ["production", "staging", "development"]
-                    ),
-                    "host": f"server-{random.randint(1, 10)}.example.com",
+                    "request_id": f"req-{random.randint(10000, 99999)}",
+                    "user_id": random.randint(1, 1000),
                 }
             ).decode("utf-8")
 
@@ -184,6 +189,8 @@ class Command(MakeSampleCommand):
                     None,  # severity_number
                     message,
                     service,
+                    environment,
+                    host,
                     data,
                 )
             )
@@ -196,8 +203,8 @@ class Command(MakeSampleCommand):
                 id, trace_id,
                 organization_id, project_id, span_id,
                 level, severity_number,
-                body, service, data
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                body, service, environment, host, data
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING;
         """
 
@@ -207,9 +214,23 @@ class Command(MakeSampleCommand):
 
         return len(rows)
 
-    def _ensure_log_services(self):
-        """Create LogService entries for all sample services."""
+    def _ensure_log_resources(self):
+        """Create LogResource entries for sample services, environments, and hosts."""
         for name in self.SAMPLE_SERVICES:
-            LogService.objects.update_or_create(
-                organization=self.organization, name=name
+            LogResource.objects.update_or_create(
+                organization=self.organization,
+                name=name,
+                type=LogResource.ResourceType.SERVICE,
+            )
+        for name in self.SAMPLE_ENVIRONMENTS:
+            LogResource.objects.update_or_create(
+                organization=self.organization,
+                name=name,
+                type=LogResource.ResourceType.ENVIRONMENT,
+            )
+        for name in self.SAMPLE_HOSTS:
+            LogResource.objects.update_or_create(
+                organization=self.organization,
+                name=name,
+                type=LogResource.ResourceType.HOST,
             )

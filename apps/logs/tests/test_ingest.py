@@ -48,6 +48,9 @@ class LogIngestProcessingTestCase(TestCase):
                     "timestamp": timestamp,
                     "level": "info",
                     "body": "Test log message",
+                    "service": "test-svc",
+                    "environment": "prod",
+                    "host": "web-1",
                 }
             ],
         )
@@ -62,6 +65,9 @@ class LogIngestProcessingTestCase(TestCase):
         self.assertEqual(log.level, LogLevel.INFO)
         self.assertEqual(log.organization_id, self.organization.id)
         self.assertEqual(log.project_id, self.project.id)
+        self.assertEqual(log.service, "test-svc")
+        self.assertEqual(log.environment, "prod")
+        self.assertEqual(log.host, "web-1")
 
     def test_process_multiple_logs(self):
         """Test processing multiple log events in one batch"""

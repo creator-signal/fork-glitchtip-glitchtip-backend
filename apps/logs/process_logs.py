@@ -19,16 +19,21 @@ MAX_TIMESTAMP_DRIFT = timedelta(days=1)
 
 
 def update_log_statistics(
-    stats_data: defaultdict[datetime, defaultdict[tuple[int, int, int], dict]],
+    stats_data: defaultdict[datetime, defaultdict[tuple[int, int, int, str], dict]],
 ) -> None:
     """
-    Bulk upsert hourly log statistics by project, level, and service bucket.
+    Bulk upsert hourly log statistics by project, level, service bucket, and environment.
 
-    stats_data structure: {hour: {(project_id, level, service_bucket): {"count": N, "organization_id": X}}}
+    stats_data structure: {hour: {(project_id, level, service_bucket, environment): {"count": N, "organization_id": X}}}
     """
     data = []
     for date, inner_dict in stats_data.items():
-        for (project_id, level, service_bucket), stats in inner_dict.items():
+        for (
+            project_id,
+            level,
+            service_bucket,
+            environment,
+        ), stats in inner_dict.items():
             if (organization_id := stats.get("organization_id")) is not None:
                 data.append(
                     [
@@ -37,6 +42,7 @@ def update_log_statistics(
                         organization_id,
                         level,
                         service_bucket,
+                        environment,
                         stats["count"],
                     ]
                 )
@@ -44,39 +50,41 @@ def update_log_statistics(
     if not data:
         return
 
-    data.sort(key=itemgetter(0, 1, 2, 3, 4))
+    data.sort(key=itemgetter(0, 1, 2, 3, 4, 5))
 
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data)
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
         sql = (
-            "INSERT INTO projects_logprojecthourlystatistic (date, project_id, organization_id, level, service_bucket, count)\n"
+            "INSERT INTO projects_logprojecthourlystatistic (date, project_id, organization_id, level, service_bucket, environment, count)\n"
             f"VALUES {args_str}\n"
-            "ON CONFLICT (project_id, organization_id, date, level, service_bucket)\n"
+            "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment)\n"
             "DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count;"
         )
         cursor.execute(sql)
 
 
-def update_service_lookup(service_data: set[tuple[int, str]]) -> None:
+def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> None:
     """
-    Bulk upsert unique service names to the lookup table.
+    Bulk upsert unique resource names to the lookup table.
 
-    service_data: set of (organization_id, service_name) tuples
+    resource_data: set of (organization_id, name, type) tuples
     """
-    if not service_data:
+    if not resource_data:
         return
 
-    data = [[org_id, name] for org_id, name in service_data if name]
+    data = [
+        [org_id, name, res_type] for org_id, name, res_type in resource_data if name
+    ]
 
     if not data:
         return
 
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s)", x) for x in data)
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s, NOW(), NOW())", x) for x in data)
         sql = (
-            "INSERT INTO logs_logservice (organization_id, name, first_seen, last_seen)\n"
+            "INSERT INTO logs_logresource (organization_id, name, type, first_seen, last_seen)\n"
             f"VALUES {args_str}\n"
-            "ON CONFLICT (organization_id, name)\n"
+            "ON CONFLICT (organization_id, name, type)\n"
             "DO UPDATE SET last_seen = NOW();"
         )
         cursor.execute(sql)
@@ -138,13 +146,13 @@ def process_log_events(messages: list) -> int:
     log_rows = []
     rejected_count = 0
 
-    # Track statistics by hour, project, level, and service bucket
+    # Track statistics by hour, project, level, service bucket, and environment
     project_hourly_stats: defaultdict[
-        datetime, defaultdict[tuple[int, int, int], dict]
+        datetime, defaultdict[tuple[int, int, int, str], dict]
     ] = defaultdict(lambda: defaultdict(lambda: {"count": 0, "organization_id": None}))
 
-    # Track unique services for lookup table
-    unique_services: set[tuple[int, str]] = set()
+    # Track unique resources for lookup table
+    unique_resources: set[tuple[int, str, str]] = set()
 
     for message in messages:
         organization_id = message.organization_id
@@ -203,8 +211,18 @@ def process_log_events(messages: list) -> int:
             body = log_item.get("body", "")
             severity_number = log_item.get("severity_number")
 
-            # Extract service from attributes or sentry.service
-            service = log_item.get("sentry.service", "") or log_item.get("service", "")
+            # Extract service from attributes or OTel service.name
+            service = (
+                log_item.get("sentry.service", "")
+                or log_item.get("service.name", "")
+                or log_item.get("service", "")
+            )
+            # Extract environment from OTel deployment.environment or environment
+            environment = log_item.get("deployment.environment", "") or log_item.get(
+                "environment", ""
+            )
+            # Extract host from OTel host.name or host
+            host = log_item.get("host.name", "") or log_item.get("host", "")
 
             # Build data dict for any extra attributes
             data = {}
@@ -216,7 +234,12 @@ def process_log_events(messages: list) -> int:
                 "span_id",
                 "severity_number",
                 "sentry.service",
+                "service.name",
                 "service",
+                "deployment.environment",
+                "environment",
+                "host.name",
+                "host",
             }
             for key, value in log_item.items():
                 if key not in excluded_keys:
@@ -233,21 +256,27 @@ def process_log_events(messages: list) -> int:
                     severity_number,
                     body,
                     service,
+                    environment,
+                    host,
                     orjson.dumps(data if data else {}).decode("utf-8"),
                 )
             )
 
-            # Track statistics - truncate to hour, group by project, level, and service bucket
+            # Track statistics - truncate to hour, group by project, level, service bucket, and environment
             hour_received = log_timestamp.replace(minute=0, second=0, microsecond=0)
             service_bucket = compute_service_hash(service)
-            stats_key = (project_id, level, service_bucket)
+            stats_key = (project_id, level, service_bucket, environment)
             project_stats = project_hourly_stats[hour_received][stats_key]
             project_stats["count"] += 1
             project_stats["organization_id"] = organization_id
 
-            # Track unique services for lookup table
+            # Track unique resources for lookup table
             if service:
-                unique_services.add((organization_id, service))
+                unique_resources.add((organization_id, service, "service"))
+            if environment:
+                unique_resources.add((organization_id, environment, "environment"))
+            if host:
+                unique_resources.add((organization_id, host, "host"))
 
     if rejected_count > 0:
         logger.warning(
@@ -264,8 +293,8 @@ def process_log_events(messages: list) -> int:
             id, trace_id,
             organization_id, project_id, span_id,
             level, severity_number,
-            body, service, data
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            body, service, environment, host, data
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT DO NOTHING;
     """
 
@@ -275,8 +304,8 @@ def process_log_events(messages: list) -> int:
     # Update hourly statistics
     update_log_statistics(project_hourly_stats)
 
-    # Update service name lookup table
-    update_service_lookup(unique_services)
+    # Update resource name lookup table
+    update_resource_lookup(unique_resources)
 
     logger.info(f"Inserted {len(log_rows)} log events")
     return len(log_rows)
