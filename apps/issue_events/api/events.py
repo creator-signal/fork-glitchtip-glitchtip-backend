@@ -43,7 +43,10 @@ def _get_event_from_cold(event_id: uuid.UUID, organization_id: int):
     if not is_duckdb_available():
         return None
 
-    event_time = UUID7Helper.extract_datetime(event_id)
+    try:
+        event_time = UUID7Helper.extract_datetime(event_id)
+    except ValueError:
+        return None
     return get_event_from_cold(organization_id, event_id, event_time)
 
 
