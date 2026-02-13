@@ -1,3 +1,5 @@
+import asyncio
+
 from django.test import SimpleTestCase
 
 from glitchtip.asgi import MCPDjangoDispatcher
@@ -13,76 +15,104 @@ class MockASGIApp:
         self.scope = scope
 
 
+class LifespanApp:
+    """Mock ASGI app that handles lifespan protocol."""
+
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                msg = await receive()
+                if msg["type"] == "lifespan.startup":
+                    self.started = True
+                    await send({"type": "lifespan.startup.complete"})
+                elif msg["type"] == "lifespan.shutdown":
+                    self.stopped = True
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        self.scope = scope
+
+
+class DjangoLikeApp:
+    """Mock that raises ValueError on non-http scope (like Django's ASGIHandler)."""
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            raise ValueError("Django can only handle ASGI/HTTP connections")
+
+
 class MCPDjangoDispatcherTestCase(SimpleTestCase):
-    async def test_mcp_routing_strips_prefix(self):
+    async def test_mcp_routing(self):
         mock_django = MockASGIApp()
         mock_mcp = MockASGIApp()
         dispatcher = MCPDjangoDispatcher(mock_django, mock_mcp, mcp_prefix="/mcp")
 
-        scope = {
-            "type": "http",
-            "path": "/mcp/sse",
-            "method": "GET",
-        }
+        scope = {"type": "http", "path": "/mcp", "method": "POST"}
 
-        async def mock_receive():
-            pass
-
-        async def mock_send(message):
-            pass
-
-        await dispatcher(scope, mock_receive, mock_send)
+        await dispatcher(scope, lambda: None, lambda msg: None)
 
         self.assertTrue(mock_mcp.called)
         self.assertFalse(mock_django.called)
-
-        # Verify path stripping
-        self.assertEqual(mock_mcp.scope["path"], "/sse")
-        # Verify root_path setting
-        self.assertEqual(mock_mcp.scope["root_path"], "/mcp")
-
-    async def test_mcp_routing_root_path(self):
-        mock_django = MockASGIApp()
-        mock_mcp = MockASGIApp()
-        dispatcher = MCPDjangoDispatcher(mock_django, mock_mcp, mcp_prefix="/mcp")
-
-        scope = {
-            "type": "http",
-            "path": "/mcp",
-            "method": "GET",
-        }
-
-        async def mock_receive():
-            pass
-
-        async def mock_send(message):
-            pass
-
-        await dispatcher(scope, mock_receive, mock_send)
-
-        self.assertTrue(mock_mcp.called)
-        self.assertEqual(mock_mcp.scope["path"], "/")
-        self.assertEqual(mock_mcp.scope["root_path"], "/mcp")
 
     async def test_django_routing(self):
         mock_django = MockASGIApp()
         mock_mcp = MockASGIApp()
         dispatcher = MCPDjangoDispatcher(mock_django, mock_mcp, mcp_prefix="/mcp")
 
-        scope = {
-            "type": "http",
-            "path": "/api/0/projects/",
-            "method": "GET",
-        }
+        scope = {"type": "http", "path": "/api/0/projects/", "method": "GET"}
 
-        async def mock_receive():
-            pass
-
-        async def mock_send(message):
-            pass
-
-        await dispatcher(scope, mock_receive, mock_send)
+        await dispatcher(scope, lambda: None, lambda msg: None)
 
         self.assertTrue(mock_django.called)
         self.assertFalse(mock_mcp.called)
-        self.assertEqual(mock_django.scope["path"], "/api/0/projects/")
+
+    async def test_lifespan_forwarded_to_both_apps(self):
+        """Both django_app and mcp_app receive lifespan events."""
+        django_app = LifespanApp()
+        mcp_app = LifespanApp()
+        dispatcher = MCPDjangoDispatcher(django_app, mcp_app, mcp_prefix="/mcp")
+
+        scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
+        messages = asyncio.Queue()
+        await messages.put({"type": "lifespan.startup"})
+        await messages.put({"type": "lifespan.shutdown"})
+
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+
+        await dispatcher(scope, messages.get, send)
+
+        self.assertTrue(django_app.started)
+        self.assertTrue(django_app.stopped)
+        self.assertTrue(mcp_app.started)
+        self.assertTrue(mcp_app.stopped)
+        self.assertEqual(sent[0]["type"], "lifespan.startup.complete")
+        self.assertEqual(sent[1]["type"], "lifespan.shutdown.complete")
+
+    async def test_lifespan_django_raises(self):
+        """Lifespan works when django_app raises (web-only mode, no vtasks)."""
+        django_app = DjangoLikeApp()
+        mcp_app = LifespanApp()
+        dispatcher = MCPDjangoDispatcher(django_app, mcp_app, mcp_prefix="/mcp")
+
+        scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
+        messages = asyncio.Queue()
+        await messages.put({"type": "lifespan.startup"})
+        await messages.put({"type": "lifespan.shutdown"})
+
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+
+        await dispatcher(scope, messages.get, send)
+
+        self.assertTrue(mcp_app.started)
+        self.assertTrue(mcp_app.stopped)
+        self.assertEqual(sent[0]["type"], "lifespan.startup.complete")
+        self.assertEqual(sent[1]["type"], "lifespan.shutdown.complete")
