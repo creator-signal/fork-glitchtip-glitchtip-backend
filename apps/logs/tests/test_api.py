@@ -343,10 +343,12 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         # Create stats data directly in the table
         from apps.projects.models import LogProjectHourlyStatistic
 
-        from ..models import compute_service_hash
+        from ..models import compute_hash_bucket
 
         now = timezone.now().replace(minute=0, second=0, microsecond=0)
-        self.worker_bucket = compute_service_hash("worker")
+        self.worker_bucket = compute_hash_bucket("worker")
+        self.prod_bucket = compute_hash_bucket("prod")
+        self.staging_bucket = compute_hash_bucket("staging")
 
         # Create hourly stats for different levels (default service_bucket=0)
         LogProjectHourlyStatistic.objects.create(
@@ -355,7 +357,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=2),
             level=LogLevel.INFO,
             service_bucket=0,
-            environment="prod",
+            environment_bucket=self.prod_bucket,
             count=10,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -364,7 +366,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=2),
             level=LogLevel.ERROR,
             service_bucket=0,
-            environment="prod",
+            environment_bucket=self.prod_bucket,
             count=3,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -373,7 +375,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.INFO,
             service_bucket=0,
-            environment="prod",
+            environment_bucket=self.prod_bucket,
             count=15,
         )
         LogProjectHourlyStatistic.objects.create(
@@ -382,7 +384,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.ERROR,
             service_bucket=0,
-            environment="staging",
+            environment_bucket=self.staging_bucket,
             count=5,
         )
         # Add stats for "worker" service
@@ -392,7 +394,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
             date=now - timedelta(hours=1),
             level=LogLevel.ERROR,
             service_bucket=self.worker_bucket,
-            environment="prod",
+            environment_bucket=self.prod_bucket,
             count=7,
         )
 

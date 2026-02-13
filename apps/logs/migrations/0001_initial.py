@@ -2,7 +2,7 @@
 # Squashed from 0001_initial + 0002_add_search_indexes + 0003_add_log_service_lookup
 #
 # Implements UUIDv7 partitioning with nested HASH by organization_id,
-# search indexes (trigram + service), and LogService lookup table.
+# search indexes (trigram + service/environment/host), and LogResource lookup table.
 
 from datetime import datetime, timedelta, timezone
 
@@ -170,6 +170,24 @@ class Migration(migrations.Migration):
                             ),
                         ),
                         (
+                            "environment",
+                            models.CharField(
+                                blank=True,
+                                default="",
+                                help_text="Deployment environment (e.g. production, staging)",
+                                max_length=255,
+                            ),
+                        ),
+                        (
+                            "host",
+                            models.CharField(
+                                blank=True,
+                                default="",
+                                help_text="Host name that emitted the log",
+                                max_length=255,
+                            ),
+                        ),
+                        (
                             "data",
                             models.JSONField(
                                 blank=True,
@@ -191,6 +209,18 @@ class Migration(migrations.Migration):
                             models.Index(
                                 fields=["organization", "level", "-id"],
                                 name="logevent_org_level_idx",
+                            ),
+                            models.Index(
+                                fields=["organization", "service", "-id"],
+                                name="logevent_org_svc_idx",
+                            ),
+                            models.Index(
+                                fields=["organization", "environment", "-id"],
+                                name="logevent_org_env_idx",
+                            ),
+                            models.Index(
+                                fields=["organization", "host", "-id"],
+                                name="logevent_org_host_idx",
                             ),
                             models.Index(
                                 condition=models.Q(trace_id__isnull=False),
@@ -215,9 +245,9 @@ class Migration(migrations.Migration):
             code=create_initial_partitions,
             reverse_code=drop_initial_partitions,
         ),
-        # Phase 3: LogService lookup table
+        # Phase 3: LogResource lookup table
         migrations.CreateModel(
-            name="LogService",
+            name="LogResource",
             fields=[
                 (
                     "id",
@@ -228,7 +258,20 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("name", models.CharField(help_text="Service name", max_length=255)),
+                ("name", models.CharField(help_text="Resource name", max_length=255)),
+                (
+                    "type",
+                    models.CharField(
+                        choices=[
+                            ("service", "service"),
+                            ("environment", "environment"),
+                            ("host", "host"),
+                        ],
+                        default="service",
+                        help_text="Type of resource (service/environment/host)",
+                        max_length=20,
+                    ),
+                ),
                 ("first_seen", models.DateTimeField(auto_now_add=True)),
                 ("last_seen", models.DateTimeField(auto_now=True)),
                 (
@@ -241,11 +284,15 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["organization"], name="logservice_org_idx")
+                    models.Index(
+                        fields=["organization", "type"],
+                        name="logresource_org_type_idx",
+                    )
                 ],
                 "constraints": [
                     models.UniqueConstraint(
-                        fields=("organization", "name"), name="unique_org_service"
+                        fields=("organization", "name", "type"),
+                        name="unique_org_resource",
                     )
                 ],
             },

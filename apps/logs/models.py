@@ -6,36 +6,36 @@ from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LogLevel
 
-# Cardinality limiter for service names in the hourly statistics table.
+# Cardinality limiter for user-controlled strings in the hourly statistics table.
 #
 # LogProjectHourlyStatistic has a composite PK:
-#   (project, organization, date, level, service_bucket)
+#   (project, organization, date, level, service_bucket, environment_bucket)
 #
-# Without bucketing, each unique service name would create its own rows.
-# If service names are high-cardinality (e.g. auto-generated, UUIDs, or
+# Without bucketing, each unique name would create its own rows.
+# If names are high-cardinality (e.g. auto-generated, UUIDs, or
 # per-request), the stats table would grow unboundedly. Hashing into 256
-# buckets caps the worst case at 256 * 6 levels * 24 hours = ~37k rows
-# per project per day, regardless of how many distinct services exist.
+# buckets caps the worst case at 256^2 * 6 levels * 24 hours = ~9.4M rows
+# per project per day, regardless of how many distinct values exist.
 #
-# Tradeoff: filtering stats by service name may include collisions from
-# other services that hash to the same bucket. This is acceptable for
-# aggregate charts — exact per-service counts come from the logs table.
-SERVICE_HASH_BUCKETS = 256
+# Tradeoff: filtering stats by name may include collisions from
+# other values that hash to the same bucket. This is acceptable for
+# aggregate charts — exact per-value counts come from the logs table.
+HASH_BUCKETS = 256
 
 
-def compute_service_hash(service_name: str) -> int:
+def compute_hash_bucket(name: str) -> int:
     """
-    Hash a service name to a bucket (0-255) for statistics aggregation.
+    Hash a string to a bucket (0-255) for statistics aggregation.
 
-    Used by LogProjectHourlyStatistic to bound row count when service
-    names have high cardinality. The stats API filters by bucket, so
-    queries like "show me stats for auth-service" hash the name and
-    filter on the bucket. Collisions are rare with typical service counts
-    and acceptable for aggregate charts.
+    Used by LogProjectHourlyStatistic to bound row count when
+    user-controlled strings (service, environment) have high cardinality.
+    The stats API filters by bucket, so queries like "show me stats for
+    auth-service" hash the name and filter on the bucket. Collisions are
+    rare with typical value counts and acceptable for aggregate charts.
     """
-    if not service_name:
+    if not name:
         return 0
-    digest = hashlib.md5(service_name.encode(), usedforsecurity=False).digest()
+    digest = hashlib.md5(name.encode(), usedforsecurity=False).digest()
     return digest[0]  # First byte gives 0-255
 
 
