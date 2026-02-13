@@ -1,5 +1,7 @@
 from django.test import SimpleTestCase
+
 from glitchtip.asgi import MCPDjangoDispatcher
+
 
 class MockASGIApp:
     def __init__(self):
@@ -9,6 +11,7 @@ class MockASGIApp:
     async def __call__(self, scope, receive, send):
         self.called = True
         self.scope = scope
+
 
 class MCPDjangoDispatcherTestCase(SimpleTestCase):
     async def test_mcp_routing_strips_prefix(self):
@@ -22,14 +25,17 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
             "method": "GET",
         }
 
-        async def mock_receive(): pass
-        async def mock_send(message): pass
+        async def mock_receive():
+            pass
+
+        async def mock_send(message):
+            pass
 
         await dispatcher(scope, mock_receive, mock_send)
 
         self.assertTrue(mock_mcp.called)
         self.assertFalse(mock_django.called)
-        
+
         # Verify path stripping
         self.assertEqual(mock_mcp.scope["path"], "/sse")
         # Verify root_path setting
@@ -46,8 +52,11 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
             "method": "GET",
         }
 
-        async def mock_receive(): pass
-        async def mock_send(message): pass
+        async def mock_receive():
+            pass
+
+        async def mock_send(message):
+            pass
 
         await dispatcher(scope, mock_receive, mock_send)
 
@@ -66,8 +75,11 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
             "method": "GET",
         }
 
-        async def mock_receive(): pass
-        async def mock_send(message): pass
+        async def mock_receive():
+            pass
+
+        async def mock_send(message):
+            pass
 
         await dispatcher(scope, mock_receive, mock_send)
 
