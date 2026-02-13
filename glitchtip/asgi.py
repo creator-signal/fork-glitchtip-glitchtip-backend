@@ -36,6 +36,12 @@ class MCPDjangoDispatcher:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope["path"].startswith(self.mcp_prefix):
+            scope = dict(scope)
+            prefix_len = len(self.mcp_prefix)
+            scope["path"] = scope["path"][prefix_len:]
+            if not scope["path"].startswith("/"):
+                scope["path"] = "/" + scope["path"]
+            scope["root_path"] = scope.get("root_path", "") + self.mcp_prefix
             await self.mcp_app(scope, receive, send)
         else:
             await self.django_app(scope, receive, send)
