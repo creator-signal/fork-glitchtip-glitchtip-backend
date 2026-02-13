@@ -1,4 +1,6 @@
+import asyncio
 import uuid
+from datetime import datetime, timezone
 
 from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
@@ -6,6 +8,7 @@ from ninja.pagination import paginate
 
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
+from glitchtip.partition_manager import UUID7Helper
 
 from ..models import IssueEvent, UserReport
 from ..schema import IssueEventDetailSchema, IssueEventJsonSchema, IssueEventSchema
@@ -33,6 +36,39 @@ async def get_user_report(event_id: uuid.UUID) -> UserReport | None:
     return await UserReport.objects.filter(event_id=event_id).afirst()
 
 
+def _get_event_from_cold(event_id: uuid.UUID, organization_id: int):
+    """Try to find an event in cold storage by its UUIDv7 id."""
+    from ..cold_storage import get_event_from_cold, is_duckdb_available
+
+    if not is_duckdb_available():
+        return None
+
+    event_time = UUID7Helper.extract_datetime(event_id)
+    return get_event_from_cold(organization_id, event_id, event_time)
+
+
+def _get_cold_events_for_issue(
+    issue_id: int,
+    organization_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    limit: int = 100,
+):
+    """Query cold storage for events belonging to an issue."""
+    from ..cold_storage import is_duckdb_available, query_cold_events
+
+    if not is_duckdb_available():
+        return []
+
+    return query_cold_events(
+        organization_id=organization_id,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        issue_id=issue_id,
+        limit=limit,
+    )
+
+
 @router.get("/issues/{int:issue_id}/events/", response=list[IssueEventSchema])
 @paginate
 @has_permission(["event:read", "event:write", "event:admin"])
@@ -58,9 +94,44 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
         ),
     )
     event = await qs.afirst()
-    if not event:
+    if event:
+        event.next = None  # We know the next after "latest" must be None
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    from ..cold_storage import is_duckdb_available
+
+    if not is_duckdb_available():
         raise Http404()
-    event.next = None  # We know the next after "latest" must be None
+
+    from ..models import Issue
+
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id, project__organization__users=request.auth.user_id
+        )
+        .select_related("project__organization")
+        .afirst()
+    )
+    if not issue:
+        raise Http404()
+
+    cold_event = await asyncio.to_thread(
+        _get_cold_events_for_issue,
+        issue_id=issue_id,
+        organization_id=issue.project.organization_id,
+        start_dt=datetime.min.replace(tzinfo=timezone.utc),
+        end_dt=datetime.now(timezone.utc),
+        limit=1,
+    )
+    if not cold_event:
+        raise Http404()
+
+    event = cold_event[0]
+    event.issue = issue
+    event.previous = None
+    event.next = None
     event.user_report = await get_user_report(event.id)
     return event
 
@@ -81,10 +152,34 @@ async def get_issue_event(request: AuthHttpRequest, issue_id: int, event_id: uui
         next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
     event = await qs.filter(id=event_id).afirst()
-    if not event:
+    if event:
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    from ..models import Issue
+
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id, project__organization__users=request.auth.user_id
+        )
+        .select_related("project__organization")
+        .afirst()
+    )
+    if not issue:
         raise Http404()
-    event.user_report = await get_user_report(event.id)
-    return event
+
+    cold_event = await asyncio.to_thread(
+        _get_event_from_cold, event_id, issue.project.organization_id
+    )
+    if not cold_event:
+        raise Http404()
+
+    cold_event.issue = issue
+    cold_event.previous = None
+    cold_event.next = None
+    cold_event.user_report = await get_user_report(cold_event.id)
+    return cold_event
 
 
 @router.get(
@@ -129,10 +224,36 @@ async def get_project_issue_event(
         next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
     event = await qs.filter(id=event_id).afirst()
-    if not event:
+    if event:
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    from apps.organizations_ext.models import Organization
+
+    org = await Organization.objects.filter(
+        slug=organization_slug, users=request.auth.user_id
+    ).afirst()
+    if not org:
         raise Http404()
-    event.user_report = await get_user_report(event.id)
-    return event
+
+    cold_event = await asyncio.to_thread(_get_event_from_cold, event_id, org.id)
+    if not cold_event:
+        raise Http404()
+
+    # Attach issue for schema resolution
+    from ..models import Issue
+
+    issue = (
+        await Issue.objects.filter(id=cold_event.issue_id)
+        .select_related("project")
+        .afirst()
+    )
+    cold_event.issue = issue
+    cold_event.previous = None
+    cold_event.next = None
+    cold_event.user_report = await get_user_report(cold_event.id)
+    return cold_event
 
 
 @router.get(
@@ -147,6 +268,29 @@ async def get_event_json(
 ):
     qs = get_queryset(request, organization_slug=organization_slug, issue_id=issue_id)
     obj = await qs.filter(id=event_id).afirst()
-    if not obj:
+    if obj:
+        return obj
+
+    # Fall back to cold storage
+    from ..models import Issue
+
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id,
+            project__organization__slug=organization_slug,
+            project__organization__users=request.auth.user_id,
+        )
+        .select_related("project__organization")
+        .afirst()
+    )
+    if not issue:
         raise Http404()
-    return obj
+
+    cold_event = await asyncio.to_thread(
+        _get_event_from_cold, event_id, issue.project.organization_id
+    )
+    if not cold_event:
+        raise Http404()
+
+    cold_event.issue = issue
+    return cold_event

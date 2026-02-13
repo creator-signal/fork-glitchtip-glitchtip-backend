@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from apps.projects.models import LogProjectHourlyStatistic
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import set_pagination_headers
 from glitchtip.api.permissions import has_permission
+from glitchtip.cold_storage import parse_json_field
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -91,20 +91,6 @@ class LogEventRow:
         return UUID7Helper.extract_datetime(self.id)
 
 
-def _parse_data_field(data) -> dict:
-    """Parse data field which may be dict, string, or None."""
-    if data is None:
-        return {}
-    if isinstance(data, dict):
-        return data
-    if isinstance(data, str):
-        try:
-            return json.loads(data)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    return {}
-
-
 def _row_to_log_event(row: tuple) -> LogEventRow:
     """Convert a database row (positional) to LogEventRow."""
     return LogEventRow(
@@ -123,7 +109,7 @@ def _row_to_log_event(row: tuple) -> LogEventRow:
         service=row[8],
         environment=row[9],
         host=row[10],
-        data=_parse_data_field(row[11]),
+        data=parse_json_field(row[11]),
     )
 
 
