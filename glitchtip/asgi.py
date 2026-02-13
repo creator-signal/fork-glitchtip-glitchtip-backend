@@ -27,7 +27,11 @@ if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":
 
 
 class MCPDjangoDispatcher:
-    """Route /mcp* requests to the MCP Starlette app, everything else to Django."""
+    """Route /mcp* requests to the MCP Starlette app, everything else to Django.
+
+    Handles ASGI lifespan by forwarding startup/shutdown to both apps so
+    the MCP Starlette app can initialise its session-manager task group.
+    """
 
     def __init__(self, django_app, mcp_app, mcp_prefix="/mcp"):
         self.django_app = django_app
@@ -35,10 +39,93 @@ class MCPDjangoDispatcher:
         self.mcp_prefix = mcp_prefix
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"].startswith(self.mcp_prefix):
+        if scope["type"] == "lifespan":
+            await self._handle_lifespan(scope, receive, send)
+        elif scope["type"] == "http" and scope["path"].startswith(self.mcp_prefix):
             await self.mcp_app(scope, receive, send)
         else:
             await self.django_app(scope, receive, send)
+
+    async def _handle_lifespan(self, scope, receive, send):
+        """Multiplex ASGI lifespan to both the Django app and MCP app.
+
+        The MCP Starlette app needs lifespan to initialise its session-manager
+        task group.  In all-in-one mode the django_app is the django-vtasks
+        wrapper which also needs lifespan to start the background worker.
+        In web-only mode django_app is Django's ASGIHandler which raises
+        ValueError for lifespan — that is caught and treated as a no-op.
+        """
+        import asyncio
+
+        django_queue: asyncio.Queue = asyncio.Queue()
+        mcp_queue: asyncio.Queue = asyncio.Queue()
+        django_ok = asyncio.Event()
+        mcp_ok = asyncio.Event()
+        django_done = asyncio.Event()
+        mcp_done = asyncio.Event()
+        failed = False
+
+        async def django_send(msg):
+            nonlocal failed
+            if msg["type"] == "lifespan.startup.complete":
+                django_ok.set()
+            elif msg["type"] == "lifespan.startup.failed":
+                failed = True
+                django_ok.set()
+            elif msg["type"] == "lifespan.shutdown.complete":
+                django_done.set()
+
+        async def mcp_send(msg):
+            nonlocal failed
+            if msg["type"] == "lifespan.startup.complete":
+                mcp_ok.set()
+            elif msg["type"] == "lifespan.startup.failed":
+                failed = True
+                mcp_ok.set()
+            elif msg["type"] == "lifespan.shutdown.complete":
+                mcp_done.set()
+
+        async def run_django():
+            try:
+                await self.django_app(scope, django_queue.get, django_send)
+            except Exception:
+                # Django's ASGIHandler raises ValueError for lifespan scope.
+                # In web-only mode (no vtasks wrapper) this is expected.
+                django_ok.set()
+                django_done.set()
+
+        async def run_mcp():
+            await self.mcp_app(scope, mcp_queue.get, mcp_send)
+
+        tasks = [
+            asyncio.create_task(run_django()),
+            asyncio.create_task(run_mcp()),
+        ]
+
+        try:
+            msg = await receive()
+            await django_queue.put(msg)
+            await mcp_queue.put(msg)
+            await django_ok.wait()
+            await mcp_ok.wait()
+
+            if failed:
+                await send({"type": "lifespan.startup.failed", "message": ""})
+                return
+
+            await send({"type": "lifespan.startup.complete"})
+
+            msg = await receive()
+            await django_queue.put(msg)
+            await mcp_queue.put(msg)
+            await django_done.wait()
+            await mcp_done.wait()
+
+            await send({"type": "lifespan.shutdown.complete"})
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 from django.conf import settings  # noqa: E402

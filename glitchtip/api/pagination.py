@@ -26,8 +26,14 @@ def _build_link_header(
     query_params = parse.parse_qs(parsed.query)
     query_params.pop("cursor", None)
     clean_url = parse.urlunparse(
-        (parsed.scheme, parsed.netloc, parsed.path, "",
-         parse.urlencode(query_params, doseq=True), "")
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            "",
+            parse.urlencode(query_params, doseq=True),
+            "",
+        )
     )
     separator = "&" if query_params else "?"
 

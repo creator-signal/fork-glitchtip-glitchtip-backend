@@ -265,9 +265,11 @@ class WebIngestIssueEvent(BaseIssueEvent):
     fingerprint: Annotated[
         list[str | None] | None,
         BeforeValidator(
-            lambda v: [str(item) if not isinstance(item, str) else item for item in v]
-            if isinstance(v, list)
-            else v
+            lambda v: (
+                [str(item) if not isinstance(item, str) else item for item in v]
+                if isinstance(v, list)
+                else v
+            )
         ),
     ] = None
     errors: list[Any] | None = None

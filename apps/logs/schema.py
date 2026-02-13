@@ -52,7 +52,9 @@ class LogFilterSchema(Schema):
         default=None, alias="traceId", description="Filter by trace ID"
     )
     query: str | None = Field(default=None, description="Search in log body")
-    start: RelativeDateTime | None = Field(default=None, description="Start of time range")
+    start: RelativeDateTime | None = Field(
+        default=None, description="Start of time range"
+    )
     end: RelativeDateTime | None = Field(default=None, description="End of time range")
     cursor: str | None = Field(default=None, description="Pagination cursor")
     limit: int = Field(default=100, ge=1, le=200, description="Results per page")
@@ -66,7 +68,9 @@ class LogStatsFilterSchema(Schema):
     service: list[str] | None = Field(
         default=None, description="Filter by service names"
     )
-    start: RelativeDateTime | None = Field(default=None, description="Start of time range")
+    start: RelativeDateTime | None = Field(
+        default=None, description="Start of time range"
+    )
     end: RelativeDateTime | None = Field(default=None, description="End of time range")
 
 
