@@ -43,9 +43,7 @@ async def list_organizations(token: str) -> str:
 async def list_projects(token: str, organization_slug: str) -> str:
     """List all projects in an organization."""
     try:
-        user_id = await _auth(
-            token, ["project:read", "project:write", "project:admin"]
-        )
+        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
         projects = await data.get_projects(user_id, organization_slug)
         return json.dumps([serializers.serialize_project(p) for p in projects])
     except ValueError as e:
@@ -164,9 +162,7 @@ async def list_alerts(
         project_slug: Optional project slug to filter by
     """
     try:
-        user_id = await _auth(
-            token, ["project:read", "project:write", "project:admin"]
-        )
+        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
         alerts = await data.get_alerts(
             user_id, organization_slug, project_slug=project_slug
         )
@@ -179,9 +175,7 @@ async def list_alerts(
 async def list_monitors(token: str, organization_slug: str) -> str:
     """List uptime monitors for an organization."""
     try:
-        user_id = await _auth(
-            token, ["project:read", "project:write", "project:admin"]
-        )
+        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
         monitors = await data.get_monitors(user_id, organization_slug)
         return json.dumps([serializers.serialize_monitor(m) for m in monitors])
     except ValueError as e:
