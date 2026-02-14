@@ -289,22 +289,27 @@ def query_cold_storage(
     UUIDv7 timestamp. DuckDB runs in-process — no PostgreSQL extension
     required, no connection pooling interaction.
     """
+    from glitchtip.cold_storage import get_cold_storage_backend
+
     from .cold_storage import (
         COLD_STORAGE_PREFIX,
-        ColdStorageConfig,
         get_duckdb_connection,
+        get_duckdb_parquet_path,
         is_duckdb_available,
     )
 
     if not is_duckdb_available():
         return []
 
-    config = ColdStorageConfig.from_settings()
-    if not config.bucket:
+    storage = get_cold_storage_backend()
+    if not storage:
         return []
 
     # Use glob pattern to read all files for this org
-    glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/logs_logevent/org_{organization_id}/*.parquet"
+    relative_glob = (
+        f"{COLD_STORAGE_PREFIX}/logs_logevent/org_{organization_id}/*.parquet"
+    )
+    glob_path = get_duckdb_parquet_path(storage, relative_glob)
 
     # Build WHERE clause with DuckDB $N positional parameters
     where_parts = ["organization_id = $1"]
@@ -362,7 +367,7 @@ def query_cold_storage(
     where_sql = " AND ".join(where_parts)
 
     try:
-        duck_conn = get_duckdb_connection(config)
+        duck_conn = get_duckdb_connection(storage)
         try:
             sql = f"""
                 SELECT id, trace_id, organization_id, project_id, span_id,
@@ -485,30 +490,37 @@ def _get_log_from_cold(
     organization_id: int, log_id: UUID, log_time: datetime
 ) -> LogEventRow | None:
     """Fetch a single log from cold storage (DuckDB/Parquet)."""
+    from glitchtip.cold_storage import (
+        get_cold_storage_backend,
+        get_org_cold_storage_path,
+    )
+
     from .cold_storage import (
-        ColdStorageConfig,
         get_duckdb_connection,
-        get_org_cold_s3_path,
+        get_duckdb_parquet_path,
         is_duckdb_available,
     )
 
     if not is_duckdb_available():
         return None
 
-    config = ColdStorageConfig.from_settings()
-    if not config.bucket:
+    storage = get_cold_storage_backend()
+    if not storage:
         return None
 
     date_str = log_time.strftime("%Y%m%d")
-    s3_path = get_org_cold_s3_path(config, "logs_logevent", organization_id, date_str)
+    relative_path = get_org_cold_storage_path(
+        "logs_logevent", organization_id, date_str
+    )
+    parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
     try:
-        duck_conn = get_duckdb_connection(config)
+        duck_conn = get_duckdb_connection(storage)
         try:
             sql = f"""
                 SELECT id, trace_id, organization_id, project_id, span_id,
                        level, severity_number, body, service, environment, host, data
-                FROM read_parquet('{s3_path}')
+                FROM read_parquet('{parquet_path}')
                 WHERE id = $1 AND organization_id = $2
                 LIMIT 1;
             """

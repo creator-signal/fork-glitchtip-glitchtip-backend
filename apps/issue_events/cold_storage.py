@@ -11,9 +11,10 @@ from uuid import UUID
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
-    ColdStorageConfig,
+    get_cold_storage_backend,
     get_duckdb_connection,
-    get_org_cold_s3_path,
+    get_duckdb_parquet_path,
+    get_org_cold_storage_path,
     is_duckdb_available,
     parse_json_field,
     parse_json_list_field,
@@ -147,22 +148,19 @@ def _row_to_issue_event(row: tuple) -> IssueEventRow:
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
-    config: ColdStorageConfig | None = None,
 ) -> list[tuple[int, str]]:
-    """Archive an issue event partition to S3 as per-org Parquet files."""
+    """Archive an issue event partition to cold storage as per-org Parquet files."""
     return _archive_partition_per_org(
         partition_name,
         date_str,
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
-        config,
     )
 
 
 def archive_and_swap_partition(
     partition_name: str,
-    config: ColdStorageConfig | None = None,
 ) -> bool:
     """Full archival workflow for issue event partitions."""
     return _archive_and_swap_partition(
@@ -170,7 +168,6 @@ def archive_and_swap_partition(
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
-        config,
     )
 
 
@@ -191,11 +188,14 @@ def query_cold_events(
     if not is_duckdb_available():
         return []
 
-    config = ColdStorageConfig.from_settings()
-    if not config.bucket:
+    storage = get_cold_storage_backend()
+    if not storage:
         return []
 
-    glob_path = f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{organization_id}/*.parquet"
+    relative_glob = (
+        f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{organization_id}/*.parquet"
+    )
+    glob_path = get_duckdb_parquet_path(storage, relative_glob)
 
     # Build WHERE clause with DuckDB $N positional parameters
     where_parts = ["organization_id = $1"]
@@ -218,7 +218,7 @@ def query_cold_events(
     where_sql = " AND ".join(where_parts)
 
     try:
-        duck_conn = get_duckdb_connection(config)
+        duck_conn = get_duckdb_connection(storage)
         try:
             sql = f"""
                 SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
@@ -253,20 +253,21 @@ def get_event_from_cold(
     if not is_duckdb_available():
         return None
 
-    config = ColdStorageConfig.from_settings()
-    if not config.bucket:
+    storage = get_cold_storage_backend()
+    if not storage:
         return None
 
     date_str = event_time.strftime("%Y%m%d")
-    s3_path = get_org_cold_s3_path(config, TABLE_NAME, organization_id, date_str)
+    relative_path = get_org_cold_storage_path(TABLE_NAME, organization_id, date_str)
+    parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
     try:
-        duck_conn = get_duckdb_connection(config)
+        duck_conn = get_duckdb_connection(storage)
         try:
             sql = f"""
                 SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
                        type, level, title, transaction, data, tags, hashes
-                FROM read_parquet('{s3_path}')
+                FROM read_parquet('{parquet_path}')
                 WHERE id = $1 AND organization_id = $2
                 LIMIT 1;
             """

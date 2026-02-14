@@ -12,8 +12,6 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from glitchtip.cold_storage import (
-    ColdStorageConfig,
-    get_org_cold_s3_path,
     get_org_cold_storage_path,
     is_duckdb_available,
 )
@@ -24,19 +22,6 @@ from ..cold_storage import (
     IssueEventRow,
     query_cold_events,
 )
-
-
-class ColdStorageConfigTestCase(TestCase):
-    """Test cold storage configuration (shared infra)."""
-
-    def test_config_from_settings(self):
-        config = ColdStorageConfig.from_settings()
-        self.assertIsInstance(config, ColdStorageConfig)
-
-    @override_settings(GLITCHTIP_COLD_STORAGE_BUCKET="test-bucket")
-    def test_config_custom_bucket(self):
-        config = ColdStorageConfig.from_settings()
-        self.assertEqual(config.bucket, "test-bucket")
 
 
 class DuckDBAvailabilityTestCase(TestCase):
@@ -68,26 +53,23 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_disabled_without_bucket(self):
         self.assertFalse(is_duckdb_available())
 
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
+    )
+    def test_auto_enabled_with_cold_storage_dir(self):
+        self.assertTrue(is_duckdb_available())
+
 
 class ColdStoragePathTestCase(TestCase):
     """Test cold storage path generation for issue events."""
-
-    def test_org_cold_s3_path(self):
-        config = ColdStorageConfig(
-            bucket="my-bucket",
-            endpoint_url=None,
-            access_key_id=None,
-            secret_access_key=None,
-        )
-        path = get_org_cold_s3_path(config, TABLE_NAME, 123, "20260115")
-        self.assertEqual(
-            path,
-            "s3://my-bucket/cold_storage/issue_events_issueevent/org_123/20260115.parquet",
-        )
 
     def test_org_cold_storage_path(self):
         path = get_org_cold_storage_path(TABLE_NAME, 456, "20260120")
@@ -249,6 +231,7 @@ class MaintainPartitionsSkipTestCase(TestCase):
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_no_skip_without_duckdb(self):
         """When DuckDB is not available, standard drop should proceed."""
