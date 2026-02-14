@@ -1,38 +1,66 @@
 import json
 import logging
 
+from django.conf import settings
 from django.core.exceptions import FieldError
 from django.http import Http404
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import data, serializers
-from .auth import validate_token
+from .auth import GlitchTipTokenVerifier
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("glitchtip", stateless_http=True)
+mcp = FastMCP(
+    "glitchtip",
+    stateless_http=True,
+    token_verifier=GlitchTipTokenVerifier(),
+    auth=AuthSettings(
+        issuer_url=settings.GLITCHTIP_URL.geturl(),
+        resource_server_url=settings.GLITCHTIP_URL.geturl(),
+    ),
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    ),
+)
 
 
 def _error(message: str) -> str:
     return json.dumps({"error": message})
 
 
-async def _auth(token: str, required_scopes: list[str]) -> int:
-    """Validate token, check scopes, and return user_id.
+def _get_user_id() -> int:
+    """Extract user_id from the MCP auth context.
 
-    Raises ValueError if the token is invalid or lacks required scopes.
+    Raises ValueError if the request is not authenticated.
     """
-    user_id, scopes = await validate_token(token)
-    if not any(s in required_scopes for s in scopes):
+    access_token = get_access_token()
+    if not access_token:
+        raise ValueError("Not authenticated")
+    return int(access_token.client_id)
+
+
+def _check_scopes(required_scopes: list[str]) -> int:
+    """Get user_id from auth context and verify the token has required scopes.
+
+    Raises ValueError if not authenticated or lacking scopes.
+    """
+    access_token = get_access_token()
+    if not access_token:
+        raise ValueError("Not authenticated")
+    if not any(s in required_scopes for s in access_token.scopes):
         raise ValueError("Token lacks required scope")
-    return user_id
+    return int(access_token.client_id)
 
 
 @mcp.tool()
-async def list_organizations(token: str) -> str:
+async def list_organizations() -> str:
     """List all organizations the authenticated user has access to."""
     try:
-        user_id = await _auth(token, ["org:read", "org:write", "org:admin"])
+        user_id = _check_scopes(["org:read", "org:write", "org:admin"])
         orgs = await data.get_organizations(user_id)
         return json.dumps([serializers.serialize_organization(o) for o in orgs])
     except ValueError as e:
@@ -40,10 +68,10 @@ async def list_organizations(token: str) -> str:
 
 
 @mcp.tool()
-async def list_projects(token: str, organization_slug: str) -> str:
+async def list_projects(organization_slug: str) -> str:
     """List all projects in an organization."""
     try:
-        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
+        user_id = _check_scopes(["project:read", "project:write", "project:admin"])
         projects = await data.get_projects(user_id, organization_slug)
         return json.dumps([serializers.serialize_project(p) for p in projects])
     except ValueError as e:
@@ -52,7 +80,6 @@ async def list_projects(token: str, organization_slug: str) -> str:
 
 @mcp.tool()
 async def list_issues(
-    token: str,
     organization_slug: str,
     project_slug: str | None = None,
     query: str | None = None,
@@ -66,7 +93,6 @@ async def list_issues(
     current problems.
 
     Args:
-        token: API authentication token
         organization_slug: Organization slug
         project_slug: Optional project slug to filter by
         query: Search query. Examples: "is:unresolved", "is:resolved",
@@ -76,7 +102,7 @@ async def list_issues(
         limit: Max issues to return (default 25, max 100)
     """
     try:
-        user_id = await _auth(token, ["event:read", "event:write", "event:admin"])
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
         if limit < 1:
             return _error("limit must be at least 1")
         issues = await data.get_issues(
@@ -97,10 +123,10 @@ async def list_issues(
 
 
 @mcp.tool()
-async def get_issue(token: str, issue_id: int) -> str:
+async def get_issue(issue_id: int) -> str:
     """Get details for a single issue by ID."""
     try:
-        user_id = await _auth(token, ["event:read", "event:write", "event:admin"])
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
         issue = await data.get_issue(user_id, issue_id)
         if issue is None:
             return _error("Issue not found")
@@ -110,10 +136,10 @@ async def get_issue(token: str, issue_id: int) -> str:
 
 
 @mcp.tool()
-async def get_latest_event(token: str, issue_id: int) -> str:
+async def get_latest_event(issue_id: int) -> str:
     """Get the latest event for an issue."""
     try:
-        user_id = await _auth(token, ["event:read", "event:write", "event:admin"])
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
         event = await data.get_latest_event(user_id, issue_id)
         if event is None:
             return _error("No events found for this issue")
@@ -123,7 +149,7 @@ async def get_latest_event(token: str, issue_id: int) -> str:
 
 
 @mcp.tool()
-async def get_event(token: str, event_id: str) -> str:
+async def get_event(event_id: str) -> str:
     """Look up a specific event by its ID and return it with its parent issue.
 
     Accepts either format:
@@ -133,11 +159,10 @@ async def get_event(token: str, event_id: str) -> str:
     Use this when a user provides an event ID from a URL, log, or alert.
 
     Args:
-        token: API authentication token
         event_id: Event UUID (either GlitchTip id or Sentry SDK event_id)
     """
     try:
-        user_id = await _auth(token, ["event:read", "event:write", "event:admin"])
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
         event = await data.get_event(user_id, event_id)
         if event is None:
             return _error("Event not found")
@@ -150,19 +175,17 @@ async def get_event(token: str, event_id: str) -> str:
 
 @mcp.tool()
 async def list_alerts(
-    token: str,
     organization_slug: str,
     project_slug: str | None = None,
 ) -> str:
     """List alert rules for an organization, optionally filtered by project.
 
     Args:
-        token: API authentication token
         organization_slug: Organization slug
         project_slug: Optional project slug to filter by
     """
     try:
-        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
+        user_id = _check_scopes(["project:read", "project:write", "project:admin"])
         alerts = await data.get_alerts(
             user_id, organization_slug, project_slug=project_slug
         )
@@ -172,10 +195,10 @@ async def list_alerts(
 
 
 @mcp.tool()
-async def list_monitors(token: str, organization_slug: str) -> str:
+async def list_monitors(organization_slug: str) -> str:
     """List uptime monitors for an organization."""
     try:
-        user_id = await _auth(token, ["project:read", "project:write", "project:admin"])
+        user_id = _check_scopes(["project:read", "project:write", "project:admin"])
         monitors = await data.get_monitors(user_id, organization_slug)
         return json.dumps([serializers.serialize_monitor(m) for m in monitors])
     except ValueError as e:
