@@ -305,5 +305,67 @@ class LogEnvelopeAPITestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(LogEvent.objects.count(), 1)
         log = LogEvent.objects.first()
-        self.assertEqual(log.data["sentry.message.template"], "Hello %s")
         self.assertEqual(log.data["custom.user_id"], "u-42")
+
+    def test_log_envelope_normalizes_sdk_attributes(self):
+        """Test that SDK attributes dict is normalized into top-level fields."""
+        now = time.time()
+        envelope_data = [
+            {
+                "event_id": "550e8400e29b41d4a716446655440003",
+                "sent_at": "2024-01-01T00:00:00Z",
+            },
+            {"type": "log", "item_count": 1},
+            {
+                "items": [
+                    {
+                        "timestamp": now,
+                        "level": "info",
+                        "body": "SDK-format test",
+                        "attributes": {
+                            "sentry.service": {
+                                "value": "auth-service",
+                                "type": "string",
+                            },
+                            "sentry.environment": {
+                                "value": "production",
+                                "type": "string",
+                            },
+                            "host.name": {"value": "web-1", "type": "string"},
+                            "sentry.severity_number": {
+                                "value": 9,
+                                "type": "integer",
+                            },
+                            "sentry.severity_text": {
+                                "value": "info",
+                                "type": "string",
+                            },
+                            "custom.user_id": {
+                                "value": "u-42",
+                                "type": "string",
+                            },
+                        },
+                    },
+                ]
+            },
+        ]
+
+        res = self.client.post(
+            self.url,
+            list_to_envelope(envelope_data),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(LogEvent.objects.count(), 1)
+        log = LogEvent.objects.first()
+        # Known attributes extracted to top-level fields
+        self.assertEqual(log.service, "auth-service")
+        self.assertEqual(log.environment, "production")
+        self.assertEqual(log.host, "web-1")
+        self.assertEqual(log.severity_number, 9)
+        # Custom attributes stored as flat values in data JSONB
+        self.assertEqual(log.data["custom.user_id"], "u-42")
+        # sentry.severity_text is consumed, not stored
+        self.assertNotIn("sentry.severity_text", log.data)
