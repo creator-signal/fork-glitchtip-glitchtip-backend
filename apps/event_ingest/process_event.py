@@ -346,6 +346,12 @@ def generate_tags(event: TaskIssueEvent) -> dict[str, str]:
     if server_name := event.server_name:
         tags["server_name"] = server_name
 
+    if csp := event.csp:
+        tags["effective-directive"] = csp.effective_directive
+        tags["blocked-uri"] = csp.blocked_uri
+        if csp.status_code:
+            tags["status-code"] = str(csp.status_code)
+
     # Exclude None values
     return {key: value for key, value in tags.items() if value}
 
