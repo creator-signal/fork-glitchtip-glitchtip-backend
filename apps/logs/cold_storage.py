@@ -45,6 +45,8 @@ EXPORT_COLUMN_TYPES = {
     "severity_number": "SMALLINT",
     "body": "VARCHAR",
     "service": "VARCHAR",
+    "environment": "VARCHAR",
+    "host": "VARCHAR",
     "data": "VARCHAR",
 }
 
@@ -236,10 +238,10 @@ def archive_partition_per_org(
                 cursor.execute(
                     f"""
                     SELECT id, trace_id, organization_id, project_id, span_id,
-                           level, severity_number, body, service, data
+                           level, severity_number, body, service, environment, host, data
                     FROM {partition_name}
                     WHERE organization_id = %s
-                    ORDER BY service, level, id
+                    ORDER BY environment, service, host, level, id
                     """,
                     [org_id],
                 )

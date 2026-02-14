@@ -12,6 +12,7 @@ from pydantic import (
     AliasChoices,
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     JsonValue,
     RootModel,
     ValidationError,
@@ -579,14 +580,81 @@ class InterchangeTransactionEvent(InterchangeEvent):
 # Log Envelope Schemas
 
 
-class LogItemSchema(LaxIngestSchema):
-    """Schema for individual log items from sentry-sdk log envelope."""
+class LogItemSchema(BaseModel):
+    """Schema for individual log items from sentry-sdk log envelope.
+
+    Inherits from BaseModel (not ninja Schema) so that extra="allow"
+    works correctly — ninja's DjangoGetter wrapper strips unknown fields.
+
+    The SDK sends logs with a nested ``attributes`` dict of typed values::
+
+        {"attributes": {"sentry.service": {"value": "web", "type": "string"}, ...}}
+
+    The ``normalize_attributes`` validator flattens this into top-level fields
+    (service, environment, host, severity_number) and flat extra keys stored
+    in the LogEvent.data JSONB column by process_log_events.
+    """
+
+    model_config = ConfigDict(coerce_numbers_to_str=True, extra="allow")
 
     timestamp: float  # Unix timestamp with fractional seconds
     level: str  # trace, debug, info, warn, error, fatal
     body: str  # The log message
+    service: str = ""
+    environment: str = ""
+    host: str = ""
     trace_id: str | None = None
+    span_id: str | None = None  # OTel span ID (16 hex chars)
     severity_number: int | None = None  # OTel severity number (1-24)
+
+    # Maps SDK attribute keys to top-level schema fields.
+    _ATTRIBUTE_FIELD_MAP: typing.ClassVar[dict[str, str]] = {
+        "sentry.service": "service",
+        "service.name": "service",
+        "sentry.environment": "environment",
+        "deployment.environment.name": "environment",
+        "host.name": "host",
+        "sentry.severity_number": "severity_number",
+    }
+    # Attributes consumed during normalization (not stored in data).
+    _ATTRIBUTE_SKIP: typing.ClassVar[set[str]] = {
+        "sentry.severity_text",
+        "sentry.message.template",
+    }
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_attributes(cls, values: Any) -> Any:
+        """Flatten the SDK ``attributes`` dict into top-level fields.
+
+        Extracts known Sentry/OTel attribute keys into their corresponding
+        schema fields, and promotes remaining attributes as flat extras so
+        they end up in the JSONB ``data`` column.
+        """
+        if not isinstance(values, dict):
+            return values
+
+        attributes = values.pop("attributes", None)
+        if not attributes or not isinstance(attributes, dict):
+            return values
+
+        for attr_key, attr_val in attributes.items():
+            # Extract plain value from typed {"value": ..., "type": ...} format
+            if isinstance(attr_val, dict) and "value" in attr_val:
+                plain_value = attr_val["value"]
+            else:
+                plain_value = attr_val
+
+            # Map known attributes to schema fields
+            if field_name := cls._ATTRIBUTE_FIELD_MAP.get(attr_key):
+                # Only set if the field hasn't been explicitly provided
+                if not values.get(field_name):
+                    values[field_name] = plain_value
+            elif attr_key not in cls._ATTRIBUTE_SKIP:
+                # Promote as top-level extra (goes into JSONB data)
+                values[attr_key] = plain_value
+
+        return values
 
     @field_validator("level")
     @classmethod

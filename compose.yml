@@ -10,6 +10,7 @@ x-environment: &default-environment
   #IS_LOAD_TEST: "true"
   VTASKS_CONCURRENCY: 4
   LOG_LEVEL: INFO
+  GLITCHTIP_ENABLE_MCP: "true"
 
 x-depends_on: &default-depends_on
   - postgres
