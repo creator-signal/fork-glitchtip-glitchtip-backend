@@ -27,11 +27,11 @@ def cleanup_old_logs():
         GLITCHTIP_LOGS_HOT_DAYS: Days to keep in hot storage (default 7)
         GLITCHTIP_LOGS_COLD_DAYS: Days to keep in cold storage (default 90)
     """
-    if not getattr(settings, "GLITCHTIP_ENABLE_LOGS", False):
+    if not settings.GLITCHTIP_ENABLE_LOGS:
         return
 
-    hot_days = getattr(settings, "GLITCHTIP_LOGS_HOT_DAYS", 7)
-    cold_days = getattr(settings, "GLITCHTIP_LOGS_COLD_DAYS", 90)
+    hot_days = settings.GLITCHTIP_LOGS_HOT_DAYS
+    cold_days = settings.GLITCHTIP_LOGS_COLD_DAYS
 
     if is_duckdb_available():
         archive_and_cleanup_partitions(

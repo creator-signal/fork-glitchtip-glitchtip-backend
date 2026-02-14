@@ -23,11 +23,12 @@ High-scale deployments can disable manual cleanup and use S3 lifecycle policies.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.files.storage import storages
 from django.db import connection
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class ColdStorageConfig:
     def from_settings(cls) -> "ColdStorageConfig":
         # Default to AWS_STORAGE_BUCKET_NAME (shared with media/sourcemaps)
         # Users can override with GLITCHTIP_COLD_STORAGE_BUCKET for separation
-        bucket = getattr(settings, "GLITCHTIP_COLD_STORAGE_BUCKET", None)
+        bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
         if not bucket:
             bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
 
@@ -96,12 +97,12 @@ def is_duckdb_available() -> bool:
     Override with GLITCHTIP_ENABLE_DUCKDB=false to disable even when
     storage exists (e.g., horizontally-scaled PaaS with S3 for media only).
     """
-    override = getattr(settings, "GLITCHTIP_ENABLE_DUCKDB", None)
+    override = settings.GLITCHTIP_ENABLE_DUCKDB
     if override is not None:
         return str(override).lower() == "true"
 
     # Auto-detect: enable if a storage bucket is available
-    bucket = getattr(settings, "GLITCHTIP_COLD_STORAGE_BUCKET", None)
+    bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
     if not bucket:
         bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
     return bool(bucket)
@@ -364,10 +365,6 @@ def get_partitions_older_than(
 
     Returns list of (partition_name, partition_date) tuples.
     """
-    from datetime import timedelta
-
-    from django.utils import timezone
-
     cutoff_date = timezone.now() - timedelta(days=days)
 
     # Build regex pattern based on whether we're looking for views or tables
@@ -435,10 +432,6 @@ def cleanup_cold_storage_for_org(
         logger.warning("No storage backend available for cleanup")
         return 0
 
-    from datetime import timedelta
-
-    from django.utils import timezone
-
     cutoff = timezone.now() - timedelta(days=retention_days)
     deleted_count = 0
 
@@ -477,13 +470,12 @@ def cleanup_all_cold_storage(
     Returns:
         Total number of files deleted
     """
-    cleanup_enabled = getattr(settings, "GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED", True)
-    if not cleanup_enabled:
+    if not settings.GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED:
         logger.info("Cold storage cleanup disabled, skipping (use lifecycle policies)")
         return 0
 
     if retention_days is None:
-        retention_days = getattr(settings, "GLITCHTIP_COLD_STORAGE_RETENTION_DAYS", 90)
+        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
 
     if config is None:
         config = ColdStorageConfig.from_settings()
@@ -564,7 +556,7 @@ def archive_and_cleanup_partitions(
         config = ColdStorageConfig.from_settings()
 
     if retention_days is None:
-        retention_days = getattr(settings, "GLITCHTIP_COLD_STORAGE_RETENTION_DAYS", 90)
+        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
 
     # Archive hot -> cold
     archived = 0
@@ -601,3 +593,193 @@ def archive_and_cleanup_partitions(
         logger.info(f"{table_name} cold cleanup: {deleted} files deleted")
 
     return (archived, failed, deleted)
+
+
+def delete_org_cold_storage(
+    org_id: int,
+    table_name: str,
+    config: ColdStorageConfig | None = None,
+) -> int:
+    """
+    Delete all cold storage files for an organization.
+
+    Used when an organization is being permanently deleted.
+    Lists files under the org's prefix and deletes them all.
+
+    Falls back to a date sweep (365 days) if listdir is unavailable.
+
+    Returns:
+        Number of files deleted
+    """
+    if config is None:
+        config = ColdStorageConfig.from_settings()
+
+    storage = get_cold_storage_backend(config)
+    if not storage:
+        logger.warning("No storage backend available for org cold storage deletion")
+        return 0
+
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    deleted_count = 0
+
+    # Try listing files under the org prefix
+    try:
+        _dirs, files = storage.listdir(org_prefix)
+        for filename in files:
+            file_path = f"{org_prefix}/{filename}"
+            try:
+                storage.delete(file_path)
+                deleted_count += 1
+            except Exception:
+                logger.warning("Failed to delete cold file %s", file_path)
+    except (NotImplementedError, OSError):
+        # listdir not supported — fall back to date sweep
+        now = timezone.now()
+        for day_offset in range(365):
+            file_date = now - timedelta(days=day_offset)
+            date_str = file_date.strftime("%Y%m%d")
+            storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
+            try:
+                if storage.exists(storage_path):
+                    storage.delete(storage_path)
+                    deleted_count += 1
+            except Exception:
+                pass
+
+    if deleted_count:
+        logger.info(
+            "Deleted %d cold files for org %d (%s)", deleted_count, org_id, table_name
+        )
+
+    return deleted_count
+
+
+def rewrite_parquet_excluding_project(
+    org_id: int,
+    project_id: int | None = None,
+    issue_ids: list[int] | None = None,
+    table_name: str = "logs_logevent",
+    column_types: dict[str, str] | None = None,
+    config: ColdStorageConfig | None = None,
+) -> int:
+    """
+    Rewrite Parquet files for an org, excluding a deleted project's data.
+
+    For logs_logevent: filters by project_id != deleted project.
+    For issue_events_issueevent: filters by issue_id NOT IN (deleted project's issues).
+
+    Processes one file at a time to bound memory usage.
+
+    Args:
+        org_id: Organization ID
+        project_id: Project ID to exclude (used for logs)
+        issue_ids: Issue IDs to exclude (used for issue events)
+        table_name: Table name for path construction
+        column_types: DuckDB column types for the table
+        config: Cold storage configuration
+
+    Returns:
+        Number of files rewritten or deleted
+    """
+    if not is_duckdb_available():
+        return 0
+
+    if config is None:
+        config = ColdStorageConfig.from_settings()
+
+    storage = get_cold_storage_backend(config)
+    if not storage:
+        return 0
+
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    files_to_process = []
+
+    # Collect file list
+    try:
+        _dirs, files = storage.listdir(org_prefix)
+        files_to_process = [f for f in files if f.endswith(".parquet")]
+    except (NotImplementedError, OSError):
+        # Fall back to date sweep
+        now = timezone.now()
+        for day_offset in range(365):
+            file_date = now - timedelta(days=day_offset)
+            date_str = file_date.strftime("%Y%m%d")
+            storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
+            try:
+                if storage.exists(storage_path):
+                    files_to_process.append(f"{date_str}.parquet")
+            except Exception:
+                pass
+
+    if not files_to_process:
+        return 0
+
+    # Build the WHERE filter
+    if table_name == "issue_events_issueevent" and issue_ids:
+        placeholders = ", ".join(str(int(iid)) for iid in issue_ids)
+        where_clause = f"WHERE issue_id NOT IN ({placeholders})"
+    elif project_id is not None:
+        where_clause = f"WHERE project_id != {int(project_id)}"
+    else:
+        return 0
+
+    rewritten_count = 0
+
+    for filename in files_to_process:
+        date_str = filename.replace(".parquet", "")
+        s3_path = get_org_cold_s3_path(config, table_name, org_id, date_str)
+        storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
+
+        try:
+            duck_conn = get_duckdb_connection(config)
+            try:
+                # Count remaining rows after filtering
+                count_sql = (
+                    f"SELECT COUNT(*) FROM read_parquet('{s3_path}') {where_clause}"
+                )
+                remaining = duck_conn.execute(count_sql).fetchone()[0]
+
+                if remaining == 0:
+                    # No rows left — delete the file
+                    duck_conn.close()
+                    storage.delete(storage_path)
+                    rewritten_count += 1
+                    logger.debug("Deleted empty cold file %s", storage_path)
+                    continue
+
+                # Check if any rows were actually filtered out
+                total_sql = f"SELECT COUNT(*) FROM read_parquet('{s3_path}')"
+                total = duck_conn.execute(total_sql).fetchone()[0]
+
+                if remaining == total:
+                    # No data from this project in this file, skip
+                    continue
+
+                # Rewrite the file excluding the project's data
+                rewrite_sql = f"""
+                    COPY (
+                        SELECT * FROM read_parquet('{s3_path}')
+                        {where_clause}
+                    ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """
+                duck_conn.execute(rewrite_sql)
+                rewritten_count += 1
+                logger.debug("Rewrote cold file %s", storage_path)
+            finally:
+                duck_conn.close()
+        except Exception as e:
+            error_str = str(e)
+            if "No files found" in error_str or "Could not open" in error_str:
+                continue
+            logger.warning("Error rewriting cold file %s: %s", storage_path, e)
+
+    if rewritten_count:
+        logger.info(
+            "Rewrote %d cold files for org %d excluding project %s (%s)",
+            rewritten_count,
+            org_id,
+            project_id or f"issues={issue_ids}",
+            table_name,
+        )
+
+    return rewritten_count
