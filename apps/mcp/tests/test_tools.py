@@ -1,9 +1,12 @@
+from unittest.mock import patch
+
 from asgiref.sync import async_to_sync
 from django.test import TestCase
 from django.utils import timezone
+from mcp.server.auth.provider import AccessToken
 from model_bakery import baker
 
-from apps.mcp.auth import validate_token
+from apps.mcp.auth import GlitchTipTokenVerifier, validate_token
 from apps.mcp.data import (
     get_alerts,
     get_event,
@@ -22,7 +25,7 @@ from apps.mcp.serializers import (
     serialize_organization,
     serialize_project,
 )
-from apps.mcp.server import _auth
+from apps.mcp.server import _check_scopes
 
 
 class ValidateTokenTest(TestCase):
@@ -46,33 +49,74 @@ class ValidateTokenTest(TestCase):
         with self.assertRaises(ValueError):
             async_to_sync(validate_token)(token_obj.token)
 
-    def test_scope_enforcement(self):
-        """Token without required scope should be rejected."""
+
+class GlitchTipTokenVerifierTest(TestCase):
+    def setUp(self):
+        self.verifier = GlitchTipTokenVerifier()
+
+    def test_valid_token(self):
         user = baker.make("users.user", is_active=True)
         token_obj = baker.make("api_tokens.APIToken", user=user)
         token_obj.add_permission("project:read")
 
-        # Should pass with matching scope
-        user_id = async_to_sync(_auth)(token_obj.token, ["project:read"])
-        self.assertEqual(user_id, user.id)
+        result = async_to_sync(self.verifier.verify_token)(token_obj.token)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.client_id, str(user.id))
+        self.assertIn("project:read", result.scopes)
+        self.assertEqual(result.token, token_obj.token)
 
-        # Should pass with broader scope list (OR logic)
-        user_id = async_to_sync(_auth)(
-            token_obj.token, ["project:read", "project:write"]
+    def test_invalid_token_returns_none(self):
+        result = async_to_sync(self.verifier.verify_token)("invalid_token")
+        self.assertIsNone(result)
+
+    def test_inactive_user_returns_none(self):
+        user = baker.make("users.user", is_active=False)
+        token_obj = baker.make("api_tokens.APIToken", user=user)
+
+        result = async_to_sync(self.verifier.verify_token)(token_obj.token)
+        self.assertIsNone(result)
+
+
+class CheckScopesTest(TestCase):
+    def _mock_access_token(self, user_id, scopes):
+        return AccessToken(
+            token="test-token",
+            client_id=str(user_id),
+            scopes=scopes,
         )
-        self.assertEqual(user_id, user.id)
 
-        # Should fail when token lacks all required scopes
-        with self.assertRaises(ValueError):
-            async_to_sync(_auth)(token_obj.token, ["event:read"])
+    def test_scope_enforcement(self):
+        """Token without required scope should be rejected."""
+        user = baker.make("users.user", is_active=True)
+        token = self._mock_access_token(user.id, ["project:read"])
+
+        with patch("apps.mcp.server.get_access_token", return_value=token):
+            # Should pass with matching scope
+            user_id = _check_scopes(["project:read"])
+            self.assertEqual(user_id, user.id)
+
+            # Should pass with broader scope list (OR logic)
+            user_id = _check_scopes(["project:read", "project:write"])
+            self.assertEqual(user_id, user.id)
+
+            # Should fail when token lacks all required scopes
+            with self.assertRaises(ValueError):
+                _check_scopes(["event:read"])
 
     def test_no_scopes_rejected(self):
         """Token with no scopes should be rejected."""
         user = baker.make("users.user", is_active=True)
-        token_obj = baker.make("api_tokens.APIToken", user=user)
+        token = self._mock_access_token(user.id, [])
 
-        with self.assertRaises(ValueError):
-            async_to_sync(_auth)(token_obj.token, ["project:read"])
+        with patch("apps.mcp.server.get_access_token", return_value=token):
+            with self.assertRaises(ValueError):
+                _check_scopes(["project:read"])
+
+    def test_not_authenticated(self):
+        """Missing auth context should raise ValueError."""
+        with patch("apps.mcp.server.get_access_token", return_value=None):
+            with self.assertRaises(ValueError):
+                _check_scopes(["project:read"])
 
 
 class DataLayerTest(TestCase):
