@@ -6,6 +6,7 @@ from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LogLevel
 
+
 # Cardinality limiter for user-controlled strings in the hourly statistics table.
 #
 # LogProjectHourlyStatistic has a composite PK:
@@ -20,9 +21,6 @@ from .constants import LogLevel
 # Tradeoff: filtering stats by name may include collisions from
 # other values that hash to the same bucket. This is acceptable for
 # aggregate charts — exact per-value counts come from the logs table.
-HASH_BUCKETS = 256
-
-
 def compute_hash_bucket(name: str) -> int:
     """
     Hash a string to a bucket (0-255) for statistics aggregation.

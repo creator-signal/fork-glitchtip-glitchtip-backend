@@ -160,8 +160,8 @@ def _build_hot_where(
         params.extend(level_values)
 
     if service:
-        where_clauses.append("service ILIKE %s")
-        params.append(f"%{service}%")
+        where_clauses.append("service = %s")
+        params.append(service)
 
     if environment:
         where_clauses.append("environment = %s")
@@ -345,8 +345,8 @@ def query_cold_storage(
         where_parts.append(f"level IN ({placeholders})")
 
     if service:
-        params.append(f"%{service}%")
-        where_parts.append(f"service ILIKE ${len(params)}")
+        params.append(service)
+        where_parts.append(f"service = ${len(params)}")
 
     if environment:
         params.append(environment)
@@ -589,7 +589,9 @@ async def list_logs(
     Supports filtering by:
     - project: List of project IDs
     - level: List of log levels (trace, debug, info, warn, error, fatal)
-    - service: Service name (partial match)
+    - service: Service name (exact match)
+    - environment: Environment name (exact match)
+    - host: Host name (exact match)
     - traceId: Trace ID for correlation
     - query: Full-text search in log body
     - start/end: Time range filtering (defaults to last 7 days)
