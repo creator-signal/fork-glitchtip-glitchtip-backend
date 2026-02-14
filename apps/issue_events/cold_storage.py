@@ -217,6 +217,9 @@ def query_cold_events(
 
     where_sql = " AND ".join(where_parts)
 
+    params.append(int(limit))
+    limit_param = f"${len(params)}"
+
     try:
         duck_conn = get_duckdb_connection(storage)
         try:
@@ -226,7 +229,7 @@ def query_cold_events(
                 FROM read_parquet('{glob_path}')
                 WHERE {where_sql}
                 ORDER BY id DESC
-                LIMIT {int(limit)};
+                LIMIT {limit_param};
             """
             result = duck_conn.execute(sql, params)
             return [_row_to_issue_event(row) for row in result.fetchall()]
