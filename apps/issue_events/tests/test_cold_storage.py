@@ -259,5 +259,5 @@ class EventsHotDaysSettingTestCase(TestCase):
     """Test GLITCHTIP_EVENTS_HOT_DAYS setting."""
 
     def test_default_value(self):
-        hot_days = getattr(settings, "GLITCHTIP_EVENTS_HOT_DAYS", 30)
+        hot_days = settings.GLITCHTIP_EVENTS_HOT_DAYS
         self.assertEqual(hot_days, 30)

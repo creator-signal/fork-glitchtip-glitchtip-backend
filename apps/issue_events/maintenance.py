@@ -27,7 +27,7 @@ def cleanup_old_issue_events():
 
     from .cold_storage import ISSUE_EVENT_EXPORT_COLUMN_TYPES, ISSUE_EVENT_SELECT_SQL
 
-    hot_days = getattr(settings, "GLITCHTIP_EVENTS_HOT_DAYS", 30)
+    hot_days = settings.GLITCHTIP_EVENTS_HOT_DAYS
     archive_and_cleanup_partitions(
         table_name="issue_events_issueevent",
         hot_days=hot_days,
