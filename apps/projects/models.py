@@ -10,6 +10,7 @@ from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
 from apps.issue_events.models import Issue, IssueEvent
+from apps.logs.models import LogEvent
 from apps.observability.utils import clear_metrics_cache
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 
@@ -81,9 +82,13 @@ class Project(CreatedModel, SoftDeleteModel):
 
     def force_delete(self, *args, **kwargs):
         """Really delete the project and all related data."""
-        # bulk delete all events
+        # bulk delete all issue events
         events_qs = IssueEvent.objects.filter(issue__project=self)
         events_qs._raw_delete(events_qs.db)
+
+        # bulk delete all log events (avoids slow CASCADE on partitioned table)
+        logs_qs = LogEvent.objects.filter(project=self)
+        logs_qs._raw_delete(logs_qs.db)
 
         # bulk delete all issues in batches of 1k
         issues_qs = self.issues.order_by("id")

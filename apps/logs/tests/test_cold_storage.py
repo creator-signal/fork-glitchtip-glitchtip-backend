@@ -99,7 +99,7 @@ class ColdStoragePathTestCase(TestCase):
 
     def test_org_cold_storage_path(self):
         """Test storage-relative path (without bucket)."""
-        from ..cold_storage import get_org_cold_storage_path
+        from glitchtip.cold_storage import get_org_cold_storage_path
 
         path = get_org_cold_storage_path("logs_logevent", 456, "20260120")
         self.assertEqual(path, "cold_storage/logs_logevent/org_456/20260120.parquet")

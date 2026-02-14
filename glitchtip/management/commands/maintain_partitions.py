@@ -42,9 +42,14 @@ class Command(BaseCommand):
             )
 
             # Cleanup old partitions
-            # Skip logs - cleanup_old_logs() handles archival-then-drop separately
+            # Skip logs and issue_events when cold storage handles archival-then-drop
             if "logs_logevent" in table:
                 continue
+            if "issue_events_issueevent" in table:
+                from glitchtip.cold_storage import is_duckdb_available
+
+                if is_duckdb_available():
+                    continue
 
             max_days = settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS
             if "uptime" in table:
