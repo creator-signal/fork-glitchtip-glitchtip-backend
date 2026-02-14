@@ -272,3 +272,38 @@ class LogEnvelopeAPITestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(res.status_code, 200)
         # Log should be created
         self.assertEqual(LogEvent.objects.count(), 1)
+
+    def test_log_envelope_preserves_extra_attributes(self):
+        """Test that arbitrary SDK attributes survive schema validation into JSONB data."""
+        now = time.time()
+        envelope_data = [
+            {
+                "event_id": "550e8400e29b41d4a716446655440002",
+                "sent_at": "2024-01-01T00:00:00Z",
+            },
+            {"type": "log", "item_count": 1},
+            {
+                "items": [
+                    {
+                        "timestamp": now,
+                        "level": "info",
+                        "body": "Test log with extras",
+                        "sentry.message.template": "Hello %s",
+                        "custom.user_id": "u-42",
+                    },
+                ]
+            },
+        ]
+
+        res = self.client.post(
+            self.url,
+            list_to_envelope(envelope_data),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(LogEvent.objects.count(), 1)
+        log = LogEvent.objects.first()
+        self.assertEqual(log.data["sentry.message.template"], "Hello %s")
+        self.assertEqual(log.data["custom.user_id"], "u-42")
