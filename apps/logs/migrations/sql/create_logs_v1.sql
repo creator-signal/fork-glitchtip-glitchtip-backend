@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS logs_logevent (
     -- Variable-width fields (varchar, text, jsonb)
     body TEXT NOT NULL,
     service VARCHAR(255) NOT NULL DEFAULT '',
+    environment VARCHAR(255) NOT NULL DEFAULT '',
+    host VARCHAR(255) NOT NULL DEFAULT '',
     data JSONB NOT NULL DEFAULT '{}',
 
     -- Primary Key: Composite (id, organization_id)
@@ -63,8 +65,16 @@ CREATE INDEX IF NOT EXISTS logevent_trace_id_idx
     WHERE trace_id IS NOT NULL;
 
 -- Service filtering (common filter in log queries)
-CREATE INDEX IF NOT EXISTS logevent_service_idx
+CREATE INDEX IF NOT EXISTS logevent_org_svc_idx
     ON logs_logevent (organization_id, service, id DESC);
+
+-- Environment filtering
+CREATE INDEX IF NOT EXISTS logevent_org_env_idx
+    ON logs_logevent (organization_id, environment, id DESC);
+
+-- Host filtering
+CREATE INDEX IF NOT EXISTS logevent_org_host_idx
+    ON logs_logevent (organization_id, host, id DESC);
 
 -- Full-text search on body using trigrams (for ILIKE queries)
 -- Requires pg_trgm extension (CREATE EXTENSION IF NOT EXISTS pg_trgm)

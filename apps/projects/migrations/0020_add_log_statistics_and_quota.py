@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from django.db import migrations
+import django.db.models.deletion
+from django.db import migrations, models
 
 
 def load_sql(filename):
@@ -17,8 +18,68 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql=load_sql("create_log_stats.sql"),
-            reverse_sql="DROP TABLE IF EXISTS projects_logprojecthourlystatistic CASCADE;",
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name="LogProjectHourlyStatistic",
+                    fields=[
+                        ("date", models.DateTimeField()),
+                        ("count", models.PositiveIntegerField()),
+                        ("level", models.PositiveSmallIntegerField()),
+                        (
+                            "service_bucket",
+                            models.PositiveSmallIntegerField(
+                                default=0,
+                                help_text="Hash bucket for service name (0-255)",
+                            ),
+                        ),
+                        (
+                            "environment_bucket",
+                            models.PositiveSmallIntegerField(
+                                default=0,
+                                help_text="Hash bucket for environment name (0-255)",
+                            ),
+                        ),
+                        (
+                            "pk",
+                            models.CompositePrimaryKey(
+                                "project",
+                                "organization",
+                                "date",
+                                "level",
+                                "service_bucket",
+                                "environment_bucket",
+                                blank=True,
+                                editable=False,
+                                primary_key=True,
+                                serialize=False,
+                            ),
+                        ),
+                        (
+                            "organization",
+                            models.ForeignKey(
+                                on_delete=django.db.models.deletion.CASCADE,
+                                to="organizations_ext.organization",
+                            ),
+                        ),
+                        (
+                            "project",
+                            models.ForeignKey(
+                                on_delete=django.db.models.deletion.CASCADE,
+                                to="projects.project",
+                            ),
+                        ),
+                    ],
+                    options={
+                        "abstract": False,
+                    },
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=load_sql("create_log_stats.sql"),
+                    reverse_sql="DROP TABLE IF EXISTS projects_logprojecthourlystatistic CASCADE;",
+                ),
+            ],
         ),
     ]

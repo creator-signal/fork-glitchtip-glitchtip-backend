@@ -6,36 +6,34 @@ from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LogLevel
 
-# Cardinality limiter for service names in the hourly statistics table.
+
+# Cardinality limiter for user-controlled strings in the hourly statistics table.
 #
 # LogProjectHourlyStatistic has a composite PK:
-#   (project, organization, date, level, service_bucket)
+#   (project, organization, date, level, service_bucket, environment_bucket)
 #
-# Without bucketing, each unique service name would create its own rows.
-# If service names are high-cardinality (e.g. auto-generated, UUIDs, or
+# Without bucketing, each unique name would create its own rows.
+# If names are high-cardinality (e.g. auto-generated, UUIDs, or
 # per-request), the stats table would grow unboundedly. Hashing into 256
-# buckets caps the worst case at 256 * 6 levels * 24 hours = ~37k rows
-# per project per day, regardless of how many distinct services exist.
+# buckets caps the worst case at 256^2 * 6 levels * 24 hours = ~9.4M rows
+# per project per day, regardless of how many distinct values exist.
 #
-# Tradeoff: filtering stats by service name may include collisions from
-# other services that hash to the same bucket. This is acceptable for
-# aggregate charts — exact per-service counts come from the logs table.
-SERVICE_HASH_BUCKETS = 256
-
-
-def compute_service_hash(service_name: str) -> int:
+# Tradeoff: filtering stats by name may include collisions from
+# other values that hash to the same bucket. This is acceptable for
+# aggregate charts — exact per-value counts come from the logs table.
+def compute_hash_bucket(name: str) -> int:
     """
-    Hash a service name to a bucket (0-255) for statistics aggregation.
+    Hash a string to a bucket (0-255) for statistics aggregation.
 
-    Used by LogProjectHourlyStatistic to bound row count when service
-    names have high cardinality. The stats API filters by bucket, so
-    queries like "show me stats for auth-service" hash the name and
-    filter on the bucket. Collisions are rare with typical service counts
-    and acceptable for aggregate charts.
+    Used by LogProjectHourlyStatistic to bound row count when
+    user-controlled strings (service, environment) have high cardinality.
+    The stats API filters by bucket, so queries like "show me stats for
+    auth-service" hash the name and filter on the bucket. Collisions are
+    rare with typical value counts and acceptable for aggregate charts.
     """
-    if not service_name:
+    if not name:
         return 0
-    digest = hashlib.md5(service_name.encode(), usedforsecurity=False).digest()
+    digest = hashlib.md5(name.encode(), usedforsecurity=False).digest()
     return digest[0]  # First byte gives 0-255
 
 
@@ -105,6 +103,18 @@ class LogEvent(models.Model):
         default="",
         help_text="Service name that emitted the log",
     )
+    environment = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Deployment environment (e.g. production, staging)",
+    )
+    host = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Host name that emitted the log",
+    )
     data = models.JSONField(
         default=dict,
         blank=True,
@@ -120,6 +130,19 @@ class LogEvent(models.Model):
             # Filter by level
             models.Index(
                 fields=["organization", "level", "-id"], name="logevent_org_level_idx"
+            ),
+            # Filter by service
+            models.Index(
+                fields=["organization", "service", "-id"], name="logevent_org_svc_idx"
+            ),
+            # Filter by environment
+            models.Index(
+                fields=["organization", "environment", "-id"],
+                name="logevent_org_env_idx",
+            ),
+            # Filter by host
+            models.Index(
+                fields=["organization", "host", "-id"], name="logevent_org_host_idx"
             ),
             # Trace correlation
             models.Index(
@@ -143,30 +166,43 @@ class LogEvent(models.Model):
         return UUID7Helper.extract_datetime(self.id)
 
 
-class LogService(models.Model):
+class LogResource(models.Model):
     """
-    Lookup table for unique service names per organization.
+    Lookup table for unique resource names (service, environment, host) per organization.
 
-    This allows the UI to show a dropdown of known services without
+    This allows the UI to show dropdowns of known values without
     querying the large logs table. Updated during log ingestion.
     """
+
+    class ResourceType(models.TextChoices):
+        SERVICE = "service", "service"
+        ENVIRONMENT = "environment", "environment"
+        HOST = "host", "host"
 
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
-    name = models.CharField(max_length=255, help_text="Service name")
+    name = models.CharField(max_length=255, help_text="Resource name")
+    type = models.CharField(
+        max_length=20,
+        choices=ResourceType.choices,
+        default=ResourceType.SERVICE,
+        help_text="Type of resource (service/environment/host)",
+    )
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["organization", "name"], name="unique_org_service"
+                fields=["organization", "name", "type"], name="unique_org_resource"
             )
         ]
         indexes = [
-            models.Index(fields=["organization"], name="logservice_org_idx"),
+            models.Index(
+                fields=["organization", "type"], name="logresource_org_type_idx"
+            ),
         ]
 
     def __str__(self):
-        return self.name
+        return f"{self.type}: {self.name}"
