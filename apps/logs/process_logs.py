@@ -190,17 +190,14 @@ def process_log_events(messages: list) -> int:
             level_str = log_item.get("level", "info").lower()
             level = LEVEL_MAP.get(level_str, LogLevel.INFO)
 
-            # Parse trace_id if present
+            # Parse trace_id if present (treat all-zero as NULL)
             trace_id_str = log_item.get("trace_id")
             trace_id = None
             if trace_id_str:
                 try:
-                    # Handle both hyphenated and non-hyphenated UUID formats
-                    if len(trace_id_str) == 32:
-                        # Non-hyphenated format
-                        trace_id = UUID(trace_id_str)
-                    else:
-                        trace_id = UUID(trace_id_str)
+                    parsed = UUID(trace_id_str)
+                    if parsed.int != 0:
+                        trace_id = parsed
                 except (ValueError, TypeError):
                     pass
 

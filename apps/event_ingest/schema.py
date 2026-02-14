@@ -604,6 +604,7 @@ class LogItemSchema(BaseModel):
     environment: str = ""
     host: str = ""
     trace_id: str | None = None
+    span_id: str | None = None  # OTel span ID (16 hex chars)
     severity_number: int | None = None  # OTel severity number (1-24)
 
     # Maps SDK attribute keys to top-level schema fields.
