@@ -201,7 +201,9 @@ class IssueEventSchema(CamelSchema, ModelSchema, BaseIssueEvent):
 
     @staticmethod
     def resolve_tags(obj: IssueEvent):
-        return [{"key": tag[0], "value": tag[1]} for tag in obj.tags.items()]
+        if isinstance(obj.tags, dict):
+            return [{"key": key, "value": value} for key, value in obj.tags.items()]
+        return []
 
     @staticmethod
     def resolve_entries(obj: IssueEvent):
