@@ -85,12 +85,14 @@ async def get_queryset(
             organization = await aget_object_or_404(
                 Organization, users=user_id, slug=organization_slug
             )
-            qs = qs.filter(project__organization_id=organization.id)
+            qs = qs.filter(
+                project__organization_id=organization.id, project__teams__members__user_id=user_id
+            )
         else:
             # Internal/System usage without user_id
             qs = qs.filter(project__organization__slug=organization_slug)
     elif user_id:
-        qs = qs.filter(project__organization__users=user_id)
+        qs = qs.filter(project__teams__members__user_id=user_id)
 
     if project_slug:
         qs = qs.filter(project__slug=project_slug)
