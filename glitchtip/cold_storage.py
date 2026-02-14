@@ -1,9 +1,9 @@
 """
 Shared cold storage infrastructure for archiving partitions to Parquet via standalone DuckDB.
 
-Auto-enables when a storage bucket is configured (GLITCHTIP_COLD_STORAGE_BUCKET
-or AWS_STORAGE_BUCKET_NAME). Old partitions are archived to Parquet files
-and queryable via DuckDB's in-process engine.
+Auto-enables when a storage backend is configured (GLITCHTIP_COLD_STORAGE_BUCKET,
+AWS_STORAGE_BUCKET_NAME, GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
+Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
 
 Uses standalone DuckDB (not pg_duckdb extension) so cold storage works with
 any PostgreSQL provider including RDS, Aurora, Cloud SQL, etc. No Postgres
@@ -16,13 +16,13 @@ Architecture (per-org files):
 3. Query cold storage by computing paths from (org_id, date_range)
 4. No cross-org data in same file - enables future sharding
 
-File deletion uses django-storages for backend abstraction (S3, GCS, Azure, etc.).
+File deletion uses django-storages for backend abstraction (S3, GCS, Azure, filesystem).
 High-scale deployments can disable manual cleanup and use S3 lifecycle policies.
 """
 
 import json
 import logging
-from dataclasses import dataclass
+import os
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -36,126 +36,137 @@ logger = logging.getLogger(__name__)
 COLD_STORAGE_PREFIX = "cold_storage"
 
 
-@dataclass
-class ColdStorageConfig:
-    """Configuration for cold storage."""
-
-    bucket: str
-    endpoint_url: str | None
-    access_key_id: str | None
-    secret_access_key: str | None
-
-    @classmethod
-    def from_settings(cls) -> "ColdStorageConfig":
-        # Default to AWS_STORAGE_BUCKET_NAME (shared with media/sourcemaps)
-        # Users can override with GLITCHTIP_COLD_STORAGE_BUCKET for separation
-        bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
-        if not bucket:
-            bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
-
-        return cls(
-            bucket=bucket,
-            endpoint_url=getattr(settings, "AWS_S3_ENDPOINT_URL", None),
-            access_key_id=getattr(settings, "AWS_ACCESS_KEY_ID", None),
-            secret_access_key=getattr(settings, "AWS_SECRET_ACCESS_KEY", None),
-        )
-
-
-def get_cold_storage_backend(config: ColdStorageConfig | None = None):
+def get_cold_storage_backend():
     """
     Get the django-storages backend for cold storage.
 
-    Uses GLITCHTIP_COLD_STORAGE alias if configured, otherwise creates
-    an S3 storage instance with the cold storage bucket.
+    Priority:
+    1. "cold" alias in STORAGES setting (most flexible)
+    2. S3 storage via GLITCHTIP_COLD_STORAGE_BUCKET or AWS_STORAGE_BUCKET_NAME
+    3. Local filesystem via GLITCHTIP_COLD_STORAGE_DIR
 
     Returns None if no suitable storage backend is available.
     """
-    # Check for dedicated cold storage configuration in STORAGES
+    # 1. Dedicated cold storage alias in STORAGES
     if "cold" in storages.backends:
         return storages["cold"]
 
-    if config is None:
-        config = ColdStorageConfig.from_settings()
+    # 2. S3 bucket configured
+    bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
+    if not bucket:
+        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
+    if bucket:
+        try:
+            from storages.backends.s3 import S3Storage
 
-    # Try to create an S3 storage instance with the cold bucket
+            return S3Storage(bucket_name=bucket)
+        except ImportError:
+            pass
+
+    # 3. Local directory configured
+    if settings.GLITCHTIP_COLD_STORAGE_DIR:
+        from django.core.files.storage import FileSystemStorage
+
+        return FileSystemStorage(location=settings.GLITCHTIP_COLD_STORAGE_DIR)
+
+    return None
+
+
+def _is_s3_storage(storage) -> bool:
+    """Check if a storage backend is S3-based."""
     try:
         from storages.backends.s3 import S3Storage
 
-        return S3Storage(bucket_name=config.bucket)
+        return isinstance(storage, S3Storage)
     except ImportError:
-        pass
-
-    return None
+        return False
 
 
 def is_duckdb_available() -> bool:
     """
     Check if DuckDB cold storage is enabled.
 
-    Auto-enables when a storage bucket is configured (either
-    GLITCHTIP_COLD_STORAGE_BUCKET or AWS_STORAGE_BUCKET_NAME).
-    Override with GLITCHTIP_ENABLE_DUCKDB=false to disable even when
-    storage exists (e.g., horizontally-scaled PaaS with S3 for media only).
+    Auto-enables when a storage backend is configured (bucket, directory,
+    or "cold" STORAGES alias). Override with GLITCHTIP_ENABLE_DUCKDB=false
+    to disable even when storage exists.
     """
     override = settings.GLITCHTIP_ENABLE_DUCKDB
     if override is not None:
         return str(override).lower() == "true"
 
+    # Auto-detect: enable if a "cold" STORAGES alias is configured
+    if "cold" in storages.backends:
+        return True
+
     # Auto-detect: enable if a storage bucket is available
     bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
     if not bucket:
         bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
-    return bool(bucket)
+    if bucket:
+        return True
+
+    # Auto-detect: enable if a local directory is configured
+    if settings.GLITCHTIP_COLD_STORAGE_DIR:
+        return True
+
+    return False
 
 
-def get_duckdb_connection(config: ColdStorageConfig | None = None):
+def get_duckdb_connection(storage=None):
     """
-    Create a standalone DuckDB connection configured for S3 access.
+    Create a standalone DuckDB connection, optionally configured for S3 access.
 
-    Returns an in-process DuckDB connection with httpfs loaded and S3
-    credentials configured. Each call creates a fresh connection —
-    no session state leaks, no interaction with PostgreSQL connection pooling.
+    For S3 backends: loads httpfs and configures credentials from the storage instance.
+    For filesystem backends: returns a plain DuckDB connection (no extensions needed).
+
+    Each call creates a fresh connection — no session state leaks.
     """
     import duckdb
 
-    if config is None:
-        config = ColdStorageConfig.from_settings()
+    if storage is None:
+        storage = get_cold_storage_backend()
 
     conn = duckdb.connect()
 
-    # Load httpfs for S3 access
-    conn.install_extension("httpfs")
-    conn.load_extension("httpfs")
+    if storage and _is_s3_storage(storage):
+        # Load httpfs for S3 access
+        conn.install_extension("httpfs")
+        conn.load_extension("httpfs")
 
-    # Configure S3 credentials (escape single quotes for safety)
-    if config.access_key_id:
-        val = config.access_key_id.replace("'", "''")
-        conn.execute(f"SET s3_access_key_id = '{val}';")
-    if config.secret_access_key:
-        val = config.secret_access_key.replace("'", "''")
-        conn.execute(f"SET s3_secret_access_key = '{val}';")
+        # Configure S3 credentials from the storage backend
+        access_key = getattr(storage, "access_key", None)
+        secret_key = getattr(storage, "secret_key", None)
+        endpoint_url = getattr(storage, "endpoint_url", None)
 
-    if config.endpoint_url:
-        # Strip protocol prefix for DuckDB
-        endpoint = config.endpoint_url.replace("http://", "").replace("https://", "")
-        use_ssl = "true" if config.endpoint_url.startswith("https") else "false"
-        conn.execute(f"SET s3_endpoint = '{endpoint}';")
-        conn.execute(f"SET s3_use_ssl = {use_ssl};")
-        conn.execute("SET s3_url_style = 'path';")
+        if access_key:
+            val = access_key.replace("'", "''")
+            conn.execute(f"SET s3_access_key_id = '{val}';")
+        if secret_key:
+            val = secret_key.replace("'", "''")
+            conn.execute(f"SET s3_secret_access_key = '{val}';")
+
+        if endpoint_url:
+            # Strip protocol prefix for DuckDB
+            endpoint = endpoint_url.replace("http://", "").replace("https://", "")
+            use_ssl = "true" if endpoint_url.startswith("https") else "false"
+            conn.execute(f"SET s3_endpoint = '{endpoint}';")
+            conn.execute(f"SET s3_use_ssl = {use_ssl};")
+            conn.execute("SET s3_url_style = 'path';")
 
     return conn
 
 
-def get_org_cold_s3_path(
-    config: ColdStorageConfig, table_name: str, org_id: int, date_str: str
-) -> str:
+def get_duckdb_parquet_path(storage, relative_path: str) -> str:
     """
-    Generate the S3 path for an org's daily Parquet file.
+    Get the full path for DuckDB to read/write a Parquet file.
 
-    Path structure: s3://bucket/cold_storage/{table}/org_{id}/{date}.parquet
-    This isolates each org's data for efficient single-file queries.
+    For S3 backends: returns s3://bucket/relative_path
+    For filesystem backends: returns the absolute local path
     """
-    return f"s3://{config.bucket}/{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
+    if _is_s3_storage(storage):
+        return f"s3://{storage.bucket_name}/{relative_path}"
+    # FileSystemStorage or similar — use storage.path() for absolute path
+    return storage.path(relative_path)
 
 
 def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> str:
@@ -169,16 +180,15 @@ def archive_partition_per_org(
     table_name: str,
     column_types: dict[str, str],
     select_sql: str,
-    config: ColdStorageConfig | None = None,
 ) -> list[tuple[int, str]]:
     """
-    Archive a partition to S3 as per-org Parquet files.
+    Archive a partition to cold storage as per-org Parquet files.
 
     Each organization's data is exported to a separate file:
     cold_storage/{table}/org_{id}/{date}.parquet
 
     Reads from PostgreSQL via Django's connection, writes Parquet via
-    standalone DuckDB. No pg_duckdb extension required.
+    standalone DuckDB.
 
     Args:
         partition_name: Name of the partition to archive
@@ -186,17 +196,18 @@ def archive_partition_per_org(
         table_name: Parent table name
         column_types: Dict mapping column names to DuckDB types
         select_sql: SQL template for selecting data, with {partition_name} and {org_id} placeholders
-        config: Cold storage configuration
 
     Returns:
-        List of (org_id, s3_path) tuples for archived files
+        List of (org_id, parquet_path) tuples for archived files
     """
     if not is_duckdb_available():
         logger.info("duckdb not available, skipping archival")
         return []
 
-    if config is None:
-        config = ColdStorageConfig.from_settings()
+    storage = get_cold_storage_backend()
+    if not storage:
+        logger.warning("No storage backend available for archival")
+        return []
 
     archived_files = []
 
@@ -218,7 +229,8 @@ def archive_partition_per_org(
 
             # Export each org's data to a separate Parquet file
             for org_id in org_ids:
-                s3_path = get_org_cold_s3_path(config, table_name, org_id, date_str)
+                relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
+                parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
                 # Read org's data from PostgreSQL
                 cursor.execute(
@@ -231,7 +243,7 @@ def archive_partition_per_org(
                 if not rows:
                     continue
 
-                # Write to S3 via standalone DuckDB
+                # Write to storage via standalone DuckDB
                 import json
 
                 # Normalize values for DuckDB (UUIDs to strings, dicts to JSON, lists to JSON)
@@ -249,7 +261,11 @@ def archive_partition_per_org(
                             clean_row.append(val)
                     clean_rows.append(clean_row)
 
-                duck_conn = get_duckdb_connection(config)
+                # Ensure parent directory exists for filesystem backends
+                if not _is_s3_storage(storage):
+                    os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+
+                duck_conn = get_duckdb_connection(storage)
                 try:
                     col_defs = ", ".join(f"{c} {column_types[c]}" for c in columns)
                     duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
@@ -258,10 +274,10 @@ def archive_partition_per_org(
                         clean_rows,
                     )
                     duck_conn.execute(
-                        f"COPY export_data TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                        f"COPY export_data TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
                     )
-                    archived_files.append((org_id, s3_path))
-                    logger.debug(f"Archived org {org_id} to {s3_path}")
+                    archived_files.append((org_id, parquet_path))
+                    logger.debug(f"Archived org {org_id} to {parquet_path}")
                 finally:
                     duck_conn.close()
 
@@ -298,7 +314,6 @@ def archive_and_swap_partition(
     table_name: str,
     column_types: dict[str, str],
     select_sql: str,
-    config: ColdStorageConfig | None = None,
 ) -> bool:
     """
     Full archival workflow: Export per-org files -> Detach -> Drop partition.
@@ -308,7 +323,6 @@ def archive_and_swap_partition(
         table_name: Parent table name
         column_types: Dict mapping column names to DuckDB types
         select_sql: SQL template for selecting data
-        config: Cold storage configuration
 
     Returns:
         True if archival succeeded, False if skipped (duckdb not available)
@@ -316,9 +330,6 @@ def archive_and_swap_partition(
     if not is_duckdb_available():
         logger.info("duckdb not available, skipping archival workflow")
         return False
-
-    if config is None:
-        config = ColdStorageConfig.from_settings()
 
     # Extract date from partition name (format: tablename_YYYYMMDD)
     parts = partition_name.split("_")
@@ -332,9 +343,9 @@ def archive_and_swap_partition(
         logger.error(f"Could not extract date from partition name: {partition_name}")
         return False
 
-    # Step 1: Export per-org files to S3
+    # Step 1: Export per-org files to cold storage
     archived_files = archive_partition_per_org(
-        partition_name, date_str, table_name, column_types, select_sql, config
+        partition_name, date_str, table_name, column_types, select_sql
     )
     if not archived_files:
         logger.info(f"No data archived from {partition_name}")
@@ -412,7 +423,6 @@ def cleanup_cold_storage_for_org(
     org_id: int,
     retention_days: int,
     table_name: str,
-    config: ColdStorageConfig | None = None,
 ) -> int:
     """
     Delete cold storage files older than retention period for an org.
@@ -424,10 +434,7 @@ def cleanup_cold_storage_for_org(
     Returns:
         Number of files deleted
     """
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    storage = get_cold_storage_backend(config)
+    storage = get_cold_storage_backend()
     if not storage:
         logger.warning("No storage backend available for cleanup")
         return 0
@@ -459,7 +466,6 @@ def cleanup_cold_storage_for_org(
 def cleanup_all_cold_storage(
     retention_days: int | None = None,
     table_name: str = "logs_logevent",
-    config: ColdStorageConfig | None = None,
 ) -> int:
     """
     Delete cold storage files older than retention period for all orgs.
@@ -477,18 +483,13 @@ def cleanup_all_cold_storage(
     if retention_days is None:
         retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
 
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
     # Import here to avoid circular imports
     from apps.organizations_ext.models import Organization
 
     total_deleted = 0
 
     for org in Organization.objects.all().iterator():
-        deleted = cleanup_cold_storage_for_org(
-            org.id, retention_days, table_name, config
-        )
+        deleted = cleanup_cold_storage_for_org(org.id, retention_days, table_name)
         total_deleted += deleted
 
     logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
@@ -529,7 +530,6 @@ def archive_and_cleanup_partitions(
     column_types: dict[str, str],
     select_sql: str,
     retention_days: int | None = None,
-    config: ColdStorageConfig | None = None,
 ) -> tuple[int, int, int]:
     """
     Archive old hot partitions to cold storage and clean up expired cold files.
@@ -544,16 +544,12 @@ def archive_and_cleanup_partitions(
         column_types: DuckDB column type mapping for Parquet export
         select_sql: SQL template with {partition_name} placeholder
         retention_days: Days to keep cold files (default from settings)
-        config: Cold storage config (default from settings)
 
     Returns:
         Tuple of (archived_count, failed_count, deleted_cold_count)
     """
     if not is_duckdb_available():
         return (0, 0, 0)
-
-    if config is None:
-        config = ColdStorageConfig.from_settings()
 
     if retention_days is None:
         retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
@@ -570,7 +566,7 @@ def archive_and_cleanup_partitions(
         for name, date in partitions:
             try:
                 if archive_and_swap_partition(
-                    name, table_name, column_types, select_sql, config
+                    name, table_name, column_types, select_sql
                 ):
                     archived += 1
                     logger.info(f"Archived partition {name}")
@@ -587,7 +583,7 @@ def archive_and_cleanup_partitions(
 
     # Delete expired cold storage files
     deleted = cleanup_all_cold_storage(
-        retention_days=retention_days, table_name=table_name, config=config
+        retention_days=retention_days, table_name=table_name
     )
     if deleted:
         logger.info(f"{table_name} cold cleanup: {deleted} files deleted")
@@ -598,7 +594,6 @@ def archive_and_cleanup_partitions(
 def delete_org_cold_storage(
     org_id: int,
     table_name: str,
-    config: ColdStorageConfig | None = None,
 ) -> int:
     """
     Delete all cold storage files for an organization.
@@ -611,10 +606,7 @@ def delete_org_cold_storage(
     Returns:
         Number of files deleted
     """
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    storage = get_cold_storage_backend(config)
+    storage = get_cold_storage_backend()
     if not storage:
         logger.warning("No storage backend available for org cold storage deletion")
         return 0
@@ -660,7 +652,6 @@ def rewrite_parquet_excluding_project(
     issue_ids: list[int] | None = None,
     table_name: str = "logs_logevent",
     column_types: dict[str, str] | None = None,
-    config: ColdStorageConfig | None = None,
 ) -> int:
     """
     Rewrite Parquet files for an org, excluding a deleted project's data.
@@ -676,7 +667,6 @@ def rewrite_parquet_excluding_project(
         issue_ids: Issue IDs to exclude (used for issue events)
         table_name: Table name for path construction
         column_types: DuckDB column types for the table
-        config: Cold storage configuration
 
     Returns:
         Number of files rewritten or deleted
@@ -684,10 +674,7 @@ def rewrite_parquet_excluding_project(
     if not is_duckdb_available():
         return 0
 
-    if config is None:
-        config = ColdStorageConfig.from_settings()
-
-    storage = get_cold_storage_backend(config)
+    storage = get_cold_storage_backend()
     if not storage:
         return 0
 
@@ -727,28 +714,26 @@ def rewrite_parquet_excluding_project(
 
     for filename in files_to_process:
         date_str = filename.replace(".parquet", "")
-        s3_path = get_org_cold_s3_path(config, table_name, org_id, date_str)
-        storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
+        relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
+        parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
         try:
-            duck_conn = get_duckdb_connection(config)
+            duck_conn = get_duckdb_connection(storage)
             try:
                 # Count remaining rows after filtering
-                count_sql = (
-                    f"SELECT COUNT(*) FROM read_parquet('{s3_path}') {where_clause}"
-                )
+                count_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}') {where_clause}"
                 remaining = duck_conn.execute(count_sql).fetchone()[0]
 
                 if remaining == 0:
                     # No rows left — delete the file
                     duck_conn.close()
-                    storage.delete(storage_path)
+                    storage.delete(relative_path)
                     rewritten_count += 1
-                    logger.debug("Deleted empty cold file %s", storage_path)
+                    logger.debug("Deleted empty cold file %s", relative_path)
                     continue
 
                 # Check if any rows were actually filtered out
-                total_sql = f"SELECT COUNT(*) FROM read_parquet('{s3_path}')"
+                total_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')"
                 total = duck_conn.execute(total_sql).fetchone()[0]
 
                 if remaining == total:
@@ -758,20 +743,20 @@ def rewrite_parquet_excluding_project(
                 # Rewrite the file excluding the project's data
                 rewrite_sql = f"""
                     COPY (
-                        SELECT * FROM read_parquet('{s3_path}')
+                        SELECT * FROM read_parquet('{parquet_path}')
                         {where_clause}
-                    ) TO '{s3_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    ) TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """
                 duck_conn.execute(rewrite_sql)
                 rewritten_count += 1
-                logger.debug("Rewrote cold file %s", storage_path)
+                logger.debug("Rewrote cold file %s", relative_path)
             finally:
                 duck_conn.close()
         except Exception as e:
             error_str = str(e)
             if "No files found" in error_str or "Could not open" in error_str:
                 continue
-            logger.warning("Error rewriting cold file %s: %s", storage_path, e)
+            logger.warning("Error rewriting cold file %s: %s", relative_path, e)
 
     if rewritten_count:
         logger.info(

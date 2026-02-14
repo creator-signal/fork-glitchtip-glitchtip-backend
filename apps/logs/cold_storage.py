@@ -2,15 +2,14 @@
 Cold storage utilities for archiving log partitions to Parquet via standalone DuckDB.
 
 This is a thin wrapper around glitchtip.cold_storage with logs-specific configuration.
-Shared functions (ColdStorageConfig, is_duckdb_available, etc.) are re-exported for
-backward compatibility with existing imports.
+Shared functions (is_duckdb_available, etc.) are re-exported for backward compatibility
+with existing imports.
 """
 
 from glitchtip.cold_storage import (  # noqa: F401 - re-exported for callers
     COLD_STORAGE_PREFIX,
-    ColdStorageConfig,
     get_duckdb_connection,
-    get_org_cold_s3_path,
+    get_duckdb_parquet_path,
     is_duckdb_available,
 )
 from glitchtip.cold_storage import (
@@ -52,25 +51,22 @@ def archive_partition_per_org(
     partition_name: str,
     date_str: str,
     table_name: str = TABLE_NAME,
-    config: ColdStorageConfig | None = None,
 ) -> list[tuple[int, str]]:
-    """Archive a log partition to S3 as per-org Parquet files."""
+    """Archive a log partition to cold storage as per-org Parquet files."""
     return _archive_partition_per_org(
         partition_name,
         date_str,
         table_name,
         EXPORT_COLUMN_TYPES,
         LOGS_SELECT_SQL,
-        config,
     )
 
 
 def archive_and_swap_partition(
     partition_name: str,
     table_name: str = TABLE_NAME,
-    config: ColdStorageConfig | None = None,
 ) -> bool:
     """Full archival workflow for log partitions."""
     return _archive_and_swap_partition(
-        partition_name, table_name, EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL, config
+        partition_name, table_name, EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
     )

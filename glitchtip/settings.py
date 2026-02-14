@@ -142,6 +142,9 @@ GLITCHTIP_EVENTS_HOT_DAYS = env.int("GLITCHTIP_EVENTS_HOT_DAYS", 30)
 # Files are stored under cold_storage/ prefix to avoid collisions
 GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)
 
+# Local directory for cold storage (alternative to S3 for simple deployments)
+GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
+
 # Override cold storage auto-detection. Set to "false" to disable even when
 # storage is configured (e.g., horizontally-scaled PaaS with S3 for media only).
 # When unset, cold storage auto-enables if a storage bucket is available.

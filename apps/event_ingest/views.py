@@ -242,7 +242,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     # Check if logs feature is enabled
                     from django.conf import settings
 
-                    if not getattr(settings, "GLITCHTIP_ENABLE_LOGS", False):
+                    if not settings.GLITCHTIP_ENABLE_LOGS:
                         # Silently ignore logs when feature is disabled
                         continue
 

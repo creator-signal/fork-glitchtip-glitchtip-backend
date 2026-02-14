@@ -2,7 +2,7 @@
 Manual E2E test: verify cold storage cleanup on org/project deletion.
 
 Creates an org with two projects, inserts issue events + logs into partitions
-for both projects, archives them to cold storage (MinIO), then:
+for both projects, archives them to cold storage, then:
 1. Deletes project_1 and verifies its data is removed from Parquet files
    while project_2's data remains intact.
 2. Deletes the org and verifies all cold storage files are removed.
@@ -13,15 +13,22 @@ Run with minio + postgres up:
     -e GLITCHTIP_ENABLE_DUCKDB=true \
     -e GLITCHTIP_EVENTS_HOT_DAYS=0 \
     web python manage.py shell < scripts/test_org_delete_cold_storage.py
+
+Or with filesystem cold storage:
+  docker compose -f compose.yml -f compose.cold-volume.yml up -d
+  docker compose -f compose.yml -f compose.cold-volume.yml run --rm \
+    -e GLITCHTIP_ENABLE_DUCKDB=true \
+    -e GLITCHTIP_EVENTS_HOT_DAYS=0 \
+    web python manage.py shell < scripts/test_org_delete_cold_storage.py
 """
 
 from datetime import datetime, timedelta, timezone
 
+from django.db import models
+
 from apps.issue_events.cold_storage import (
     ISSUE_EVENT_EXPORT_COLUMN_TYPES,
     ISSUE_EVENT_SELECT_SQL,
-    IssueEventRow,
-    get_event_from_cold,
     is_duckdb_available,
     query_cold_events,
 )
@@ -32,10 +39,11 @@ from apps.logs.models import LogEvent
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.cold_storage import (
-    ColdStorageConfig,
     archive_and_swap_partition,
     delete_org_cold_storage,
     get_cold_storage_backend,
+    get_duckdb_connection,
+    get_duckdb_parquet_path,
     get_org_cold_storage_path,
     rewrite_parquet_excluding_project,
 )
@@ -47,11 +55,9 @@ print("=" * 70)
 
 # ── 0. Pre-checks ────────────────────────────────────────────────────
 assert is_duckdb_available(), "DuckDB not available — set GLITCHTIP_ENABLE_DUCKDB=true"
-config = ColdStorageConfig.from_settings()
-assert config.bucket, "No bucket configured"
-storage = get_cold_storage_backend(config)
+storage = get_cold_storage_backend()
 assert storage, "No storage backend"
-print(f"[OK] DuckDB available, bucket={config.bucket}")
+print(f"[OK] DuckDB available, storage backend={type(storage).__name__}")
 
 # ── 1. Create test org + 2 projects + issues ─────────────────────────
 org, _ = Organization.objects.get_or_create(
@@ -181,7 +187,6 @@ ok = archive_and_swap_partition(
     "issue_events_issueevent",
     ISSUE_EVENT_EXPORT_COLUMN_TYPES,
     ISSUE_EVENT_SELECT_SQL,
-    config,
 )
 assert ok, "Issue event archival failed"
 print("[OK] Issue events archived")
@@ -192,7 +197,6 @@ ok = archive_and_swap_partition(
     "logs_logevent",
     LOG_COLUMN_TYPES,
     LOGS_SELECT_SQL,
-    config,
 )
 assert ok, "Log archival failed"
 print("[OK] Logs archived")
@@ -203,7 +207,7 @@ log_path = get_org_cold_storage_path("logs_logevent", org.id, date_str)
 
 assert storage.exists(ie_path), f"Issue event Parquet not found: {ie_path}"
 assert storage.exists(log_path), f"Log Parquet not found: {log_path}"
-print(f"\n[OK] Cold files exist:")
+print("\n[OK] Cold files exist:")
 print(f"     {ie_path}")
 print(f"     {log_path}")
 
@@ -228,7 +232,6 @@ rewritten = rewrite_parquet_excluding_project(
     project_id=proj1.id,
     table_name="logs_logevent",
     column_types=LOG_COLUMN_TYPES,
-    config=config,
 )
 print(f"[OK] Rewrote {rewritten} log file(s)")
 
@@ -240,7 +243,6 @@ rewritten = rewrite_parquet_excluding_project(
     issue_ids=issue1_ids,
     table_name="issue_events_issueevent",
     column_types=ISSUE_EVENT_EXPORT_COLUMN_TYPES,
-    config=config,
 )
 print(f"[OK] Rewrote {rewritten} issue event file(s)")
 
@@ -256,17 +258,20 @@ assert len(cold_events_after) == 3, (
     f"Expected 3 cold issue events (proj2 only), got {len(cold_events_after)}"
 )
 for ce in cold_events_after:
-    assert ce.issue_id == issue2.id, f"Event {ce.id} has issue_id={ce.issue_id}, expected {issue2.id}"
+    assert ce.issue_id == issue2.id, (
+        f"Event {ce.id} has issue_id={ce.issue_id}, expected {issue2.id}"
+    )
 print("[OK] Only project 2's issue events remain in cold storage")
 
 # Verify: log Parquet still exists but only has proj2's data
 # (We can verify via DuckDB query)
-from glitchtip.cold_storage import get_duckdb_connection, get_org_cold_s3_path
-
-s3_log_path = get_org_cold_s3_path(config, "logs_logevent", org.id, date_str)
-duck = get_duckdb_connection(config)
+log_relative_path = get_org_cold_storage_path("logs_logevent", org.id, date_str)
+log_parquet_path = get_duckdb_parquet_path(storage, log_relative_path)
+duck = get_duckdb_connection(storage)
 try:
-    result = duck.execute(f"SELECT project_id, COUNT(*) FROM read_parquet('{s3_log_path}') GROUP BY project_id").fetchall()
+    result = duck.execute(
+        f"SELECT project_id, COUNT(*) FROM read_parquet('{log_parquet_path}') GROUP BY project_id"
+    ).fetchall()
     print(f"[CHECK] Log Parquet project breakdown: {result}")
     assert len(result) == 1, f"Expected 1 project in logs, got {len(result)}"
     assert result[0][0] == proj2.id, f"Expected proj2 ({proj2.id}), got {result[0][0]}"
@@ -282,7 +287,7 @@ print("-" * 70)
 
 # Delete cold storage for both tables
 for table in ["issue_events_issueevent", "logs_logevent"]:
-    deleted = delete_org_cold_storage(org.id, table, config)
+    deleted = delete_org_cold_storage(org.id, table)
     print(f"[OK] Deleted {deleted} cold file(s) for {table}")
 
 # Verify files are gone
@@ -305,7 +310,6 @@ print("[OK] Cold query returns 0 events after org deletion")
 # ── 8. Cleanup DB rows ───────────────────────────────────────────────
 Issue.objects.filter(id__in=[issue1.id, issue2.id]).delete()
 # Use super().delete() to bypass soft-delete
-from django.db import models
 models.Model.delete(proj1)
 models.Model.delete(proj2)
 org.force_delete()

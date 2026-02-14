@@ -10,28 +10,12 @@ from datetime import timedelta
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
+from glitchtip.cold_storage import get_cold_storage_backend, is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
-from ..cold_storage import ColdStorageConfig, is_duckdb_available
 from ..constants import LogLevel
 from ..models import LogEvent
-
-
-class ColdStorageConfigTestCase(TestCase):
-    """Test cold storage configuration."""
-
-    def test_config_from_settings(self):
-        """Test loading config from Django settings."""
-        config = ColdStorageConfig.from_settings()
-        # Should have bucket from test settings or None
-        self.assertIsInstance(config, ColdStorageConfig)
-
-    @override_settings(GLITCHTIP_COLD_STORAGE_BUCKET="test-bucket")
-    def test_config_custom_bucket(self):
-        """Test custom bucket configuration."""
-        config = ColdStorageConfig.from_settings()
-        self.assertEqual(config.bucket, "test-bucket")
 
 
 class DuckDBAvailabilityTestCase(TestCase):
@@ -72,30 +56,24 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_disabled_without_bucket(self):
-        """No bucket configured = no cold storage."""
+        """No bucket or directory configured = no cold storage."""
         self.assertFalse(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
+    )
+    def test_auto_enabled_with_cold_storage_dir(self):
+        self.assertTrue(is_duckdb_available())
 
 
 class ColdStoragePathTestCase(TestCase):
     """Test cold storage path generation."""
-
-    def test_org_cold_s3_path(self):
-        """Test per-org S3 path generation."""
-        from ..cold_storage import get_org_cold_s3_path
-
-        config = ColdStorageConfig(
-            bucket="my-bucket",
-            endpoint_url=None,
-            access_key_id=None,
-            secret_access_key=None,
-        )
-
-        path = get_org_cold_s3_path(config, "logs_logevent", 123, "20260115")
-        self.assertEqual(
-            path, "s3://my-bucket/cold_storage/logs_logevent/org_123/20260115.parquet"
-        )
 
     def test_org_cold_storage_path(self):
         """Test storage-relative path (without bucket)."""
@@ -109,16 +87,10 @@ class DuckDBConnectionTestCase(TestCase):
     """Test standalone DuckDB connection setup."""
 
     def test_get_connection_no_s3(self):
-        """Test creating a DuckDB connection without S3 credentials."""
+        """Test creating a DuckDB connection without S3 (filesystem backend)."""
         from ..cold_storage import get_duckdb_connection
 
-        config = ColdStorageConfig(
-            bucket="test",
-            endpoint_url=None,
-            access_key_id=None,
-            secret_access_key=None,
-        )
-        conn = get_duckdb_connection(config)
+        conn = get_duckdb_connection()
         try:
             # Should be able to execute basic queries
             result = conn.execute("SELECT 1").fetchone()
@@ -126,22 +98,30 @@ class DuckDBConnectionTestCase(TestCase):
         finally:
             conn.close()
 
-    def test_get_connection_with_endpoint(self):
-        """Test creating a DuckDB connection with custom S3 endpoint."""
-        from ..cold_storage import get_duckdb_connection
 
-        config = ColdStorageConfig(
-            bucket="test",
-            endpoint_url="http://minio:9000",
-            access_key_id="minioadmin",
-            secret_access_key="minioadmin",
-        )
-        conn = get_duckdb_connection(config)
-        try:
-            result = conn.execute("SELECT 1").fetchone()
-            self.assertEqual(result[0], 1)
-        finally:
-            conn.close()
+class ColdStorageBackendTestCase(TestCase):
+    """Test cold storage backend detection."""
+
+    @override_settings(
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
+    )
+    def test_no_backend_configured(self):
+        backend = get_cold_storage_backend()
+        self.assertIsNone(backend)
+
+    @override_settings(
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold-test",
+    )
+    def test_filesystem_backend(self):
+        from django.core.files.storage import FileSystemStorage
+
+        backend = get_cold_storage_backend()
+        self.assertIsInstance(backend, FileSystemStorage)
+        self.assertEqual(backend.location, "/tmp/cold-test")
 
 
 class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
@@ -149,17 +129,16 @@ class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
     def setUp(self):
         self.create_project()
-        self.config = ColdStorageConfig.from_settings()
 
-    def _skip_if_no_bucket(self):
-        """Skip test if no bucket is configured."""
-        if not self.config.bucket:
-            self.skipTest("No cold storage bucket configured")
+    def _skip_if_no_backend(self):
+        """Skip test if no storage backend is configured."""
+        if not get_cold_storage_backend():
+            self.skipTest("No cold storage backend configured")
 
     @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_query_empty_cold_storage(self):
         """Test querying cold storage when no files exist."""
-        self._skip_if_no_bucket()
+        self._skip_if_no_backend()
 
         from datetime import datetime
         from datetime import timezone as dt_timezone
