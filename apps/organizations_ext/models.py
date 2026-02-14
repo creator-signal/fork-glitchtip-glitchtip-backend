@@ -258,6 +258,7 @@ class Organization(SharedBaseModel, OrganizationBase):
         null=True,
         related_name="+",
     )
+    is_deleted = models.BooleanField(default=False)
 
     objects = OrganizationManager()
 
@@ -270,6 +271,15 @@ class Organization(SharedBaseModel, OrganizationBase):
             clear_metrics_cache()
 
     def delete(self, *args, **kwargs):
+        """Soft-delete: mark as deleted and enqueue async cleanup."""
+        from apps.organizations_ext.tasks import delete_organization
+
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted"])
+        delete_organization.enqueue(self.pk)
+
+    def force_delete(self, *args, **kwargs):
+        """Actually delete the organization and all related data from the DB."""
         super().delete(*args, **kwargs)
         clear_metrics_cache()
 

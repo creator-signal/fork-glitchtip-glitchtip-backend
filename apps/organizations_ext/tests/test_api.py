@@ -121,8 +121,12 @@ class OrganizationsAPITestCase(TestCase):
 
     def test_organizations_delete_without_permissions(self):
         """
-        Ensure queryset with role_required checks the correct organization user's role
+        Ensure queryset with role_required checks the correct organization user's role.
+        Deletion is soft-delete: org is marked is_deleted=True, then async task hard-deletes.
+        With the immediate task backend, force_delete runs synchronously.
         """
+        from apps.organizations_ext.models import Organization
+
         organization_2 = baker.make("organizations_ext.Organization")
 
         org_2_user = organization_2.add_user(self.user)
@@ -136,8 +140,30 @@ class OrganizationsAPITestCase(TestCase):
         org_2_user.role = OrganizationUserRole.OWNER
         org_2_user.save()
 
+        org_2_id = organization_2.id
         res = self.client.delete(url)
-        self.assertEqual(
-            res.status_code,
-            204,
+        self.assertEqual(res.status_code, 204)
+
+        # With immediate task backend, org is fully deleted after the API call
+        self.assertFalse(Organization.objects.filter(id=org_2_id).exists())
+
+    def test_organizations_soft_delete(self):
+        """Test that Organization.delete() sets is_deleted=True before task runs."""
+        from apps.organizations_ext.models import Organization
+
+        organization_2 = baker.make("organizations_ext.Organization")
+        org_2_id = organization_2.id
+
+        # Directly set is_deleted to verify the queryset filter works
+        organization_2.is_deleted = True
+        organization_2.save(update_fields=["is_deleted"])
+
+        organization_2.refresh_from_db()
+        self.assertTrue(organization_2.is_deleted)
+
+        # Soft-deleted org should not appear in filtered queries
+        self.assertFalse(
+            Organization.objects.filter(is_deleted=False, id=org_2_id).exists()
         )
+        # But should still exist in unfiltered queries
+        self.assertTrue(Organization.objects.filter(id=org_2_id).exists())

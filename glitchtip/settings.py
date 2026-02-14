@@ -135,6 +135,9 @@ GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
 GLITCHTIP_LOGS_HOT_DAYS = env.int("GLITCHTIP_LOGS_HOT_DAYS", 7)  # Days in PostgreSQL
 GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3/Parquet
 
+# Issue event hot storage retention (days in PostgreSQL before archival to cold storage)
+GLITCHTIP_EVENTS_HOT_DAYS = env.int("GLITCHTIP_EVENTS_HOT_DAYS", 30)
+
 # Cold storage bucket (defaults to AWS_STORAGE_BUCKET_NAME if not set)
 # Files are stored under cold_storage/ prefix to avoid collisions
 GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)

@@ -1,3 +1,5 @@
+import logging
+
 from asgiref.sync import sync_to_async
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
@@ -10,6 +12,8 @@ from apps.stripe.models import StripeSubscription
 
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
+
+logger = logging.getLogger(__name__)
 
 
 def get_free_tier_cycle(created):
@@ -161,3 +165,29 @@ async def send_throttle_email(organization_id: int):
 @task
 async def send_email_invite(org_user_id: int, token: str):
     await sync_to_async(InvitationEmail(pk=org_user_id, token=token).send_email)()
+
+
+@task
+async def delete_organization(organization_id: int):
+    """Delete cold storage files for an org, then hard-delete from DB."""
+    org = await Organization.objects.aget(id=organization_id)
+
+    # Delete cold storage files before removing DB rows
+    await sync_to_async(_delete_org_cold_storage)(org.id)
+
+    await sync_to_async(org.force_delete)()
+    logger.info("Organization %s (id=%s) fully deleted", org.slug, org.id)
+
+
+def _delete_org_cold_storage(org_id: int):
+    from glitchtip.cold_storage import (
+        delete_org_cold_storage,
+        is_duckdb_available,
+    )
+
+    if not is_duckdb_available():
+        return
+
+    table_names = ["logs_logevent", "issue_events_issueevent"]
+    for table_name in table_names:
+        delete_org_cold_storage(org_id, table_name)
