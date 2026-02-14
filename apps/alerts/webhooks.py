@@ -65,6 +65,7 @@ class WebhookAttachment:
     color: str | None = None
     fields: list[WebhookAttachmentField] | None = None
     mrkdown_in: list[str] | None = None
+    event_id: str | None = None
 
 
 @dataclass
@@ -125,6 +126,9 @@ def send_issue_as_webhook(
                 )
             )
 
+        latest_event = issue.issueevent_set.order_by("-id").only("id", "event_id").first()
+        event_id = (latest_event.event_id or latest_event.id).hex if latest_event else None
+
         attachments.append(
             WebhookAttachment(
                 mrkdown_in=["text"],
@@ -133,6 +137,7 @@ def send_issue_as_webhook(
                 text=issue.culprit,
                 color=issue.get_hex_color(),
                 fields=fields,
+                event_id=event_id,
             )
         )
     message = "GlitchTip Alert"
@@ -155,6 +160,7 @@ class DiscordEmbed:
     color: int
     url: str
     fields: list[DiscordField]
+    event_id: str | None = None
 
 
 @dataclass
@@ -190,6 +196,9 @@ def send_issue_as_discord_webhook(
                 )
             )
 
+        latest_event = issue.issueevent_set.order_by("-id").only("id", "event_id").first()
+        event_id = (latest_event.event_id or latest_event.id).hex if latest_event else None
+
         embeds.append(
             DiscordEmbed(
                 title=str(issue),
@@ -199,6 +208,7 @@ def send_issue_as_discord_webhook(
                 else None,
                 url=issue.get_detail_url(),
                 fields=fields,
+                event_id=event_id,
             )
         )
 
@@ -249,6 +259,12 @@ class GoogleChatCard:
         )
         widgets = []
         widgets.append(dict(decoratedText=dict(topLabel="Culprit", text=issue.culprit)))
+        
+        latest_event = issue.issueevent_set.order_by("-id").only("id", "event_id").first()
+        if latest_event:
+            event_id = (latest_event.event_id or latest_event.id).hex
+            widgets.append(dict(decoratedText=dict(topLabel="Event ID", text=event_id)))
+
         for tag in tags or []:
             widgets.append(dict(decoratedText=dict(topLabel=tag.label, text=tag.value)))
         widgets.append(
