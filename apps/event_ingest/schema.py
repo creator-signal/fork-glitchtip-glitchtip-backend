@@ -12,6 +12,7 @@ from pydantic import (
     AliasChoices,
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     JsonValue,
     RootModel,
     ValidationError,
@@ -579,8 +580,16 @@ class InterchangeTransactionEvent(InterchangeEvent):
 # Log Envelope Schemas
 
 
-class LogItemSchema(LaxIngestSchema):
-    """Schema for individual log items from sentry-sdk log envelope."""
+class LogItemSchema(BaseModel):
+    """Schema for individual log items from sentry-sdk log envelope.
+
+    Inherits from BaseModel (not ninja Schema) so that extra="allow"
+    works correctly — ninja's DjangoGetter wrapper strips unknown fields.
+    Extra attributes sent by the SDK are preserved and stored in the
+    LogEvent.data JSONB column by process_log_events.
+    """
+
+    model_config = ConfigDict(coerce_numbers_to_str=True, extra="allow")
 
     timestamp: float  # Unix timestamp with fractional seconds
     level: str  # trace, debug, info, warn, error, fatal
