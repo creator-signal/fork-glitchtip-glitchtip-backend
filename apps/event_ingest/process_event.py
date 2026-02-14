@@ -346,7 +346,7 @@ def generate_tags(event: TaskIssueEvent) -> dict[str, str]:
     if server_name := event.server_name:
         tags["server_name"] = server_name
 
-    if csp := event.csp:
+    if csp := getattr(event, "csp", None):
         tags["effective-directive"] = csp.effective_directive
         tags["blocked-uri"] = csp.blocked_uri
         if csp.status_code:
