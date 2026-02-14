@@ -28,6 +28,7 @@ class AlertRecipient(models.Model):
     alert = models.ForeignKey(ProjectAlert, on_delete=models.CASCADE)
     recipient_type = models.CharField(max_length=16, choices=RecipientType.choices)
     url = models.URLField(max_length=2000, blank=True)
+    config = models.JSONField(default=dict, blank=True)
     tags_to_add = ArrayField(
         models.CharField(max_length=255),
         default=list,
@@ -39,23 +40,16 @@ class AlertRecipient(models.Model):
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
 
-    @property
-    def is_webhook(self):
-        return self.recipient_type in (
-            RecipientType.DISCORD,
-            RecipientType.GENERAL_WEBHOOK,
-            RecipientType.GOOGLE_CHAT,
-        )
-
     def send(self, notification):
         if self.recipient_type == RecipientType.EMAIL:
             send_email_notification(notification)
-        elif self.is_webhook:
+        else:
             send_webhook_notification(
                 notification,
                 self.url,
                 self.recipient_type,
                 tags_to_add=self.tags_to_add,
+                config=self.config,
             )
 
 

@@ -172,5 +172,5 @@ def send_monitor_notification(
                 went_down=went_down,
                 last_change=last_change if last_change else None,
             ).send_users_email()
-        elif recipient.is_webhook:
+        else:
             send_uptime_as_webhook(recipient, monitor_check_id, went_down, last_change)
