@@ -16,7 +16,7 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import MonitorType
 from ..models import Monitor, MonitorCheck
-from ..tasks import dispatch_checks
+from ..tasks import dispatch_checks, save_monitor_checks
 from ..utils import fetch_all
 from ..webhooks import send_uptime_as_webhook
 
@@ -98,6 +98,40 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         with freeze_time("2020-01-02"):
             async_to_sync(run_loop)()
         self.assertEqual(mon.checks.count(), 3)
+
+    def test_is_change_baseline_after_pruning(self):
+        """When partition retention prunes all is_change=True records,
+        the next check should be marked is_change=True to establish a baseline."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor, url="https://example.com", monitor_type=MonitorType.GET
+            )
+        # Simulate post-pruning: only is_change=False checks remain
+        with freeze_time("2020-01-01"):
+            baker.make(
+                MonitorCheck,
+                monitor=mon,
+                organization=mon.organization,
+                is_up=True,
+                is_change=False,
+            )
+
+        # Run save_monitor_checks with a result that matches current state
+        # (is_up=True, latest_is_up=True, last_change=None)
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": True,
+            "last_change": None,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-01"):
+            async_to_sync(save_monitor_checks)([result], timezone.now())
+
+        # The new check should have is_change=True (baseline)
+        latest_check = mon.checks.order_by("-start_check").first()
+        self.assertTrue(latest_check.is_change)
 
     @aioresponses()
     def test_expected_response(self, mocked):
