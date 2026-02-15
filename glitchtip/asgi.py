@@ -20,7 +20,8 @@ application = get_asgi_application()
 # Print startup banner
 print_startup_banner()
 
-if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":
+_embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
+if _embed_worker:
     from django_vtasks.asgi import get_worker_application
 
     application = get_worker_application(application)
@@ -40,10 +41,11 @@ class MCPDjangoDispatcher:
     # OAuth endpoints the MCP SDK creates at root level
     _OAUTH_PATHS = frozenset({"/authorize", "/token", "/register", "/revoke"})
 
-    def __init__(self, django_app, mcp_app, mcp_prefix="/mcp"):
+    def __init__(self, django_app, mcp_app, mcp_prefix="/mcp", django_lifespan=False):
         self.django_app = django_app
         self.mcp_app = mcp_app
         self.mcp_prefix = mcp_prefix
+        self._django_lifespan = django_lifespan
 
     def _is_mcp_path(self, path: str) -> bool:
         return (
@@ -61,14 +63,19 @@ class MCPDjangoDispatcher:
             await self.django_app(scope, receive, send)
 
     async def _handle_lifespan(self, scope, receive, send):
-        """Multiplex ASGI lifespan to both the Django app and MCP app.
+        """Multiplex ASGI lifespan to sub-applications that need it.
 
-        The MCP Starlette app needs lifespan to initialise its session-manager
-        task group.  In all-in-one mode the django_app is the django-vtasks
-        wrapper which also needs lifespan to start the background worker.
-        In web-only mode django_app is Django's ASGIHandler which raises
-        ValueError for lifespan — that is caught and treated as a no-op.
+        The MCP Starlette app always needs lifespan to initialise its
+        session-manager task group.  In all-in-one mode the django_app is
+        the django-vtasks wrapper which also needs lifespan to start the
+        background worker (set django_lifespan=True).  In web-only mode
+        django_app is Django's ASGIHandler which does not support lifespan.
         """
+        if not self._django_lifespan:
+            # Web-only mode: only MCP needs lifespan, forward directly.
+            await self.mcp_app(scope, receive, send)
+            return
+
         import asyncio
 
         django_queue: asyncio.Queue = asyncio.Queue()
@@ -100,13 +107,7 @@ class MCPDjangoDispatcher:
                 mcp_done.set()
 
         async def run_django():
-            try:
-                await self.django_app(scope, django_queue.get, django_send)
-            except Exception:
-                # Django's ASGIHandler raises ValueError for lifespan scope.
-                # In web-only mode (no vtasks wrapper) this is expected.
-                django_ok.set()
-                django_done.set()
+            await self.django_app(scope, django_queue.get, django_send)
 
         async def run_mcp():
             await self.mcp_app(scope, mcp_queue.get, mcp_send)
@@ -148,7 +149,11 @@ if settings.GLITCHTIP_ENABLE_MCP:
     from apps.mcp.server import mcp as _mcp_server
 
     _mcp_app = _mcp_server.streamable_http_app()
-    application = MCPDjangoDispatcher(django_app=application, mcp_app=_mcp_app)
+    application = MCPDjangoDispatcher(
+        django_app=application,
+        mcp_app=_mcp_app,
+        django_lifespan=_embed_worker,
+    )
 
 # Wrap application with granian proxy headers support
 # This allows granian to properly handle X-Forwarded-For and X-Forwarded-Proto headers

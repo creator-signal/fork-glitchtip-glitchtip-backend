@@ -70,10 +70,12 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
         self.assertFalse(mock_mcp.called)
 
     async def test_lifespan_forwarded_to_both_apps(self):
-        """Both django_app and mcp_app receive lifespan events."""
+        """Both django_app and mcp_app receive lifespan when django_lifespan=True."""
         django_app = LifespanApp()
         mcp_app = LifespanApp()
-        dispatcher = MCPDjangoDispatcher(django_app, mcp_app, mcp_prefix="/mcp")
+        dispatcher = MCPDjangoDispatcher(
+            django_app, mcp_app, mcp_prefix="/mcp", django_lifespan=True
+        )
 
         scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
         messages = asyncio.Queue()
@@ -94,8 +96,8 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
         self.assertEqual(sent[0]["type"], "lifespan.startup.complete")
         self.assertEqual(sent[1]["type"], "lifespan.shutdown.complete")
 
-    async def test_lifespan_django_raises(self):
-        """Lifespan works when django_app raises (web-only mode, no vtasks)."""
+    async def test_lifespan_web_only_mode(self):
+        """Lifespan only goes to MCP in web-only mode (django_lifespan=False)."""
         django_app = DjangoLikeApp()
         mcp_app = LifespanApp()
         dispatcher = MCPDjangoDispatcher(django_app, mcp_app, mcp_prefix="/mcp")
