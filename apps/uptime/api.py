@@ -157,7 +157,7 @@ async def heartbeat_check(
         organization=monitor.organization,
         is_up=True,
         reason=None,
-        is_change=monitor.latest_is_up is not True,
+        is_change=monitor.latest_is_up is not True or monitor.last_change is None,
     )
     if monitor.latest_is_up is False:
         last_change = monitor.last_change
