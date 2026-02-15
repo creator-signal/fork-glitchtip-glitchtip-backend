@@ -49,6 +49,7 @@ if "django.contrib.admin" in settings.INSTALLED_APPS:
     ]
 
 urlpatterns += [
+    path("oauth/authorize/", include("apps.oauth.urls")),
     path("", include("apps.uptime.urls")),
     path("api/test/", include("test_api.urls")),
     path("accounts/", include("allauth.urls")),
