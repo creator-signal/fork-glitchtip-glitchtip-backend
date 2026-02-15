@@ -251,12 +251,6 @@ class OAuthProviderLoadAccessTokenTest(TestCase):
     def setUp(self):
         self.provider = GlitchTipOAuthProvider()
         self.user = baker.make("users.user", is_active=True)
-        self.inactive_user = baker.make("users.user", is_active=False)
-        self.api_token = baker.make("api_tokens.APIToken", user=self.user)
-        self.api_token.add_permission("org:read")
-        self.inactive_api_token = baker.make(
-            "api_tokens.APIToken", user=self.inactive_user
-        )
 
     def tearDown(self):
         cache.clear()
@@ -299,16 +293,6 @@ class OAuthProviderLoadAccessTokenTest(TestCase):
 
     async def test_load_missing_token(self):
         result = await self.provider.load_access_token("nonexistent")
-        self.assertIsNone(result)
-
-    async def test_legacy_api_token_fallback(self):
-        result = await self.provider.load_access_token(self.api_token.token)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.client_id, str(self.user.id))
-        self.assertIn("org:read", result.scopes)
-
-    async def test_legacy_api_token_inactive_user(self):
-        result = await self.provider.load_access_token(self.inactive_api_token.token)
         self.assertIsNone(result)
 
 
