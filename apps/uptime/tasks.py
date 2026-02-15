@@ -65,7 +65,8 @@ async def save_monitor_checks(results, now):
                 monitor_id=result["id"],
                 organization_id=result["organization_id"],
                 is_up=result["is_up"],
-                is_change=result["latest_is_up"] != result["is_up"],
+                is_change=result["latest_is_up"] != result["is_up"]
+                or result["last_change"] is None,
                 start_check=now,
                 reason=result.get("reason", None),
                 response_time=result.get("response_time", None),
