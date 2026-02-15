@@ -6,13 +6,16 @@ full JSON-RPC request/response cycle over Streamable HTTP.
 
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 
 import httpx
+from django.core.cache import cache
 from django.test import TestCase
 from model_bakery import baker
 
 from apps.mcp.server import mcp
+from apps.oauth.provider import _access_cache_key
 
 INITIALIZE_PARAMS = {
     "protocolVersion": "2025-03-26",
@@ -85,14 +88,6 @@ class MCPHttpAuthTest(TestCase):
         mcp._session_manager = None
         cls.app = mcp.streamable_http_app()
 
-    def setUp(self):
-        super().setUp()
-        user = baker.make("users.user", is_active=True)
-        token_obj = baker.make("api_tokens.APIToken", user=user)
-        token_obj.add_permission("org:read")
-        self.user = user
-        self.token = token_obj.token
-
     async def _post(self, body, token=None, host="localhost:8000"):
         headers = {
             "Content-Type": "application/json",
@@ -120,16 +115,37 @@ class MCPHttpAuthTest(TestCase):
         self.assertEqual(resp.status_code, 401)
 
 
+def _store_oauth_token(user, scopes=None):
+    """Store an OAuth access token in Valkey and return the token string."""
+    from apps.api_tokens.models import generate_token
+
+    if scopes is None:
+        scopes = ["org:read", "event:read", "project:read", "team:read", "member:read"]
+    token_str = generate_token()
+    access_data = json.dumps(
+        {
+            "user_id": user.id,
+            "client_id": "test-client",
+            "scopes": scopes,
+            "expires_at": int(time.time()) + 3600,
+            "resource": None,
+        }
+    )
+    cache.set(_access_cache_key(token_str), access_data, 3600)
+    return token_str
+
+
 class MCPHttpIntegrationTest(TestCase):
     """Full-stack tests that require the session manager (lifespan)."""
 
     def setUp(self):
         super().setUp()
-        user = baker.make("users.user", is_active=True)
-        token_obj = baker.make("api_tokens.APIToken", user=user)
-        token_obj.add_permission("org:read")
-        self.user = user
-        self.token = token_obj.token
+        self.user = baker.make("users.user", is_active=True)
+        self.token = _store_oauth_token(self.user)
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
 
     def _fresh_app(self):
         """Create a fresh ASGI app with a new session manager."""
