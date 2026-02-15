@@ -107,18 +107,21 @@ def validate_timestamp(client_timestamp: datetime, server_time: datetime) -> boo
 
 def parse_span_id(span_id_str: str | None) -> int | None:
     """
-    Parse span_id from hex string to integer.
+    Parse span_id from hex string to signed 64-bit integer.
 
-    OpenTelemetry span_id is 8 bytes (16 hex chars).
-    We store it as BIGINT for efficiency.
+    OpenTelemetry span_id is 8 bytes (16 hex chars), an unsigned value.
+    PostgreSQL BIGINT is signed 64-bit (-2^63 to 2^63-1), so we convert
+    unsigned values with the high bit set to their signed two's complement.
     """
     if not span_id_str:
         return None
     try:
-        # Handle both 16-char hex and other formats
-        # Strip any hyphens or 0x prefix
         clean_str = span_id_str.replace("-", "").replace("0x", "")
-        return int(clean_str, 16)
+        value = int(clean_str, 16)
+        # Convert unsigned 64-bit to signed 64-bit for PostgreSQL BIGINT
+        if value >= (1 << 63):
+            value -= 1 << 64
+        return value
     except (ValueError, TypeError):
         return None
 

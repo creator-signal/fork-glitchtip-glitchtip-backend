@@ -40,8 +40,9 @@ class LogEventSchema(CamelSchema):
         """Convert span_id integer to hex string for display."""
         if obj.span_id is None:
             return None
-        # Format as 16-character hex string (8 bytes)
-        return f"{obj.span_id:016x}"
+        # Convert signed BIGINT back to unsigned for hex display
+        value = obj.span_id if obj.span_id >= 0 else obj.span_id + (1 << 64)
+        return f"{value:016x}"
 
 
 class LogFilterSchema(Schema):

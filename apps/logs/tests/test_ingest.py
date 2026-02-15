@@ -16,7 +16,7 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import LogLevel
 from ..models import LogEvent
-from ..process_logs import LEVEL_MAP, process_log_events
+from ..process_logs import LEVEL_MAP, parse_span_id, process_log_events
 from ..tasks import LogTaskMessage
 
 
@@ -150,6 +150,38 @@ class LogIngestProcessingTestCase(TestCase):
         self.assertEqual(count, 1)
         log = LogEvent.objects.first()
         self.assertEqual(log.severity_number, 9)
+
+    def test_parse_span_id_high_bit(self):
+        """Span IDs with the high bit set must fit in signed bigint."""
+        # This span_id caused NumericValueOutOfRange in production:
+        # 0xb1392b5a6c42881e = 12770285885749102622 > bigint max (2^63-1)
+        result = parse_span_id("b1392b5a6c42881e")
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result, -(1 << 63))
+        self.assertLess(result, 1 << 63)
+
+    def test_process_log_with_high_bit_span_id(self):
+        """Logs with high-bit span_id should insert without overflow."""
+        now = datetime.now(timezone.utc)
+        message = LogTaskMessage(
+            project_id=self.project.id,
+            organization_id=self.organization.id,
+            received=now,
+            logs=[
+                {
+                    "timestamp": now.timestamp(),
+                    "level": "info",
+                    "body": "Test log with high-bit span_id",
+                    "span_id": "b1392b5a6c42881e",
+                }
+            ],
+        )
+
+        count = process_log_events([message])
+
+        self.assertEqual(count, 1)
+        log = LogEvent.objects.first()
+        self.assertIsNotNone(log.span_id)
 
     def test_process_log_preserves_extra_data(self):
         """Test that extra fields are preserved in data"""
