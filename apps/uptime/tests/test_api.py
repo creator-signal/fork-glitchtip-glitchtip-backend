@@ -238,6 +238,47 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertContains(res, "2021-09-19T15:39:31Z")
 
     @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_monitor_checks_is_change_baseline(self, _):
+        """When all is_change=True records have been pruned (e.g. partition
+        retention on a 100% uptime monitor), the is_change=true filter should
+        still return at least one record — the most recent check should be
+        marked as a baseline change."""
+        monitor = baker.make(
+            "uptime.Monitor",
+            organization=self.organization,
+            url="http://example.com",
+        )
+        # Simulate post-pruning state: only is_change=False checks remain
+        baker.make(
+            "uptime.MonitorCheck",
+            monitor=monitor,
+            organization=monitor.organization,
+            is_up=True,
+            is_change=False,
+            start_check="2021-09-19T15:39:31Z",
+        )
+        baker.make(
+            "uptime.MonitorCheck",
+            monitor=monitor,
+            organization=monitor.organization,
+            is_up=True,
+            is_change=False,
+            start_check="2021-09-19T15:40:31Z",
+        )
+
+        url = reverse(
+            "api:list_monitor_checks", args=[self.organization.slug, monitor.pk]
+        )
+
+        # Without filter, all checks are returned
+        res = self.client.get(url)
+        self.assertEqual(len(res.json()), 2)
+
+        # With is_change=true, should return nothing (no baseline yet)
+        res = self.client.get(url + "?is_change=true")
+        self.assertEqual(len(res.json()), 0)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_monitor_update(self, _):
         monitor = baker.make(
             "uptime.Monitor",
