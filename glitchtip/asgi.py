@@ -27,21 +27,35 @@ if os.environ.get("GLITCHTIP_EMBED_WORKER") == "true":
 
 
 class MCPDjangoDispatcher:
-    """Route /mcp* requests to the MCP Starlette app, everything else to Django.
+    """Route MCP and OAuth requests to the MCP Starlette app, everything else to Django.
+
+    The MCP SDK creates OAuth routes (/authorize, /token, /register, /revoke)
+    and discovery routes (/.well-known/oauth-*) at root level alongside the
+    main /mcp endpoint. All of these must be forwarded to the MCP Starlette app.
 
     Handles ASGI lifespan by forwarding startup/shutdown to both apps so
     the MCP Starlette app can initialise its session-manager task group.
     """
+
+    # OAuth endpoints the MCP SDK creates at root level
+    _OAUTH_PATHS = frozenset({"/authorize", "/token", "/register", "/revoke"})
 
     def __init__(self, django_app, mcp_app, mcp_prefix="/mcp"):
         self.django_app = django_app
         self.mcp_app = mcp_app
         self.mcp_prefix = mcp_prefix
 
+    def _is_mcp_path(self, path: str) -> bool:
+        return (
+            path.startswith(self.mcp_prefix)
+            or path in self._OAUTH_PATHS
+            or path.startswith("/.well-known/oauth-")
+        )
+
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
             await self._handle_lifespan(scope, receive, send)
-        elif scope["type"] == "http" and scope["path"].startswith(self.mcp_prefix):
+        elif scope["type"] == "http" and self._is_mcp_path(scope["path"]):
             await self.mcp_app(scope, receive, send)
         else:
             await self.django_app(scope, receive, send)

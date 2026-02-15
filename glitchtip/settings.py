@@ -320,6 +320,7 @@ INSTALLED_APPS += [
     "apps.logs",
     "apps.event_ingest",
     "apps.mcp",
+    "apps.oauth",
     "import_export",  # Contains import management command, keep under apps.importer
 ]
 

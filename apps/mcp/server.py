@@ -5,22 +5,33 @@ from django.conf import settings
 from django.core.exceptions import FieldError
 from django.http import Http404
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import (
+    AuthSettings,
+    ClientRegistrationOptions,
+    RevocationOptions,
+)
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from apps.oauth.provider import DEFAULT_SCOPES, VALID_SCOPES, GlitchTipOAuthProvider
+
 from . import data, serializers
-from .auth import GlitchTipTokenVerifier
 
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "glitchtip",
     stateless_http=True,
-    token_verifier=GlitchTipTokenVerifier(),
+    auth_server_provider=GlitchTipOAuthProvider(),
     auth=AuthSettings(
         issuer_url=settings.GLITCHTIP_URL.geturl(),
         resource_server_url=settings.GLITCHTIP_URL.geturl(),
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=VALID_SCOPES,
+            default_scopes=DEFAULT_SCOPES,
+        ),
+        revocation_options=RevocationOptions(enabled=True),
     ),
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=False,
