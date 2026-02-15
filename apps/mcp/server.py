@@ -1,7 +1,7 @@
 import json
 import logging
 
-from django.conf import settings
+from django.conf import settings as django_settings
 from django.core.exceptions import FieldError
 from django.http import Http404
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -24,8 +24,8 @@ mcp = FastMCP(
     stateless_http=True,
     auth_server_provider=GlitchTipOAuthProvider(),
     auth=AuthSettings(
-        issuer_url=settings.GLITCHTIP_URL.geturl(),
-        resource_server_url=settings.GLITCHTIP_URL.geturl(),
+        issuer_url=django_settings.GLITCHTIP_URL.geturl(),
+        resource_server_url=django_settings.GLITCHTIP_URL.geturl(),
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
             valid_scopes=VALID_SCOPES,
@@ -214,3 +214,66 @@ async def list_monitors(organization_slug: str) -> str:
         return json.dumps([serializers.serialize_monitor(m) for m in monitors])
     except ValueError as e:
         return _error(str(e))
+
+
+if django_settings.GLITCHTIP_ENABLE_LOGS:
+
+    @mcp.tool()
+    async def list_logs(
+        organization_slug: str,
+        project_id: int | None = None,
+        level: str | None = None,
+        service: str | None = None,
+        environment: str | None = None,
+        query: str | None = None,
+        trace_id: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        """Search log events for an organization (last 7 days).
+
+        Returns logs from most recent to oldest. Useful for investigating
+        application behavior, debugging errors, and correlating with traces.
+
+        Args:
+            organization_slug: Organization slug
+            project_id: Optional project ID to filter by
+            level: Log level filter (trace, debug, info, warn, error, fatal)
+            service: Filter by service name (exact match)
+            environment: Filter by environment (exact match)
+            query: Search text in log body (case-insensitive)
+            trace_id: Filter by trace ID for correlation
+            limit: Max logs to return (default 50, max 100)
+        """
+        try:
+            user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+            logs = await data.get_logs(
+                user_id,
+                organization_slug,
+                project_id=project_id,
+                level=level,
+                service=service,
+                environment=environment,
+                query=query,
+                trace_id=trace_id,
+                limit=limit,
+            )
+            return json.dumps([serializers.serialize_log_event(log) for log in logs])
+        except ValueError as e:
+            return _error(str(e))
+
+    @mcp.tool()
+    async def get_log(organization_slug: str, log_id: str) -> str:
+        """Get a single log event by its ID.
+
+        Args:
+            organization_slug: Organization slug
+            log_id: Log event UUID
+        """
+        try:
+            user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+            log = await data.get_log(user_id, organization_slug, log_id)
+            if log is None:
+                return _error("Log event not found")
+            return json.dumps(serializers.serialize_log_event(log))
+        except ValueError as e:
+            return _error(str(e))
