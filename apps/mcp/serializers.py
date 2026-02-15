@@ -1,5 +1,7 @@
 from apps.issue_events.models import Issue, IssueEvent
 from apps.issue_events.utils import get_entries
+from apps.logs.api import LogEventRow
+from apps.logs.constants import LogLevel
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 
@@ -109,6 +111,29 @@ def serialize_alert(alert) -> dict:
             }
             for r in recipients
         ]
+    return result
+
+
+def serialize_log_event(log: LogEventRow) -> dict:
+    result = {
+        "id": str(log.id),
+        "timestamp": log.timestamp.isoformat(),
+        "level": LogLevel(log.level).label,
+        "body": log.body,
+        "service": log.service,
+        "environment": log.environment,
+        "host": log.host,
+        "projectId": log.project_id,
+    }
+    if log.trace_id:
+        result["traceId"] = str(log.trace_id)
+    if log.span_id is not None:
+        value = log.span_id if log.span_id >= 0 else log.span_id + (1 << 64)
+        result["spanId"] = f"{value:016x}"
+    if log.severity_number is not None:
+        result["severityNumber"] = log.severity_number
+    if log.data:
+        result["data"] = log.data
     return result
 
 
