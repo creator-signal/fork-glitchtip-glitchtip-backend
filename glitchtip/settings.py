@@ -202,6 +202,19 @@ if SENTRY_DSN:
             _, exc_value, _ = hint["exc_info"]
             if isinstance(exc_value, UnreadablePostError):
                 return None
+        # Prevent feedback loops when self-reporting: drop errors from
+        # the event ingestion pipeline (views and worker tasks) so a bug
+        # can't amplify into a self-DOS via the SDK sending back to us.
+        request_info = event.get("request", {})
+        url = request_info.get("url", "")
+        if "/envelope/" in url or "/store/" in url:
+            return None
+        if "exception" in event:
+            for exc_val in event["exception"].get("values", []):
+                for frame in exc_val.get("stacktrace", {}).get("frames", []):
+                    module = frame.get("module", "")
+                    if module.startswith(("apps.event_ingest", "apps.logs.process")):
+                        return None
         return event
 
     # Ignore whitenoise served static routes
