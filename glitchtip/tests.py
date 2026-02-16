@@ -1,4 +1,6 @@
+import logging
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import requests_mock
@@ -6,7 +8,9 @@ from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
 
+from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
+from glitchtip.settings import _is_self_referencing_dsn
 
 
 class SettingsTestCase(TestCase):
@@ -416,3 +420,244 @@ class DatabaseSettingsTestCase(TestCase):
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
         self.assertEqual(db_settings.get("ENGINE"), "django.db.backends.postgresql")
+
+
+class IsSelfReferencingDsnTestCase(TestCase):
+    """Test _is_self_referencing_dsn detection."""
+
+    def _url(self, url_str):
+        """Create a parsed URL result similar to env.url()."""
+        from urllib.parse import urlparse
+
+        return urlparse(url_str)
+
+    def test_same_host_same_port(self):
+        self.assertTrue(
+            _is_self_referencing_dsn(
+                "http://key@localhost:8000/1", self._url("http://localhost:8000")
+            )
+        )
+
+    def test_same_host_default_https_port(self):
+        self.assertTrue(
+            _is_self_referencing_dsn(
+                "https://key@example.com/1", self._url("https://example.com")
+            )
+        )
+
+    def test_same_host_default_http_port(self):
+        self.assertTrue(
+            _is_self_referencing_dsn(
+                "http://key@example.com/1", self._url("http://example.com")
+            )
+        )
+
+    def test_different_host(self):
+        self.assertFalse(
+            _is_self_referencing_dsn(
+                "https://key@sentry.io/1", self._url("https://glitchtip.example.com")
+            )
+        )
+
+    def test_same_host_different_port(self):
+        self.assertFalse(
+            _is_self_referencing_dsn(
+                "http://key@localhost:9000/1", self._url("http://localhost:8000")
+            )
+        )
+
+    def test_docker_hostname(self):
+        self.assertTrue(
+            _is_self_referencing_dsn(
+                "http://key@web:8000/1", self._url("http://web:8000")
+            )
+        )
+
+
+class InternalTransportTestCase(TestCase):
+    """Test InternalTransport enqueues events correctly."""
+
+    def setUp(self):
+        self.organization = baker.make(
+            "organizations_ext.Organization", slug="test-internal"
+        )
+        self.project = baker.make(
+            "projects.Project", organization=self.organization
+        )
+        self.project_key = baker.make(
+            "projects.ProjectKey", project=self.project
+        )
+
+    def test_capture_envelope_enqueues_event(self):
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+
+        envelope = MagicMock()
+        envelope.get_event.return_value = {
+            "event_id": "abcd1234abcd1234abcd1234abcd1234",
+            "exception": {"values": [{"type": "ValueError", "value": "test"}]},
+            "level": "error",
+            "platform": "python",
+        }
+
+        with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
+            transport.capture_envelope(envelope)
+
+        mock_ingest.enqueue.assert_called_once()
+        args = mock_ingest.enqueue.call_args[0][0]
+        self.assertEqual(args["project_id"], self.project.id)
+        self.assertEqual(args["organization_id"], self.organization.id)
+
+    def test_capture_envelope_no_event_is_noop(self):
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+
+        envelope = MagicMock()
+        envelope.get_event.return_value = None
+
+        with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
+            transport.capture_envelope(envelope)
+
+        mock_ingest.enqueue.assert_not_called()
+
+    def test_capture_envelope_bad_dsn_is_noop(self):
+        transport = InternalTransport(
+            options={"dsn": "http://0000@localhost:8000/999"}
+        )
+
+        envelope = MagicMock()
+        envelope.get_event.return_value = {"exception": {}}
+
+        with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
+            transport.capture_envelope(envelope)
+
+        mock_ingest.enqueue.assert_not_called()
+
+    def test_sets_processing_internal_contextvar(self):
+        """Verify _processing_internal is set during envelope processing."""
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+
+        observed_values = []
+
+        original_process = transport._process_envelope
+
+        def spy_process(envelope):
+            observed_values.append(_processing_internal.get())
+            original_process(envelope)
+
+        envelope = MagicMock()
+        envelope.get_event.return_value = {
+            "event_id": "abcd1234abcd1234abcd1234abcd1234",
+            "exception": {"values": []},
+        }
+
+        with patch.object(transport, "_process_envelope", spy_process):
+            with patch("apps.event_ingest.tasks.ingest_event"):
+                transport.capture_envelope(envelope)
+
+        self.assertEqual(observed_values, [True])
+        # After return, contextvar should be reset
+        self.assertFalse(_processing_internal.get())
+
+
+class BeforeSendSelfRefTestCase(TestCase):
+    """Test before_send behavior with self-referencing guards."""
+
+    def _make_before_send(self, is_self_ref):
+        """Create a before_send function with controlled self-ref flag."""
+        from django.http import UnreadablePostError
+
+        _UNSAFE_MODULES = ("apps.event_ingest", "apps.logs.process")
+
+        def before_send(event, hint):
+            if "log_record" in hint:
+                if hint["log_record"].name == "django.security.DisallowedHost":
+                    return None
+            if "exc_info" in hint:
+                _, exc_value, _ = hint["exc_info"]
+                if isinstance(exc_value, UnreadablePostError):
+                    return None
+            if is_self_ref:
+                if _processing_internal.get():
+                    return None
+                if "log_record" in hint:
+                    if hint["log_record"].name.startswith(
+                        ("apps.event_ingest", "apps.logs")
+                    ):
+                        return None
+                for exc_val in event.get("exception", {}).get("values", []):
+                    for frame in exc_val.get("stacktrace", {}).get("frames", []):
+                        if frame.get("module", "").startswith(_UNSAFE_MODULES):
+                            return None
+            return event
+
+        return before_send
+
+    def test_self_ref_drops_during_processing(self):
+        before_send = self._make_before_send(True)
+        token = _processing_internal.set(True)
+        try:
+            result = before_send({"exception": {}}, {})
+            self.assertIsNone(result)
+        finally:
+            _processing_internal.reset(token)
+
+    def test_self_ref_drops_ingest_log_record(self):
+        before_send = self._make_before_send(True)
+        record = logging.LogRecord(
+            "apps.event_ingest.views", logging.ERROR, "", 0, "msg", (), None
+        )
+        result = before_send({"exception": {}}, {"log_record": record})
+        self.assertIsNone(result)
+
+    def test_self_ref_drops_ingest_stackframe(self):
+        before_send = self._make_before_send(True)
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"module": "apps.event_ingest.process_event"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        result = before_send(event, {})
+        self.assertIsNone(result)
+
+    def test_non_self_ref_passes_ingest_stackframe(self):
+        before_send = self._make_before_send(False)
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"module": "apps.event_ingest.process_event"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        result = before_send(event, {})
+        self.assertIsNotNone(result)
+
+    def test_self_ref_passes_normal_error(self):
+        before_send = self._make_before_send(True)
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"module": "apps.users.views"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        result = before_send(event, {})
+        self.assertIsNotNone(result)
