@@ -28,6 +28,28 @@ GlitchTip is API-compatible with Sentry, but **Sentry is NOT open source**. Thei
 - **ALLOWED:** Reading Sentry's **MIT-licensed SDKs** (e.g., `sentry-python`, `sentry-javascript`, `sentry-ruby`, etc.) is fine — these are genuinely open source.
 - **Rule of thumb:** If it's a client SDK (sends data *to* Sentry/GlitchTip), it's MIT and fair game. If it's server-side code (processes/stores data), it's BSL and off limits.
 
+## Local Development
+
+Running `docker compose up` auto-provisions a dev environment with:
+
+- **User:** `test@example.com` / `admin`
+- **Organization:** `org`
+- **Project:** `project`
+- **API Token:** `dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd` (all scopes)
+- **DSN:** Printed to stdout on startup (format: `http://<key>@localhost:8000/<project_id>`)
+
+Populate sample data (no arguments needed):
+```sh
+docker compose exec web python manage.py make_sample_issues
+docker compose exec web python manage.py make_sample_logs
+docker compose exec web python manage.py make_sample_transactions
+```
+
+Test the API:
+```sh
+curl -H "Authorization: Bearer dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" http://localhost:8000/api/0/organizations/
+```
+
 ## Gotchas
 - We optimize postgres column alignment, when making migrations consider column alignment. Some smaller tales don't matter. When in doubt, ask the user.
 - Some tables use nested postgres partitions, often organization_id HASH > uuid7 (time). When querying a partitioned tabled, consider optimizing the query to be partition aware
