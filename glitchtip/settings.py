@@ -177,7 +177,8 @@ if "BASE_PATH" in os.environ or "FORCE_SCRIPT_NAME" in os.environ:
 
 
 # GlitchTip can track GlitchTip's own errors.
-# If enabling this, use a different server to avoid infinite loops.
+# When SENTRY_DSN points back to the same instance, InternalTransport
+# bypasses HTTP to prevent feedback loops while still capturing errors.
 SENTRY_DSN = env.str("SENTRY_DSN", None)
 # Optionally allow a different DSN for the frontend
 SENTRY_FRONTEND_DSN = env.str("SENTRY_FRONTEND_DSN", SENTRY_DSN)
@@ -188,10 +189,32 @@ SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", 0.01)
 # Enable sentry-sdk logs feature to send logs to the configured DSN
 SENTRY_ENABLE_LOGS = env.bool("SENTRY_ENABLE_LOGS", False)
 
+
+def _is_self_referencing_dsn(sentry_dsn, glitchtip_url):
+    """Check if SENTRY_DSN points back to this GlitchTip instance."""
+    from urllib.parse import urlparse
+
+    dsn = urlparse(sentry_dsn)
+    dsn_port = dsn.port or (443 if dsn.scheme == "https" else 80)
+    gt_port = glitchtip_url.port or (443 if glitchtip_url.scheme == "https" else 80)
+    return dsn.hostname == glitchtip_url.hostname and dsn_port == gt_port
+
+
 if SENTRY_DSN:
     import sentry_sdk
     from django.http import UnreadablePostError
     from sentry_sdk.integrations.django import DjangoIntegration
+
+    from glitchtip.internal_transport import InternalTransport
+
+    _is_self_referencing = env.bool(
+        "SENTRY_SELF_REFERENCING",
+        _is_self_referencing_dsn(SENTRY_DSN, GLITCHTIP_URL),
+    )
+
+    # Equivalent to old Sentry's UNSAFE_FILES — catches async recursion
+    # in worker tasks where the contextvar doesn't propagate.
+    _UNSAFE_MODULES = ("apps.event_ingest", "apps.logs.process")
 
     def before_send(event, hint):
         """Don't log useless, inactionable errors in Sentry."""
@@ -202,6 +225,26 @@ if SENTRY_DSN:
             _, exc_value, _ = hint["exc_info"]
             if isinstance(exc_value, UnreadablePostError):
                 return None
+
+        # --- Self-referencing loop protection ---
+        if _is_self_referencing:
+            from glitchtip.internal_transport import _processing_internal
+
+            # Synchronous recursion guard (equivalent to NOOP_HUB)
+            if _processing_internal.get():
+                return None
+            # Logger-originated events from ingest modules
+            if "log_record" in hint:
+                if hint["log_record"].name.startswith(
+                    ("apps.event_ingest", "apps.logs")
+                ):
+                    return None
+            # Worker path: stackframes from ingest modules (equivalent to UNSAFE_FILES)
+            for exc_val in event.get("exception", {}).get("values", []):
+                for frame in exc_val.get("stacktrace", {}).get("frames", []):
+                    if frame.get("module", "").startswith(_UNSAFE_MODULES):
+                        return None
+
         return event
 
     # Ignore whitenoise served static routes
@@ -217,6 +260,7 @@ if SENTRY_DSN:
     release = "glitchtip@" + GLITCHTIP_VERSION if GLITCHTIP_VERSION else None
     sentry_sdk.init(
         dsn=SENTRY_DSN,
+        transport=InternalTransport if _is_self_referencing else None,
         integrations=[DjangoIntegration()],
         before_send=before_send,
         release=release,
