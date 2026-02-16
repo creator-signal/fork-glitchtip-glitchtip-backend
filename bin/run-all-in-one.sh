@@ -7,6 +7,10 @@ if [ "${SKIP_INIT}" != "True" ] && [ "${SKIP_INIT}" != "true" ] && [ "${SKIP_INI
     python manage.py migrate --no-input --skip-checks
     python manage.py maintain_partitions
 
+    if [ "$GLITCHTIP_BOOTSTRAP_DEV" = "True" ] || [ "$GLITCHTIP_BOOTSTRAP_DEV" = "true" ] || [ "$GLITCHTIP_BOOTSTRAP_DEV" = "1" ]; then
+        python manage.py bootstrap_dev
+    fi
+
     # Create cache table if django.contrib.sessions is installed
     python -c "import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'glitchtip.settings'); django.setup(); from django.conf import settings; from django.core.management import call_command; call_command('createcachetable') if 'django.contrib.sessions' in settings.INSTALLED_APPS else None"
 fi
