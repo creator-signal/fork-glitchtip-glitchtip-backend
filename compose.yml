@@ -11,6 +11,7 @@ x-environment: &default-environment
   VTASKS_CONCURRENCY: 4
   LOG_LEVEL: INFO
   GLITCHTIP_ENABLE_MCP: "true"
+  GLITCHTIP_BOOTSTRAP_DEV: "true"
 
 x-depends_on: &default-depends_on
   - postgres
