@@ -19,13 +19,15 @@ from . import data, serializers
 
 logger = logging.getLogger(__name__)
 
+_base_url = django_settings.GLITCHTIP_URL.geturl().rstrip("/")
+
 mcp = FastMCP(
     "glitchtip",
     stateless_http=True,
     auth_server_provider=GlitchTipOAuthProvider(),
     auth=AuthSettings(
-        issuer_url=django_settings.GLITCHTIP_URL.geturl(),
-        resource_server_url=django_settings.GLITCHTIP_URL.geturl(),
+        issuer_url=_base_url,
+        resource_server_url=f"{_base_url}/mcp",
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
             valid_scopes=VALID_SCOPES,
