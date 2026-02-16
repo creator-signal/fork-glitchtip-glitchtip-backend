@@ -115,6 +115,7 @@ def serialize_alert(alert) -> dict:
 
 
 def serialize_log_event(log: LogEventRow) -> dict:
+    # Keep in sync with apps/logs/schema.py:LogEventSchema
     result = {
         "id": str(log.id),
         "timestamp": log.timestamp.isoformat(),

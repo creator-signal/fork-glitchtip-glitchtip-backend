@@ -1,9 +1,16 @@
-from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, QuerySet, Subquery
 
 from apps.projects.models import Project
 from apps.teams.models import Team
 
 from .models import Organization, OrganizationUser
+
+
+def get_organization_for_user(
+    user_id: int, organization_slug: str
+) -> QuerySet[Organization]:
+    """Get organization queryset filtered by user membership and slug."""
+    return Organization.objects.filter(users=user_id, slug=organization_slug)
 
 
 def get_organizations_queryset(

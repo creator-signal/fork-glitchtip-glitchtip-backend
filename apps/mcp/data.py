@@ -9,9 +9,12 @@ from apps.issue_events.models import Issue, IssueEvent
 from apps.issue_events.services import filter_issue_list
 from apps.issue_events.services import get_queryset as get_issues_qs
 from apps.logs.api import LogEventRow, query_logs_combined
-from apps.logs.constants import LEVEL_MAP
+from apps.logs.constants import parse_level_filters
 from apps.organizations_ext.models import Organization
-from apps.organizations_ext.queryset_utils import get_organizations_queryset
+from apps.organizations_ext.queryset_utils import (
+    get_organization_for_user,
+    get_organizations_queryset,
+)
 from apps.projects.api import get_projects_queryset
 from apps.projects.models import Project
 from apps.uptime.api import get_monitor_queryset
@@ -116,12 +119,14 @@ async def get_monitors(user_id: int, organization_slug: str) -> list[Monitor]:
 
 async def _get_org_id(user_id: int, organization_slug: str) -> int:
     """Resolve org slug to ID, verifying user membership."""
-    org = await Organization.objects.filter(
-        users=user_id, slug=organization_slug
-    ).afirst()
-    if not org:
+    org_id = (
+        await get_organization_for_user(user_id, organization_slug)
+        .values_list("id", flat=True)
+        .afirst()
+    )
+    if org_id is None:
         raise ValueError(f"Organization '{organization_slug}' not found")
-    return org.id
+    return org_id
 
 
 async def get_logs(
@@ -141,11 +146,7 @@ async def get_logs(
     now = datetime.now(timezone.utc)
     start_dt = now - timedelta(days=7)
 
-    level_values = None
-    if level:
-        level_enum = LEVEL_MAP.get(level.lower())
-        if level_enum is not None:
-            level_values = [level_enum]
+    level_values = parse_level_filters([level] if level else None)
 
     project_ids = [project_id] if project_id else None
 

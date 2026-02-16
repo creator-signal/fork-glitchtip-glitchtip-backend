@@ -13,7 +13,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Query, Router
 
-from apps.organizations_ext.models import Organization
+from apps.organizations_ext.queryset_utils import get_organization_for_user
 from apps.projects.models import LogProjectHourlyStatistic
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.pagination import set_pagination_headers
@@ -21,7 +21,7 @@ from glitchtip.api.permissions import has_permission
 from glitchtip.cold_storage import parse_json_field
 from glitchtip.partition_manager import UUID7Helper
 
-from .constants import LEVEL_MAP, LogLevel
+from .constants import LogLevel, parse_level_filters
 from .models import LogResource, compute_hash_bucket
 from .schema import (
     LogEventSchema,
@@ -61,11 +61,6 @@ def encode_cursor(position: UUID) -> str:
     """Encode log UUID as cursor string."""
     querystring = f"p={position}"
     return b64encode(querystring.encode()).decode()
-
-
-def get_organization_for_user(user_id: int, organization_slug: str):
-    """Get organization queryset filtered by user membership."""
-    return Organization.objects.filter(users=user_id, slug=organization_slug)
 
 
 @dataclass
@@ -608,14 +603,7 @@ async def list_logs(
     start_dt = filters.start or (now - timedelta(days=DEFAULT_LOOKBACK_DAYS))
     end_dt = filters.end or now
 
-    # Parse level filters
-    level_values = None
-    if filters.level:
-        level_values = []
-        for level_str in filters.level:
-            level_enum = LEVEL_MAP.get(level_str.lower())
-            if level_enum is not None:
-                level_values.append(level_enum)
+    level_values = parse_level_filters(filters.level)
 
     # Decode cursor
     cursor_position = decode_cursor(filters.cursor)
@@ -788,14 +776,7 @@ async def get_log_stats(
     if end_dt - start_dt > max_range:
         start_dt = end_dt - max_range
 
-    # Parse level filters
-    level_values = None
-    if filters.level:
-        level_values = []
-        for level_str in filters.level:
-            level_enum = LEVEL_MAP.get(level_str.lower())
-            if level_enum is not None:
-                level_values.append(level_enum)
+    level_values = parse_level_filters(filters.level)
 
     # Parse service filters to hash buckets
     service_buckets = None
