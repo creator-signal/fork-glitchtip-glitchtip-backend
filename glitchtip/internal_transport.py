@@ -53,7 +53,7 @@ class InternalTransport(Transport):
         from django.utils import timezone
 
         from apps.event_ingest.interfaces import IngestTaskMessage
-        from apps.event_ingest.tasks import ingest_event
+        from apps.event_ingest.tasks import ingest_event, ingest_transaction
         from apps.event_ingest.utils import serialize_for_vtasks
         from apps.issue_events.constants import IssueEventType
         from glitchtip.partition_manager import UUID7Helper
@@ -62,21 +62,59 @@ class InternalTransport(Transport):
         if key is None:
             return
 
-        event = envelope.get_event()
-        if event is None:
-            return  # Only handle error events for now
+        now = timezone.now
 
-        # Determine issue type from event data
-        issue_type = (
-            IssueEventType.ERROR if "exception" in event else IssueEventType.DEFAULT
-        )
+        for item in envelope:
+            if item.type == "event":
+                event = item.payload.json
+                issue_type = (
+                    IssueEventType.ERROR
+                    if "exception" in event
+                    else IssueEventType.DEFAULT
+                )
+                msg = IngestTaskMessage(
+                    project_id=key.project_id,
+                    organization_id=key.project.organization_id,
+                    payload=event | {"type": issue_type},
+                    received=now(),
+                    update_first_event=False,
+                    uuid=UUID7Helper.from_datetime().hex,
+                )
+                ingest_event.enqueue(serialize_for_vtasks(asdict(msg)))
 
-        msg = IngestTaskMessage(
+            elif item.type == "transaction":
+                msg = IngestTaskMessage(
+                    project_id=key.project_id,
+                    organization_id=key.project.organization_id,
+                    payload=item.payload.json,
+                    received=now(),
+                    update_first_event=False,
+                    uuid=UUID7Helper.from_datetime().hex,
+                )
+                ingest_transaction.enqueue(serialize_for_vtasks(asdict(msg)))
+
+            elif item.type == "log":
+                self._process_log_item(item, key, now())
+
+    def _process_log_item(self, item, key, received):
+        from dataclasses import asdict
+
+        from django.conf import settings
+
+        if not settings.GLITCHTIP_ENABLE_LOGS:
+            return
+
+        from apps.event_ingest.interfaces import LogIngestTaskMessage
+        from apps.event_ingest.schema import LogEnvelopePayload
+        from apps.event_ingest.utils import serialize_for_vtasks
+        from apps.logs.tasks import ingest_logs
+
+        payload_bytes = item.get_bytes()
+        log_payload = LogEnvelopePayload.model_validate_json(payload_bytes)
+        log_message = LogIngestTaskMessage(
             project_id=key.project_id,
             organization_id=key.project.organization_id,
-            payload=event | {"type": issue_type},
-            received=timezone.now(),
-            update_first_event=False,
-            uuid=UUID7Helper.from_datetime().hex,
+            received=received,
+            logs=[log_item.dict() for log_item in log_payload.items],
         )
-        ingest_event.enqueue(serialize_for_vtasks(asdict(msg)))
+        ingest_logs.enqueue(serialize_for_vtasks(asdict(log_message)))
