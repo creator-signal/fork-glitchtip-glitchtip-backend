@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from django.db.models import Q, QuerySet
@@ -7,8 +8,13 @@ from apps.alerts.models import ProjectAlert
 from apps.issue_events.models import Issue, IssueEvent
 from apps.issue_events.services import filter_issue_list
 from apps.issue_events.services import get_queryset as get_issues_qs
+from apps.logs.api import LogEventRow, query_logs_combined
+from apps.logs.constants import parse_level_filters
 from apps.organizations_ext.models import Organization
-from apps.organizations_ext.queryset_utils import get_organizations_queryset
+from apps.organizations_ext.queryset_utils import (
+    get_organization_for_user,
+    get_organizations_queryset,
+)
 from apps.projects.api import get_projects_queryset
 from apps.projects.models import Project
 from apps.uptime.api import get_monitor_queryset
@@ -109,3 +115,64 @@ async def get_monitors(user_id: int, organization_slug: str) -> list[Monitor]:
     qs = get_monitor_queryset(user_id, organization_slug)
     qs = _apply_compliance_filter(qs)
     return [m async for m in qs]
+
+
+async def _get_org_id(user_id: int, organization_slug: str) -> int:
+    """Resolve org slug to ID, verifying user membership."""
+    org_id = (
+        await get_organization_for_user(user_id, organization_slug)
+        .values_list("id", flat=True)
+        .afirst()
+    )
+    if org_id is None:
+        raise ValueError(f"Organization '{organization_slug}' not found")
+    return org_id
+
+
+async def get_logs(
+    user_id: int,
+    organization_slug: str,
+    project_id: int | None = None,
+    level: str | None = None,
+    service: str | None = None,
+    environment: str | None = None,
+    query: str | None = None,
+    trace_id: str | None = None,
+    limit: int = 50,
+) -> list[LogEventRow]:
+    """Query logs from hot+cold storage via the existing combined query."""
+    org_id = await _get_org_id(user_id, organization_slug)
+
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(days=7)
+
+    level_values = parse_level_filters([level] if level else None)
+
+    project_ids = [project_id] if project_id else None
+
+    return await query_logs_combined(
+        organization_id=org_id,
+        start_dt=start_dt,
+        end_dt=now,
+        project_ids=project_ids,
+        level_values=level_values,
+        service=service,
+        environment=environment,
+        trace_id=trace_id,
+        query=query,
+        limit=min(limit, 100),
+    )
+
+
+async def get_log(
+    user_id: int, organization_slug: str, log_id: str
+) -> LogEventRow | None:
+    """Get a single log event by ID."""
+    from apps.logs.api import get_log_by_id
+
+    org_id = await _get_org_id(user_id, organization_slug)
+    try:
+        uuid_val = UUID(log_id)
+    except ValueError:
+        return None
+    return await get_log_by_id(org_id, uuid_val)

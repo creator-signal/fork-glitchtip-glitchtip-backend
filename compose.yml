@@ -12,6 +12,7 @@ x-environment: &default-environment
   LOG_LEVEL: INFO
   GLITCHTIP_ENABLE_MCP: "true"
   GLITCHTIP_BOOTSTRAP_DEV: "true"
+  GLITCHTIP_ENABLE_LOGS: "true"
 
 x-depends_on: &default-depends_on
   - postgres
