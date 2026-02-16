@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from uuid import UUID
 
 import requests_mock
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
@@ -488,16 +488,25 @@ class InternalTransportTestCase(TestCase):
             "projects.ProjectKey", project=self.project
         )
 
+    def _make_envelope(self, item_type, payload):
+        """Helper to create a real SDK Envelope with a single item."""
+        from sentry_sdk.envelope import Envelope, Item, PayloadRef
+
+        envelope = Envelope()
+        envelope.add_item(
+            Item(type=item_type, payload=PayloadRef(json=payload))
+        )
+        return envelope
+
     def test_capture_envelope_enqueues_event(self):
         transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
 
-        envelope = MagicMock()
-        envelope.get_event.return_value = {
+        envelope = self._make_envelope("event", {
             "event_id": "abcd1234abcd1234abcd1234abcd1234",
             "exception": {"values": [{"type": "ValueError", "value": "test"}]},
             "level": "error",
             "platform": "python",
-        }
+        })
 
         with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
             transport.capture_envelope(envelope)
@@ -507,11 +516,12 @@ class InternalTransportTestCase(TestCase):
         self.assertEqual(args["project_id"], self.project.id)
         self.assertEqual(args["organization_id"], self.organization.id)
 
-    def test_capture_envelope_no_event_is_noop(self):
+    def test_capture_envelope_empty_is_noop(self):
         transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
 
-        envelope = MagicMock()
-        envelope.get_event.return_value = None
+        from sentry_sdk.envelope import Envelope
+
+        envelope = Envelope()
 
         with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
             transport.capture_envelope(envelope)
@@ -523,13 +533,87 @@ class InternalTransportTestCase(TestCase):
             options={"dsn": "http://0000@localhost:8000/999"}
         )
 
-        envelope = MagicMock()
-        envelope.get_event.return_value = {"exception": {}}
+        envelope = self._make_envelope("event", {"exception": {}})
 
         with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
             transport.capture_envelope(envelope)
 
         mock_ingest.enqueue.assert_not_called()
+
+    def test_capture_envelope_enqueues_transaction(self):
+        """Verify InternalTransport forwards transaction envelope items."""
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+
+        envelope = self._make_envelope("transaction", {
+            "event_id": "bbbb1234bbbb1234bbbb1234bbbb1234",
+            "type": "transaction",
+            "transaction": "/api/test",
+            "contexts": {"trace": {"op": "http.server", "trace_id": "a" * 32}},
+            "start_timestamp": "2026-01-01T00:00:00Z",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "spans": [],
+        })
+
+        with (
+            patch("apps.event_ingest.tasks.ingest_event") as mock_event,
+            patch("apps.event_ingest.tasks.ingest_transaction") as mock_txn,
+        ):
+            transport.capture_envelope(envelope)
+
+        mock_event.enqueue.assert_not_called()
+        mock_txn.enqueue.assert_called_once()
+        args = mock_txn.enqueue.call_args[0][0]
+        self.assertEqual(args["project_id"], self.project.id)
+        self.assertEqual(args["organization_id"], self.organization.id)
+        self.assertEqual(args["payload"]["transaction"], "/api/test")
+
+    @override_settings(GLITCHTIP_ENABLE_LOGS=True)
+    def test_capture_envelope_enqueues_logs(self):
+        """Verify InternalTransport forwards log envelope items."""
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+
+        from sentry_sdk.envelope import Envelope, Item, PayloadRef
+
+        envelope = Envelope()
+        envelope.add_item(
+            Item(
+                type="log",
+                content_type="application/vnd.sentry.items.log+json",
+                headers={"item_count": 1},
+                payload=PayloadRef(
+                    json={
+                        "items": [
+                            {
+                                "timestamp": 1700000000.0,
+                                "trace_id": "00000000-0000-0000-0000-000000000000",
+                                "level": "info",
+                                "body": "hello from internal transport",
+                                "attributes": {
+                                    "sentry.severity_number": {
+                                        "value": 9,
+                                        "type": "integer",
+                                    },
+                                    "sentry.severity_text": {
+                                        "value": "info",
+                                        "type": "string",
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                ),
+            )
+        )
+
+        with patch("apps.logs.tasks.ingest_logs") as mock_ingest:
+            transport.capture_envelope(envelope)
+
+        mock_ingest.enqueue.assert_called_once()
+        args = mock_ingest.enqueue.call_args[0][0]
+        self.assertEqual(args["project_id"], self.project.id)
+        self.assertEqual(args["organization_id"], self.organization.id)
+        self.assertEqual(len(args["logs"]), 1)
+        self.assertEqual(args["logs"][0]["body"], "hello from internal transport")
 
     def test_sets_processing_internal_contextvar(self):
         """Verify _processing_internal is set during envelope processing."""
@@ -543,11 +627,10 @@ class InternalTransportTestCase(TestCase):
             observed_values.append(_processing_internal.get())
             original_process(envelope)
 
-        envelope = MagicMock()
-        envelope.get_event.return_value = {
+        envelope = self._make_envelope("event", {
             "event_id": "abcd1234abcd1234abcd1234abcd1234",
             "exception": {"values": []},
-        }
+        })
 
         with patch.object(transport, "_process_envelope", spy_process):
             with patch("apps.event_ingest.tasks.ingest_event"):
