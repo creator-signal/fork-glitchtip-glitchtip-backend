@@ -96,6 +96,8 @@ test-latest:
     - mc alias set myminio http://minio:9000 minioadmin minioadmin
     - mc mb --ignore-existing myminio/glitchtip-cold || true
     - uv sync --frozen --no-install-project
+    # Pre-install DuckDB extensions (mirrors Dockerfile build step)
+    - python -c "import duckdb; c=duckdb.connect(); c.install_extension('httpfs'); c.install_extension('aws'); c.close()"
     - uv run ./manage.py test
     - uv cache prune --ci
   rules:
