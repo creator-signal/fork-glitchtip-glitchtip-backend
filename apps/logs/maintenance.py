@@ -24,14 +24,14 @@ def cleanup_old_logs():
     Archive old log partitions to cold storage and delete expired cold data.
 
     Settings:
-        GLITCHTIP_LOGS_HOT_DAYS: Days to keep in hot storage (default 7)
-        GLITCHTIP_LOGS_COLD_DAYS: Days to keep in cold storage (default 90)
+        GLITCHTIP_LOG_HOT_DAYS: Days to keep in hot storage (default 7)
+        GLITCHTIP_LOG_RETENTION_DAYS: Total retention including cold (default 90)
     """
     if not settings.GLITCHTIP_ENABLE_LOGS:
         return
 
-    hot_days = settings.GLITCHTIP_LOGS_HOT_DAYS
-    cold_days = settings.GLITCHTIP_LOGS_COLD_DAYS
+    hot_days = settings.GLITCHTIP_LOG_HOT_DAYS
+    retention_days = settings.GLITCHTIP_LOG_RETENTION_DAYS
 
     if is_duckdb_available():
         archive_and_cleanup_partitions(
@@ -39,11 +39,11 @@ def cleanup_old_logs():
             hot_days=hot_days,
             column_types=EXPORT_COLUMN_TYPES,
             select_sql=LOGS_SELECT_SQL,
-            retention_days=cold_days,
+            retention_days=retention_days,
         )
     else:
-        # No cold storage available - just delete old partitions
-        delete_old_hot_partitions(hot_days)
+        # No cold storage available - delete partitions at total retention
+        delete_old_hot_partitions(retention_days)
 
 
 def delete_old_hot_partitions(days: int):

@@ -7,6 +7,6 @@ from .models import DebugSymbolBundle
 
 
 def cleanup_old_debug_symbol_bundles():
-    days_ago = now() - timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS)
+    days_ago = now() - timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS)
     queryset = DebugSymbolBundle.objects.filter(last_used__lt=days_ago)
     queryset._raw_delete(queryset.db)

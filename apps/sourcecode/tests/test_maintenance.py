@@ -17,7 +17,7 @@ class SourceCodeMaintenanceTestCase(GlitchTestCase):
         baker.make("sourcecode.DebugSymbolBundle", last_used=now, debug_id=uuid4())
         baker.make(
             "sourcecode.DebugSymbolBundle",
-            last_used=now - timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS),
+            last_used=now - timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS),
             debug_id=uuid4(),
         )
         cleanup_old_debug_symbol_bundles()
