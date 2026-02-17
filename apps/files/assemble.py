@@ -205,7 +205,7 @@ def assemble_file(
 
     # Reject all files that exceed the maximum allowed size for this
     # organization. This value cannot be
-    file_size = sum(x[2] for x in file_blobs)
+    file_size = sum(x[2] for x in file_blobs if x[2] is not None)
     if file_size > MAX_FILE_SIZE:
         set_assemble_status(
             task,
