@@ -839,7 +839,7 @@ wheels = [
 
 [[package]]
 name = "django-vtasks"
-version = "1.0.2"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "croniter" },
@@ -847,9 +847,9 @@ dependencies = [
     { name = "orjson" },
     { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/a5/8ebd174cb2fe53ddd6bab7556d7148f6d1a5bfc1ed84868a2323a4a6fae4/django_vtasks-1.0.2.tar.gz", hash = "sha256:f432a5274772451b9c3b2f5cf39e0467ca80240ce901b9c4c18c6a2c46a2dab8", size = 28422, upload-time = "2026-02-04T22:45:19.682Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/39/36/938135cb01f5f5a3ecd595446e5189859aaf6857602bd28dd957c3a620ad/django_vtasks-1.0.3.tar.gz", hash = "sha256:3d701cbeebbfe4598e96444e827cb928f55bafb7c40eba719cb6e0805c1aa6ea", size = 28863, upload-time = "2026-02-17T19:02:00.344Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/11/eafd74629d1b08325864fea71470873f865ddd5f0f7d0c1cb5b7f07bda06/django_vtasks-1.0.2-py3-none-any.whl", hash = "sha256:c0363b92ac0b27bc88057972e367106a8f7f09917033334b7773638453cf7da6", size = 40567, upload-time = "2026-02-04T22:45:18.397Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/b7/39072927f058256bacb1da2cd0e48c1404198c2663be8a4a0a5b03c154e7/django_vtasks-1.0.3-py3-none-any.whl", hash = "sha256:857b3dd9684a58fa0f683996cefd6485e5acfc018a8b43bddb3752d7a9fba548", size = 41024, upload-time = "2026-02-17T19:01:59.426Z" },
 ]
 
 [package.optional-dependencies]
