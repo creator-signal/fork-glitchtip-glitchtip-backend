@@ -30,7 +30,13 @@ COPY . /code/
 ARG COLLECT_STATIC
 RUN if [ "$COLLECT_STATIC" != "" ] ; then SECRET_KEY=ci ./manage.py collectstatic --noinput; fi
 
-RUN useradd -u 5000 app && chown app:app /code && chown app:app /code/uploads
+# Pre-install DuckDB extensions at build time so nothing is downloaded at runtime.
+# Extension version is locked to the duckdb version in uv.lock.
+# Stored in a shared path so it works regardless of runtime user.
+RUN mkdir -p /opt/duckdb/extensions && \
+    python -c "import duckdb; c=duckdb.connect(config={'extension_directory':'/opt/duckdb/extensions'}); c.install_extension('httpfs'); c.install_extension('aws'); c.close()"
+
+RUN useradd -u 5000 app -m && chown app:app /code && chown app:app /code/uploads
 USER app:app
 
 CMD ["./bin/start.sh"]
