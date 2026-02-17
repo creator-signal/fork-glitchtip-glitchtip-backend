@@ -28,7 +28,7 @@ class TasksTestCase(GlitchTipTestCase):
         baker.make("performance.TransactionEvent", group=groups[0])
         with freeze_time(
             timezone.now()
-            + timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1)
+            + timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS + 1)
         ):
             cleanup_old_transaction_events()
         self.assertEqual(TransactionGroup.objects.count(), 1)
@@ -36,7 +36,7 @@ class TasksTestCase(GlitchTipTestCase):
         TransactionEvent.objects.all().delete()
         with freeze_time(
             timezone.now()
-            + timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1)
+            + timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS + 1)
         ):
             cleanup_old_transaction_events()
         self.assertEqual(TransactionGroup.objects.count(), 0)
@@ -72,9 +72,7 @@ class TasksTestCase(GlitchTipTestCase):
 
                 with freeze_time(
                     timezone.now()
-                    + timedelta(
-                        days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS + 1
-                    )
+                    + timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS + 1)
                 ):
                     cleanup_old_transaction_events()
 

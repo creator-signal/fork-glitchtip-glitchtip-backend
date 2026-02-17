@@ -226,9 +226,22 @@ def archive_partition_per_org(
                 logger.info(f"No data in {partition_name}, skipping")
                 return []
 
-            logger.info(
-                f"Archiving {partition_name} for {len(org_ids)} orgs: {org_ids}"
-            )
+            # Filter to orgs eligible for cold storage (paid tier when billing enabled)
+            if settings.BILLING_ENABLED:
+                from apps.organizations_ext.models import Organization
+
+                eligible_ids = set(
+                    Organization.objects.filter(
+                        id__in=org_ids,
+                        stripe_primary_subscription__isnull=False,
+                    ).values_list("id", flat=True)
+                )
+                skipped = len(org_ids) - len(eligible_ids)
+                if skipped:
+                    logger.info("Skipping cold archival for %d free-tier orgs", skipped)
+                org_ids = [oid for oid in org_ids if oid in eligible_ids]
+
+            logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
             # Export each org's data to a separate Parquet file
             for org_id in org_ids:
@@ -484,14 +497,17 @@ def cleanup_all_cold_storage(
         return 0
 
     if retention_days is None:
-        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
+        retention_days = settings.GLITCHTIP_RETENTION_DAYS
 
     # Import here to avoid circular imports
     from apps.organizations_ext.models import Organization
 
     total_deleted = 0
 
-    for org in Organization.objects.all().iterator():
+    qs = Organization.objects.all()
+    if settings.BILLING_ENABLED:
+        qs = qs.filter(stripe_primary_subscription__isnull=False)
+    for org in qs.iterator():
         deleted = cleanup_cold_storage_for_org(org.id, retention_days, table_name)
         total_deleted += deleted
 
@@ -555,7 +571,7 @@ def archive_and_cleanup_partitions(
         return (0, 0, 0)
 
     if retention_days is None:
-        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
+        retention_days = settings.GLITCHTIP_RETENTION_DAYS
 
     # Archive hot -> cold
     archived = 0

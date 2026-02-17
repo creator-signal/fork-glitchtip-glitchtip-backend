@@ -39,7 +39,7 @@ router = Router()
 DEFAULT_LOOKBACK_DAYS = 7
 
 # Days of hot storage before data is archived to cold
-HOT_STORAGE_DAYS = settings.GLITCHTIP_LOGS_HOT_DAYS
+HOT_STORAGE_DAYS = settings.GLITCHTIP_LOG_HOT_DAYS
 
 
 def decode_cursor(cursor_str: str | None) -> UUID | None:

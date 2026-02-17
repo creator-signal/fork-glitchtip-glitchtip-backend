@@ -21,7 +21,7 @@ def cleanup_old_files():
 
     Batches deletes to limit memory and transaction size.
     """
-    days_ago = now() - timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS)
+    days_ago = now() - timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS)
 
     queryset = FileBlob.objects.filter(created__lt=days_ago).exclude(
         Exists(File.objects.filter(blob_id=OuterRef("id"), created__gte=days_ago))

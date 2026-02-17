@@ -236,8 +236,8 @@ class MaintainPartitionsSkipTestCase(TestCase):
 
 
 class EventsHotDaysSettingTestCase(TestCase):
-    """Test GLITCHTIP_EVENTS_HOT_DAYS setting."""
+    """Test GLITCHTIP_EVENT_HOT_DAYS setting."""
 
     def test_default_value(self):
-        hot_days = settings.GLITCHTIP_EVENTS_HOT_DAYS
+        hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
         self.assertEqual(hot_days, 30)

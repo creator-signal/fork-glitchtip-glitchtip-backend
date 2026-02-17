@@ -41,7 +41,7 @@ def get_startup_info() -> dict:
         "url": settings.GLITCHTIP_URL.geturl(),
         "mode": mode,
         "backend": backend,
-        "retention_days": settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS,
+        "retention_days": settings.GLITCHTIP_RETENTION_DAYS,
     }
 
 
