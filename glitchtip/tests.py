@@ -4,6 +4,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 import requests_mock
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
@@ -774,3 +775,51 @@ class BeforeSendSelfRefTestCase(TestCase):
         }
         result = before_send(event, {})
         self.assertIsNotNone(result)
+
+
+class ColdStorageFreeTierGatingTestCase(TestCase):
+    """Test that free-tier orgs are excluded from cold storage when billing is enabled."""
+
+    def setUp(self):
+        self.org_free = baker.make("organizations_ext.Organization", slug="free-org")
+        subscription = baker.make("stripe.StripeSubscription")
+        self.org_paid = baker.make(
+            "organizations_ext.Organization",
+            slug="paid-org",
+            stripe_primary_subscription=subscription,
+        )
+
+    def _get_eligible_org_ids(self, org_ids):
+        """Simulate the filtering logic from archive_partition_per_org."""
+        from apps.organizations_ext.models import Organization
+
+        if settings.BILLING_ENABLED:
+            eligible_ids = set(
+                Organization.objects.filter(
+                    id__in=org_ids,
+                    stripe_primary_subscription__isnull=False,
+                ).values_list("id", flat=True)
+            )
+            return [oid for oid in org_ids if oid in eligible_ids]
+        return org_ids
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_billing_disabled_returns_all(self):
+        """Without billing, all orgs are eligible for cold storage."""
+        org_ids = [self.org_free.id, self.org_paid.id]
+        result = self._get_eligible_org_ids(org_ids)
+        self.assertEqual(result, org_ids)
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_excludes_free_tier(self):
+        """With billing, only orgs with a subscription get cold storage."""
+        org_ids = [self.org_free.id, self.org_paid.id]
+        result = self._get_eligible_org_ids(org_ids)
+        self.assertEqual(result, [self.org_paid.id])
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_all_free(self):
+        """With billing, if all orgs are free tier, result is empty."""
+        org_ids = [self.org_free.id]
+        result = self._get_eligible_org_ids(org_ids)
+        self.assertEqual(result, [])

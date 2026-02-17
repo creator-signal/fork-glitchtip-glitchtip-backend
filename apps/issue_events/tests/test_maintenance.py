@@ -32,7 +32,7 @@ class MaintenanceTestCase(TestCase):
 
         IssueEvent.objects.all().delete()
         with freeze_time(
-            now() + timedelta(days=settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS)
+            now() + timedelta(days=settings.GLITCHTIP_EVENT_RETENTION_DAYS)
         ):
             cleanup_old_issues()
             self.assertEqual(Issue.objects.count(), 0)
@@ -68,7 +68,7 @@ class MaintenanceTestCase(TestCase):
                 baker.make(rel.related_model, **kwargs)
 
                 with freeze_time(
-                    now() + timedelta(days=settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS + 1)
+                    now() + timedelta(days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + 1)
                 ):
                     cleanup_old_issues()
 

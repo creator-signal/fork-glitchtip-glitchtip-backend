@@ -17,22 +17,23 @@ def cleanup_old_issue_events():
     Archive old issue event partitions to cold storage and delete expired cold data.
 
     When DuckDB is available:
-    - Archive partitions older than GLITCHTIP_EVENTS_HOT_DAYS (30d) to S3
-    - Delete cold files older than GLITCHTIP_COLD_STORAGE_RETENTION_DAYS (90d)
+    - Archive partitions older than GLITCHTIP_EVENT_HOT_DAYS (30d) to S3
+    - Delete cold files older than GLITCHTIP_EVENT_RETENTION_DAYS (90d)
 
     When DuckDB is unavailable:
-    - No-op (maintain_partitions handles dropping old partitions at MAX_EVENT_LIFE_DAYS)
+    - No-op (maintain_partitions handles dropping old partitions at EVENT_RETENTION_DAYS)
     """
     from glitchtip.cold_storage import archive_and_cleanup_partitions
 
     from .cold_storage import ISSUE_EVENT_EXPORT_COLUMN_TYPES, ISSUE_EVENT_SELECT_SQL
 
-    hot_days = settings.GLITCHTIP_EVENTS_HOT_DAYS
+    hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
     archive_and_cleanup_partitions(
         table_name="issue_events_issueevent",
         hot_days=hot_days,
         column_types=ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         select_sql=ISSUE_EVENT_SELECT_SQL,
+        retention_days=settings.GLITCHTIP_EVENT_RETENTION_DAYS,
     )
 
 
@@ -60,7 +61,7 @@ def cleanup_old_issues():
     """
     from .models import IssueEvent
 
-    days = settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS
+    days = settings.GLITCHTIP_EVENT_RETENTION_DAYS
 
     queryset = (
         Issue.objects.filter(last_seen__lt=now() - timedelta(days=days))

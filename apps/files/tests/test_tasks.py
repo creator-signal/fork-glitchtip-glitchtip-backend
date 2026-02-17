@@ -35,7 +35,9 @@ class TasksTestCase(GlitchTipTestCase):
         self.assertEqual(FileBlob.objects.count(), 1)
         self.assertEqual(File.objects.count(), 1)
 
-        with freeze_time(now() + timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS)):
+        with freeze_time(
+            now() + timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS)
+        ):
             release_file = baker.make(
                 "sourcecode.DebugSymbolBundle",
                 file__blob=file_blob,
@@ -47,7 +49,9 @@ class TasksTestCase(GlitchTipTestCase):
         self.assertEqual(File.objects.count(), 2)
         release_file.file.delete()
 
-        with freeze_time(now() + timedelta(days=settings.GLITCHTIP_MAX_FILE_LIFE_DAYS)):
+        with freeze_time(
+            now() + timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS)
+        ):
             cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 0)
         self.assertEqual(File.objects.count(), 0)
