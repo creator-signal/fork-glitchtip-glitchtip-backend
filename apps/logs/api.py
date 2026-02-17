@@ -280,31 +280,16 @@ def query_cold_storage(
     """
     Query logs from cold storage (per-org Parquet files via standalone DuckDB).
 
-    Uses glob pattern to read all files for the org, then filters by
-    UUIDv7 timestamp. DuckDB runs in-process — no PostgreSQL extension
+    Enumerates files individually so a corrupt file doesn't poison the
+    entire query. DuckDB runs in-process — no PostgreSQL extension
     required, no connection pooling interaction.
     """
-    from glitchtip.cold_storage import get_cold_storage_backend
-
-    from .cold_storage import (
-        COLD_STORAGE_PREFIX,
-        get_duckdb_connection,
-        get_duckdb_parquet_path,
-        is_duckdb_available,
-    )
+    from .cold_storage import is_duckdb_available
 
     if not is_duckdb_available():
         return []
 
-    storage = get_cold_storage_backend()
-    if not storage:
-        return []
-
-    # Use glob pattern to read all files for this org
-    relative_glob = (
-        f"{COLD_STORAGE_PREFIX}/logs_logevent/org_{organization_id}/*.parquet"
-    )
-    glob_path = get_duckdb_parquet_path(storage, relative_glob)
+    from glitchtip.cold_storage import query_cold_parquet_files
 
     # Build WHERE clause with DuckDB $N positional parameters
     where_parts = ["organization_id = $1"]
@@ -364,28 +349,23 @@ def query_cold_storage(
     params.append(int(limit))
     limit_param = f"${len(params)}"
 
-    try:
-        duck_conn = get_duckdb_connection(storage)
-        try:
-            sql = f"""
-                SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, environment, host, data
-                FROM read_parquet('{glob_path}')
-                WHERE {where_sql}
-                ORDER BY id DESC
-                LIMIT {limit_param};
-            """
-            result = duck_conn.execute(sql, params)
+    select_columns = (
+        "id, trace_id, organization_id, project_id, span_id, "
+        "level, severity_number, body, service, environment, host, data"
+    )
 
-            return [_row_to_log_event(row) for row in result.fetchall()]
-        finally:
-            duck_conn.close()
+    rows = query_cold_parquet_files(
+        organization_id=organization_id,
+        table_name="logs_logevent",
+        select_columns=select_columns,
+        where_sql=where_sql,
+        params=params,
+        limit_param=limit_param,
+    )
 
-    except Exception as e:
-        error_str = str(e)
-        if "No files found" in error_str or "Could not open" in error_str:
-            return []
-        raise
+    results = [_row_to_log_event(row) for row in rows]
+    results.sort(key=lambda r: r.id, reverse=True)
+    return results[:limit]
 
 
 async def query_logs_combined(

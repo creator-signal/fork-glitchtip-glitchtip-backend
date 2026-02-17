@@ -515,6 +515,77 @@ def cleanup_all_cold_storage(
     return total_deleted
 
 
+def query_cold_parquet_files(
+    organization_id: int,
+    table_name: str,
+    select_columns: str,
+    where_sql: str,
+    params: list,
+    limit_param: str,
+) -> list[tuple]:
+    """
+    Query cold storage parquet files individually with per-file error handling.
+
+    Instead of a single glob query (which fails entirely if any file is corrupt),
+    this enumerates files in the org directory and queries each one separately.
+    Corrupt files are logged at ERROR level and skipped; valid results are merged.
+
+    Args:
+        organization_id: Org whose files to query
+        table_name: PG table name (e.g., "logs_logevent")
+        select_columns: Column list for SELECT clause
+        where_sql: WHERE clause with DuckDB $N positional parameters
+        params: Parameter values (without limit — limit_param references it)
+        limit_param: DuckDB positional parameter for LIMIT (e.g., "$5")
+
+    Returns:
+        List of raw row tuples from all successfully read files.
+    """
+    storage = get_cold_storage_backend()
+    if not storage:
+        return []
+
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{organization_id}"
+
+    # Enumerate parquet files for this org
+    try:
+        _dirs, files = storage.listdir(org_prefix)
+    except (NotImplementedError, OSError):
+        # Directory doesn't exist or listdir unsupported — no cold data
+        return []
+
+    parquet_files = sorted(f for f in files if f.endswith(".parquet"))
+    if not parquet_files:
+        return []
+
+    all_rows: list[tuple] = []
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        for filename in parquet_files:
+            relative_path = f"{org_prefix}/{filename}"
+            parquet_path = get_duckdb_parquet_path(storage, relative_path)
+            sql = f"""
+                SELECT {select_columns}
+                FROM read_parquet('{parquet_path}')
+                WHERE {where_sql}
+                ORDER BY id DESC
+                LIMIT {limit_param};
+            """
+            try:
+                result = duck_conn.execute(sql, params)
+                all_rows.extend(result.fetchall())
+            except Exception:
+                logger.error(
+                    "Corrupt parquet file skipped: %s",
+                    relative_path,
+                    exc_info=True,
+                )
+    finally:
+        duck_conn.close()
+
+    return all_rows
+
+
 def parse_json_field(val) -> dict:
     """Parse a value that may be dict, JSON string, or None into a dict."""
     if val is None:

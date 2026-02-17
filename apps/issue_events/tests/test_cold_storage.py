@@ -5,7 +5,9 @@ DuckDB runs in-process (no PostgreSQL extension required).
 Tests that need S3 access are skipped when no bucket is configured.
 """
 
-from datetime import timedelta
+import tempfile
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 from django.test import TestCase, override_settings
@@ -15,11 +17,13 @@ from glitchtip.cold_storage import (
     get_org_cold_storage_path,
     is_duckdb_available,
 )
+from glitchtip.partition_manager import UUID7Helper
 
 from ..cold_storage import (
     ISSUE_EVENT_EXPORT_COLUMN_TYPES,
     TABLE_NAME,
     IssueEventRow,
+    get_event_from_cold,
     query_cold_events,
 )
 
@@ -241,3 +245,41 @@ class EventsHotDaysSettingTestCase(TestCase):
     def test_default_value(self):
         hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
         self.assertEqual(hot_days, 30)
+
+
+class MissingParquetTestCase(TestCase):
+    """
+    Test graceful handling when parquet files don't exist for issue events.
+
+    Cold storage queries should return empty results, not raise exceptions.
+    """
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+    )
+    def test_query_cold_events_returns_empty(self):
+        """query_cold_events returns [] when no parquet files exist."""
+        with tempfile.TemporaryDirectory(prefix="glitchtip_cold_test_") as cold_dir:
+            with self.settings(GLITCHTIP_COLD_STORAGE_DIR=cold_dir):
+                results = query_cold_events(
+                    organization_id=99999,
+                    start_dt=datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+                    end_dt=datetime(2020, 12, 31, tzinfo=dt_timezone.utc),
+                )
+                self.assertEqual(results, [])
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+    )
+    def test_get_event_from_cold_returns_none(self):
+        """get_event_from_cold returns None when parquet file doesn't exist."""
+        with tempfile.TemporaryDirectory(prefix="glitchtip_cold_test_") as cold_dir:
+            with self.settings(GLITCHTIP_COLD_STORAGE_DIR=cold_dir):
+                fake_time = datetime(2020, 6, 15, tzinfo=dt_timezone.utc)
+                fake_id = UUID7Helper.from_datetime(fake_time)
+                result = get_event_from_cold(99999, fake_id, fake_time)
+                self.assertIsNone(result)
