@@ -481,32 +481,29 @@ class InternalTransportTestCase(TestCase):
         self.organization = baker.make(
             "organizations_ext.Organization", slug="test-internal"
         )
-        self.project = baker.make(
-            "projects.Project", organization=self.organization
-        )
-        self.project_key = baker.make(
-            "projects.ProjectKey", project=self.project
-        )
+        self.project = baker.make("projects.Project", organization=self.organization)
+        self.project_key = baker.make("projects.ProjectKey", project=self.project)
 
     def _make_envelope(self, item_type, payload):
         """Helper to create a real SDK Envelope with a single item."""
         from sentry_sdk.envelope import Envelope, Item, PayloadRef
 
         envelope = Envelope()
-        envelope.add_item(
-            Item(type=item_type, payload=PayloadRef(json=payload))
-        )
+        envelope.add_item(Item(type=item_type, payload=PayloadRef(json=payload)))
         return envelope
 
     def test_capture_envelope_enqueues_event(self):
         transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
 
-        envelope = self._make_envelope("event", {
-            "event_id": "abcd1234abcd1234abcd1234abcd1234",
-            "exception": {"values": [{"type": "ValueError", "value": "test"}]},
-            "level": "error",
-            "platform": "python",
-        })
+        envelope = self._make_envelope(
+            "event",
+            {
+                "event_id": "abcd1234abcd1234abcd1234abcd1234",
+                "exception": {"values": [{"type": "ValueError", "value": "test"}]},
+                "level": "error",
+                "platform": "python",
+            },
+        )
 
         with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
             transport.capture_envelope(envelope)
@@ -529,9 +526,7 @@ class InternalTransportTestCase(TestCase):
         mock_ingest.enqueue.assert_not_called()
 
     def test_capture_envelope_bad_dsn_is_noop(self):
-        transport = InternalTransport(
-            options={"dsn": "http://0000@localhost:8000/999"}
-        )
+        transport = InternalTransport(options={"dsn": "http://0000@localhost:8000/999"})
 
         envelope = self._make_envelope("event", {"exception": {}})
 
@@ -544,15 +539,18 @@ class InternalTransportTestCase(TestCase):
         """Verify InternalTransport forwards transaction envelope items."""
         transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
 
-        envelope = self._make_envelope("transaction", {
-            "event_id": "bbbb1234bbbb1234bbbb1234bbbb1234",
-            "type": "transaction",
-            "transaction": "/api/test",
-            "contexts": {"trace": {"op": "http.server", "trace_id": "a" * 32}},
-            "start_timestamp": "2026-01-01T00:00:00Z",
-            "timestamp": "2026-01-01T00:00:01Z",
-            "spans": [],
-        })
+        envelope = self._make_envelope(
+            "transaction",
+            {
+                "event_id": "bbbb1234bbbb1234bbbb1234bbbb1234",
+                "type": "transaction",
+                "transaction": "/api/test",
+                "contexts": {"trace": {"op": "http.server", "trace_id": "a" * 32}},
+                "start_timestamp": "2026-01-01T00:00:00Z",
+                "timestamp": "2026-01-01T00:00:01Z",
+                "spans": [],
+            },
+        )
 
         with (
             patch("apps.event_ingest.tasks.ingest_event") as mock_event,
@@ -627,10 +625,13 @@ class InternalTransportTestCase(TestCase):
             observed_values.append(_processing_internal.get())
             original_process(envelope)
 
-        envelope = self._make_envelope("event", {
-            "event_id": "abcd1234abcd1234abcd1234abcd1234",
-            "exception": {"values": []},
-        })
+        envelope = self._make_envelope(
+            "event",
+            {
+                "event_id": "abcd1234abcd1234abcd1234abcd1234",
+                "exception": {"values": []},
+            },
+        )
 
         with patch.object(transport, "_process_envelope", spy_process):
             with patch("apps.event_ingest.tasks.ingest_event"):
@@ -639,6 +640,35 @@ class InternalTransportTestCase(TestCase):
         self.assertEqual(observed_values, [True])
         # After return, contextvar should be reset
         self.assertFalse(_processing_internal.get())
+
+    def test_capture_envelope_works_in_async_context(self):
+        """Verify capture_envelope dispatches to thread pool in async context."""
+        import asyncio
+
+        transport = InternalTransport(options={"dsn": self.project_key.get_dsn()})
+        # Pre-cache project_key so the thread pool doesn't need DB access
+        # (separate thread can't see test transaction's uncommitted data)
+        transport._project_key = self.project_key
+
+        envelope = self._make_envelope(
+            "event",
+            {
+                "event_id": "abcd1234abcd1234abcd1234abcd1234",
+                "exception": {"values": [{"type": "ValueError", "value": "async"}]},
+            },
+        )
+
+        async def run():
+            with patch("apps.event_ingest.tasks.ingest_event") as mock_ingest:
+                transport.capture_envelope(envelope)
+                # Give the background task time to complete in thread pool
+                await asyncio.sleep(0.5)
+            return mock_ingest
+
+        mock_ingest = asyncio.run(run())
+        mock_ingest.enqueue.assert_called_once()
+        args = mock_ingest.enqueue.call_args[0][0]
+        self.assertEqual(args["project_id"], self.project.id)
 
 
 class BeforeSendSelfRefTestCase(TestCase):

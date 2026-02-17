@@ -1,7 +1,9 @@
+import asyncio
 import contextvars
 import logging
 from dataclasses import asdict
 
+from asgiref.sync import sync_to_async
 from sentry_sdk.transport import Transport
 
 logger = logging.getLogger(__name__)
@@ -17,8 +19,10 @@ class InternalTransport(Transport):
     into the ingest task queue. Prevents self-DOS feedback loops when
     SENTRY_DSN points to the same GlitchTip instance.
 
-    Inspired by old open-source Sentry's InternalTransport
-    (src/sentry/utils/sdk.py).
+    capture_envelope is sync (SDK interface) but may be called from both
+    sync (worker) and async (ASGI web) contexts. We detect the calling
+    context and dispatch accordingly so that ORM calls (project_key
+    lookup, task enqueue) never hit SynchronousOnlyOperation.
     """
 
     def __init__(self, options=None):
@@ -41,9 +45,28 @@ class InternalTransport(Transport):
         return self._project_key
 
     def capture_envelope(self, envelope):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Sync context (worker, management commands) — process directly
+            token = _processing_internal.set(True)
+            try:
+                self._process_envelope(envelope)
+            except Exception:
+                logger.exception("InternalTransport: failed to process envelope")
+            finally:
+                _processing_internal.reset(token)
+        else:
+            # Async context (ASGI web) — schedule in thread pool
+            loop.create_task(self._process_envelope_in_thread(envelope))
+
+    async def _process_envelope_in_thread(self, envelope):
+        """Run _process_envelope in a thread pool for async contexts."""
         token = _processing_internal.set(True)
         try:
-            self._process_envelope(envelope)
+            await sync_to_async(self._process_envelope, thread_sensitive=False)(
+                envelope
+            )
         except Exception:
             logger.exception("InternalTransport: failed to process envelope")
         finally:
