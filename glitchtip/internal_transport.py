@@ -52,8 +52,8 @@ class InternalTransport(Transport):
             token = _processing_internal.set(True)
             try:
                 self._process_envelope(envelope)
-            except Exception:
-                logger.exception("InternalTransport: failed to process envelope")
+            except Exception as e:
+                logger.warning("InternalTransport: failed to process envelope: %s", e)
             finally:
                 _processing_internal.reset(token)
         else:
@@ -67,8 +67,8 @@ class InternalTransport(Transport):
             await sync_to_async(self._process_envelope, thread_sensitive=False)(
                 envelope
             )
-        except Exception:
-            logger.exception("InternalTransport: failed to process envelope")
+        except Exception as e:
+            logger.warning("InternalTransport: failed to process envelope: %s", e)
         finally:
             _processing_internal.reset(token)
 
