@@ -25,7 +25,7 @@ def cleanup_old_transaction_events():
       of joining all partitions (important for partition-heavy tables).
     - ID collection + batch delete keeps CASCADE FK work per statement small.
     """
-    cutoff = now() - timedelta(days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS)
+    cutoff = now() - timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS)
     queryset = (
         TransactionGroup.objects.filter(created__lt=cutoff)
         .exclude(Exists(TransactionEvent.objects.filter(group_id=OuterRef("id"))))

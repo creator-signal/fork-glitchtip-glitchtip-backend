@@ -105,16 +105,36 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
 
 PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
 
-# Events and associated data older than this will be deleted from the database
-GLITCHTIP_MAX_EVENT_LIFE_DAYS = env.int("GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=90)
-GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS = env.int(
-    "GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
+# ── Retention settings ──────────────────────────────────────────────
+# Master default; falls back to legacy GLITCHTIP_MAX_EVENT_LIFE_DAYS
+GLITCHTIP_RETENTION_DAYS = env.int(
+    "GLITCHTIP_RETENTION_DAYS",
+    default=env.int("GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=90),
 )
-GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS = env.int(
-    "GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
+
+# Per-type total retention (hot + cold combined)
+GLITCHTIP_EVENT_RETENTION_DAYS = env.int(
+    "GLITCHTIP_EVENT_RETENTION_DAYS", default=GLITCHTIP_RETENTION_DAYS
 )
-GLITCHTIP_MAX_FILE_LIFE_DAYS = env.int(
-    "GLITCHTIP_MAX_EVENT_LIFE_DAYS", default=GLITCHTIP_MAX_EVENT_LIFE_DAYS
+GLITCHTIP_TRANSACTION_RETENTION_DAYS = env.int(
+    "GLITCHTIP_TRANSACTION_RETENTION_DAYS",
+    default=env.int(
+        "GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS", default=GLITCHTIP_RETENTION_DAYS
+    ),
+)
+GLITCHTIP_UPTIME_RETENTION_DAYS = env.int(
+    "GLITCHTIP_UPTIME_RETENTION_DAYS",
+    default=env.int(
+        "GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS", default=GLITCHTIP_RETENTION_DAYS
+    ),
+)
+GLITCHTIP_FILE_RETENTION_DAYS = env.int(
+    "GLITCHTIP_FILE_RETENTION_DAYS",
+    default=env.int("GLITCHTIP_MAX_FILE_LIFE_DAYS", default=GLITCHTIP_RETENTION_DAYS),
+)
+GLITCHTIP_LOG_RETENTION_DAYS = env.int(
+    "GLITCHTIP_LOG_RETENTION_DAYS",
+    default=env.int("GLITCHTIP_LOGS_COLD_DAYS", default=GLITCHTIP_RETENTION_DAYS),
 )
 
 # Check if a throttle is needed 1 out of every 5000 event requests
@@ -131,12 +151,15 @@ GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", False)
 GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
 
 
-# Log retention settings (days)
-GLITCHTIP_LOGS_HOT_DAYS = env.int("GLITCHTIP_LOGS_HOT_DAYS", 7)  # Days in PostgreSQL
-GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3/Parquet
-
-# Issue event hot storage retention (days in PostgreSQL before archival to cold storage)
-GLITCHTIP_EVENTS_HOT_DAYS = env.int("GLITCHTIP_EVENTS_HOT_DAYS", 30)
+# Hot storage (PostgreSQL retention before archival to cold)
+GLITCHTIP_EVENT_HOT_DAYS = env.int(
+    "GLITCHTIP_EVENT_HOT_DAYS",
+    default=env.int("GLITCHTIP_EVENTS_HOT_DAYS", default=30),
+)
+GLITCHTIP_LOG_HOT_DAYS = env.int(
+    "GLITCHTIP_LOG_HOT_DAYS",
+    default=env.int("GLITCHTIP_LOGS_HOT_DAYS", default=7),
+)
 
 # DuckDB extension directory (pre-installed in Docker image at /opt/duckdb/extensions)
 DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
@@ -157,11 +180,6 @@ GLITCHTIP_ENABLE_DUCKDB = env.str("GLITCHTIP_ENABLE_DUCKDB", None)
 # High-scale deployments should disable this and configure lifecycle policies on the bucket
 GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED = env.bool(
     "GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED", True
-)
-
-# Days to retain cold storage files (only used if cleanup is enabled)
-GLITCHTIP_COLD_STORAGE_RETENTION_DAYS = env.int(
-    "GLITCHTIP_COLD_STORAGE_RETENTION_DAYS", 90
 )
 
 # Freezes acceptance of new events, for use during db maintenance

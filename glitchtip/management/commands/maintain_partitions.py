@@ -51,11 +51,11 @@ class Command(BaseCommand):
                 if is_duckdb_available():
                     continue
 
-            max_days = settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS
+            max_days = settings.GLITCHTIP_EVENT_RETENTION_DAYS
             if "uptime" in table:
-                max_days = settings.GLITCHTIP_MAX_UPTIME_CHECK_LIFE_DAYS
+                max_days = settings.GLITCHTIP_UPTIME_RETENTION_DAYS
             elif "transaction" in table:
-                max_days = settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS
+                max_days = settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
 
             self.stdout.write(
                 f"Cleaning up old partitions for {table} (retention: {max_days} days)..."
@@ -92,8 +92,8 @@ class Command(BaseCommand):
             )
 
             # Cleanup old weekly partitions (using a default retention or specific one)
-            # For aggregates, we can use GLITCHTIP_MAX_EVENT_LIFE_DAYS
+            # For aggregates, we can use GLITCHTIP_EVENT_RETENTION_DAYS
             self.stdout.write(f"Cleaning up old weekly partitions for {table}...")
-            manager.drop_old_partitions(table, settings.GLITCHTIP_MAX_EVENT_LIFE_DAYS)
+            manager.drop_old_partitions(table, settings.GLITCHTIP_EVENT_RETENTION_DAYS)
 
         self.stdout.write(self.style.SUCCESS("Partition maintenance complete."))

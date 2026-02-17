@@ -370,7 +370,7 @@ class TransactionEventSchema(LaxIngestSchema):
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
         """Validator to ensure the datetime is recent"""
         minimum_date = now() - timedelta(
-            days=settings.GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS
+            days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
         )
         if v < minimum_date:
             raise ValueError("Event time too old.")

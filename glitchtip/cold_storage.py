@@ -226,9 +226,22 @@ def archive_partition_per_org(
                 logger.info(f"No data in {partition_name}, skipping")
                 return []
 
-            logger.info(
-                f"Archiving {partition_name} for {len(org_ids)} orgs: {org_ids}"
-            )
+            # Filter to orgs eligible for cold storage (paid tier when billing enabled)
+            if settings.BILLING_ENABLED:
+                from apps.organizations_ext.models import Organization
+
+                eligible_ids = set(
+                    Organization.objects.filter(
+                        id__in=org_ids,
+                        stripe_primary_subscription__isnull=False,
+                    ).values_list("id", flat=True)
+                )
+                skipped = len(org_ids) - len(eligible_ids)
+                if skipped:
+                    logger.info("Skipping cold archival for %d free-tier orgs", skipped)
+                org_ids = [oid for oid in org_ids if oid in eligible_ids]
+
+            logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
             # Export each org's data to a separate Parquet file
             for org_id in org_ids:
@@ -484,19 +497,93 @@ def cleanup_all_cold_storage(
         return 0
 
     if retention_days is None:
-        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
+        retention_days = settings.GLITCHTIP_RETENTION_DAYS
 
     # Import here to avoid circular imports
     from apps.organizations_ext.models import Organization
 
     total_deleted = 0
 
-    for org in Organization.objects.all().iterator():
+    qs = Organization.objects.all()
+    if settings.BILLING_ENABLED:
+        qs = qs.filter(stripe_primary_subscription__isnull=False)
+    for org in qs.iterator():
         deleted = cleanup_cold_storage_for_org(org.id, retention_days, table_name)
         total_deleted += deleted
 
     logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
     return total_deleted
+
+
+def query_cold_parquet_files(
+    organization_id: int,
+    table_name: str,
+    select_columns: str,
+    where_sql: str,
+    params: list,
+    limit_param: str,
+) -> list[tuple]:
+    """
+    Query cold storage parquet files individually with per-file error handling.
+
+    Instead of a single glob query (which fails entirely if any file is corrupt),
+    this enumerates files in the org directory and queries each one separately.
+    Corrupt files are logged at ERROR level and skipped; valid results are merged.
+
+    Args:
+        organization_id: Org whose files to query
+        table_name: PG table name (e.g., "logs_logevent")
+        select_columns: Column list for SELECT clause
+        where_sql: WHERE clause with DuckDB $N positional parameters
+        params: Parameter values (without limit — limit_param references it)
+        limit_param: DuckDB positional parameter for LIMIT (e.g., "$5")
+
+    Returns:
+        List of raw row tuples from all successfully read files.
+    """
+    storage = get_cold_storage_backend()
+    if not storage:
+        return []
+
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{organization_id}"
+
+    # Enumerate parquet files for this org
+    try:
+        _dirs, files = storage.listdir(org_prefix)
+    except (NotImplementedError, OSError):
+        # Directory doesn't exist or listdir unsupported — no cold data
+        return []
+
+    parquet_files = sorted(f for f in files if f.endswith(".parquet"))
+    if not parquet_files:
+        return []
+
+    all_rows: list[tuple] = []
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        for filename in parquet_files:
+            relative_path = f"{org_prefix}/{filename}"
+            parquet_path = get_duckdb_parquet_path(storage, relative_path)
+            sql = f"""
+                SELECT {select_columns}
+                FROM read_parquet('{parquet_path}')
+                WHERE {where_sql}
+                ORDER BY id DESC
+                LIMIT {limit_param};
+            """
+            try:
+                result = duck_conn.execute(sql, params)
+                all_rows.extend(result.fetchall())
+            except Exception:
+                logger.error(
+                    "Corrupt parquet file skipped: %s",
+                    relative_path,
+                    exc_info=True,
+                )
+    finally:
+        duck_conn.close()
+
+    return all_rows
 
 
 def parse_json_field(val) -> dict:
@@ -555,7 +642,7 @@ def archive_and_cleanup_partitions(
         return (0, 0, 0)
 
     if retention_days is None:
-        retention_days = settings.GLITCHTIP_COLD_STORAGE_RETENTION_DAYS
+        retention_days = settings.GLITCHTIP_RETENTION_DAYS
 
     # Archive hot -> cold
     archived = 0
