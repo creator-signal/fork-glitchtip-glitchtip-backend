@@ -2,7 +2,7 @@
 Shared cold storage infrastructure for archiving partitions to Parquet via standalone DuckDB.
 
 Auto-enables when a storage backend is configured (GLITCHTIP_COLD_STORAGE_BUCKET,
-AWS_STORAGE_BUCKET_NAME, GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
+GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
 Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
 
 Uses standalone DuckDB (not pg_duckdb extension) so cold storage works with
@@ -42,7 +42,7 @@ def get_cold_storage_backend():
 
     Priority:
     1. "cold" alias in STORAGES setting (most flexible)
-    2. S3 storage via GLITCHTIP_COLD_STORAGE_BUCKET or AWS_STORAGE_BUCKET_NAME
+    2. S3 storage via GLITCHTIP_COLD_STORAGE_BUCKET
     3. Local filesystem via GLITCHTIP_COLD_STORAGE_DIR
 
     Returns None if no suitable storage backend is available.
@@ -53,8 +53,6 @@ def get_cold_storage_backend():
 
     # 2. S3 bucket configured
     bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
-    if not bucket:
-        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
     if bucket:
         try:
             from storages.backends.s3 import S3Storage
@@ -98,11 +96,8 @@ def is_duckdb_available() -> bool:
     if "cold" in storages.backends:
         return True
 
-    # Auto-detect: enable if a storage bucket is available
-    bucket = settings.GLITCHTIP_COLD_STORAGE_BUCKET
-    if not bucket:
-        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
-    if bucket:
+    # Auto-detect: enable if a cold storage bucket is configured
+    if settings.GLITCHTIP_COLD_STORAGE_BUCKET:
         return True
 
     # Auto-detect: enable if a local directory is configured
@@ -119,6 +114,9 @@ def get_duckdb_connection(storage=None):
     For S3 backends: loads httpfs and configures credentials from the storage instance.
     For filesystem backends: returns a plain DuckDB connection (no extensions needed).
 
+    Extensions are pre-installed in the Docker image at build time — this function
+    never downloads anything. autoinstall is disabled to prevent runtime fetches.
+
     Each call creates a fresh connection — no session state leaks.
     """
     import duckdb
@@ -126,11 +124,13 @@ def get_duckdb_connection(storage=None):
     if storage is None:
         storage = get_cold_storage_backend()
 
-    conn = duckdb.connect()
+    config = {"autoinstall_known_extensions": "false"}
+    ext_dir = getattr(settings, "DUCKDB_EXTENSION_DIRECTORY", None)
+    if ext_dir:
+        config["extension_directory"] = ext_dir
+    conn = duckdb.connect(config=config)
 
     if storage and _is_s3_storage(storage):
-        # Load httpfs for S3 access
-        conn.install_extension("httpfs")
         conn.load_extension("httpfs")
 
         # Configure S3 credentials from the storage backend

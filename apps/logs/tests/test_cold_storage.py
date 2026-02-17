@@ -31,7 +31,7 @@ class DuckDBAvailabilityTestCase(TestCase):
 
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB="false",
-        AWS_STORAGE_BUCKET_NAME="my-bucket",
+        GLITCHTIP_COLD_STORAGE_BUCKET="my-bucket",
     )
     def test_override_takes_precedence_over_bucket(self):
         """Explicit false overrides auto-detection from bucket config."""
@@ -47,15 +47,6 @@ class DuckDBAvailabilityTestCase(TestCase):
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        AWS_STORAGE_BUCKET_NAME="my-bucket",
-    )
-    def test_auto_enabled_with_aws_bucket(self):
-        self.assertTrue(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        AWS_STORAGE_BUCKET_NAME=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_disabled_without_bucket(self):
@@ -65,7 +56,6 @@ class DuckDBAvailabilityTestCase(TestCase):
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        AWS_STORAGE_BUCKET_NAME=None,
         GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
     )
     def test_auto_enabled_with_cold_storage_dir(self):
@@ -104,7 +94,6 @@ class ColdStorageBackendTestCase(TestCase):
 
     @override_settings(
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        AWS_STORAGE_BUCKET_NAME=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_no_backend_configured(self):
@@ -113,7 +102,6 @@ class ColdStorageBackendTestCase(TestCase):
 
     @override_settings(
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        AWS_STORAGE_BUCKET_NAME=None,
         GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold-test",
     )
     def test_filesystem_backend(self):

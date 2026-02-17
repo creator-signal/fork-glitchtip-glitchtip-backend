@@ -138,7 +138,10 @@ GLITCHTIP_LOGS_COLD_DAYS = env.int("GLITCHTIP_LOGS_COLD_DAYS", 90)  # Days in S3
 # Issue event hot storage retention (days in PostgreSQL before archival to cold storage)
 GLITCHTIP_EVENTS_HOT_DAYS = env.int("GLITCHTIP_EVENTS_HOT_DAYS", 30)
 
-# Cold storage bucket (defaults to AWS_STORAGE_BUCKET_NAME if not set)
+# DuckDB extension directory (pre-installed in Docker image at /opt/duckdb/extensions)
+DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", "/opt/duckdb/extensions")
+
+# Cold storage bucket (dedicated S3 bucket for parquet archival)
 # Files are stored under cold_storage/ prefix to avoid collisions
 GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)
 
