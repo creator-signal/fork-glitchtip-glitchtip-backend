@@ -114,8 +114,8 @@ def get_duckdb_connection(storage=None):
     For S3 backends: loads httpfs and configures credentials from the storage instance.
     For filesystem backends: returns a plain DuckDB connection (no extensions needed).
 
-    In Docker, extensions are pre-installed at build time and autoinstall is disabled.
-    Outside Docker (dev/CI), DuckDB downloads extensions on first use.
+    Extensions must be pre-installed (Docker image or CI script).
+    When DUCKDB_EXTENSION_DIRECTORY is set, autoinstall is disabled.
 
     Each call creates a fresh connection — no session state leaks.
     """
@@ -132,9 +132,7 @@ def get_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     if storage and _is_s3_storage(storage):
-        # SQL LOAD triggers autoinstall outside Docker; in Docker extensions
-        # are pre-installed so this is a plain load.
-        conn.execute("LOAD httpfs;")
+        conn.load_extension("httpfs")
 
         # Configure S3 credentials from the storage backend
         access_key = getattr(storage, "access_key", None)
