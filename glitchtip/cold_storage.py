@@ -132,7 +132,9 @@ def get_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     if storage and _is_s3_storage(storage):
-        conn.load_extension("httpfs")
+        # SQL LOAD triggers autoinstall outside Docker; in Docker extensions
+        # are pre-installed so this is a plain load.
+        conn.execute("LOAD httpfs;")
 
         # Configure S3 credentials from the storage backend
         access_key = getattr(storage, "access_key", None)
