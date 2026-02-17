@@ -164,9 +164,12 @@ GLITCHTIP_LOG_HOT_DAYS = env.int(
 # DuckDB extension directory (pre-installed in Docker image at /opt/duckdb/extensions)
 DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
 
-# Cold storage bucket (dedicated S3 bucket for parquet archival)
-# Files are stored under cold_storage/ prefix to avoid collisions
-GLITCHTIP_COLD_STORAGE_BUCKET = env.str("GLITCHTIP_COLD_STORAGE_BUCKET", None)
+# Cold storage bucket — defaults to AWS_STORAGE_BUCKET_NAME so users with S3
+# configured get cold storage automatically. Files use cold_storage/ prefix.
+GLITCHTIP_COLD_STORAGE_BUCKET = env.str(
+    "GLITCHTIP_COLD_STORAGE_BUCKET",
+    default=env.str("AWS_STORAGE_BUCKET_NAME", None),
+)
 
 # Local directory for cold storage (alternative to S3 for simple deployments)
 GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
