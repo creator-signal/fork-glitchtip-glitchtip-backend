@@ -16,6 +16,7 @@ FROM python:3.13-slim
 ARG GLITCHTIP_VERSION=local
 ENV GLITCHTIP_VERSION ${GLITCHTIP_VERSION}
 ENV PYTHONUNBUFFERED=1
+ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 RUN apt-get update && apt-get install -y libxml2 libpq5 && apt-get clean && rm -rf /var/lib/apt/lists/*
 
