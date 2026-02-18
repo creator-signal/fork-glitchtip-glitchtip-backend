@@ -45,3 +45,13 @@ class ReleaseProject(models.Model):
 
     class Meta:
         unique_together = ("project", "release")
+
+
+class Deploy(CreatedModel):
+    release = models.ForeignKey(
+        Release, on_delete=models.CASCADE, related_name="deploys"
+    )
+    environment = models.CharField(max_length=64)
+    url = models.CharField(max_length=200, blank=True, default="")
+    date_started = models.DateTimeField(null=True, blank=True)
+    date_finished = models.DateTimeField(null=True, blank=True)
