@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
-from apps.stripe.constants import ACTIVE_SUBSCRIPTION_STATUSES, SubscriptionStatus
+from apps.stripe.constants import ACTIVE_SUBSCRIPTION_STATUSES
 from apps.stripe.models import StripeSubscription
 
 from .email import InvitationEmail, ThrottleNoticeEmail
