@@ -49,8 +49,11 @@ router = Router()
 @optional_slash(router, "get", "organizations/{slug:organization_slug}/chunk-upload/")
 async def get_chunk_upload_info(request: AuthHttpRequest, organization_slug: str):
     """Get server settings for chunk file upload"""
-    url = settings.GLITCHTIP_URL.geturl() + reverse(
-        "api:get_chunk_upload_info", args=[organization_slug]
+    path = reverse("api:get_chunk_upload_info", args=[organization_slug])
+    url = (
+        path
+        if settings.GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL
+        else settings.GLITCHTIP_URL.geturl() + path
     )
     return {
         "url": url,
