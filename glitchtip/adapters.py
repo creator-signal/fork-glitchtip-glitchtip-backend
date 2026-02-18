@@ -10,7 +10,7 @@ from glitchtip.email import GlitchTipEmail
 
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
-    def is_open_for_signup(self, request, sociallogin):
+    def is_open_for_signup(self, request, _sociallogin):
         return is_social_apps_user_registration_open()
 
 
