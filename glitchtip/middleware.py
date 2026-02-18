@@ -24,14 +24,6 @@ except ImportError:
         _zstd_builtin = False
 
 
-try:
-    import uwsgi
-
-    has_uwsgi = True
-except ImportError:
-    has_uwsgi = False
-
-
 logger = logging.getLogger(__name__)
 
 # --- Configuration Constants ---
@@ -45,30 +37,6 @@ Z_CHUNK = 1024 * 8
 
 # Chunk size specifically for reading Brotli ('br') compressed streams.
 BR_CHUNK = 1024 * 8
-
-
-# --- uWSGI Chunked Input Handling ---
-if has_uwsgi:
-    # Provides a file-like interface for reading chunked input via uWSGI API
-    class UWsgiChunkedInput(io.RawIOBase):
-        def __init__(self):
-            self._internal_buffer = b""
-
-        def readable(self):
-            return True
-
-        def readinto(self, buf):
-            if not self._internal_buffer:
-                try:
-                    self._internal_buffer = uwsgi.chunked_read()
-                except OSError as e:
-                    logger.error("uwsgi.chunked_read() failed: %s", e)
-                    self._internal_buffer = b""
-            n = min(len(buf), len(self._internal_buffer))
-            if n > 0:
-                buf[:n] = self._internal_buffer[:n]
-                self._internal_buffer = self._internal_buffer[n:]
-            return n
 
 
 class StreamingDecompressorBase(io.RawIOBase):
@@ -313,31 +281,6 @@ class GzipDecoder(ZDecoder):
         super().__init__(fp, zlib.decompressobj(16 + zlib.MAX_WBITS))
 
 
-# --- Other Middleware Classes ---
-
-
-class ChunkedMiddleware(object):
-    """Middleware to handle chunked transfer encoding with uWSGI."""
-
-    def __init__(self, get_response=None):
-        self.get_response = get_response
-        if not has_uwsgi:
-            from django.core.exceptions import MiddlewareNotUsed
-
-            raise MiddlewareNotUsed
-
-    def __call__(self, request):
-        self.process_request(request)
-        response = self.get_response(request)
-        return response
-
-    def process_request(self, request):
-        # If chunked encoding is used with uWSGI, replace stream with UWsgiChunkedInput
-        if request.META.get("HTTP_TRANSFER_ENCODING", "").lower() == "chunked":
-            request._stream = io.BufferedReader(UWsgiChunkedInput())
-            request.META["CONTENT_LENGTH"] = "4294967295"
-
-
 class DecompressBodyMiddleware(object):
     """
     Middleware that decompresses request body based on Content-Encoding header
@@ -403,29 +346,3 @@ class DecompressBodyMiddleware(object):
                 exc_info=True,
             )
             raise
-
-
-class ContentLengthHeaderMiddleware(object):
-    """Ensure responses have a Content-Length header if not streaming."""
-
-    def __init__(self, get_response=None):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        response = self.get_response(request)
-        return self.process_response(request, response)
-
-    def process_response(self, request, response):
-        # If header already present or response is streaming, do nothing
-        if "Transfer-Encoding" in response or "Content-Length" in response:
-            return response
-        if getattr(response, "streaming", False):
-            return response
-
-        # If response has content, calculate and set Content-Length
-        if hasattr(response, "content"):
-            try:
-                response["Content-Length"] = str(len(response.content))
-            except TypeError:  # Handle cases where content might not have a len
-                pass
-        return response
