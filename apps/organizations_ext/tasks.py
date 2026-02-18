@@ -7,9 +7,6 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
-from apps.stripe.constants import SubscriptionStatus
-from apps.stripe.models import StripeSubscription
-
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
@@ -46,33 +43,10 @@ def get_free_tier_cycle(created):
 
 @task
 async def update_subscription_cycles():
-    """
-    Daily task to update subscription cycle dates for annual plans.
-    """
-    now = timezone.now()
-    # Find active subscriptions where the cycle has ended
-    # We only care about annual plans (interval='year') usually, but strictly speaking
-    # checking subscription_cycle_end < now is enough if we assume monthly plans are updated by Stripe sync.
-    # However, to be safe and efficient, we can target those that need rolling.
+    """Delegate to maintenance function — kept as task for backwards compatibility."""
+    from apps.stripe.maintenance import update_subscription_cycles as _update
 
-    # We need to filter for subscriptions that are active and have a cycle end in the past
-    qs = StripeSubscription.objects.filter(
-        status=SubscriptionStatus.ACTIVE,
-        subscription_cycle_end__lt=now,
-        price__interval="year",
-    ).select_related("price")
-
-    async for sub in qs.aiterator():
-        # Advance cycle by one month until it covers now
-        while sub.subscription_cycle_end < now:
-            sub.subscription_cycle_start = sub.subscription_cycle_end
-            sub.subscription_cycle_end = sub.subscription_cycle_start + relativedelta(
-                months=1
-            )
-
-        await sub.asave(
-            update_fields=["subscription_cycle_start", "subscription_cycle_end"]
-        )
+    await _update()
 
 
 @task
