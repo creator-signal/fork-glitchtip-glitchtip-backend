@@ -48,7 +48,7 @@ class InvitationBackend(BaseInvitationBackend):
     Based on django-organizations InvitationBackend but for org user instead of user
     """
 
-    def __init__(self, org_model=None, namespace=None):
+    def __init__(self, _org_model=None, namespace=None):
         self.user_model = None
         self.org_model = Organization
         self.namespace = namespace
@@ -65,7 +65,7 @@ class InvitationBackend(BaseInvitationBackend):
     def get_token(self, org_user, **kwargs):
         return InvitationTokenGenerator().make_token(org_user)
 
-    def send_invitation(self, user, sender=None, **kwargs):
+    def send_invitation(self, user, _sender=None, **kwargs):
         kwargs.update(
             {
                 "token": self.get_token(user),
