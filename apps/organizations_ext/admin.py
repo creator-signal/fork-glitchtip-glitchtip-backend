@@ -115,7 +115,7 @@ class IsOverListFilter(admin.SimpleListFilter):
     title = "Is over plan limit"
     parameter_name = "is_over"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return (
             (True, "Yes"),
             (False, "No"),

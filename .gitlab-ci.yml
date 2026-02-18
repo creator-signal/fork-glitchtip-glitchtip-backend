@@ -135,8 +135,9 @@ e2e:
 lint:
   image: python:3.13-slim
   script:
-    - pip install ruff
+    - pip install ruff vulture
     - ruff check glitchtip/ apps/
+    - vulture apps/ glitchtip/ vulture_whitelist.py --min-confidence 100 --exclude "*/migrations/*,glitchtip/test_runner.py,apps/organizations_ext/api.py"
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 

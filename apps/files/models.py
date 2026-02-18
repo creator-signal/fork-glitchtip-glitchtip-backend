@@ -201,7 +201,7 @@ class ChunkedFileBlobIndexWrapper(object):
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, tb):
+    def __exit__(self, _exc_type, _exc_value, _tb):
         self.close()
 
     def detach_tempfile(self):

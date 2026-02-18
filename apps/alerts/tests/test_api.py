@@ -297,7 +297,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         "apps.alerts.api.send_test_notification",
         side_effect=Exception("Connection refused"),
     )
-    def test_test_project_alert_error(self, mock_send):
+    def test_test_project_alert_error(self, _mock_send):
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
