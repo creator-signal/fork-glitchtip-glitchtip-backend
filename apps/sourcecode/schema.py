@@ -32,5 +32,6 @@ class DebugSymbolBundleSchema(CamelSchema):
         validation_alias="file.headers", default=None
     )
     name: str = Field(validation_alias="file.name")
+    size: int = Field(validation_alias="file.size", default=0)
 
     model_config = ConfigDict(coerce_numbers_to_str=True)

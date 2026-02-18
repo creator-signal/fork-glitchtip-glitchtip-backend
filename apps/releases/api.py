@@ -1,3 +1,4 @@
+from django.db.models import F
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -13,9 +14,12 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.decorators import optional_slash
 from glitchtip.api.permissions import has_permission
 
-from .models import Release
+from .models import Deploy, Release
 from .schema import (
     AssembleSchema,
+    CommitIn,
+    DeployIn,
+    DeploySchema,
     ReleaseBase,
     ReleaseIn,
     ReleaseSchema,
@@ -27,7 +31,10 @@ router = Router()
 
 """
 POST /organizations/{organization_slug}/releases/
-POST /organizations/{organization_slug}/releases/{version}/deploys/ (Not implemented)
+POST /organizations/{organization_slug}/releases/{version}/deploys/
+GET /organizations/{organization_slug}/releases/{version}/deploys/
+POST /organizations/{organization_slug}/releases/{version}/commits/
+GET /organizations/{organization_slug}/releases/{version}/commits/
 GET /organizations/{organization_slug}/releases/
 GET /organizations/{organization_slug}/releases/{version}/
 PUT /organizations/{organization_slug}/releases/{version}/
@@ -411,6 +418,100 @@ async def get_project_release_file(
             id=file_id,
         )
     )
+
+
+@optional_slash(
+    router,
+    "post",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/deploys/",
+    response={201: DeploySchema},
+    by_alias=True,
+)
+@has_permission(["project:releases", "project:write", "project:admin"])
+async def create_deploy(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    version: str,
+    payload: DeployIn,
+):
+    user_id = request.auth.user_id
+    release = await aget_object_or_404(
+        get_releases_queryset(organization_slug, user_id, version=version)
+    )
+    deploy = await Deploy.objects.acreate(
+        release=release,
+        environment=payload.environment,
+        url=payload.url,
+        date_started=payload.date_started,
+        date_finished=payload.date_finished,
+    )
+    await Release.objects.filter(id=release.id).aupdate(
+        deploy_count=F("deploy_count") + 1
+    )
+    return 201, deploy
+
+
+@optional_slash(
+    router,
+    "get",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/deploys/",
+    response=list[DeploySchema],
+    by_alias=True,
+)
+@has_permission(["project:releases", "project:write", "project:admin"])
+async def list_deploys(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    version: str,
+):
+    release = await aget_object_or_404(
+        get_releases_queryset(organization_slug, request.auth.user_id, version=version)
+    )
+    return [deploy async for deploy in Deploy.objects.filter(release=release)]
+
+
+@optional_slash(
+    router,
+    "post",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/commits/",
+    response=ReleaseSchema,
+    by_alias=True,
+)
+@has_permission(["project:releases", "project:write", "project:admin"])
+async def create_commits(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    version: str,
+    payload: list[CommitIn],
+):
+    user_id = request.auth.user_id
+    release = await aget_object_or_404(
+        get_releases_queryset(organization_slug, user_id, version=version)
+    )
+    commits = [commit.dict(by_alias=True) for commit in payload]
+    release.commit_count = len(commits)
+    release.data["commits"] = commits[:1000]
+    await release.asave(update_fields=["commit_count", "data"])
+    return await get_releases_queryset(organization_slug, user_id, id=release.id).aget()
+
+
+@optional_slash(
+    router,
+    "get",
+    "/organizations/{slug:organization_slug}/releases/{str:version}/commits/",
+    response=list[CommitIn],
+    by_alias=True,
+)
+@has_permission(["project:releases", "project:write", "project:admin"])
+async def list_commits(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    version: str,
+):
+    release = await aget_object_or_404(
+        get_releases_queryset(organization_slug, request.auth.user_id, version=version)
+    )
+    return release.data.get("commits", [])
 
 
 @optional_slash(
