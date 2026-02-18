@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
-from apps.stripe.constants import SubscriptionStatus
+from apps.stripe.constants import ACTIVE_SUBSCRIPTION_STATUSES, SubscriptionStatus
 from apps.stripe.models import StripeSubscription
 
 from .email import InvitationEmail, ThrottleNoticeEmail
@@ -57,7 +57,7 @@ async def update_subscription_cycles():
 
     # We need to filter for subscriptions that are active and have a cycle end in the past
     qs = StripeSubscription.objects.filter(
-        status=SubscriptionStatus.ACTIVE,
+        status__in=ACTIVE_SUBSCRIPTION_STATUSES,
         subscription_cycle_end__lt=now,
         price__interval="year",
     ).select_related("price")
