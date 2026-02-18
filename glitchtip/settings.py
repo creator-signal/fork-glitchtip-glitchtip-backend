@@ -43,6 +43,7 @@ env = environ.FileAwareEnv(
     STATIC_URL=(str, "/"),
     ENABLE_OBSERVABILITY_API=(bool, False),
     READ_ONLY_DATABASE_URL=(str, None),
+    GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL=(bool, False),
 )
 path = environ.Path()
 
@@ -88,6 +89,10 @@ GLITCHTIP_URL = env.url("GLITCHTIP_URL", default_url)
 if GLITCHTIP_URL.scheme not in ["http", "https"]:
     raise ImproperlyConfigured("GLITCHTIP_DOMAIN must start with http or https")
 
+# If True, use a relative URL in chunk upload responses.
+GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL = env.bool(
+    "GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL", False
+)
 
 # Is running unit test
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"

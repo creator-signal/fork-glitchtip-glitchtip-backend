@@ -1,8 +1,9 @@
 import os
 from io import BytesIO
+from urllib.parse import urlparse
 
 from django.core.files.uploadedfile import InMemoryUploadedFile, SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
@@ -27,6 +28,34 @@ class ChunkUploadAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def test_get(self):
         res = self.client.get(self.url)
         self.assertContains(res, self.organization.slug)
+
+    def test_get_returns_relative_url_when_use_relative_url_is_true(self):
+        """Chunk upload info URL is relative when GLITCHTIP_CHUNK_UPLOAD_ABSOLUTE_URL_PREFIX is unset."""
+        with override_settings(GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL=True):
+            res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        expected_path = reverse(
+            "api:get_chunk_upload_info", args=[self.organization.slug]
+        )
+        self.assertEqual(data["url"], expected_path)
+        self.assertTrue(data["url"].startswith("/"))
+
+    def test_get_returns_absolute_url_when_use_relative_url_is_false(self):
+        """Chunk upload info URL uses GLITCHTIP_URL when GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL is False."""
+        base_url = urlparse("https://uploads.example.com")
+        with override_settings(
+            GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL=False,
+            GLITCHTIP_URL=base_url,
+        ):
+            res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        expected_path = reverse(
+            "api:get_chunk_upload_info", args=[self.organization.slug]
+        )
+        self.assertEqual(data["url"], base_url.geturl() + expected_path)
+        self.assertTrue(data["url"].startswith("https://"))
 
     def test_post(self):
         data = {"file_gzip": generate_file()}
