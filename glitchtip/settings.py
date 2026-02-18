@@ -179,9 +179,9 @@ GLITCHTIP_COLD_STORAGE_BUCKET = env.str(
 # Local directory for cold storage (alternative to S3 for simple deployments)
 GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
 
-# Override cold storage auto-detection. Set to "false" to disable even when
-# storage is configured (e.g., horizontally-scaled PaaS with S3 for media only).
-# When unset, cold storage auto-enables if a storage bucket is available.
+# Set to "true" to enable DuckDB cold storage archival.
+# Requires a storage backend (GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR,
+# or a "cold" STORAGES alias).
 GLITCHTIP_ENABLE_DUCKDB = env.str("GLITCHTIP_ENABLE_DUCKDB", None)
 
 # Cold storage cleanup: True = GT deletes old files, False = use S3 lifecycle policies

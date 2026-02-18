@@ -38,24 +38,25 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_ENABLE_DUCKDB="false",
         GLITCHTIP_COLD_STORAGE_BUCKET="my-bucket",
     )
-    def test_override_takes_precedence_over_bucket(self):
-        """Explicit false overrides auto-detection from bucket config."""
+    def test_explicit_false_with_bucket(self):
+        """Explicit false disables even when bucket is configured."""
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET="cold-bucket",
     )
-    def test_auto_enabled_with_cold_storage_bucket(self):
-        self.assertTrue(is_duckdb_available())
+    def test_disabled_without_explicit_opt_in(self):
+        """Bucket alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
+        self.assertFalse(is_duckdb_available())
 
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
-    def test_disabled_without_bucket(self):
-        """No bucket or directory configured = no cold storage."""
+    def test_disabled_without_any_config(self):
+        """No override and no bucket = no cold storage."""
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
@@ -63,8 +64,9 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
     )
-    def test_auto_enabled_with_cold_storage_dir(self):
-        self.assertTrue(is_duckdb_available())
+    def test_disabled_with_dir_but_no_opt_in(self):
+        """Directory alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
+        self.assertFalse(is_duckdb_available())
 
 
 class ColdStoragePathTestCase(TestCase):

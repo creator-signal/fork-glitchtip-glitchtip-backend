@@ -1,8 +1,7 @@
 """
 Shared cold storage infrastructure for archiving partitions to Parquet via standalone DuckDB.
 
-Auto-enables when a storage backend is configured (GLITCHTIP_COLD_STORAGE_BUCKET,
-GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
+Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
 Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
 
 Uses standalone DuckDB (not pg_duckdb extension) so cold storage works with
@@ -84,26 +83,11 @@ def is_duckdb_available() -> bool:
     """
     Check if DuckDB cold storage is enabled.
 
-    Auto-enables when a storage backend is configured (bucket, directory,
-    or "cold" STORAGES alias). Override with GLITCHTIP_ENABLE_DUCKDB=false
-    to disable even when storage exists.
+    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
     """
     override = settings.GLITCHTIP_ENABLE_DUCKDB
     if override is not None:
         return str(override).lower() == "true"
-
-    # Auto-detect: enable if a "cold" STORAGES alias is configured
-    if "cold" in storages.backends:
-        return True
-
-    # Auto-detect: enable if a cold storage bucket is configured
-    if settings.GLITCHTIP_COLD_STORAGE_BUCKET:
-        return True
-
-    # Auto-detect: enable if a local directory is configured
-    if settings.GLITCHTIP_COLD_STORAGE_DIR:
-        return True
-
     return False
 
 
