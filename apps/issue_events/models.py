@@ -89,6 +89,20 @@ class Issue(SoftDeleteModel):
     first_release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
+    last_release = models.ForeignKey(
+        "releases.Release",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    resolved_in_release = models.ForeignKey(
+        "releases.Release",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
     first_seen = models.DateTimeField(default=timezone.now, db_index=True)
     last_seen = models.DateTimeField(default=timezone.now, db_index=True)
     count = models.PositiveIntegerField(default=1, editable=False)

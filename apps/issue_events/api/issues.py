@@ -10,10 +10,11 @@ from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
-from ninja import Query, Schema
+from ninja import Field, Query, Schema
 from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
+from apps.releases.models import Release
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
@@ -33,8 +34,16 @@ from . import router
 EventStatusEnum = StrEnum("EventStatusEnum", EventStatus.labels)
 
 
+class StatusDetailsSchema(Schema):
+    in_release: str | None = Field(default=None, validation_alias="inRelease")
+    in_next_release: bool | None = Field(default=None, validation_alias="inNextRelease")
+
+
 class UpdateIssueSchema(Schema):
     status: EventStatusEnum | None = None
+    status_details: StatusDetailsSchema | None = Field(
+        default=None, validation_alias="statusDetails"
+    )
     merge: int | None = None
 
 
@@ -107,7 +116,33 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
     except Issue.DoesNotExist:
         raise Http404()
     obj.status = EventStatus.from_string(payload.status)
-    await obj.asave()
+
+    update_fields = ["status"]
+    if obj.status == EventStatus.RESOLVED and payload.status_details:
+        if payload.status_details.in_release:
+            release = await Release.objects.filter(
+                version=payload.status_details.in_release,
+                organization_id=obj.project.organization_id,
+            ).afirst()
+            if release:
+                obj.resolved_in_release = release
+                update_fields.append("resolved_in_release_id")
+        elif payload.status_details.in_next_release:
+            release = await (
+                Release.objects.filter(
+                    projects=obj.project_id,
+                )
+                .order_by("-created")
+                .afirst()
+            )
+            if release:
+                obj.resolved_in_release = release
+                update_fields.append("resolved_in_release_id")
+    elif obj.status != EventStatus.RESOLVED:
+        obj.resolved_in_release = None
+        update_fields.append("resolved_in_release_id")
+
+    await obj.asave(update_fields=update_fields)
     return obj
 
 
