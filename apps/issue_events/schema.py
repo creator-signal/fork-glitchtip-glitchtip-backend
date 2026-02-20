@@ -22,6 +22,7 @@ from ..shared.schema.event import (
     ListKeyValue,
 )
 from ..shared.schema.user import EventUser
+from .constants import EventStatus
 from .models import Comment, Issue, IssueEvent, UserReport
 from .utils import get_entries, to_camel_with_lower_id
 
@@ -63,7 +64,7 @@ class IssueSchema(ModelSchema):
     share_id: int | None = None
     logger: str | None = None
     permalink: str | None = "Not implemented"
-    status_details: dict[str, str] | None = {}
+    status_details: dict[str, str] | None = Field(default_factory=dict)
     subscription_details: str | None = None
     user_count: int | None = 0
     matching_event_id: str | None = Field(
@@ -71,6 +72,9 @@ class IssueSchema(ModelSchema):
     )
     firstRelease: IssueReleaseSchema | None = Field(
         default=None, validation_alias="first_release"
+    )
+    lastRelease: IssueReleaseSchema | None = Field(
+        default=None, validation_alias="last_release"
     )
     firstSeen: datetime = Field(validation_alias="first_seen")
     lastSeen: datetime = Field(validation_alias="last_seen")
@@ -83,6 +87,12 @@ class IssueSchema(ModelSchema):
     def resolve_matching_event_id(obj: Issue, context):
         if event_id := context["request"].matching_event_id:
             return event_id.hex
+
+    @staticmethod
+    def resolve_status_details(obj: Issue):
+        if obj.status == EventStatus.RESOLVED and obj.resolved_in_release_id:
+            return {"inRelease": obj.resolved_in_release.version}
+        return {}
 
     @staticmethod
     def resolve_permalink(obj: Issue, context):

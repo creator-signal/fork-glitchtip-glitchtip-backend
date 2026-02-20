@@ -239,10 +239,20 @@ def update_issues(processing_events: list[ProcessingEvent]):
             issues_to_update[issue_id].search_vector += f" {vector}"
             if issues_to_update[issue_id].last_seen < processing_event.received:
                 issues_to_update[issue_id].last_seen = processing_event.received
+                if processing_event.release_id:
+                    issues_to_update[
+                        issue_id
+                    ].last_release_id = processing_event.release_id
+            elif (
+                not issues_to_update[issue_id].last_release_id
+                and processing_event.release_id
+            ):
+                issues_to_update[issue_id].last_release_id = processing_event.release_id
         else:
             issues_to_update[issue_id] = IssueUpdate(
                 last_seen=processing_event.received,
                 search_vector=vector,
+                last_release_id=processing_event.release_id,
             )
 
     if not issues_to_update:
@@ -250,22 +260,29 @@ def update_issues(processing_events: list[ProcessingEvent]):
 
     data = sorted(
         [
-            (issue_id, value.added_count, value.search_vector, value.last_seen)
+            (
+                issue_id,
+                value.added_count,
+                value.search_vector,
+                value.last_seen,
+                value.last_release_id,
+            )
             for issue_id, value in issues_to_update.items()
         ],
         key=itemgetter(0),
     )
 
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
         max_lexemes = settings.SEARCH_MAX_LEXEMES
 
         sql = (
             "UPDATE issue_events_issue SET "
             "count = issue_events_issue.count + v.added_count, "
             f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
-            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen) "
-            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen) "
+            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
+            "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
+            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
             "WHERE issue_events_issue.id = v.id"
         )
         cursor.execute(sql)
@@ -774,7 +791,13 @@ def process_issue_events(
     hash_queryset = (
         IssueHash.objects.using(read_only_db)
         .filter(q_objects)
-        .values("value", "project_id", "issue_id", "issue__status")
+        .values(
+            "value",
+            "project_id",
+            "issue_id",
+            "issue__status",
+            "issue__resolved_in_release_id",
+        )
     )
 
     # Build a dict for O(1) lookups instead of iterating the queryset per event
@@ -793,7 +816,13 @@ def process_issue_events(
             for h in (
                 IssueHash.objects.using("default")
                 .filter(missing_q)
-                .values("value", "project_id", "issue_id", "issue__status")
+                .values(
+                    "value",
+                    "project_id",
+                    "issue_id",
+                    "issue__status",
+                    "issue__resolved_in_release_id",
+                )
             ):
                 hash_dict[(h["project_id"], h["value"].hex)] = h
 
@@ -817,6 +846,7 @@ def process_issue_events(
             "first_seen": processing_event.received,
             "last_seen": processing_event.received,
             "first_release_id": processing_event.release_id,
+            "last_release_id": processing_event.release_id,
         }
         if level := processing_event.level:
             issue_defaults["level"] = level
@@ -824,7 +854,9 @@ def process_issue_events(
         if hash_obj:
             processing_event.issue_id = hash_obj["issue_id"]
             if hash_obj["issue__status"] == EventStatus.RESOLVED:
-                issues_to_reopen.append(hash_obj["issue_id"])
+                resolved_in = hash_obj.get("issue__resolved_in_release_id")
+                if resolved_in is None or resolved_in != processing_event.release_id:
+                    issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
             with connection.cursor() as cursor:
@@ -918,7 +950,8 @@ def process_issue_events(
 
     if issues_to_reopen:
         Issue.objects.filter(id__in=issues_to_reopen).update(
-            status=EventStatus.UNRESOLVED
+            status=EventStatus.UNRESOLVED,
+            resolved_in_release=None,
         )
         Notification.objects.filter(issues__in=issues_to_reopen).delete()
 

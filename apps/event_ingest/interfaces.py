@@ -49,6 +49,7 @@ class IssueUpdate:
     last_seen: datetime
     search_vector: str
     added_count: int = 1
+    last_release_id: int | None = None
 
 
 class IssueStats(TypedDict):
