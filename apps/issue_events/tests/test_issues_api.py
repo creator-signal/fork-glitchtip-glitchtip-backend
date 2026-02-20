@@ -74,6 +74,34 @@ class IssueAPITestCase(GlitchTestCase):
         )
         self.assertEqual(data.get("permalink"), expected_permalink)
 
+    def test_retrieve_with_first_release(self):
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            first_release=release,
+        )
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertIsNotNone(data.get("firstRelease"))
+        self.assertEqual(data["firstRelease"]["version"], "1.0.0")
+        self.assertEqual(data["firstRelease"]["shortVersion"], "1.0.0")
+        self.assertIn("dateCreated", data["firstRelease"])
+
+    def test_retrieve_without_first_release(self):
+        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertIsNone(data.get("firstRelease"))
+
     def test_list(self):
         res = self.client.get(self.list_url)
         self.assertEqual(res.status_code, 200)

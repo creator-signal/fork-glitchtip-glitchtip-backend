@@ -816,6 +816,7 @@ def process_issue_events(
             "metadata": remove_bad_chars(processing_event.metadata),
             "first_seen": processing_event.received,
             "last_seen": processing_event.received,
+            "first_release_id": processing_event.release_id,
         }
         if level := processing_event.level:
             issue_defaults["level"] = level

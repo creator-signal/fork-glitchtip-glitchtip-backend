@@ -191,6 +191,36 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.process_events(data)
         self.assertTrue(IssueEvent.objects.first())
 
+    def test_first_release_set_on_new_issue(self):
+        """first_release should be set when a new issue is created with a release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        self.assertIsNotNone(issue.first_release)
+        release_version = data.get("release")
+        self.assertEqual(issue.first_release.version, release_version)
+
+    def test_first_release_not_updated_on_second_event(self):
+        """first_release should not change when a second event with a different release arrives"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        original_release = issue.first_release
+
+        # Send a second event with the same fingerprint but a different release
+        data2 = self.get_json_data("events/test_data/py_hi_event.json")
+        data2["release"] = "v2.0.0"
+        self.process_events(data2)
+
+        issue.refresh_from_db()
+        self.assertEqual(issue.first_release, original_release)
+
+    def test_first_release_null_without_release(self):
+        """first_release should be null when no release is provided"""
+        self.process_events({})
+        issue = Issue.objects.first()
+        self.assertIsNone(issue.first_release)
+
     def test_event_environment(self):
         # Some noise to test queries
         baker.make("environments.Environment", organization=self.organization)
