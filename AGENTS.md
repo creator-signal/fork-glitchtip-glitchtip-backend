@@ -53,3 +53,4 @@ curl -H "Authorization: Bearer ddddddddddddddddddddddddddddddddddddddddddddddddd
 ## Gotchas
 - We optimize postgres column alignment, when making migrations consider column alignment. Some smaller tales don't matter. When in doubt, ask the user.
 - Some tables use nested postgres partitions, often organization_id HASH > uuid7 (time). When querying a partitioned tabled, consider optimizing the query to be partition aware
+- Target scaling up to 10,000 organizations and 100 million events

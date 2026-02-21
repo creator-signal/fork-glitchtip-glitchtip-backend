@@ -1,3 +1,30 @@
+# 6.0.7
+
+- Feat: Add MCP (Model Context Protocol) server with OAuth 2.0 authorization
+- Feat: Add native alert support for Microsoft Teams, Zulip, and ntfy
+- Feat: Add test alert endpoint with optional recipient filter
+- Feat: Add optional uptime monitoring toggle and enabled_features settings API
+- Feat: Add deploy/commit APIs and fix release file size
+- Feat: Add release retention cleanup (365-day default)
+- Feat: Add InternalTransport to prevent self-DOS when SENTRY_DSN points to self
+- Feat: Add bootstrap_dev management command for dev environment setup
+- Feat: Add `GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL` setting for sourcemap upload
+- Feat: Logs ingestion support (disabled by default, enable with `ENABLE_LOGS`)
+- Feat: Optional DuckDB cold storage for issue events (disabled by default)
+- Fix: Bump django-vtasks to 1.0.3 (zstd thread-safety SIGSEGV fix)
+- Fix: Coerce non-string fingerprint values to strings during ingest
+- Fix: Handle delete alert preference when no alert exists
+- Fix: Use project_id instead of slug in difs_assemble to avoid MultipleObjectsReturned
+- Fix: Add replay_video to IgnoredItemType for React Native SDK envelopes
+- Fix: Fix AttributeError in IssueEventSchema resolve_tags when tags are not a dict (Fixes #212)
+- Fix: Convert span_id to signed bigint to prevent overflow
+- Fix: Establish is_change baseline when partition retention prunes uptime change records
+- Fix: Don't forward ASGI lifespan to Django in web-only mode
+- Fix: Wire update_subscription_cycles into nightly maintenance
+- Fix: Handle None blob size in assemble
+- Fix: Allow project:write and project:admin scopes to list alerts
+- Refactor: Remove dead code and add vulture CI check
+
 # 6.0.6
 
 - Fix: Debug information file assembly now works with object storage backends (S3, GCS, DigitalOcean Spaces)
