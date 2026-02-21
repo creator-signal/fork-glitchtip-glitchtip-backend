@@ -191,6 +191,125 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         self.process_events(data)
         self.assertTrue(IssueEvent.objects.first())
 
+    def test_first_release_set_on_new_issue(self):
+        """first_release should be set when a new issue is created with a release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        self.assertIsNotNone(issue.first_release)
+        release_version = data.get("release")
+        self.assertEqual(issue.first_release.version, release_version)
+
+    def test_first_release_not_updated_on_second_event(self):
+        """first_release should not change when a second event with a different release arrives"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        original_release = issue.first_release
+
+        # Send a second event with the same fingerprint but a different release
+        data2 = self.get_json_data("events/test_data/py_hi_event.json")
+        data2["release"] = "v2.0.0"
+        self.process_events(data2)
+
+        issue.refresh_from_db()
+        self.assertEqual(issue.first_release, original_release)
+
+    def test_first_release_null_without_release(self):
+        """first_release should be null when no release is provided"""
+        self.process_events({})
+        issue = Issue.objects.first()
+        self.assertIsNone(issue.first_release)
+
+    def test_last_release_set_on_new_issue(self):
+        """last_release should be set when a new issue is created with a release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        self.assertIsNotNone(issue.last_release)
+        self.assertEqual(issue.last_release.version, data.get("release"))
+
+    def test_last_release_updated_on_second_event(self):
+        """last_release should update when a second event with a different release arrives"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        original_release = issue.last_release
+
+        data2 = self.get_json_data("events/test_data/py_hi_event.json")
+        data2["release"] = "v2.0.0"
+        self.process_events(data2)
+
+        issue.refresh_from_db()
+        self.assertNotEqual(issue.last_release, original_release)
+        self.assertEqual(issue.last_release.version, "v2.0.0")
+
+    def test_last_release_not_cleared_by_event_without_release(self):
+        """An event without a release should not erase last_release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        self.assertIsNotNone(issue.last_release)
+
+        # Send a second event with no release (same fingerprint)
+        data2 = self.get_json_data("events/test_data/py_hi_event.json")
+        data2.pop("release", None)
+        self.process_events(data2)
+
+        issue.refresh_from_db()
+        self.assertIsNotNone(issue.last_release)
+
+    def test_resolve_in_release_no_reopen_same_release(self):
+        """Resolved issue with resolved_in_release should NOT reopen for events from same release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        release = issue.first_release
+
+        # Resolve in this release
+        issue.status = EventStatus.RESOLVED
+        issue.resolved_in_release = release
+        issue.save()
+
+        # Send another event with the same release
+        self.process_events(data)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.RESOLVED)
+
+    def test_resolve_in_release_reopen_different_release(self):
+        """Resolved issue with resolved_in_release should reopen for events from a different release"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+        release = issue.first_release
+
+        issue.status = EventStatus.RESOLVED
+        issue.resolved_in_release = release
+        issue.save()
+
+        # Send event with a different release
+        data2 = self.get_json_data("events/test_data/py_hi_event.json")
+        data2["release"] = "v2.0.0"
+        self.process_events(data2)
+
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
+        self.assertIsNone(issue.resolved_in_release)
+
+    def test_resolve_plain_always_reopens(self):
+        """Resolved issue without resolved_in_release should reopen on any event (backward compat)"""
+        data = self.get_json_data("events/test_data/py_hi_event.json")
+        self.process_events(data)
+        issue = Issue.objects.first()
+
+        # Plain resolve (no resolved_in_release)
+        issue.status = EventStatus.RESOLVED
+        issue.save()
+
+        self.process_events(data)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
+
     def test_event_environment(self):
         # Some noise to test queries
         baker.make("environments.Environment", organization=self.organization)
