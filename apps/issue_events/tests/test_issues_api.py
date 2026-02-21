@@ -74,6 +74,34 @@ class IssueAPITestCase(GlitchTestCase):
         )
         self.assertEqual(data.get("permalink"), expected_permalink)
 
+    def test_retrieve_with_first_release(self):
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            first_release=release,
+        )
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertIsNotNone(data.get("firstRelease"))
+        self.assertEqual(data["firstRelease"]["version"], "1.0.0")
+        self.assertEqual(data["firstRelease"]["shortVersion"], "1.0.0")
+        self.assertIn("dateCreated", data["firstRelease"])
+
+    def test_retrieve_without_first_release(self):
+        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertIsNone(data.get("firstRelease"))
+
     def test_list(self):
         res = self.client.get(self.list_url)
         self.assertEqual(res.status_code, 200)
@@ -564,6 +592,117 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 200)
         issue.refresh_from_db()
         self.assertEqual(issue.status, EventStatus.RESOLVED)
+
+    def test_resolve_with_status_details_in_release(self):
+        """PUT with statusDetails.inRelease sets resolved_in_release"""
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"status": "resolved", "statusDetails": {"inRelease": "1.0.0"}}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.RESOLVED)
+        self.assertEqual(issue.resolved_in_release, release)
+
+    def test_resolve_with_status_details_in_next_release(self):
+        """PUT with statusDetails.inNextRelease sets resolved_in_release to latest release"""
+        older_release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="0.9.0",
+        )
+        older_release.projects.add(self.project)
+        latest_release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        latest_release.projects.add(self.project)
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"status": "resolved", "statusDetails": {"inNextRelease": True}}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.RESOLVED)
+        self.assertEqual(issue.resolved_in_release, latest_release)
+
+    def test_status_details_in_response(self):
+        """Resolved issue with resolved_in_release shows statusDetails.inRelease in GET"""
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            status=EventStatus.RESOLVED,
+            resolved_in_release=release,
+        )
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertEqual(data["statusDetails"], {"inRelease": "1.0.0"})
+
+    def test_last_release_in_response(self):
+        """Issue with last_release shows lastRelease object in GET"""
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="2.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            last_release=release,
+        )
+        url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        data = res.json()
+        self.assertIsNotNone(data.get("lastRelease"))
+        self.assertEqual(data["lastRelease"]["version"], "2.0.0")
+        self.assertEqual(data["lastRelease"]["shortVersion"], "2.0.0")
+
+    def test_unresolve_clears_resolved_in_release(self):
+        """Un-resolving an issue should clear resolved_in_release"""
+        release = baker.make(
+            "releases.Release",
+            organization=self.project.organization,
+            version="1.0.0",
+        )
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.RESOLVED,
+            resolved_in_release=release,
+        )
+        data = {"status": "unresolved"}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
+        self.assertIsNone(issue.resolved_in_release)
 
     def test_issue_delete(self):
         issue = baker.make("issue_events.Issue", project=self.project)

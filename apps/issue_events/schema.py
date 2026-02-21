@@ -7,6 +7,7 @@ from pydantic import ConfigDict, computed_field
 
 from apps.event_ingest.schema import CSPReportSchema
 from apps.projects.models import Project
+from apps.releases.models import Release
 from apps.shared.schema.csp import CSPEntry
 from apps.shared.schema.exception import EventException, ExceptionEntry
 from apps.shared.schema.message import MessageEntry
@@ -21,6 +22,7 @@ from ..shared.schema.event import (
     ListKeyValue,
 )
 from ..shared.schema.user import EventUser
+from .constants import EventStatus
 from .models import Comment, Issue, IssueEvent, UserReport
 from .utils import get_entries, to_camel_with_lower_id
 
@@ -39,6 +41,16 @@ class ProjectReference(CamelSchema, ModelSchema):
         return str(obj.id)
 
 
+class IssueReleaseSchema(CamelSchema, ModelSchema):
+    short_version: str = Field(validation_alias="version")
+    created: datetime = Field(serialization_alias="dateCreated")
+    released: datetime | None = Field(serialization_alias="dateReleased")
+
+    class Meta:
+        model = Release
+        fields = ["version"]
+
+
 class IssueSchema(ModelSchema):
     id: str
     count: str
@@ -52,11 +64,17 @@ class IssueSchema(ModelSchema):
     share_id: int | None = None
     logger: str | None = None
     permalink: str | None = "Not implemented"
-    status_details: dict[str, str] | None = {}
+    status_details: dict[str, str] | None = Field(default_factory=dict)
     subscription_details: str | None = None
     user_count: int | None = 0
     matching_event_id: str | None = Field(
         default=None, serialization_alias="matchingEventId"
+    )
+    firstRelease: IssueReleaseSchema | None = Field(
+        default=None, validation_alias="first_release"
+    )
+    lastRelease: IssueReleaseSchema | None = Field(
+        default=None, validation_alias="last_release"
     )
     firstSeen: datetime = Field(validation_alias="first_seen")
     lastSeen: datetime = Field(validation_alias="last_seen")
@@ -69,6 +87,12 @@ class IssueSchema(ModelSchema):
     def resolve_matching_event_id(obj: Issue, context):
         if event_id := context["request"].matching_event_id:
             return event_id.hex
+
+    @staticmethod
+    def resolve_status_details(obj: Issue):
+        if obj.status == EventStatus.RESOLVED and obj.resolved_in_release_id:
+            return {"inRelease": obj.resolved_in_release.version}
+        return {}
 
     @staticmethod
     def resolve_permalink(obj: Issue, context):
