@@ -3,6 +3,7 @@ from apps.issue_events.utils import get_entries
 from apps.logs.api import LogEventRow
 from apps.logs.constants import LogLevel
 from apps.organizations_ext.models import Organization
+from apps.performance.models import TransactionGroup
 from apps.projects.models import Project
 
 
@@ -136,6 +137,35 @@ def serialize_log_event(log: LogEventRow) -> dict:
     if log.data:
         result["data"] = log.data
     return result
+
+
+def serialize_transaction_group(tg: TransactionGroup) -> dict:
+    result = {
+        "id": tg.id,
+        "project": tg.project_id,
+        "transaction": tg.transaction,
+        "op": tg.op,
+        "method": tg.method,
+        "count": tg.count,
+        "avgDuration": tg.avg_duration,
+        "p50": tg.p50,
+        "p95": tg.p95,
+        "errorCount": tg.error_count,
+        "firstSeen": tg.first_seen.isoformat(),
+        "lastSeen": tg.last_seen.isoformat(),
+    }
+    return result
+
+
+def serialize_span_group(span: dict) -> dict:
+    return {
+        "op": span["op"],
+        "description": span["description"],
+        "count": span["count"],
+        "avgDuration": span["avg_duration"],
+        "p95Duration": span["p95_duration"],
+        "totalTime": span["total_time"],
+    }
 
 
 def serialize_monitor(monitor) -> dict:

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
 from django.db.models import Q, QuerySet
 
 from apps.alerts.api import get_project_alert_queryset
@@ -15,6 +16,7 @@ from apps.organizations_ext.queryset_utils import (
     get_organization_for_user,
     get_organizations_queryset,
 )
+from apps.performance.models import TransactionGroup
 from apps.projects.api import get_projects_queryset
 from apps.projects.models import Project
 from apps.uptime.api import get_monitor_queryset
@@ -176,3 +178,102 @@ async def get_log(
     except ValueError:
         return None
     return await get_log_by_id(org_id, uuid_val)
+
+
+async def get_transaction_groups(
+    user_id: int,
+    organization_slug: str,
+    project_ids: list[int] | None = None,
+    query: str | None = None,
+    sort: str = "-avg_duration",
+    limit: int = 25,
+) -> list[TransactionGroup]:
+    """List transaction groups for an organization."""
+    org_id = await _get_org_id(user_id, organization_slug)
+    qs = TransactionGroup.objects.filter(organization_id=org_id)
+
+    if project_ids:
+        qs = qs.filter(project_id__in=project_ids)
+    if query:
+        qs = qs.filter(transaction__icontains=query)
+
+    allowed_sorts = {
+        "created", "-created", "avg_duration", "-avg_duration", "count", "-count"
+    }
+    if sort not in allowed_sorts:
+        sort = "-avg_duration"
+
+    qs = qs.order_by(sort)
+    limit = min(limit, 100)
+    return [tg async for tg in qs[:limit]]
+
+
+async def get_transaction_group(
+    user_id: int, organization_slug: str, group_id: int
+) -> TransactionGroup | None:
+    """Get a single transaction group by ID."""
+    org_id = await _get_org_id(user_id, organization_slug)
+    return await TransactionGroup.objects.filter(
+        id=group_id, organization_id=org_id
+    ).afirst()
+
+
+async def get_transaction_spans(
+    user_id: int,
+    organization_slug: str,
+    group_id: int,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+) -> list[dict]:
+    """Get span groups for a specific transaction (DuckDB cold storage)."""
+    from apps.performance.cold_storage import query_span_groups_for_transaction
+
+    org_id = await _get_org_id(user_id, organization_slug)
+
+    # Verify user has access to this transaction group
+    group = await TransactionGroup.objects.filter(
+        id=group_id, organization_id=org_id
+    ).afirst()
+    if not group:
+        return []
+
+    now = datetime.now(timezone.utc)
+    start = start_dt or (now - timedelta(days=7))
+    end = end_dt or now
+
+    return await sync_to_async(query_span_groups_for_transaction)(
+        org_id=org_id,
+        transaction_group_id=group_id,
+        start_dt=start,
+        end_dt=end,
+    )
+
+
+async def get_span_groups(
+    user_id: int,
+    organization_slug: str,
+    project_ids: list[int] | None = None,
+    op_filter: str | None = None,
+    sort: str = "-total_time",
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Query span groups across the organization (DuckDB cold storage)."""
+    from apps.performance.cold_storage import query_span_groups
+
+    org_id = await _get_org_id(user_id, organization_slug)
+
+    now = datetime.now(timezone.utc)
+    start = start_dt or (now - timedelta(days=7))
+    end = end_dt or now
+
+    return await sync_to_async(query_span_groups)(
+        org_id=org_id,
+        project_ids=project_ids,
+        start_dt=start,
+        end_dt=end,
+        op_filter=op_filter,
+        sort=sort,
+        limit=min(limit, 100),
+    )
