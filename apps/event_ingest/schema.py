@@ -343,6 +343,18 @@ class EventIngestSchema(WebIngestIssueEvent):
     event_id: uuid.UUID  # type: ignore[assignment]
 
 
+class SpanSchema(LaxIngestSchema):
+    """Schema for individual spans within a transaction."""
+
+    span_id: str = ""
+    op: str = ""
+    description: str | None = None
+    start_timestamp: datetime | None = None
+    timestamp: datetime | None = None
+    status: str | None = None
+    data: JsonValue | None = None
+
+
 class TransactionEventSchema(LaxIngestSchema):
     type: Literal["transaction"] = "transaction"
     contexts: JsonValue
@@ -350,6 +362,7 @@ class TransactionEventSchema(LaxIngestSchema):
     start_timestamp: datetime
     timestamp: datetime
     transaction: str
+    spans: list[SpanSchema] | None = None
 
     # # SentrySDKEventSerializer
     breadcrumbs: JsonValue | None = None
