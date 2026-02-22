@@ -2,6 +2,8 @@ import logging
 
 from django_vtasks import task
 
+from apps.performance.promotion import BATCH_LIMIT
+
 logger = logging.getLogger(__name__)
 
 
@@ -9,7 +11,11 @@ logger = logging.getLogger(__name__)
 def promote_spans():
     from apps.performance.promotion import promote_spans as _promote
 
-    _promote()
+    promoted = _promote()
+    if promoted >= BATCH_LIMIT:
+        # More rows likely remain — schedule another run immediately
+        logger.info("Promotion batch full (%d rows), re-enqueueing", promoted)
+        promote_spans.enqueue()
 
 
 @task
