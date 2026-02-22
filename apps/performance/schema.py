@@ -32,11 +32,3 @@ class SpanGroupSchema(CamelSchema, Schema):
     avg_duration: float
     p95_duration: float
     total_time: float
-
-
-class SlowQuerySchema(CamelSchema, Schema):
-    op: str
-    description: str
-    count: int
-    avg_duration: float
-    total_time: float
