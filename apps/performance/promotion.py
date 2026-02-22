@@ -9,6 +9,7 @@ import logging
 import os
 import time
 
+from django.db import connection
 from django.utils import timezone
 
 from glitchtip.cold_storage import (
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 TABLE_NAME = "performance_spans"
 
-# Minimum rows per org+date group before promoting (skip tiny batches)
-MIN_BATCH_SIZE = 100
+# Process up to this many rows per invocation.
+# At ~10 columns with VARCHAR fields, 500K rows ≈ 200-400MB in Python.
+BATCH_LIMIT = 500_000
 
 
 def promote_spans() -> int:
@@ -34,7 +36,7 @@ def promote_spans() -> int:
     1. Query rows where created < NOW() - 5 minutes (lag prevents racing with inserts)
     2. Group by (organization_id, date(timestamp))
     3. Write chunk Parquet files per org+date
-    4. DELETE consumed rows
+    4. Range-DELETE consumed rows by created < cutoff bounded by max promoted created
 
     Returns number of rows promoted.
     """
@@ -65,7 +67,7 @@ def promote_spans() -> int:
             "description",
             "duration",
             "timestamp",
-        )[:50000]
+        )[:BATCH_LIMIT]
     )
 
     if not rows:
@@ -83,9 +85,6 @@ def promote_spans() -> int:
     promoted_ids: list[int] = []
 
     for (org_id, date_str), group_rows in groups.items():
-        if len(group_rows) < MIN_BATCH_SIZE:
-            continue
-
         try:
             _write_chunk_parquet(storage, org_id, date_str, group_rows)
             promoted_ids.extend(r[0] for r in group_rows)
@@ -97,9 +96,18 @@ def promote_spans() -> int:
                 exc_info=True,
             )
 
-    # Delete promoted rows
+    # Range-based delete: delete by ID range within the partition (created < cutoff).
+    # This avoids a massive IN (...) clause and lets Postgres prune by partition.
     if promoted_ids:
-        SpanStaging.objects.filter(id__in=promoted_ids, created__lt=cutoff).delete()
+        max_id = max(promoted_ids)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM performance_spanstaging
+                WHERE created < %s AND id <= %s
+                """,
+                [cutoff, max_id],
+            )
 
     logger.info("Promoted %d span rows to cold storage", len(promoted_ids))
     return len(promoted_ids)

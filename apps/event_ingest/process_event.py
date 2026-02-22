@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -36,7 +37,10 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
-from apps.performance.histogram import merge_durations, percentile_from_histogram
+from apps.performance.histogram import (
+    get_bucket_index,
+    percentile_from_histogram,
+)
 from apps.performance.models import SpanStaging, TransactionGroup
 from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
@@ -1064,73 +1068,108 @@ def _is_error_status(trace_status: str | None) -> bool:
     )
 
 
+def _build_histogram_increment(durations: list[float]) -> dict[str, int]:
+    """Build a histogram dict from a list of durations (for SQL merge)."""
+    histogram: dict[str, int] = {}
+    for d in durations:
+        key = str(get_bucket_index(d))
+        histogram[key] = histogram.get(key, 0) + 1
+    return histogram
+
+
 def _update_transaction_group_stats(
-    groups: dict[int, TransactionGroup],
     group_durations: dict[int, list[float]],
     group_error_counts: dict[int, int],
 ):
     """
-    Update TransactionGroup stats in-place (running mean, histogram, p50/p95).
-    Uses raw SQL UPDATE for atomicity.
+    Update TransactionGroup stats atomically using append-only SQL.
+
+    Histogram merge, running average, and p50/p95 are all computed in a single
+    UPDATE statement per batch — no read-modify-write cycle, so concurrent
+    workers cannot corrupt each other's data.
     """
     if not group_durations:
         return
 
-    updates = []
+    # Build VALUES list for a single batched UPDATE ... FROM (VALUES ...)
+    # Each row: (group_id, batch_count, batch_total, error_count, histogram_increment)
+    values_data = []
     for group_id, durations in group_durations.items():
-        group = groups.get(group_id)
-        if not group:
-            continue
-
         batch_count = len(durations)
         batch_total = sum(durations)
         error_count = group_error_counts.get(group_id, 0)
-
-        # Merge durations into histogram
-        histogram = dict(group.duration_histogram) if group.duration_histogram else {}
-        merge_durations(histogram, durations)
-
-        new_count = group.count + batch_count
-        new_avg = (
-            (group.avg_duration * group.count + batch_total) / new_count
-            if new_count > 0
-            else 0
+        histogram_inc = _build_histogram_increment(durations)
+        histogram_json = json.dumps(histogram_inc)
+        values_data.append(
+            (group_id, batch_count, batch_total, error_count, histogram_json)
         )
 
-        p50 = percentile_from_histogram(histogram, new_count, 50)
-        p95 = percentile_from_histogram(histogram, new_count, 95)
-
-        updates.append(
-            (
-                new_avg,
-                p50,
-                p95,
-                batch_count,
-                error_count,
-                str(histogram).replace("'", '"'),  # JSON-safe
-                group_id,
-            )
-        )
-
-    if not updates:
+    if not values_data:
         return
 
     with connection.cursor() as cursor:
-        # Batch update using CASE expressions for atomicity
-        for update in updates:
+        # Single UPDATE ... FROM (VALUES ...) for the entire batch.
+        # Histogram merge: for each bucket key, add the increment to the existing
+        # value using jsonb_each_text + aggregation, then overlay onto the original.
+        # Running average: (old_avg * old_count + batch_total) / (old_count + batch_count)
+        # p50/p95: recomputed in Python after the UPDATE (cheaper than PL/pgSQL).
+        placeholders = ",".join(
+            cursor.mogrify("(%s,%s,%s,%s,%s::jsonb)", row) for row in values_data
+        )
+        cursor.execute(
+            f"""
+            UPDATE performance_transactiongroup AS tg
+            SET count = tg.count + v.batch_count,
+                error_count = tg.error_count + v.error_count,
+                avg_duration = CASE
+                    WHEN tg.count + v.batch_count > 0
+                    THEN (tg.avg_duration * tg.count + v.batch_total)
+                         / (tg.count + v.batch_count)
+                    ELSE 0
+                END,
+                last_seen = NOW(),
+                duration_histogram = (
+                    SELECT COALESCE(jsonb_object_agg(key, total), '{{}}'::jsonb)
+                    FROM (
+                        SELECT key, SUM(value::int) AS total
+                        FROM (
+                            SELECT key, value FROM jsonb_each_text(tg.duration_histogram)
+                            UNION ALL
+                            SELECT key, value FROM jsonb_each_text(v.histogram_inc)
+                        ) combined
+                        GROUP BY key
+                    ) merged
+                )
+            FROM (VALUES {placeholders})
+                AS v(group_id, batch_count, batch_total, error_count, histogram_inc)
+            WHERE tg.id = v.group_id
+            """
+        )
+
+    # Recompute p50/p95 from the merged histogram.
+    # This is a second query but reads the now-consistent histogram.
+    group_ids = [row[0] for row in values_data]
+    updated_groups = TransactionGroup.objects.filter(id__in=group_ids).only(
+        "id", "count", "duration_histogram"
+    )
+    p_updates = []
+    for g in updated_groups:
+        p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
+        p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
+        p_updates.append((p50, p95, g.id))
+
+    if p_updates:
+        with connection.cursor() as cursor:
+            placeholders = ",".join(
+                cursor.mogrify("(%s,%s,%s)", row) for row in p_updates
+            )
             cursor.execute(
+                f"""
+                UPDATE performance_transactiongroup AS tg
+                SET p50 = v.p50, p95 = v.p95
+                FROM (VALUES {placeholders}) AS v(p50, p95, group_id)
+                WHERE tg.id = v.group_id
                 """
-                UPDATE performance_transactiongroup
-                SET avg_duration = %s,
-                    p50 = %s,
-                    p95 = %s,
-                    count = count + %s,
-                    error_count = error_count + %s,
-                    last_seen = NOW(),
-                    duration_histogram = %s::jsonb
-                WHERE id = %s
-                """,
-                update,
             )
 
 
@@ -1255,15 +1294,12 @@ def process_transaction_events(
         release_set, environment_set, project_set, read_only_db
     )
 
-    # 1. Get/create TransactionGroups and collect stats
-    groups: dict[int, TransactionGroup] = {}  # group_id -> group
-    group_durations: dict[int, list[float]] = defaultdict(list)
-    group_error_counts: dict[int, int] = defaultdict(int)
-    span_rows: list[SpanStaging] = []
-
-    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
-        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
-    )
+    # 1. Parse event data and collect unique group keys
+    GroupKey = tuple[int, str, str, str]  # (project_id, transaction, op, method)
+    event_data: list[
+        tuple[InterchangeTransactionEvent, str, str, str | None, GroupKey]
+    ] = []
+    unique_keys: dict[GroupKey, int] = {}  # key -> organization_id
 
     for ingest_event in ingest_events:
         event = ingest_event.payload
@@ -1281,41 +1317,68 @@ def process_transaction_events(
             method = request.method
 
         transaction_name = event.transaction[:1024]
+        key: GroupKey = (ingest_event.project_id, transaction_name, op, method)
+        unique_keys.setdefault(key, ingest_event.organization_id)
+        event_data.append((ingest_event, transaction_name, op, trace_status, key))
 
-        # Get or create group
-        group = (
-            TransactionGroup.objects.using(read_only_db)
-            .filter(
-                project_id=ingest_event.project_id,
-                transaction=transaction_name,
-                op=op,
-                method=method,
+    # 2. Batch fetch existing TransactionGroups (single query)
+    if unique_keys:
+        q = Q()
+        for project_id, txn, op, method in unique_keys:
+            q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
+        existing = {
+            (g.project_id, g.transaction, g.op, g.method): g
+            for g in TransactionGroup.objects.using(read_only_db).filter(q)
+        }
+    else:
+        existing = {}
+
+    # Batch create any missing groups
+    missing_keys = [k for k in unique_keys if k not in existing]
+    if missing_keys:
+        new_groups = [
+            TransactionGroup(
+                project_id=k[0],
+                transaction=k[1],
+                op=k[2],
+                method=k[3],
+                organization_id=unique_keys[k],
+                first_seen=now,
+                last_seen=now,
             )
-            .first()
-        )
+            for k in missing_keys
+        ]
+        TransactionGroup.objects.bulk_create(new_groups, ignore_conflicts=True)
+        # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
+        if missing_keys:
+            q = Q()
+            for project_id, txn, op, method in missing_keys:
+                q |= Q(
+                    project_id=project_id, transaction=txn, op=op, method=method
+                )
+            for g in TransactionGroup.objects.filter(q):
+                existing[(g.project_id, g.transaction, g.op, g.method)] = g
+
+    # 3. Collect durations, error counts, and spans per group
+    group_durations: dict[int, list[float]] = defaultdict(list)
+    group_error_counts: dict[int, int] = defaultdict(int)
+    span_rows: list[SpanStaging] = []
+
+    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
+    )
+
+    for ingest_event, transaction_name, op, trace_status, key in event_data:
+        event = ingest_event.payload
+        group = existing.get(key)
         if not group:
-            group, _ = TransactionGroup.objects.get_or_create(
-                project_id=ingest_event.project_id,
-                transaction=transaction_name,
-                op=op,
-                method=method,
-                defaults={
-                    "organization_id": ingest_event.organization_id,
-                    "first_seen": now,
-                    "last_seen": now,
-                },
-            )
-
-        groups[group.id] = group
+            continue  # Should not happen after bulk_create
 
         # Calculate duration
         duration_ms = 0.0
         if event.timestamp and event.start_timestamp:
             delta = event.timestamp - event.start_timestamp
-            duration_ms = max(
-                0.0,
-                delta.total_seconds() * 1000,
-            )
+            duration_ms = max(0.0, delta.total_seconds() * 1000)
 
         group_durations[group.id].append(duration_ms)
 
@@ -1328,7 +1391,7 @@ def process_transaction_events(
         project_stats["count"] += 1
         project_stats["organization_id"] = ingest_event.organization_id
 
-        # 2. Extract spans
+        # Extract spans
         event_id_hex = event.event_id.hex if event.event_id else ""
         if event.spans:
             for span in event.spans:
@@ -1353,15 +1416,12 @@ def process_transaction_events(
                     )
                 )
 
-    # 3. Update TransactionGroup stats atomically
-    # Refetch groups to get current DB state for accurate running mean
-    fresh_groups = TransactionGroup.objects.filter(id__in=groups.keys())
-    groups_by_id = {g.id: g for g in fresh_groups}
-    _update_transaction_group_stats(groups_by_id, group_durations, group_error_counts)
+    # 4. Update TransactionGroup stats atomically (append-only, no read-modify-write)
+    _update_transaction_group_stats(group_durations, group_error_counts)
 
-    # 4. Bulk insert span staging rows
+    # 5. Bulk insert span staging rows
     if span_rows:
-        SpanStaging.objects.bulk_create(span_rows, ignore_conflicts=True)
+        SpanStaging.objects.bulk_create(span_rows, batch_size=1000)
 
     # 5. Update hourly project statistics
     update_statistics(
