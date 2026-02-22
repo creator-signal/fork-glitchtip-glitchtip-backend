@@ -122,7 +122,9 @@ def query_span_groups_for_transaction(
     from apps.performance.models import TransactionGroup
 
     try:
-        group = TransactionGroup.objects.get(id=transaction_group_id)
+        group = TransactionGroup.objects.get(
+            id=transaction_group_id, organization_id=org_id
+        )
     except TransactionGroup.DoesNotExist:
         return []
 

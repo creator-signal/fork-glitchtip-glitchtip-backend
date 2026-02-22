@@ -686,9 +686,10 @@ def delete_org_cold_storage(
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
     deleted_count = 0
 
-    # Try listing files under the org prefix
+    # Try listing files under the org prefix (including subdirectories
+    # for chunk-file layouts like performance_spans/{date}/chunk_*.parquet)
     try:
-        _dirs, files = storage.listdir(org_prefix)
+        dirs, files = storage.listdir(org_prefix)
         for filename in files:
             file_path = f"{org_prefix}/{filename}"
             try:
@@ -696,6 +697,29 @@ def delete_org_cold_storage(
                 deleted_count += 1
             except Exception:
                 logger.warning("Failed to delete cold file %s", file_path)
+        # Recurse into subdirectories (e.g. date dirs with chunk files)
+        for subdir in dirs:
+            subdir_path = f"{org_prefix}/{subdir}"
+            try:
+                _, subfiles = storage.listdir(subdir_path)
+                for subfile in subfiles:
+                    try:
+                        storage.delete(f"{subdir_path}/{subfile}")
+                        deleted_count += 1
+                    except Exception:
+                        logger.warning(
+                            "Failed to delete cold file %s/%s", subdir_path, subfile
+                        )
+                # Try to remove the empty directory (filesystem only)
+                if not org_prefix.startswith("s3://"):
+                    try:
+                        import os
+
+                        os.rmdir(storage.path(subdir_path))
+                    except OSError:
+                        pass
+            except (NotImplementedError, OSError):
+                pass
     except (NotImplementedError, OSError):
         # listdir not supported — fall back to date sweep
         now = timezone.now()
@@ -751,14 +775,33 @@ def rewrite_parquet_excluding_project(
         return 0
 
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
-    files_to_process = []
+    # List of (relative_path, parquet_path) tuples to process
+    files_to_process: list[tuple[str, str]] = []
 
-    # Collect file list
+    # Collect file list (flat compacted files + chunk files in subdirectories)
     try:
-        _dirs, files = storage.listdir(org_prefix)
-        files_to_process = [f for f in files if f.endswith(".parquet")]
+        dirs, files = storage.listdir(org_prefix)
+        for f in files:
+            if f.endswith(".parquet"):
+                relative = f"{org_prefix}/{f}"
+                files_to_process.append(
+                    (relative, get_duckdb_parquet_path(storage, relative))
+                )
+        # Also collect chunk files in date subdirectories
+        for subdir in dirs:
+            subdir_path = f"{org_prefix}/{subdir}"
+            try:
+                _, subfiles = storage.listdir(subdir_path)
+                for sf in subfiles:
+                    if sf.endswith(".parquet"):
+                        relative = f"{subdir_path}/{sf}"
+                        files_to_process.append(
+                            (relative, get_duckdb_parquet_path(storage, relative))
+                        )
+            except (NotImplementedError, OSError):
+                pass
     except (NotImplementedError, OSError):
-        # Fall back to date sweep
+        # Fall back to date sweep (flat files only)
         now = timezone.now()
         for day_offset in range(365):
             file_date = now - timedelta(days=day_offset)
@@ -766,7 +809,10 @@ def rewrite_parquet_excluding_project(
             storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
             try:
                 if storage.exists(storage_path):
-                    files_to_process.append(f"{date_str}.parquet")
+                    relative = storage_path
+                    files_to_process.append(
+                        (relative, get_duckdb_parquet_path(storage, relative))
+                    )
             except Exception:
                 pass
 
@@ -784,10 +830,7 @@ def rewrite_parquet_excluding_project(
 
     rewritten_count = 0
 
-    for filename in files_to_process:
-        date_str = filename.replace(".parquet", "")
-        relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
-        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+    for relative_path, parquet_path in files_to_process:
 
         try:
             duck_conn = get_duckdb_connection(storage)

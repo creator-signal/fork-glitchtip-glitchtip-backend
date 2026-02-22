@@ -86,6 +86,7 @@ MAX_TOTAL_FILENAMES = 5
 MAX_FRAMES_PER_STACKTRACE = 3
 MAX_STACKTRACES_TO_PROCESS = 2
 MAX_VECTOR_STRING_SEGMENT_LEN = 2048  # 2KB
+MAX_SPANS_PER_TRANSACTION = 1000
 
 STATS_TABLE_CONFIG = {
     "projects_issueeventprojecthourlystatistic": {"id_column": "project_id"},
@@ -1396,10 +1397,10 @@ def process_transaction_events(
         project_stats["count"] += 1
         project_stats["organization_id"] = ingest_event.organization_id
 
-        # Extract spans
+        # Extract spans (capped to prevent abuse from oversized transactions)
         event_id_hex = event.event_id.hex if event.event_id else ""
         if event.spans:
-            for span in event.spans:
+            for span in event.spans[:MAX_SPANS_PER_TRANSACTION]:
                 span_duration_ms = 0.0
                 if span.timestamp and span.start_timestamp:
                     span_delta = span.timestamp - span.start_timestamp
@@ -1428,7 +1429,7 @@ def process_transaction_events(
     if span_rows:
         SpanStaging.objects.bulk_create(span_rows, batch_size=1000)
 
-    # 5. Update hourly project statistics
+    # 6. Update hourly project statistics
     update_statistics(
         data_stats,
         table_name="projects_transactioneventprojecthourlystatistic",
