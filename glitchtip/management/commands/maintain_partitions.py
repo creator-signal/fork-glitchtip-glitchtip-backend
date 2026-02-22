@@ -19,7 +19,6 @@ class Command(BaseCommand):
         # 1. Daily UUIDv7 partitions (Events)
         daily_v7_models = [
             ("issue_events_issueevent", None),  # Use settings
-            ("performance_transactionevent", None),  # Use settings
             ("uptime_monitorcheck", None),
             ("logs_logevent", None),
         ]
@@ -54,8 +53,6 @@ class Command(BaseCommand):
             max_days = settings.GLITCHTIP_EVENT_RETENTION_DAYS
             if "uptime" in table:
                 max_days = settings.GLITCHTIP_UPTIME_RETENTION_DAYS
-            elif "transaction" in table:
-                max_days = settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
 
             self.stdout.write(
                 f"Cleaning up old partitions for {table} (retention: {max_days} days)..."
@@ -68,7 +65,6 @@ class Command(BaseCommand):
         weekly_models = [
             "issue_events_issueaggregate",
             "issue_events_issuetag",
-            "performance_transactiongroupaggregate",
             "projects_issueeventprojecthourlystatistic",
             "projects_transactioneventprojecthourlystatistic",
             "projects_logprojecthourlystatistic",
@@ -91,9 +87,37 @@ class Command(BaseCommand):
                 key_type="datetime",
             )
 
-            # Cleanup old weekly partitions (using a default retention or specific one)
-            # For aggregates, we can use GLITCHTIP_EVENT_RETENTION_DAYS
+            # Cleanup old weekly partitions
             self.stdout.write(f"Cleaning up old weekly partitions for {table}...")
             manager.drop_old_partitions(table, settings.GLITCHTIP_EVENT_RETENTION_DAYS)
+
+        # 3. Daily DateTime partitions (SpanStaging — short retention)
+        span_staging_table = "performance_spanstaging"
+        if manager.is_table_partitioned(span_staging_table):
+            self.stdout.write(
+                f"Maintaining daily partitions for {span_staging_table}..."
+            )
+            manager.create_partitions_for_date_range(
+                parent_table=span_staging_table,
+                start_date=start_date_daily,
+                end_date=end_date_daily,
+                partition_interval="DAY",
+                hash_buckets=0,
+                hash_column="organization_id",
+                key_type="datetime",
+                partition_column="created",
+            )
+
+            # Short retention: drop empty partitions older than 3 days
+            self.stdout.write(
+                f"Cleaning up old partitions for {span_staging_table}..."
+            )
+            dropped = manager.drop_old_partitions(span_staging_table, 3)
+            if dropped > 0:
+                self.stdout.write(self.style.SUCCESS(f"Dropped {dropped} partitions."))
+        else:
+            self.stdout.write(
+                f"Skipping {span_staging_table} (not partitioned yet)..."
+            )
 
         self.stdout.write(self.style.SUCCESS("Partition maintenance complete."))

@@ -10,7 +10,7 @@ from django.urls import reverse
 from freezegun import freeze_time
 
 from apps.issue_events.models import IssueEvent, UserReport
-from apps.performance.models import TransactionEvent
+from apps.performance.models import TransactionGroup
 
 from .utils import EventIngestTestCase, list_to_envelope
 
@@ -86,7 +86,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             task_backends["default"].flush_batches()
             mock_warning.assert_called_once()
         self.assertEqual(res.status_code, 200)
-        self.assertFalse(TransactionEvent.objects.exists())
+        self.assertFalse(TransactionGroup.objects.exists())
 
         with freeze_time("2020-01-01"):
             res = self.client.post(
@@ -96,7 +96,7 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             )
             task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 200)
-        self.assertTrue(TransactionEvent.objects.exists())
+        self.assertTrue(TransactionGroup.objects.exists())
 
     def test_invalid_dsn(self):
         url = reverse("event_envelope", args=[self.project.id]) + "?sentry_key=aaaa"
@@ -443,15 +443,8 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
         self.assertEqual(res.status_code, 200)
         self.assertTrue(
-            TransactionEvent.objects.exists(),
+            TransactionGroup.objects.exists(),
             "Transaction without platform should still be ingested.",
-        )
-
-        tx = TransactionEvent.objects.first()
-        self.assertEqual(
-            tx.data.get("platform"),
-            "other",
-            "TransactionEvent platform should default to 'other' when missing.",
         )
 
     def test_user_report_envelope(self):

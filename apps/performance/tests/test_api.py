@@ -1,142 +1,91 @@
-import datetime
-from collections import defaultdict
+from datetime import timedelta
 
-from django.urls import reverse
 from django.utils import timezone
-from freezegun import freeze_time
-from model_bakery import baker
 
-from apps.event_ingest.process_event import update_transaction_group_stats
+from apps.performance.models import TransactionGroup
 from glitchtip.test_utils.test_case import GlitchTestCase
-
-
-class TransactionAPITestCase(GlitchTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.create_user()
-        cls.list_url = reverse("api:list_transactions", args=[cls.organization.slug])
-
-    def setUp(self):
-        self.client.force_login(self.user)
-
-    def test_list(self):
-        transaction = baker.make(
-            "performance.TransactionEvent", group__project=self.project
-        )
-        res = self.client.get(self.list_url)
-        self.assertContains(res, transaction.event_id)
 
 
 class TransactionGroupAPITestCase(GlitchTestCase):
     @classmethod
     def setUpTestData(cls):
         cls.create_user()
-        cls.list_url = reverse(
-            "api:list_transaction_groups", args=[cls.organization.slug]
+        cls.list_url = (
+            f"/api/0/organizations/{cls.organization.slug}/transaction-groups/"
         )
 
     def setUp(self):
         self.client.force_login(self.user)
 
-    def create_transaction_and_update_stats(
-        self, group, start_timestamp=None, timestamp=None
-    ):
-        """
-        Test helper to create a transaction event and immediately call the
-        production aggregation logic to populate the stats model.
-        """
-
-        if start_timestamp is None:
-            start_timestamp = timezone.now()
-        # Create the raw event for completeness.
-        organization = group.project.organization
-        event = baker.make(
-            "performance.TransactionEvent",
-            group=group,
-            organization=organization,
-            start_timestamp=start_timestamp,
-            timestamp=timestamp,
-        )
-
-        # Now, call the production stats function with data for this single event.
-        minute_timestamp = start_timestamp.replace(second=0, microsecond=0)
-        stats_data = defaultdict(
-            lambda: defaultdict(
-                lambda: {
-                    "count": 0,
-                    "total_duration": 0.0,
-                    "sum_of_squares_duration": 0.0,
-                }
-            )
-        )
-
-        stats_bucket = stats_data[minute_timestamp][group.id]
-        stats_bucket["organization_id"] = organization.id
-        stats_bucket["count"] = 1
-        stats_bucket["total_duration"] = event.duration_ms
-        stats_bucket["sum_of_squares_duration"] = event.duration_ms**2
-
-        # This is the key: we are directly calling the real database writer.
-        update_transaction_group_stats(stats_data)
-
-        return event
+    def create_group(self, **kwargs):
+        now = timezone.now()
+        defaults = {
+            "project": self.project,
+            "organization": self.organization,
+            "transaction": "/api/test/",
+            "op": "http.server",
+            "method": "GET",
+            "first_seen": now - timedelta(days=1),
+            "last_seen": now,
+            "avg_duration": 100.0,
+            "count": 10,
+        }
+        defaults.update(kwargs)
+        return TransactionGroup.objects.create(**defaults)
 
     def test_list(self):
-        group = baker.make("performance.TransactionGroup", project=self.project)
+        group = self.create_group()
         res = self.client.get(self.list_url)
-        self.assertContains(res, group.transaction)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], group.id)
+        self.assertEqual(data[0]["transaction"], "/api/test/")
+        self.assertEqual(data[0]["count"], 10)
+        self.assertIn("avgDuration", data[0])
 
-    def test_list_relative_datetime_filter(self):
-        group = baker.make("performance.TransactionGroup", project=self.project)
-        now = timezone.now().replace(second=0, microsecond=0)
-        last_minute = now - datetime.timedelta(minutes=1)
-        self.create_transaction_and_update_stats(
-            group=group,
-            start_timestamp=last_minute,
-            timestamp=last_minute + datetime.timedelta(seconds=5),
+    def test_list_empty(self):
+        res = self.client.get(self.list_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_list_sort_by_count(self):
+        self.create_group(transaction="/slow/", count=5)
+        self.create_group(transaction="/fast/", count=50)
+        res = self.client.get(self.list_url + "?sort=-count")
+        data = res.json()
+        self.assertEqual(data[0]["transaction"], "/fast/")
+        self.assertEqual(data[1]["transaction"], "/slow/")
+
+    def test_list_filter_by_project(self):
+        self.create_group(transaction="/proj1/")
+        res = self.client.get(self.list_url + f"?project={self.project.id}")
+        self.assertEqual(len(res.json()), 1)
+
+    def test_list_query_filter(self):
+        self.create_group(transaction="/api/users/")
+        self.create_group(transaction="/api/projects/")
+        res = self.client.get(self.list_url + "?query=users")
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["transaction"], "/api/users/")
+
+    def test_list_time_range_filter(self):
+        now = timezone.now()
+        self.create_group(
+            transaction="/old/",
+            last_seen=now - timedelta(days=30),
+            first_seen=now - timedelta(days=60),
         )
-        two_minutes_ago = now - datetime.timedelta(minutes=2)
-        self.create_transaction_and_update_stats(
-            group=group,
-            start_timestamp=two_minutes_ago,
-            timestamp=two_minutes_ago + datetime.timedelta(seconds=1),
+        self.create_group(
+            transaction="/recent/",
+            last_seen=now,
+            first_seen=now - timedelta(days=1),
         )
-        yesterday = now - datetime.timedelta(days=1)
-        self.create_transaction_and_update_stats(
-            group=group,
-            start_timestamp=yesterday,
-            timestamp=yesterday + datetime.timedelta(seconds=1),
-        )
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"start": last_minute})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 1)
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"start": "now-1m", "end": "now"})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 1)
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"start": "now-2m"})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 2)
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"end": "now-1d"})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 1)
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"end": "now-24h"})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 1)
-
-        with freeze_time(now):
-            res = self.client.get(self.list_url, {"end": "now"})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()[0]["transactionCount"], 3)
+        res = self.client.get(self.list_url + "?start=now-7d")
+        data = res.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["transaction"], "/recent/")
 
     def test_list_relative_parsing(self):
         res = self.client.get(self.list_url, {"start": "now-1h "})
@@ -154,51 +103,29 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url, {"start": "now 1m"})
         self.assertEqual(res.status_code, 422)
 
-    def test_list_environment_filter(self):
-        environment_project = baker.make(
-            "environments.EnvironmentProject",
-            environment__organization=self.organization,
-        )
-        environment = environment_project.environment
-        environment.projects.add(self.project)
-        group1 = baker.make(
-            "performance.TransactionGroup",
-            project=self.project,
-            tags={"environment": [environment.name]},
-        )
-        group2 = baker.make("performance.TransactionGroup", project=self.project)
-        res = self.client.get(self.list_url, {"environment": environment.name})
-        self.assertContains(res, group1.transaction)
-        self.assertNotContains(res, group2.transaction)
+    def test_detail(self):
+        group = self.create_group()
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["id"], group.id)
+        self.assertEqual(data["transaction"], "/api/test/")
 
-    def test_filter_then_average(self):
-        group = baker.make("performance.TransactionGroup", project=self.project)
-        now = timezone.now()
-        last_minute = now - datetime.timedelta(minutes=1)
+    def test_detail_not_found(self):
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/99999/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 404)
 
-        # Use the new helper to create events and update stats
-        self.create_transaction_and_update_stats(
-            group=group,
-            start_timestamp=last_minute,
-            timestamp=last_minute + datetime.timedelta(seconds=5),
-        )
-        transaction2 = self.create_transaction_and_update_stats(
-            group=group,
-            start_timestamp=now,
-            timestamp=now + datetime.timedelta(seconds=1),
-        )
+    def test_spans_endpoint_empty(self):
+        group = self.create_group()
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/spans/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
 
-        # This assertion now works because the view is reading from the populated stats table
-        res = self.client.get(self.list_url)
-        self.assertEqual(res.json()[0]["avgDuration"], 3000)
-
-        # This filtered assertion also works correctly
-        res = self.client.get(
-            self.list_url
-            + "?start="
-            + transaction2.start_timestamp.replace(second=0, microsecond=0)
-            .replace(tzinfo=None)
-            .isoformat()
-            + "Z"
-        )
-        self.assertEqual(res.json()[0]["avgDuration"], 1000)
+    def test_slow_queries_endpoint_empty(self):
+        url = f"/api/0/organizations/{self.organization.slug}/slow-queries/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])

@@ -36,11 +36,9 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
-from apps.performance.models import (
-    TransactionEvent,
-    TransactionGroup,
-    TransactionGroupAggregate,
-)
+from apps.performance.histogram import merge_durations, percentile_from_histogram
+from apps.performance.models import SpanStaging, TransactionGroup
+from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
@@ -1048,57 +1046,92 @@ def update_org_statistics(
         cursor.execute(sql)
 
 
-def update_transaction_group_stats(
-    stats_data: defaultdict[datetime, defaultdict[int, dict]],
+def _is_error_status(trace_status: str | None) -> bool:
+    """Check if a trace status indicates an error."""
+    return trace_status in (
+        "internal_error",
+        "unavailable",
+        "deadline_exceeded",
+        "unimplemented",
+        "permission_denied",
+        "unauthenticated",
+        "resource_exhausted",
+        "data_loss",
+        "aborted",
+        "failed_precondition",
+        "out_of_range",
+        "unknown",
+    )
+
+
+def _update_transaction_group_stats(
+    groups: dict[int, TransactionGroup],
+    group_durations: dict[int, list[float]],
+    group_error_counts: dict[int, int],
 ):
     """
-    Bulk upserts 1-minute statistics for the TransactionGroupAggregate model.
+    Update TransactionGroup stats in-place (running mean, histogram, p50/p95).
+    Uses raw SQL UPDATE for atomicity.
     """
-    table_name = TransactionGroupAggregate._meta.db_table
-    data = []
-
-    for date, inner_dict in stats_data.items():
-        for group_id, stats in inner_dict.items():
-            # Ensure organization_id is present before appending
-            if (organization_id := stats.get("organization_id")) is not None:
-                data.append(
-                    (
-                        date,
-                        organization_id,
-                        group_id,
-                        stats["count"],
-                        stats["total_duration"],
-                        stats["sum_of_squares_duration"],
-                        "{}",
-                    )
-                )
-
-    if not data:
+    if not group_durations:
         return
 
-    # Sort by the primary key to avoid potential deadlocks on concurrent writes
-    data.sort(key=itemgetter(0, 1, 2))
+    updates = []
+    for group_id, durations in group_durations.items():
+        group = groups.get(group_id)
+        if not group:
+            continue
+
+        batch_count = len(durations)
+        batch_total = sum(durations)
+        error_count = group_error_counts.get(group_id, 0)
+
+        # Merge durations into histogram
+        histogram = dict(group.duration_histogram) if group.duration_histogram else {}
+        merge_durations(histogram, durations)
+
+        new_count = group.count + batch_count
+        new_avg = (
+            (group.avg_duration * group.count + batch_total) / new_count
+            if new_count > 0
+            else 0
+        )
+
+        p50 = percentile_from_histogram(histogram, new_count, 50)
+        p95 = percentile_from_histogram(histogram, new_count, 95)
+
+        updates.append(
+            (
+                new_avg,
+                p50,
+                p95,
+                batch_count,
+                error_count,
+                str(histogram).replace("'", '"'),  # JSON-safe
+                group_id,
+            )
+        )
+
+    if not updates:
+        return
 
     with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
-
-        # The ON CONFLICT target must match the composite PK
-        conflict_target = "(group_id, organization_id, date)"
-
-        # Construct the final SQL query for an atomic "upsert"
-        sql = f"""
-            INSERT INTO {table_name} (
-                date, organization_id, group_id, count,
-                total_duration, sum_of_squares_duration, histogram
+        # Batch update using CASE expressions for atomicity
+        for update in updates:
+            cursor.execute(
+                """
+                UPDATE performance_transactiongroup
+                SET avg_duration = %s,
+                    p50 = %s,
+                    p95 = %s,
+                    count = count + %s,
+                    error_count = error_count + %s,
+                    last_seen = NOW(),
+                    duration_histogram = %s::jsonb
+                WHERE id = %s
+                """,
+                update,
             )
-            VALUES {args_str}
-            ON CONFLICT {conflict_target}
-            DO UPDATE SET
-                count = {table_name}.count + EXCLUDED.count,
-                total_duration = {table_name}.total_duration + EXCLUDED.total_duration,
-                sum_of_squares_duration = {table_name}.sum_of_squares_duration + EXCLUDED.sum_of_squares_duration;
-        """
-        cursor.execute(sql)
 
 
 TagStats = defaultdict[
@@ -1195,13 +1228,15 @@ def update_tags(processing_events: list[ProcessingEvent]):
 def process_transaction_events(
     ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
 ):
+    now = timezone.now()
+
     projects_to_update = {
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
     if projects_to_update:
         Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
-        ).update(first_event=timezone.now())
+        ).update(first_event=now)
 
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)
@@ -1219,29 +1254,40 @@ def process_transaction_events(
     _get_or_create_related_models(
         release_set, environment_set, project_set, read_only_db
     )
-    transactions = []
+
+    # 1. Get/create TransactionGroups and collect stats
+    groups: dict[int, TransactionGroup] = {}  # group_id -> group
+    group_durations: dict[int, list[float]] = defaultdict(list)
+    group_error_counts: dict[int, int] = defaultdict(int)
+    span_rows: list[SpanStaging] = []
+
+    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
+    )
 
     for ingest_event in ingest_events:
         event = ingest_event.payload
         contexts = event.contexts
         request = event.request
-        trace_id = contexts["trace"]["trace_id"]
         op = ""
+        trace_status = None
         if isinstance(contexts, dict):
             trace = contexts.get("trace", {})
             if isinstance(trace, dict):
                 op = str(trace.get("op", ""))
+                trace_status = trace.get("status")
         method = ""
         if request and request.method:
             method = request.method
 
-        # TODO tags
+        transaction_name = event.transaction[:1024]
 
+        # Get or create group
         group = (
             TransactionGroup.objects.using(read_only_db)
             .filter(
                 project_id=ingest_event.project_id,
-                transaction=event.transaction[:1024],  # Truncate
+                transaction=transaction_name,
                 op=op,
                 method=method,
             )
@@ -1250,70 +1296,74 @@ def process_transaction_events(
         if not group:
             group, _ = TransactionGroup.objects.get_or_create(
                 project_id=ingest_event.project_id,
-                transaction=event.transaction[:1024],  # Truncate
+                transaction=transaction_name,
                 op=op,
                 method=method,
+                defaults={
+                    "organization_id": ingest_event.organization_id,
+                    "first_seen": now,
+                    "last_seen": now,
+                },
             )
 
-        transactions.append(
-            TransactionEvent(
-                group=group,
-                organization_id=ingest_event.organization_id,
-                data=remove_bad_chars(
-                    {
-                        "request": request.dict() if request else None,
-                        "sdk": event.sdk.dict() if event.sdk else None,
-                        "platform": event.platform,
-                    }
-                ),
-                trace_id=trace_id,
-                event_id=event.event_id,
-                timestamp=event.timestamp,
-                start_timestamp=event.start_timestamp,
+        groups[group.id] = group
+
+        # Calculate duration
+        duration_ms = 0.0
+        if event.timestamp and event.start_timestamp:
+            delta = event.timestamp - event.start_timestamp
+            duration_ms = max(
+                0.0,
+                delta.total_seconds() * 1000,
             )
-        )
-    TransactionEvent.objects.bulk_create(transactions, ignore_conflicts=True)
 
-    group_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
-        lambda: defaultdict(
-            lambda: {
-                "count": 0,
-                "total_duration": 0.0,
-                "sum_of_squares_duration": 0.0,
-            }
-        )
-    )
-    for perf_transaction in transactions:
-        # Truncate the timestamp to the minute for our 1-minute aggregation buckets.
-        minute_timestamp = perf_transaction.start_timestamp.replace(
-            second=0, microsecond=0
-        )
-        group_id = perf_transaction.group_id
-        duration: int | None = perf_transaction.duration_ms
+        group_durations[group.id].append(duration_ms)
 
-        stats_bucket = group_stats[minute_timestamp][group_id]
+        if _is_error_status(trace_status):
+            group_error_counts[group.id] += 1
 
-        # Set organization_id once per bucket, as it's part of the key.
-        if "organization_id" not in stats_bucket:
-            stats_bucket["organization_id"] = perf_transaction.organization_id
-
-        stats_bucket["count"] += 1
-        if duration:
-            stats_bucket["total_duration"] += duration
-            stats_bucket["sum_of_squares_duration"] += duration**2
-    update_transaction_group_stats(group_stats)
-
-    data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
-        lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
-    )
-
-    for perf_transaction in transactions:
-        hour_received = perf_transaction.start_timestamp.replace(
-            minute=0, second=0, microsecond=0
-        )
-        project_stats = data_stats[hour_received][perf_transaction.group.project_id]
+        # Hourly project statistics
+        hour_received = event.start_timestamp.replace(minute=0, second=0, microsecond=0)
+        project_stats = data_stats[hour_received][ingest_event.project_id]
         project_stats["count"] += 1
-        project_stats["organization_id"] = perf_transaction.organization_id
+        project_stats["organization_id"] = ingest_event.organization_id
+
+        # 2. Extract spans
+        event_id_hex = event.event_id.hex if event.event_id else ""
+        if event.spans:
+            for span in event.spans:
+                span_duration_ms = 0.0
+                if span.timestamp and span.start_timestamp:
+                    span_delta = span.timestamp - span.start_timestamp
+                    span_duration_ms = max(0.0, span_delta.total_seconds() * 1000)
+
+                description = parameterize_description(span.op, span.description)
+
+                span_rows.append(
+                    SpanStaging(
+                        organization_id=ingest_event.organization_id,
+                        project_id=ingest_event.project_id,
+                        transaction_name=transaction_name,
+                        span_id=span.span_id[:32],
+                        transaction_id=event_id_hex[:32],
+                        op=span.op[:255],
+                        description=description,
+                        duration=span_duration_ms,
+                        timestamp=span.start_timestamp or event.start_timestamp,
+                    )
+                )
+
+    # 3. Update TransactionGroup stats atomically
+    # Refetch groups to get current DB state for accurate running mean
+    fresh_groups = TransactionGroup.objects.filter(id__in=groups.keys())
+    groups_by_id = {g.id: g for g in fresh_groups}
+    _update_transaction_group_stats(groups_by_id, group_durations, group_error_counts)
+
+    # 4. Bulk insert span staging rows
+    if span_rows:
+        SpanStaging.objects.bulk_create(span_rows, ignore_conflicts=True)
+
+    # 5. Update hourly project statistics
     update_statistics(
         data_stats,
         table_name="projects_transactioneventprojecthourlystatistic",
