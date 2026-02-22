@@ -12,6 +12,7 @@ class TransactionGroupSchema(CamelSchema, ModelSchema):
         model = TransactionGroup
         fields = [
             "id",
+            "project",
             "transaction",
             "op",
             "method",

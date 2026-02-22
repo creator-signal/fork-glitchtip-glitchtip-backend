@@ -8,7 +8,6 @@ chunk files into daily files for efficient analytical queries.
 import logging
 import os
 import time
-from uuid import UUID
 
 from django.db import connection
 from django.utils import timezone
@@ -86,12 +85,11 @@ def promote_spans() -> int:
         key = (org_id, date_str)
         groups.setdefault(key, []).append(row)
 
-    promoted_uuids: list[UUID] = []
+    total_promoted = 0
 
     for (org_id, date_str), group_rows in groups.items():
         try:
             _write_chunk_parquet(storage, org_id, date_str, group_rows)
-            promoted_uuids.extend(r[0] for r in group_rows)
         except Exception:
             logger.error(
                 "Failed to write parquet chunk for org %d date %s",
@@ -99,27 +97,33 @@ def promote_spans() -> int:
                 date_str,
                 exc_info=True,
             )
+            continue
 
-    # Range-based delete using UUID7 range — partition-prunable.
-    # All promoted rows have id <= max_uuid and id < cutoff_uuid.
-    if promoted_uuids:
-        max_uuid = max(promoted_uuids)
+        # Delete only the successfully promoted rows.
+        # Uses id range (partition-prunable) scoped to the specific org
+        # to avoid deleting rows from groups that failed to write.
+        group_uuids = [r[0] for r in group_rows]
+        min_uuid = min(group_uuids)
+        max_uuid = max(group_uuids)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 DELETE FROM performance_spanstaging
-                WHERE id <= %s
+                WHERE id >= %s AND id <= %s
+                  AND organization_id = %s
                 """,
-                [max_uuid],
+                [min_uuid, max_uuid, org_id],
             )
+        total_promoted += len(group_rows)
 
-    logger.info("Promoted %d span rows to cold storage", len(promoted_uuids))
-    return len(promoted_uuids)
+    if total_promoted:
+        logger.info("Promoted %d span rows to cold storage", total_promoted)
+    return total_promoted
 
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
     """Write a chunk Parquet file for a single org+date group."""
-    chunk_ts = int(time.time())
+    chunk_ts = f"{int(time.time())}_{os.getpid()}"
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
     parquet_path = get_duckdb_parquet_path(storage, relative_path)
