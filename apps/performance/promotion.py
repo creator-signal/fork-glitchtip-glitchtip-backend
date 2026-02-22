@@ -8,6 +8,7 @@ chunk files into daily files for efficient analytical queries.
 import logging
 import os
 import time
+from uuid import UUID
 
 from django.db import connection
 from django.utils import timezone
@@ -19,6 +20,7 @@ from glitchtip.cold_storage import (
     get_duckdb_parquet_path,
     is_duckdb_available,
 )
+from glitchtip.partition_manager import UUID7Helper
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +35,10 @@ def promote_spans() -> int:
     """
     Promote span_staging rows to per-org Parquet files.
 
-    1. Query rows where created < NOW() - 5 minutes (lag prevents racing with inserts)
+    1. Query rows where id < UUID7(NOW() - 5min) — partition-prunable on UUID7 range
     2. Group by (organization_id, date(timestamp))
     3. Write chunk Parquet files per org+date
-    4. Range-DELETE consumed rows by created < cutoff bounded by max promoted created
+    4. Range-DELETE consumed rows by id <= max_promoted_id
 
     Returns number of rows promoted.
     """
@@ -52,10 +54,12 @@ def promote_spans() -> int:
     from apps.performance.models import SpanStaging
 
     cutoff = timezone.now() - timezone.timedelta(minutes=5)
+    # UUID7 with min random bits — everything before this was inserted before cutoff
+    cutoff_uuid = UUID7Helper.from_datetime(cutoff)
 
     rows = list(
-        SpanStaging.objects.filter(created__lt=cutoff)
-        .order_by("organization_id", "created")
+        SpanStaging.objects.filter(id__lt=cutoff_uuid)
+        .order_by("id")
         .values_list(
             "id",
             "organization_id",
@@ -82,12 +86,12 @@ def promote_spans() -> int:
         key = (org_id, date_str)
         groups.setdefault(key, []).append(row)
 
-    promoted_ids: list[int] = []
+    promoted_uuids: list[UUID] = []
 
     for (org_id, date_str), group_rows in groups.items():
         try:
             _write_chunk_parquet(storage, org_id, date_str, group_rows)
-            promoted_ids.extend(r[0] for r in group_rows)
+            promoted_uuids.extend(r[0] for r in group_rows)
         except Exception:
             logger.error(
                 "Failed to write parquet chunk for org %d date %s",
@@ -96,21 +100,21 @@ def promote_spans() -> int:
                 exc_info=True,
             )
 
-    # Range-based delete: delete by ID range within the partition (created < cutoff).
-    # This avoids a massive IN (...) clause and lets Postgres prune by partition.
-    if promoted_ids:
-        max_id = max(promoted_ids)
+    # Range-based delete using UUID7 range — partition-prunable.
+    # All promoted rows have id <= max_uuid and id < cutoff_uuid.
+    if promoted_uuids:
+        max_uuid = max(promoted_uuids)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 DELETE FROM performance_spanstaging
-                WHERE created < %s AND id <= %s
+                WHERE id <= %s
                 """,
-                [cutoff, max_id],
+                [max_uuid],
             )
 
-    logger.info("Promoted %d span rows to cold storage", len(promoted_ids))
-    return len(promoted_ids)
+    logger.info("Promoted %d span rows to cold storage", len(promoted_uuids))
+    return len(promoted_uuids)
 
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
@@ -130,7 +134,7 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
         # Create a table from the data
         duck_conn.execute("""
             CREATE TEMPORARY TABLE staging (
-                id BIGINT,
+                id VARCHAR,
                 organization_id INTEGER,
                 project_id INTEGER,
                 transaction_name VARCHAR,
@@ -143,10 +147,10 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
             )
         """)
 
-        # Insert rows (strip the id column from output)
+        # Insert rows — UUID id is converted to string by DuckDB
         duck_conn.executemany(
             "INSERT INTO staging VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rows,
+            [(str(r[0]), *r[1:]) for r in rows],
         )
 
         # Write to parquet (exclude the staging id)

@@ -2,17 +2,18 @@
 # - Drop TransactionEvent and TransactionGroupAggregate
 # - Add new fields to TransactionGroup (organization, first_seen, last_seen, stats)
 # - Remove tags, search_vector, SoftDeleteModel from TransactionGroup
-# - Create SpanStaging partitioned table
+# - Create SpanStaging partitioned table (UUID7 + HASH by org)
 
 from datetime import datetime, timedelta, timezone
 
+import apps.performance.models
 from django.db import migrations, models
 
 from apps.shared.migration_utils import get_sql_content
 
 
 def create_initial_partitions(apps, schema_editor):
-    """Create initial daily partitions for span_staging."""
+    """Create initial daily UUID7 partitions with HASH sub-partitioning."""
     from glitchtip.partition_manager import PartitionManager
 
     manager = PartitionManager(db_connection=schema_editor.connection.alias)
@@ -27,10 +28,9 @@ def create_initial_partitions(apps, schema_editor):
         start_date=start_date,
         end_date=end_date,
         partition_interval="DAY",
-        hash_buckets=0,
+        hash_buckets=None,  # Use settings.PARTITION_HASH_BUCKETS
         hash_column="organization_id",
-        key_type="datetime",
-        partition_column="created",
+        key_type="uuid7",
     )
 
 
@@ -161,12 +161,82 @@ class Migration(migrations.Migration):
             name="transactiongroup",
             managers=[],
         ),
-        # 7. Create SpanStaging partitioned table
-        migrations.RunSQL(
-            sql=get_sql_content(__file__, "create_span_staging.sql"),
-            reverse_sql="DROP TABLE IF EXISTS performance_spanstaging CASCADE;",
+        # 7. Add index on (organization_id, last_seen) for API queries
+        migrations.AddIndex(
+            model_name="transactiongroup",
+            index=models.Index(
+                fields=["organization", "last_seen"],
+                name="perf_txgroup_org_lastseen",
+            ),
         ),
-        # 8. Create initial daily partitions
+        # 8. Create SpanStaging partitioned table (UUID7 range + HASH org)
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name="SpanStaging",
+                    fields=[
+                        (
+                            "id",
+                            models.UUIDField(
+                                default=apps.performance.models._generate_uuid7,
+                                editable=False,
+                            ),
+                        ),
+                        (
+                            "pk",
+                            models.CompositePrimaryKey(
+                                "id",
+                                "organization",
+                                blank=True,
+                                editable=False,
+                                primary_key=True,
+                                serialize=False,
+                            ),
+                        ),
+                        ("project_id", models.IntegerField()),
+                        (
+                            "transaction_name",
+                            models.CharField(max_length=1024),
+                        ),
+                        ("span_id", models.CharField(max_length=32)),
+                        ("transaction_id", models.CharField(max_length=32)),
+                        ("op", models.CharField(max_length=255)),
+                        (
+                            "description",
+                            models.CharField(blank=True, max_length=500),
+                        ),
+                        (
+                            "duration",
+                            models.FloatField(
+                                help_text="Duration in milliseconds"
+                            ),
+                        ),
+                        (
+                            "timestamp",
+                            models.DateTimeField(help_text="Span start time"),
+                        ),
+                        (
+                            "organization",
+                            models.ForeignKey(
+                                on_delete=models.deletion.DO_NOTHING,
+                                to="organizations_ext.organization",
+                            ),
+                        ),
+                    ],
+                    options={
+                        "db_table": "performance_spanstaging",
+                        "managed": False,
+                    },
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=get_sql_content(__file__, "create_span_staging.sql"),
+                    reverse_sql="DROP TABLE IF EXISTS performance_spanstaging CASCADE;",
+                ),
+            ],
+        ),
+        # 9. Create initial daily partitions (UUID7 + HASH by org)
         migrations.RunPython(
             code=create_initial_partitions,
             reverse_code=noop,

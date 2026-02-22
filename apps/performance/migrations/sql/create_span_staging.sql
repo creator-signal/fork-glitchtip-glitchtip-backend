@@ -1,16 +1,18 @@
 -- SpanStaging: Write-heavy staging table for span data
--- Partitioned by DAY on `created` (datetime range, no HASH sub-partitioning)
--- No indexes — optimized for bulk inserts, read only by promotion job
+-- Partitioned by RANGE on id (UUIDv7) with HASH sub-partitioning on organization_id
+-- Matches the IssueEvent partitioning pattern for partition-aware queries
+-- No additional indexes — optimized for bulk inserts, read only by promotion job
 -- Rows are promoted to Parquet and deleted within hours
 
 CREATE TABLE IF NOT EXISTS performance_spanstaging (
-    -- 8-byte alignment
-    id BIGSERIAL,
+    -- 16-byte alignment: UUID
+    id UUID NOT NULL,
+
+    -- 8-byte alignment: FKs, timestamps, floats
     organization_id INTEGER NOT NULL,
     project_id INTEGER NOT NULL,
     duration DOUBLE PRECISION NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
-    created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Variable-width fields
     transaction_name VARCHAR(1024) NOT NULL,
@@ -19,5 +21,5 @@ CREATE TABLE IF NOT EXISTS performance_spanstaging (
     op VARCHAR(255) NOT NULL,
     description VARCHAR(500) NOT NULL DEFAULT '',
 
-    PRIMARY KEY (id, created)
-) PARTITION BY RANGE (created);
+    PRIMARY KEY (id, organization_id)
+) PARTITION BY RANGE (id);
