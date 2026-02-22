@@ -8,7 +8,7 @@ from django.core.validators import URLValidator
 from django.urls import reverse
 from ninja import ModelSchema
 from ninja.errors import ValidationError
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, computed_field, model_validator
 
 from glitchtip.schema import CamelSchema
 
@@ -17,16 +17,25 @@ from .models import Monitor, MonitorCheck, StatusPage
 
 
 class MonitorCheckSchema(CamelSchema, ModelSchema):
+    @computed_field
+    @property
+    def message(self) -> str | None:
+        if self.data and isinstance(self.data, dict):
+            return self.data.get("message")
+        return None
+
     class Meta:
         model = MonitorCheck
         fields = ["is_up", "start_check", "reason"]
+
+    model_config = ConfigDict(exclude={"data"})
 
 
 class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
     """Monitor check with response time. Used in Monitors detail api and monitor checks list"""
 
     class Meta(MonitorCheckSchema.Meta):
-        fields = MonitorCheckSchema.Meta.fields + ["response_time"]
+        fields = ["is_up", "start_check", "reason", "response_time", "data"]
 
 
 class MonitorIn(CamelSchema, ModelSchema):
