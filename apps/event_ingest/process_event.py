@@ -1107,6 +1107,9 @@ def _update_transaction_group_stats(
     if not values_data:
         return
 
+    # Sort by group_id so concurrent workers lock rows in the same order
+    values_data.sort(key=lambda x: x[0])
+
     with connection.cursor() as cursor:
         # Single UPDATE ... FROM (VALUES ...) for the entire batch.
         # Histogram merge: for each bucket key, add the increment to the existing
@@ -1159,6 +1162,8 @@ def _update_transaction_group_stats(
         p_updates.append((p50, p95, g.id))
 
     if p_updates:
+        # Sort by group_id to match locking order of the main UPDATE
+        p_updates.sort(key=lambda x: x[2])
         with connection.cursor() as cursor:
             placeholders = ",".join(
                 cursor.mogrify("(%s,%s,%s)", row) for row in p_updates

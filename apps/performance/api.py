@@ -14,7 +14,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
 from .models import TransactionGroup
-from .schema import SlowQuerySchema, SpanGroupSchema, TransactionGroupSchema
+from .schema import SpanGroupSchema, TransactionGroupSchema
 
 router = Router()
 
@@ -39,10 +39,19 @@ class SpanGroupFilters(Schema):
     end: RelativeDateTime | None = None
 
 
-class SlowQueryFilters(Schema):
+class OrgSpanGroupFilters(Schema):
     start: RelativeDateTime | None = None
     end: RelativeDateTime | None = None
     project: list[int] = []
+    op: str | None = None
+    sort: Literal[
+        "total_time",
+        "-total_time",
+        "avg_duration",
+        "-avg_duration",
+        "count",
+        "-count",
+    ] = "-total_time"
 
 
 @router.get(
@@ -133,15 +142,15 @@ async def list_transaction_spans(
 
 
 @router.get(
-    "organizations/{slug:organization_slug}/slow-queries/",
-    response=list[SlowQuerySchema],
+    "organizations/{slug:organization_slug}/span-groups/",
+    response=list[SpanGroupSchema],
     by_alias=True,
 )
 @has_permission(["event:read", "event:write", "event:admin"])
-async def list_slow_queries(
+async def list_span_groups(
     request: AuthHttpRequest,
     organization_slug: str,
-    filters: Query[SlowQueryFilters],
+    filters: Query[OrgSpanGroupFilters],
 ):
     organization = await get_organization_for_user(
         request.auth.user_id, organization_slug
@@ -154,11 +163,13 @@ async def list_slow_queries(
     end_dt = filters.end or now
     project_ids = filters.project or None
 
-    from .cold_storage import query_slow_queries
+    from .cold_storage import query_span_groups
 
-    return await sync_to_async(query_slow_queries)(
+    return await sync_to_async(query_span_groups)(
         org_id=organization.id,
         project_ids=project_ids,
         start_dt=start_dt,
         end_dt=end_dt,
+        op_filter=filters.op,
+        sort=filters.sort,
     )

@@ -124,8 +124,8 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
 
-    def test_slow_queries_endpoint_empty(self):
-        url = f"/api/0/organizations/{self.organization.slug}/slow-queries/"
+    def test_span_groups_endpoint_empty(self):
+        url = f"/api/0/organizations/{self.organization.slug}/span-groups/"
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
