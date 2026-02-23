@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from ninja import Field, ModelSchema, Schema
 from pydantic import computed_field
 
@@ -60,7 +62,7 @@ class NPlusOnePatternSchema(CamelSchema, Schema):
 
 
 class TransactionTrendSchema(CamelSchema, Schema):
-    date: str
+    date: datetime
     count: int
     transaction_count: int
     avg_duration: float

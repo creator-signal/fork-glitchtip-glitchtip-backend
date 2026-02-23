@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
+    close_duckdb_read_connection,
+    duckdb_quote_path,
     get_cold_storage_backend,
     get_duckdb_parquet_path,
     get_duckdb_read_connection,
@@ -132,7 +134,7 @@ def query_span_groups_for_transaction(
 
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
         sql = f"""
             SELECT
                 op,
@@ -153,6 +155,7 @@ def query_span_groups_for_transaction(
             sql, [transaction_name, start_dt, end_dt, limit]
         ).fetchall()
     except Exception:
+        close_duckdb_read_connection()
         logger.error("Error querying span groups", exc_info=True)
         return []
 
@@ -217,7 +220,7 @@ def query_n_plus_one_patterns(
 
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
         sql = f"""
             SELECT
                 transaction_name,
@@ -239,6 +242,7 @@ def query_n_plus_one_patterns(
         """
         rows = duck_conn.execute(sql, params).fetchall()
     except Exception:
+        close_duckdb_read_connection()
         logger.error("Error querying N+1 patterns", exc_info=True)
         return []
 
@@ -316,7 +320,7 @@ def query_span_groups(
 
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
         sql = f"""
             SELECT
                 op,
@@ -335,6 +339,7 @@ def query_span_groups(
         """
         rows = duck_conn.execute(sql, params).fetchall()
     except Exception:
+        close_duckdb_read_connection()
         logger.error("Error querying span groups", exc_info=True)
         return []
 
@@ -390,7 +395,7 @@ def query_transaction_trend(
 
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
         sql = f"""
             SELECT
                 DATE_TRUNC('day', timestamp) as date,
@@ -408,12 +413,13 @@ def query_transaction_trend(
         """
         rows = duck_conn.execute(sql, params).fetchall()
     except Exception:
+        close_duckdb_read_connection()
         logger.error("Error querying transaction trend", exc_info=True)
         return []
 
     return [
         {
-            "date": row[0].isoformat() if row[0] else "",
+            "date": row[0],
             "count": row[1],
             "transaction_count": row[2],
             "avg_duration": row[3] or 0,

@@ -172,8 +172,9 @@ def serialize_n_plus_one_pattern(pattern: dict) -> dict:
 
 
 def serialize_transaction_trend(trend: dict) -> dict:
+    date = trend["date"]
     return {
-        "date": trend["date"],
+        "date": date.isoformat() if hasattr(date, "isoformat") else date,
         "count": trend["count"],
         "transactionCount": trend["transaction_count"],
         "avgDuration": trend["avg_duration"],
