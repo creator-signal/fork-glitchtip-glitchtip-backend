@@ -22,7 +22,7 @@ from apps.performance.cold_storage import (
     query_span_groups_for_transaction,
     query_transaction_trend,
 )
-from apps.performance.models import SpanStaging, TransactionGroup
+from apps.performance.models import SpanStaging
 from apps.performance.promotion import (
     _write_chunk_parquet,
     compact_span_chunks,
@@ -87,6 +87,9 @@ class ColdStorageTestMixin:
         self.promo_storage_patch.start()
 
     def tearDown(self):
+        from glitchtip.cold_storage import close_duckdb_read_connection
+
+        close_duckdb_read_connection()
         self.duckdb_patch.stop()
         self.storage_patch.stop()
         self.promo_duckdb_patch.stop()
@@ -119,9 +122,10 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         SpanStaging.objects.bulk_create(spans)
         self.assertEqual(SpanStaging.objects.count(), 5)
 
-        promoted = promote_spans()
+        promoted, truncated = promote_spans()
 
         self.assertEqual(promoted, 5)
+        self.assertFalse(truncated)
         self.assertEqual(SpanStaging.objects.count(), 0)
 
         # Verify parquet file was created
@@ -147,9 +151,10 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         )
         SpanStaging.objects.bulk_create([span])
 
-        promoted = promote_spans()
+        promoted, truncated = promote_spans()
 
         self.assertEqual(promoted, 0)
+        self.assertFalse(truncated)
         self.assertEqual(SpanStaging.objects.count(), 1)
 
     def test_promote_groups_by_org(self):
@@ -163,9 +168,10 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
             _make_span_staging_row(org2.id, project2.id, timestamp=ts, span_id="x"),
         ])
 
-        promoted = promote_spans()
+        promoted, truncated = promote_spans()
 
         self.assertEqual(promoted, 2)
+        self.assertFalse(truncated)
         self.assertEqual(SpanStaging.objects.count(), 0)
 
         spans_dir = os.path.join(
@@ -396,14 +402,6 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
 
     def test_query_span_groups_for_transaction(self):
         """Query span groups for a specific transaction."""
-        group = TransactionGroup.objects.create(
-            project=self.project,
-            organization=self.org,
-            transaction="/api/test/",
-            op="http.server",
-            first_seen=self.ts,
-            last_seen=self.ts,
-        )
         rows = [
             self._make_row(
                 id=str(UUID7Helper.from_datetime(self.ts + timedelta(seconds=i))),
@@ -419,7 +417,7 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
         start = datetime(2026, 2, 20, 0, 0, 0, tzinfo=timezone.utc)
         end = datetime(2026, 2, 21, 0, 0, 0, tzinfo=timezone.utc)
         results = query_span_groups_for_transaction(
-            self.org.id, group.id, start, end
+            self.org.id, "/api/test/", start, end
         )
 
         self.assertEqual(len(results), 1)
