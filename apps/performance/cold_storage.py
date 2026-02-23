@@ -365,8 +365,12 @@ def query_transaction_trend(
     """
     Query daily performance trend for a specific transaction.
 
-    Returns list of {date, span_count, transaction_count, avg_span_duration,
-    total_span_time} with one row per day, ordered chronologically.
+    Returns one row per day with:
+    - date: day bucket
+    - count: total spans (all child spans in matching transactions)
+    - transaction_count: distinct transaction/request count (throughput)
+    - avg_duration: average span duration in ms
+    - total_time: sum of all span durations in ms
     """
     if not is_duckdb_available():
         return []
@@ -394,10 +398,10 @@ def query_transaction_trend(
         sql = f"""
             SELECT
                 DATE_TRUNC('day', timestamp) as date,
-                COUNT(*) as span_count,
+                COUNT(*) as count,
                 COUNT(DISTINCT transaction_id) as transaction_count,
-                AVG(duration) as avg_span_duration,
-                SUM(duration) as total_span_time
+                AVG(duration) as avg_duration,
+                SUM(duration) as total_time
             FROM read_parquet([{paths_list}])
             WHERE transaction_name = $1
               AND timestamp >= $2
@@ -416,10 +420,10 @@ def query_transaction_trend(
     return [
         {
             "date": row[0].isoformat() if row[0] else "",
-            "span_count": row[1],
+            "count": row[1],
             "transaction_count": row[2],
-            "avg_span_duration": row[3] or 0,
-            "total_span_time": row[4] or 0,
+            "avg_duration": row[3] or 0,
+            "total_time": row[4] or 0,
         }
         for row in rows
     ]

@@ -29,18 +29,14 @@ class TransactionGroupSchema(CamelSchema, ModelSchema):
     @computed_field
     @property
     def error_rate(self) -> float:
-        if self.count > 0:
-            return round((self.error_count / self.count) * 100, 2)
-        return 0.0
+        """Delegates to TransactionGroup.error_rate property."""
+        return TransactionGroup.error_rate.fget(self)  # type: ignore[attr-defined]
 
     @computed_field
     @property
     def throughput(self) -> float | None:
-        if self.first_seen and self.last_seen:
-            span = (self.last_seen - self.first_seen).total_seconds()
-            if span > 0:
-                return round((self.count / span) * 60, 2)
-        return None
+        """Delegates to TransactionGroup.throughput property."""
+        return TransactionGroup.throughput.fget(self)  # type: ignore[attr-defined]
 
 
 class SpanGroupSchema(CamelSchema, Schema):
@@ -65,7 +61,7 @@ class NPlusOnePatternSchema(CamelSchema, Schema):
 
 class TransactionTrendSchema(CamelSchema, Schema):
     date: str
-    span_count: int
+    count: int
     transaction_count: int
-    avg_span_duration: float
-    total_span_time: float
+    avg_duration: float
+    total_time: float
