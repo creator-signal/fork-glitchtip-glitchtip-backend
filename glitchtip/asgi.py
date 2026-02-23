@@ -52,12 +52,18 @@ class MCPDjangoDispatcher:
             path.startswith(self.mcp_prefix)
             or path in self._OAUTH_PATHS
             or path.startswith("/.well-known/oauth-")
+            or path.startswith("/.well-known/openid-configuration")
         )
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
             await self._handle_lifespan(scope, receive, send)
         elif scope["type"] == "http" and self._is_mcp_path(scope["path"]):
+            # Rewrite OpenID Connect discovery to OAuth AS metadata.
+            # Some MCP clients try /.well-known/openid-configuration[/mcp]
+            # but the MCP SDK only serves /.well-known/oauth-authorization-server.
+            if scope["path"].startswith("/.well-known/openid-configuration"):
+                scope = dict(scope, path="/.well-known/oauth-authorization-server")
             await self.mcp_app(scope, receive, send)
         else:
             await self.django_app(scope, receive, send)

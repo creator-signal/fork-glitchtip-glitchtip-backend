@@ -1,4 +1,5 @@
 from ninja import Field, ModelSchema, Schema
+from pydantic import computed_field
 
 from glitchtip.schema import CamelSchema
 
@@ -25,6 +26,22 @@ class TransactionGroupSchema(CamelSchema, ModelSchema):
             "last_seen",
         ]
 
+    @computed_field
+    @property
+    def error_rate(self) -> float:
+        if self.count > 0:
+            return round((self.error_count / self.count) * 100, 2)
+        return 0.0
+
+    @computed_field
+    @property
+    def throughput(self) -> float | None:
+        if self.first_seen and self.last_seen:
+            span = (self.last_seen - self.first_seen).total_seconds()
+            if span > 0:
+                return round((self.count / span) * 60, 2)
+        return None
+
 
 class SpanGroupSchema(CamelSchema, Schema):
     op: str
@@ -33,3 +50,22 @@ class SpanGroupSchema(CamelSchema, Schema):
     avg_duration: float
     p95_duration: float
     total_time: float
+
+
+class NPlusOnePatternSchema(CamelSchema, Schema):
+    transaction_name: str
+    op: str
+    description: str
+    total_spans: int
+    transaction_count: int
+    spans_per_txn: float
+    avg_duration: float
+    total_time: float
+
+
+class TransactionTrendSchema(CamelSchema, Schema):
+    date: str
+    span_count: int
+    transaction_count: int
+    avg_span_duration: float
+    total_span_time: float

@@ -14,7 +14,12 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
 from .models import TransactionGroup
-from .schema import SpanGroupSchema, TransactionGroupSchema
+from .schema import (
+    NPlusOnePatternSchema,
+    SpanGroupSchema,
+    TransactionGroupSchema,
+    TransactionTrendSchema,
+)
 
 router = Router()
 
@@ -52,6 +57,14 @@ class OrgSpanGroupFilters(Schema):
         "count",
         "-count",
     ] = "-total_time"
+
+
+class NPlusOneFilters(Schema):
+    start: RelativeDateTime | None = None
+    end: RelativeDateTime | None = None
+    project: list[int] = []
+    op: str | None = "db"
+    threshold: float = 5.0
 
 
 @router.get(
@@ -172,4 +185,76 @@ async def list_span_groups(
         end_dt=end_dt,
         op_filter=filters.op,
         sort=filters.sort,
+    )
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/n-plus-one/",
+    response=list[NPlusOnePatternSchema],
+    by_alias=True,
+)
+@has_permission(["event:read", "event:write", "event:admin"])
+async def list_n_plus_one_patterns(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    filters: Query[NPlusOneFilters],
+):
+    organization = await get_organization_for_user(
+        request.auth.user_id, organization_slug
+    ).afirst()
+    if not organization:
+        return []
+
+    now = timezone.now()
+    start_dt = filters.start or (now - timedelta(days=7))
+    end_dt = filters.end or now
+    project_ids = filters.project or None
+
+    from .cold_storage import query_n_plus_one_patterns
+
+    return await sync_to_async(query_n_plus_one_patterns)(
+        org_id=organization.id,
+        project_ids=project_ids,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        op_filter=filters.op,
+        threshold=filters.threshold,
+    )
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/transaction-groups/{int:id}/trend/",
+    response=list[TransactionTrendSchema],
+    by_alias=True,
+)
+@has_permission(["event:read", "event:write", "event:admin"])
+async def get_transaction_trend(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    id: int,
+    filters: Query[SpanGroupFilters],
+):
+    organization = await get_organization_for_user(
+        request.auth.user_id, organization_slug
+    ).afirst()
+    if not organization:
+        return []
+
+    group = await TransactionGroup.objects.filter(
+        id=id, organization=organization
+    ).afirst()
+    if not group:
+        return []
+
+    now = timezone.now()
+    start_dt = filters.start or (now - timedelta(days=7))
+    end_dt = filters.end or now
+
+    from .cold_storage import query_transaction_trend
+
+    return await sync_to_async(query_transaction_trend)(
+        org_id=organization.id,
+        transaction_name=group.transaction,
+        start_dt=start_dt,
+        end_dt=end_dt,
     )

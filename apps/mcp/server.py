@@ -259,9 +259,7 @@ if django_settings.ENABLE_OBSERVABILITY_API:
             return _error(str(e))
 
     @mcp.tool()
-    async def get_transaction_group(
-        organization_slug: str, group_id: int
-    ) -> str:
+    async def get_transaction_group(organization_slug: str, group_id: int) -> str:
         """Get details for a single transaction group by ID.
 
         Args:
@@ -299,9 +297,7 @@ if django_settings.ENABLE_OBSERVABILITY_API:
             spans = await data.get_transaction_spans(
                 user_id, organization_slug, group_id
             )
-            return json.dumps(
-                [serializers.serialize_span_group(s) for s in spans]
-            )
+            return json.dumps([serializers.serialize_span_group(s) for s in spans])
         except ValueError as e:
             return _error(str(e))
 
@@ -337,8 +333,74 @@ if django_settings.ENABLE_OBSERVABILITY_API:
                 sort=sort,
                 limit=limit,
             )
+            return json.dumps([serializers.serialize_span_group(s) for s in spans])
+        except ValueError as e:
+            return _error(str(e))
+
+    @mcp.tool()
+    async def detect_n_plus_one(
+        organization_slug: str,
+        project_id: int | None = None,
+        op: str | None = "db",
+        threshold: float = 5.0,
+        limit: int = 50,
+    ) -> str:
+        """Detect N+1 query patterns across transactions.
+
+        Finds span groups that repeat many times per transaction (e.g. a DB
+        query executed 50 times in a single request). High spans_per_txn
+        values strongly suggest N+1 patterns.
+
+        Requires DuckDB cold storage to be enabled.
+
+        Args:
+            organization_slug: Organization slug
+            project_id: Optional project ID to filter by
+            op: Op prefix filter (default "db" for database spans)
+            threshold: Minimum spans-per-transaction to report (default 5.0)
+            limit: Max results to return (default 50, max 100)
+        """
+        try:
+            user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+            project_ids = [project_id] if project_id else None
+            patterns = await data.get_n_plus_one_patterns(
+                user_id,
+                organization_slug,
+                project_ids=project_ids,
+                op_filter=op,
+                threshold=threshold,
+                limit=limit,
+            )
             return json.dumps(
-                [serializers.serialize_span_group(s) for s in spans]
+                [serializers.serialize_n_plus_one_pattern(p) for p in patterns]
+            )
+        except ValueError as e:
+            return _error(str(e))
+
+    @mcp.tool()
+    async def get_transaction_trend(
+        organization_slug: str,
+        group_id: int,
+    ) -> str:
+        """Get daily performance trend for a specific transaction group.
+
+        Returns daily stats (span count, transaction count, avg duration,
+        total time) for the last 7 days. Useful for spotting performance
+        regressions or improvements over time.
+
+        Requires DuckDB cold storage to be enabled.
+
+        Args:
+            organization_slug: Organization slug
+            group_id: Transaction group ID
+        """
+        try:
+            user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+            trend = await data.get_transaction_trend(
+                user_id, organization_slug, group_id
+            )
+            return json.dumps(
+                [serializers.serialize_transaction_trend(t) for t in trend]
             )
         except ValueError as e:
             return _error(str(e))
