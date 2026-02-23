@@ -66,16 +66,25 @@ class Command(BaseCommand):
 
         # 2. Weekly DateTime partitions (Aggregates)
         weekly_models = [
-            "issue_events_issueaggregate",
-            "issue_events_issuetag",
-            "projects_issueeventprojecthourlystatistic",
-            "projects_transactioneventprojecthourlystatistic",
-            "projects_logprojecthourlystatistic",
+            ("issue_events_issueaggregate", settings.GLITCHTIP_EVENT_RETENTION_DAYS),
+            ("issue_events_issuetag", settings.GLITCHTIP_EVENT_RETENTION_DAYS),
+            (
+                "projects_issueeventprojecthourlystatistic",
+                settings.GLITCHTIP_EVENT_RETENTION_DAYS,
+            ),
+            (
+                "projects_transactioneventprojecthourlystatistic",
+                settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS,
+            ),
+            (
+                "projects_logprojecthourlystatistic",
+                settings.GLITCHTIP_LOG_RETENTION_DAYS,
+            ),
         ]
         start_of_week = start_date_daily - timedelta(days=start_date_daily.weekday())
         end_date_weekly = start_of_week + timedelta(weeks=4)
 
-        for table in weekly_models:
+        for table, retention_days in weekly_models:
             if not manager.is_table_partitioned(table):
                 self.stdout.write(f"Skipping {table} (not partitioned yet)...")
                 continue
@@ -92,6 +101,6 @@ class Command(BaseCommand):
 
             # Cleanup old weekly partitions
             self.stdout.write(f"Cleaning up old weekly partitions for {table}...")
-            manager.drop_old_partitions(table, settings.GLITCHTIP_EVENT_RETENTION_DAYS)
+            manager.drop_old_partitions(table, retention_days)
 
         self.stdout.write(self.style.SUCCESS("Partition maintenance complete."))
