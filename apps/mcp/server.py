@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 
 from django.conf import settings as django_settings
 from django.core.exceptions import FieldError
@@ -39,6 +40,19 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=False,
     ),
 )
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 datetime string, returning None if not provided."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        raise ValueError(f"Invalid datetime format: {value!r}. Use ISO 8601.")
 
 
 def _error(message: str) -> str:
@@ -277,6 +291,8 @@ async def get_transaction_group(organization_slug: str, group_id: int) -> str:
 async def list_transaction_spans(
     organization_slug: str,
     group_id: int,
+    start: str | None = None,
+    end: str | None = None,
 ) -> str:
     """Get span breakdown for a specific transaction group.
 
@@ -287,10 +303,18 @@ async def list_transaction_spans(
     Args:
         organization_slug: Organization slug
         group_id: Transaction group ID
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
-        spans = await data.get_transaction_spans(user_id, organization_slug, group_id)
+        spans = await data.get_transaction_spans(
+            user_id,
+            organization_slug,
+            group_id,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
         return json.dumps([serializers.serialize_span_group(s) for s in spans])
     except ValueError as e:
         return _error(str(e))
@@ -303,6 +327,8 @@ async def list_span_groups(
     op: str | None = None,
     sort: str = "-total_time",
     limit: int = 50,
+    start: str | None = None,
+    end: str | None = None,
 ) -> str:
     """Query span groups across the organization (slow queries, etc).
 
@@ -316,6 +342,8 @@ async def list_span_groups(
         op: Optional op prefix filter (e.g. "db" for database spans)
         sort: Sort field: "-total_time" (default), "-avg_duration", "-count"
         limit: Max results to return (default 50, max 100)
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
@@ -327,6 +355,8 @@ async def list_span_groups(
             op_filter=op,
             sort=sort,
             limit=limit,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
         )
         return json.dumps([serializers.serialize_span_group(s) for s in spans])
     except ValueError as e:
@@ -340,6 +370,8 @@ async def detect_n_plus_one(
     op: str | None = "db",
     threshold: float = 5.0,
     limit: int = 50,
+    start: str | None = None,
+    end: str | None = None,
 ) -> str:
     """Detect N+1 query patterns across transactions.
 
@@ -355,6 +387,8 @@ async def detect_n_plus_one(
         op: Op prefix filter (default "db" for database spans)
         threshold: Minimum spans-per-transaction to report (default 5.0)
         limit: Max results to return (default 50, max 100)
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
@@ -366,6 +400,8 @@ async def detect_n_plus_one(
             op_filter=op,
             threshold=threshold,
             limit=limit,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
         )
         return json.dumps(
             [serializers.serialize_n_plus_one_pattern(p) for p in patterns]
@@ -378,22 +414,32 @@ async def detect_n_plus_one(
 async def get_transaction_trend(
     organization_slug: str,
     group_id: int,
+    start: str | None = None,
+    end: str | None = None,
 ) -> str:
     """Get daily performance trend for a specific transaction group.
 
-    Returns daily stats (span count, transaction count, avg duration,
-    total time) for the last 7 days. Useful for spotting performance
-    regressions or improvements over time.
+    Returns daily stats (request count, avg duration, total time) for the
+    last 7 days. Useful for spotting performance regressions or improvements
+    over time.
 
     Requires DuckDB cold storage to be enabled.
 
     Args:
         organization_slug: Organization slug
         group_id: Transaction group ID
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
-        trend = await data.get_transaction_trend(user_id, organization_slug, group_id)
+        trend = await data.get_transaction_trend(
+            user_id,
+            organization_slug,
+            group_id,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
         return json.dumps([serializers.serialize_transaction_trend(t) for t in trend])
     except ValueError as e:
         return _error(str(e))

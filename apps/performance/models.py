@@ -49,6 +49,20 @@ class TransactionGroup(CreatedModel):
             ),
         ]
 
+    @property
+    def error_rate(self) -> float:
+        if self.count > 0:
+            return round((self.error_count / self.count) * 100, 2)
+        return 0.0
+
+    @property
+    def throughput(self) -> float | None:
+        if self.first_seen and self.last_seen:
+            span = (self.last_seen - self.first_seen).total_seconds()
+            if span > 0:
+                return round((self.count / span) * 60, 2)
+        return None
+
     def __str__(self):
         return self.transaction
 
