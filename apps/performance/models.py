@@ -28,9 +28,9 @@ class TransactionGroup(CreatedModel):
     p50 = models.FloatField(null=True, blank=True)
     p95 = models.FloatField(null=True, blank=True)
 
-    # 4-byte alignment: integers
-    count = models.PositiveIntegerField(default=0)
-    error_count = models.PositiveIntegerField(default=0)
+    # 8-byte alignment: big integers
+    count = models.PositiveBigIntegerField(default=0)
+    error_count = models.PositiveBigIntegerField(default=0)
 
     # Variable-width
     duration_histogram = models.JSONField(default=dict)

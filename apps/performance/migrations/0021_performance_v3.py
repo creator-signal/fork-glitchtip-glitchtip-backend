@@ -113,12 +113,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="transactiongroup",
             name="count",
-            field=models.PositiveIntegerField(default=0),
+            field=models.PositiveBigIntegerField(default=0),
         ),
         migrations.AddField(
             model_name="transactiongroup",
             name="error_count",
-            field=models.PositiveIntegerField(default=0),
+            field=models.PositiveBigIntegerField(default=0),
         ),
         migrations.AddField(
             model_name="transactiongroup",
