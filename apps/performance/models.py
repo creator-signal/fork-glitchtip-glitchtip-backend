@@ -57,6 +57,11 @@ class TransactionGroup(CreatedModel):
 
     @property
     def throughput(self) -> float | None:
+        """All-time average requests per minute (count / total time span).
+
+        TODO: Consider computing a windowed throughput (e.g., last hour/day)
+        from cold storage data for a more meaningful current-rate metric.
+        """
         if self.first_seen and self.last_seen:
             span = (self.last_seen - self.first_seen).total_seconds()
             if span > 0:

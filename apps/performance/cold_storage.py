@@ -8,7 +8,7 @@ Handles two file layouts:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
@@ -44,8 +44,6 @@ def _date_in_range(date_str: str, start_dt: datetime, end_dt: datetime) -> bool:
     except ValueError:
         return True  # Unknown format — include to be safe
     # Include if the file's day overlaps [start_dt, end_dt)
-    from datetime import timedelta
-
     return file_date < end_dt and file_date + timedelta(days=1) > start_dt
 
 
@@ -58,6 +56,11 @@ def _enumerate_parquet_files(
     Prunes files by date from the directory/file name to avoid reading
     irrelevant data.
 
+    When a compacted flat file (``{date}.parquet``) exists for a given date,
+    chunk files in the ``{date}/`` subdirectory are skipped. This ensures
+    correct results even if a compaction run crashed after writing the
+    compacted file but before deleting all chunks.
+
     Returns list of DuckDB-readable paths.
     """
     org_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}"
@@ -68,6 +71,7 @@ def _enumerate_parquet_files(
         return []
 
     paths = []
+    compacted_dates: set[str] = set()
 
     # Compacted flat files: org_{id}/{date}.parquet
     for f in flat_files:
@@ -76,9 +80,13 @@ def _enumerate_parquet_files(
             if _date_in_range(date_str, start_dt, end_dt):
                 relative = f"{org_prefix}/{f}"
                 paths.append(get_duckdb_parquet_path(storage, relative))
+                compacted_dates.add(date_str)
 
     # Chunk files in date subdirectories: org_{id}/{date}/chunk_*.parquet
+    # Skip dates that already have a compacted flat file (crash recovery).
     for subdir in subdirs:
+        if subdir in compacted_dates:
+            continue
         if not _date_in_range(subdir, start_dt, end_dt):
             continue
         subdir_path = f"{org_prefix}/{subdir}"
