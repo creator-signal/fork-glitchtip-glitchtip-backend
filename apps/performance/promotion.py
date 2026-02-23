@@ -99,20 +99,17 @@ def promote_spans() -> int:
             )
             continue
 
-        # Delete only the successfully promoted rows.
-        # Uses id range (partition-prunable) scoped to the specific org
-        # to avoid deleting rows from groups that failed to write.
+        # Delete exactly the promoted rows by ID.
+        # Includes organization_id for partition pruning (HASH sub-partitions).
         group_uuids = [r[0] for r in group_rows]
-        min_uuid = min(group_uuids)
-        max_uuid = max(group_uuids)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 DELETE FROM performance_spanstaging
-                WHERE id >= %s AND id <= %s
+                WHERE id = ANY(%s)
                   AND organization_id = %s
                 """,
-                [min_uuid, max_uuid, org_id],
+                [group_uuids, org_id],
             )
         total_promoted += len(group_rows)
 
