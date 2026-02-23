@@ -8,6 +8,7 @@ chunk files into daily files for efficient analytical queries.
 import logging
 import os
 import time
+from datetime import timedelta
 
 from django.db import connection
 from django.utils import timezone
@@ -25,19 +26,19 @@ logger = logging.getLogger(__name__)
 
 TABLE_NAME = "performance_spans"
 
-# Process up to this many rows per invocation.
-# At ~10 columns with VARCHAR fields, 500K rows ≈ 200-400MB in Python.
-BATCH_LIMIT = 500_000
+# Process up to this many rows per organization per invocation.
+BATCH_LIMIT_PER_ORG = 100_000
 
 
 def promote_spans() -> int:
     """
     Promote span_staging rows to per-org Parquet files.
 
-    1. Query rows where id < UUID7(NOW() - 5min) — partition-prunable on UUID7 range
-    2. Group by (organization_id, date(timestamp))
-    3. Write chunk Parquet files per org+date
-    4. Range-DELETE consumed rows by id <= max_promoted_id
+    1. Get distinct org_ids with rows older than cutoff (partition-prunable)
+    2. For each org, query rows with both id + organization_id filters
+       (prunes both RANGE and HASH partitions)
+    3. Group by date, write chunk Parquet files per org+date
+    4. DELETE consumed rows by exact id + organization_id
 
     Returns number of rows promoted.
     """
@@ -52,66 +53,81 @@ def promote_spans() -> int:
 
     from apps.performance.models import SpanStaging
 
-    cutoff = timezone.now() - timezone.timedelta(minutes=5)
+    cutoff = timezone.now() - timedelta(minutes=5)
     # UUID7 with min random bits — everything before this was inserted before cutoff
     cutoff_uuid = UUID7Helper.from_datetime(cutoff)
 
-    rows = list(
+    # Step 1: Get distinct org_ids. This scans range partitions but the query
+    # is lightweight (only reads organization_id column).
+    org_ids = list(
         SpanStaging.objects.filter(id__lt=cutoff_uuid)
-        .order_by("id")
-        .values_list(
-            "id",
-            "organization_id",
-            "project_id",
-            "transaction_name",
-            "span_id",
-            "transaction_id",
-            "op",
-            "description",
-            "duration",
-            "timestamp",
-        )[:BATCH_LIMIT]
+        .values_list("organization_id", flat=True)
+        .distinct()
     )
 
-    if not rows:
+    if not org_ids:
         return 0
-
-    # Group rows by (org_id, date)
-    groups: dict[tuple[int, str], list[tuple]] = {}
-    for row in rows:
-        org_id = row[1]
-        ts = row[9]  # timestamp
-        date_str = ts.strftime("%Y%m%d") if ts else "unknown"
-        key = (org_id, date_str)
-        groups.setdefault(key, []).append(row)
 
     total_promoted = 0
 
-    for (org_id, date_str), group_rows in groups.items():
-        try:
-            _write_chunk_parquet(storage, org_id, date_str, group_rows)
-        except Exception:
-            logger.error(
-                "Failed to write parquet chunk for org %d date %s",
-                org_id,
-                date_str,
-                exc_info=True,
+    # Step 2: Process each org separately — both id and organization_id
+    # filters allow PostgreSQL to prune RANGE and HASH partitions.
+    for org_id in org_ids:
+        rows = list(
+            SpanStaging.objects.filter(
+                id__lt=cutoff_uuid,
+                organization_id=org_id,
             )
+            .order_by("id")
+            .values_list(
+                "id",
+                "organization_id",
+                "project_id",
+                "transaction_name",
+                "span_id",
+                "transaction_id",
+                "op",
+                "description",
+                "duration",
+                "timestamp",
+            )[:BATCH_LIMIT_PER_ORG]
+        )
+
+        if not rows:
             continue
 
-        # Delete exactly the promoted rows by ID.
-        # Includes organization_id for partition pruning (HASH sub-partitions).
-        group_uuids = [r[0] for r in group_rows]
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM performance_spanstaging
-                WHERE id = ANY(%s)
-                  AND organization_id = %s
-                """,
-                [group_uuids, org_id],
-            )
-        total_promoted += len(group_rows)
+        # Group rows by date within this org
+        date_groups: dict[str, list[tuple]] = {}
+        for row in rows:
+            ts = row[9]  # timestamp
+            date_str = ts.strftime("%Y%m%d") if ts else "unknown"
+            date_groups.setdefault(date_str, []).append(row)
+
+        for date_str, group_rows in date_groups.items():
+            try:
+                _write_chunk_parquet(storage, org_id, date_str, group_rows)
+            except Exception:
+                logger.error(
+                    "Failed to write parquet chunk for org %d date %s",
+                    org_id,
+                    date_str,
+                    exc_info=True,
+                )
+                continue
+
+            # Delete exactly the promoted rows by ID.
+            # Includes organization_id for HASH partition pruning.
+            group_uuids = [r[0] for r in group_rows]
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM performance_spanstaging
+                    WHERE id = ANY(%s)
+                      AND organization_id = %s
+                    """,
+                    [group_uuids, org_id],
+                )
+            total_promoted += len(group_rows)
 
     if total_promoted:
         logger.info("Promoted %d span rows to cold storage", total_promoted)
@@ -235,7 +251,14 @@ def compact_span_chunks() -> int:
 def _compact_date_chunks(
     storage, org_path: str, date_dir: str, date_path: str, chunks: list[str]
 ):
-    """Compact multiple chunk files into a single daily Parquet file."""
+    """Compact multiple chunk files into a single daily Parquet file.
+
+    Note: This does not write atomically (temp file + rename). If the process
+    crashes after writing the compacted file but before deleting all chunks,
+    _enumerate_parquet_files skips chunks when a compacted flat file exists
+    for the same date, so queries remain correct. The next compaction run
+    will clean up the leftover chunks.
+    """
     # Build list of chunk paths for DuckDB
     chunk_paths = [
         get_duckdb_parquet_path(storage, f"{date_path}/{chunk}") for chunk in chunks

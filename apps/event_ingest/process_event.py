@@ -38,7 +38,7 @@ from apps.issue_events.models import (
     TagValue,
 )
 from apps.performance.histogram import (
-    get_bucket_index,
+    merge_durations,
     percentile_from_histogram,
 )
 from apps.performance.models import SpanStaging, TransactionGroup
@@ -1069,25 +1069,22 @@ def _is_error_status(trace_status: str | None) -> bool:
     )
 
 
-def _build_histogram_increment(durations: list[float]) -> dict[str, int]:
-    """Build a histogram dict from a list of durations (for SQL merge)."""
-    histogram: dict[str, int] = {}
-    for d in durations:
-        key = str(get_bucket_index(d))
-        histogram[key] = histogram.get(key, 0) + 1
-    return histogram
-
-
 def _update_transaction_group_stats(
     group_durations: dict[int, list[float]],
     group_error_counts: dict[int, int],
 ):
     """
-    Update TransactionGroup stats atomically using append-only SQL.
+    Update TransactionGroup stats using append-only SQL.
 
-    Histogram merge, running average, and p50/p95 are all computed in a single
-    UPDATE statement per batch — no read-modify-write cycle, so concurrent
-    workers cannot corrupt each other's data.
+    Phase 1: A single UPDATE ... FROM (VALUES ...) atomically merges count,
+    error_count, avg_duration, and duration_histogram — no read-modify-write
+    cycle, so concurrent workers cannot corrupt these fields.
+
+    Phase 2: Reads the merged histogram back and recomputes p50/p95 in Python.
+    This IS a read-modify-write and can race: if two workers process the same
+    group concurrently, the last writer's p50/p95 may be based on a stale
+    snapshot. This is acceptable because p50/p95 are bucket-midpoint
+    approximations that self-correct on the next batch.
     """
     if not group_durations:
         return
@@ -1099,7 +1096,7 @@ def _update_transaction_group_stats(
         batch_count = len(durations)
         batch_total = sum(durations)
         error_count = group_error_counts.get(group_id, 0)
-        histogram_inc = _build_histogram_increment(durations)
+        histogram_inc = merge_durations({}, durations)
         histogram_json = json.dumps(histogram_inc)
         values_data.append(
             (group_id, batch_count, batch_total, error_count, histogram_json)

@@ -96,12 +96,14 @@ def generate_fake_transaction_group(project):
     if created:
         # Simulate some historical data
         count = random.randint(10, 1000)
-        durations = [generate_random_duration_ms() for _ in range(min(count, 100))]
+        sample_size = min(count, 100)
+        durations = [generate_random_duration_ms() for _ in range(sample_size)]
         histogram: dict[str, int] = {}
         merge_durations(histogram, durations)
         avg = sum(durations) / len(durations)
-        p50 = percentile_from_histogram(histogram, count, 50)
-        p95 = percentile_from_histogram(histogram, count, 95)
+        # Use sample_size (histogram total) for percentile, not count
+        p50 = percentile_from_histogram(histogram, sample_size, 50)
+        p95 = percentile_from_histogram(histogram, sample_size, 95)
 
         group.count = count
         group.avg_duration = avg
