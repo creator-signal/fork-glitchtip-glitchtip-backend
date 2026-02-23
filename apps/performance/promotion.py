@@ -45,12 +45,12 @@ def promote_spans() -> tuple[int, bool]:
     """
     if not is_duckdb_available():
         logger.debug("DuckDB not available, skipping span promotion")
-        return 0
+        return 0, False
 
     storage = get_cold_storage_backend()
     if not storage:
         logger.debug("No storage backend, skipping span promotion")
-        return 0
+        return 0, False
 
     from apps.performance.models import SpanStaging
 
