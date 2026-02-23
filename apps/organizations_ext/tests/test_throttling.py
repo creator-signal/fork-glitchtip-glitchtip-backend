@@ -104,7 +104,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         """
         Test throttle calculation with weighted event counts.
 
-        Event weights: issues=1.0, transactions=0.1, logs=0.1
+        Event weights: issues=1.0, transactions=1.0, logs=0.1
         Plan limit: 10 events
         Throttle thresholds: >100%=10%, >150%=50%, >200%=100%
         """
@@ -117,9 +117,9 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.assertEqual(org.event_throttle_rate, 0)
 
         # 6 weighted events (of 10), no throttle
-        # 3 issues (3.0) + 30 transactions (3.0) = 6.0 weighted events
+        # 3 issues (3.0) + 3 transactions (3.0) = 6.0 weighted events
         self._make_events(3, date=timezone.now() - timedelta(minutes=50))
-        self._make_transaction_events(30, date=timezone.now() - timedelta(minutes=45))
+        self._make_transaction_events(3, date=timezone.now() - timedelta(minutes=45))
         check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
