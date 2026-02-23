@@ -30,7 +30,7 @@ TABLE_NAME = "performance_spans"
 BATCH_LIMIT_PER_ORG = 100_000
 
 
-def promote_spans() -> int:
+def promote_spans() -> tuple[int, bool]:
     """
     Promote span_staging rows to per-org Parquet files.
 
@@ -40,7 +40,8 @@ def promote_spans() -> int:
     3. Group by date, write chunk Parquet files per org+date
     4. DELETE consumed rows by exact id + organization_id
 
-    Returns number of rows promoted.
+    Returns (rows_promoted, truncated) where truncated is True if any org
+    hit the per-org batch limit, indicating more rows likely remain.
     """
     if not is_duckdb_available():
         logger.debug("DuckDB not available, skipping span promotion")
@@ -66,9 +67,10 @@ def promote_spans() -> int:
     )
 
     if not org_ids:
-        return 0
+        return 0, False
 
     total_promoted = 0
+    truncated = False
 
     # Step 2: Process each org separately — both id and organization_id
     # filters allow PostgreSQL to prune RANGE and HASH partitions.
@@ -95,6 +97,9 @@ def promote_spans() -> int:
 
         if not rows:
             continue
+
+        if len(rows) >= BATCH_LIMIT_PER_ORG:
+            truncated = True
 
         # Group rows by date within this org
         date_groups: dict[str, list[tuple]] = {}
@@ -131,7 +136,7 @@ def promote_spans() -> int:
 
     if total_promoted:
         logger.info("Promoted %d span rows to cold storage", total_promoted)
-    return total_promoted
+    return total_promoted, truncated
 
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:

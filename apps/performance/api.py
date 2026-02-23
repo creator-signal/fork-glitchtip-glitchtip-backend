@@ -148,7 +148,7 @@ async def list_transaction_spans(
 
     return await sync_to_async(query_span_groups_for_transaction)(
         org_id=organization.id,
-        transaction_group_id=id,
+        transaction_name=group.transaction,
         start_dt=start_dt,
         end_dt=end_dt,
     )

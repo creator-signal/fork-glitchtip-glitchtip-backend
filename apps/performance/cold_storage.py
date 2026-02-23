@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
     get_cold_storage_backend,
-    get_duckdb_connection,
     get_duckdb_parquet_path,
+    get_duckdb_read_connection,
     is_duckdb_available,
 )
 
@@ -104,13 +104,17 @@ def _enumerate_parquet_files(
 
 def query_span_groups_for_transaction(
     org_id: int,
-    transaction_group_id: int,
+    transaction_name: str,
     start_dt: datetime,
     end_dt: datetime,
     limit: int = 50,
 ) -> list[dict]:
     """
     Query span groups for a specific transaction.
+
+    Args:
+        transaction_name: The resolved transaction name (caller must look up the
+            TransactionGroup and pass group.transaction).
 
     Returns list of {op, description, count, avg_duration, p95_duration, total_time}
     grouped by (op, description), ordered by total_time DESC.
@@ -126,17 +130,7 @@ def query_span_groups_for_transaction(
     if not parquet_files:
         return []
 
-    # We need the transaction name from the group
-    from apps.performance.models import TransactionGroup
-
-    try:
-        group = TransactionGroup.objects.get(
-            id=transaction_group_id, organization_id=org_id
-        )
-    except TransactionGroup.DoesNotExist:
-        return []
-
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         paths_list = ", ".join(f"'{p}'" for p in parquet_files)
         sql = f"""
@@ -156,13 +150,11 @@ def query_span_groups_for_transaction(
             LIMIT $4
         """
         rows = duck_conn.execute(
-            sql, [group.transaction, start_dt, end_dt, limit]
+            sql, [transaction_name, start_dt, end_dt, limit]
         ).fetchall()
     except Exception:
         logger.error("Error querying span groups", exc_info=True)
         return []
-    finally:
-        duck_conn.close()
 
     return [
         {
@@ -223,7 +215,7 @@ def query_n_plus_one_patterns(
 
     params.extend([threshold, limit])
 
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         paths_list = ", ".join(f"'{p}'" for p in parquet_files)
         sql = f"""
@@ -249,8 +241,6 @@ def query_n_plus_one_patterns(
     except Exception:
         logger.error("Error querying N+1 patterns", exc_info=True)
         return []
-    finally:
-        duck_conn.close()
 
     return [
         {
@@ -324,7 +314,7 @@ def query_span_groups(
 
     params.append(limit)
 
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         paths_list = ", ".join(f"'{p}'" for p in parquet_files)
         sql = f"""
@@ -347,8 +337,6 @@ def query_span_groups(
     except Exception:
         logger.error("Error querying span groups", exc_info=True)
         return []
-    finally:
-        duck_conn.close()
 
     return [
         {
@@ -400,7 +388,7 @@ def query_transaction_trend(
         extra_where += f" AND project_id IN ({placeholders})"
         params.extend(project_ids)
 
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         paths_list = ", ".join(f"'{p}'" for p in parquet_files)
         sql = f"""
@@ -422,8 +410,6 @@ def query_transaction_trend(
     except Exception:
         logger.error("Error querying transaction trend", exc_info=True)
         return []
-    finally:
-        duck_conn.close()
 
     return [
         {
