@@ -140,6 +140,15 @@ def serialize_log_event(log: LogEventRow) -> dict:
 
 
 def serialize_transaction_group(tg: TransactionGroup) -> dict:
+    error_rate = 0.0
+    if tg.count > 0:
+        error_rate = round((tg.error_count / tg.count) * 100, 2)
+
+    throughput = None
+    span = (tg.last_seen - tg.first_seen).total_seconds()
+    if span > 0:
+        throughput = round((tg.count / span) * 60, 2)
+
     result = {
         "id": tg.id,
         "project": tg.project_id,
@@ -151,10 +160,35 @@ def serialize_transaction_group(tg: TransactionGroup) -> dict:
         "p50": tg.p50,
         "p95": tg.p95,
         "errorCount": tg.error_count,
+        "errorRate": error_rate,
+        "throughput": throughput,
         "firstSeen": tg.first_seen.isoformat(),
         "lastSeen": tg.last_seen.isoformat(),
     }
     return result
+
+
+def serialize_n_plus_one_pattern(pattern: dict) -> dict:
+    return {
+        "transactionName": pattern["transaction_name"],
+        "op": pattern["op"],
+        "description": pattern["description"],
+        "totalSpans": pattern["total_spans"],
+        "transactionCount": pattern["transaction_count"],
+        "spansPerTxn": pattern["spans_per_txn"],
+        "avgDuration": pattern["avg_duration"],
+        "totalTime": pattern["total_time"],
+    }
+
+
+def serialize_transaction_trend(trend: dict) -> dict:
+    return {
+        "date": trend["date"],
+        "spanCount": trend["span_count"],
+        "transactionCount": trend["transaction_count"],
+        "avgSpanDuration": trend["avg_span_duration"],
+        "totalSpanTime": trend["total_span_time"],
+    }
 
 
 def serialize_span_group(span: dict) -> dict:

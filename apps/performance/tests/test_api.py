@@ -43,6 +43,8 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         self.assertEqual(data[0]["transaction"], "/api/test/")
         self.assertEqual(data[0]["count"], 10)
         self.assertIn("avgDuration", data[0])
+        self.assertIn("errorRate", data[0])
+        self.assertIn("throughput", data[0])
 
     def test_list_empty(self):
         res = self.client.get(self.list_url)
@@ -103,6 +105,29 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url, {"start": "now 1m"})
         self.assertEqual(res.status_code, 422)
 
+    def test_error_rate_and_throughput(self):
+        now = timezone.now()
+        group = self.create_group(
+            count=100,
+            error_count=25,
+            first_seen=now - timedelta(hours=1),
+            last_seen=now,
+        )
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/"
+        res = self.client.get(url)
+        data = res.json()
+        self.assertEqual(data["errorRate"], 25.0)
+        self.assertIsNotNone(data["throughput"])
+        # 100 txns over 3600 seconds = ~1.67/min
+        self.assertAlmostEqual(data["throughput"], 1.67, places=2)
+
+    def test_error_rate_zero_count(self):
+        group = self.create_group(count=0, error_count=0)
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/"
+        res = self.client.get(url)
+        data = res.json()
+        self.assertEqual(data["errorRate"], 0.0)
+
     def test_detail(self):
         group = self.create_group()
         url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/"
@@ -126,6 +151,25 @@ class TransactionGroupAPITestCase(GlitchTestCase):
 
     def test_span_groups_endpoint_empty(self):
         url = f"/api/0/organizations/{self.organization.slug}/span-groups/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_n_plus_one_endpoint_empty(self):
+        url = f"/api/0/organizations/{self.organization.slug}/n-plus-one/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_trend_endpoint_empty(self):
+        group = self.create_group()
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/trend/"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_trend_endpoint_not_found(self):
+        url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/99999/trend/"
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])

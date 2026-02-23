@@ -169,6 +169,96 @@ def query_span_groups_for_transaction(
     ]
 
 
+def query_n_plus_one_patterns(
+    org_id: int,
+    project_ids: list[int] | None,
+    start_dt: datetime,
+    end_dt: datetime,
+    op_filter: str | None = "db",
+    threshold: float = 5.0,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    Detect N+1 query patterns by finding span groups with high per-transaction
+    repetition counts.
+
+    Returns list of {transaction_name, op, description, total_spans,
+    transaction_count, spans_per_txn, avg_duration, total_time}
+    ordered by spans_per_txn DESC.
+    """
+    if not is_duckdb_available():
+        return []
+
+    storage = get_cold_storage_backend()
+    if not storage:
+        return []
+
+    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
+    if not parquet_files:
+        return []
+
+    # Build optional WHERE clauses
+    extra_where = ""
+    params: list = [start_dt, end_dt]
+    param_idx = 3
+
+    if op_filter:
+        extra_where += f" AND op LIKE ${param_idx}"
+        params.append(f"{op_filter}%")
+        param_idx += 1
+
+    if project_ids:
+        placeholders = ", ".join(f"${param_idx + i}" for i in range(len(project_ids)))
+        extra_where += f" AND project_id IN ({placeholders})"
+        params.extend(project_ids)
+        param_idx += len(project_ids)
+
+    params.extend([threshold, limit])
+
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        sql = f"""
+            SELECT
+                transaction_name,
+                op,
+                description,
+                COUNT(*) as total_spans,
+                COUNT(DISTINCT transaction_id) as transaction_count,
+                ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT transaction_id), 1) as spans_per_txn,
+                AVG(duration) as avg_duration,
+                SUM(duration) as total_time
+            FROM read_parquet([{paths_list}])
+            WHERE timestamp >= $1
+              AND timestamp < $2
+              {extra_where}
+            GROUP BY transaction_name, op, description
+            HAVING COUNT(*) * 1.0 / COUNT(DISTINCT transaction_id) > ${param_idx}
+            ORDER BY spans_per_txn DESC
+            LIMIT ${param_idx + 1}
+        """
+        rows = duck_conn.execute(sql, params).fetchall()
+    except Exception:
+        logger.error("Error querying N+1 patterns", exc_info=True)
+        return []
+    finally:
+        duck_conn.close()
+
+    return [
+        {
+            "transaction_name": row[0],
+            "op": row[1],
+            "description": row[2] or "",
+            "total_spans": row[3],
+            "transaction_count": row[4],
+            "spans_per_txn": row[5],
+            "avg_duration": row[6] or 0,
+            "total_time": row[7] or 0,
+        }
+        for row in rows
+    ]
+
+
 def query_span_groups(
     org_id: int,
     project_ids: list[int] | None,
@@ -260,6 +350,76 @@ def query_span_groups(
             "avg_duration": row[3] or 0,
             "p95_duration": row[4] or 0,
             "total_time": row[5] or 0,
+        }
+        for row in rows
+    ]
+
+
+def query_transaction_trend(
+    org_id: int,
+    transaction_name: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    project_ids: list[int] | None = None,
+) -> list[dict]:
+    """
+    Query daily performance trend for a specific transaction.
+
+    Returns list of {date, span_count, transaction_count, avg_span_duration,
+    total_span_time} with one row per day, ordered chronologically.
+    """
+    if not is_duckdb_available():
+        return []
+
+    storage = get_cold_storage_backend()
+    if not storage:
+        return []
+
+    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
+    if not parquet_files:
+        return []
+
+    extra_where = ""
+    params: list = [transaction_name, start_dt, end_dt]
+    param_idx = 4
+
+    if project_ids:
+        placeholders = ", ".join(f"${param_idx + i}" for i in range(len(project_ids)))
+        extra_where += f" AND project_id IN ({placeholders})"
+        params.extend(project_ids)
+
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        paths_list = ", ".join(f"'{p}'" for p in parquet_files)
+        sql = f"""
+            SELECT
+                DATE_TRUNC('day', timestamp) as date,
+                COUNT(*) as span_count,
+                COUNT(DISTINCT transaction_id) as transaction_count,
+                AVG(duration) as avg_span_duration,
+                SUM(duration) as total_span_time
+            FROM read_parquet([{paths_list}])
+            WHERE transaction_name = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+              {extra_where}
+            GROUP BY DATE_TRUNC('day', timestamp)
+            ORDER BY date
+        """
+        rows = duck_conn.execute(sql, params).fetchall()
+    except Exception:
+        logger.error("Error querying transaction trend", exc_info=True)
+        return []
+    finally:
+        duck_conn.close()
+
+    return [
+        {
+            "date": row[0].isoformat() if row[0] else "",
+            "span_count": row[1],
+            "transaction_count": row[2],
+            "avg_span_duration": row[3] or 0,
+            "total_span_time": row[4] or 0,
         }
         for row in rows
     ]

@@ -198,7 +198,12 @@ async def get_transaction_groups(
         qs = qs.filter(transaction__icontains=query)
 
     allowed_sorts = {
-        "created", "-created", "avg_duration", "-avg_duration", "count", "-count"
+        "created",
+        "-created",
+        "avg_duration",
+        "-avg_duration",
+        "count",
+        "-count",
     }
     if sort not in allowed_sorts:
         sort = "-avg_duration"
@@ -244,6 +249,67 @@ async def get_transaction_spans(
     return await sync_to_async(query_span_groups_for_transaction)(
         org_id=org_id,
         transaction_group_id=group_id,
+        start_dt=start,
+        end_dt=end,
+    )
+
+
+async def get_n_plus_one_patterns(
+    user_id: int,
+    organization_slug: str,
+    project_ids: list[int] | None = None,
+    op_filter: str | None = "db",
+    threshold: float = 5.0,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Detect N+1 query patterns (DuckDB cold storage)."""
+    from apps.performance.cold_storage import query_n_plus_one_patterns
+
+    org_id = await _get_org_id(user_id, organization_slug)
+
+    now = datetime.now(timezone.utc)
+    start = start_dt or (now - timedelta(days=7))
+    end = end_dt or now
+
+    return await sync_to_async(query_n_plus_one_patterns)(
+        org_id=org_id,
+        project_ids=project_ids,
+        start_dt=start,
+        end_dt=end,
+        op_filter=op_filter,
+        threshold=threshold,
+        limit=min(limit, 100),
+    )
+
+
+async def get_transaction_trend(
+    user_id: int,
+    organization_slug: str,
+    group_id: int,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+) -> list[dict]:
+    """Get daily performance trend for a transaction group (DuckDB cold storage)."""
+    from apps.performance.cold_storage import query_transaction_trend
+
+    org_id = await _get_org_id(user_id, organization_slug)
+
+    # Verify user has access and resolve transaction name
+    group = await TransactionGroup.objects.filter(
+        id=group_id, organization_id=org_id
+    ).afirst()
+    if not group:
+        return []
+
+    now = datetime.now(timezone.utc)
+    start = start_dt or (now - timedelta(days=7))
+    end = end_dt or now
+
+    return await sync_to_async(query_transaction_trend)(
+        org_id=org_id,
+        transaction_name=group.transaction,
         start_dt=start,
         end_dt=end,
     )
