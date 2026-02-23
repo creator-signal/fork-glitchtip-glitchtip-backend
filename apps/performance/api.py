@@ -57,6 +57,7 @@ class OrgSpanGroupFilters(Schema):
         "count",
         "-count",
     ] = "-total_time"
+    limit: int = 50
 
 
 class NPlusOneFilters(Schema):
@@ -65,6 +66,7 @@ class NPlusOneFilters(Schema):
     project: list[int] = []
     op: str | None = "db"
     threshold: float = 5.0
+    limit: int = 50
 
 
 @router.get(
@@ -185,6 +187,7 @@ async def list_span_groups(
         end_dt=end_dt,
         op_filter=filters.op,
         sort=filters.sort,
+        limit=min(filters.limit, 100),
     )
 
 
@@ -219,6 +222,7 @@ async def list_n_plus_one_patterns(
         end_dt=end_dt,
         op_filter=filters.op,
         threshold=filters.threshold,
+        limit=min(filters.limit, 100),
     )
 
 

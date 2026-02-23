@@ -173,3 +173,39 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
+
+    def test_cross_org_isolation(self):
+        """A user in org B cannot see transaction groups from org A."""
+        group = self.create_group()
+
+        # Create a second user in a different organization
+        from model_bakery import baker
+
+        user_b = baker.make("users.user")
+        org_b = baker.make("organizations_ext.Organization")
+        org_b.add_user(user_b)
+
+        self.client.force_login(user_b)
+
+        # List endpoint — should return empty
+        list_url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/"
+        res = self.client.get(list_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+        # Detail endpoint — should return 404
+        detail_url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/"
+        res = self.client.get(detail_url)
+        self.assertEqual(res.status_code, 404)
+
+        # Spans endpoint — should return empty
+        spans_url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/spans/"
+        res = self.client.get(spans_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+        # Trend endpoint — should return empty
+        trend_url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/{group.id}/trend/"
+        res = self.client.get(trend_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])

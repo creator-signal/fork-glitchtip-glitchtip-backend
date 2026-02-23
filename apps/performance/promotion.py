@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
+    duckdb_quote_path,
     get_cold_storage_backend,
     get_duckdb_connection,
     get_duckdb_parquet_path,
@@ -183,7 +184,7 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
                        duration, timestamp
                 FROM staging
                 ORDER BY timestamp
-            ) TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
     finally:
         duck_conn.close()
@@ -275,12 +276,12 @@ def _compact_date_chunks(
 
     duck_conn = get_duckdb_connection(storage)
     try:
-        paths_list = ", ".join(f"'{p}'" for p in chunk_paths)
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in chunk_paths)
         duck_conn.execute(f"""
             COPY (
                 SELECT * FROM read_parquet([{paths_list}])
                 ORDER BY timestamp
-            ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{duckdb_quote_path(output_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
     finally:
         duck_conn.close()

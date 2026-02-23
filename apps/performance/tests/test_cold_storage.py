@@ -13,6 +13,7 @@ from unittest import mock
 
 from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
+from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.performance.cold_storage import (
@@ -143,9 +144,10 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         self.assertEqual(len(chunk_files), 1)
         self.assertTrue(chunk_files[0].endswith(".parquet"))
 
+    @freeze_time("2026-02-23 12:00:00")
     def test_promote_skips_recent_rows(self):
         """Rows newer than 5 minutes are not promoted."""
-        recent_ts = datetime.now(timezone.utc) - timedelta(minutes=1)
+        recent_ts = datetime(2026, 2, 23, 11, 59, 0, tzinfo=timezone.utc)
         span = _make_span_staging_row(
             self.org.id, self.project.id, timestamp=recent_ts
         )

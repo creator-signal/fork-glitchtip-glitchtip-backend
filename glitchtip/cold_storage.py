@@ -188,6 +188,11 @@ def _create_duckdb_connection(storage=None):
     return conn
 
 
+def duckdb_quote_path(path: str) -> str:
+    """Escape a file path for safe interpolation into DuckDB SQL string literals."""
+    return path.replace("'", "''")
+
+
 def get_duckdb_parquet_path(storage, relative_path: str) -> str:
     """
     Get the full path for DuckDB to read/write a Parquet file.
