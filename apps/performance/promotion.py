@@ -111,7 +111,9 @@ def promote_spans() -> tuple[int, bool]:
 
         for date_str, group_rows in date_groups.items():
             try:
-                _write_chunk_parquet(storage, org_id, date_str, group_rows)
+                chunk_path = _write_chunk_parquet(
+                    storage, org_id, date_str, group_rows
+                )
             except Exception:
                 logger.error(
                     "Failed to write parquet chunk for org %d date %s",
@@ -124,15 +126,35 @@ def promote_spans() -> tuple[int, bool]:
             # Delete exactly the promoted rows by ID.
             # Includes organization_id for HASH partition pruning.
             group_uuids = [r[0] for r in group_rows]
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    DELETE FROM performance_spanstaging
-                    WHERE id = ANY(%s)
-                      AND organization_id = %s
-                    """,
-                    [group_uuids, org_id],
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        DELETE FROM performance_spanstaging
+                        WHERE id = ANY(%s)
+                          AND organization_id = %s
+                        """,
+                        [group_uuids, org_id],
+                    )
+            except Exception:
+                # DELETE failed after chunk was written — remove the chunk
+                # to prevent duplicate data on the next promotion run.
+                logger.error(
+                    "Failed to delete promoted rows for org %d date %s, "
+                    "removing chunk to prevent duplicates",
+                    org_id,
+                    date_str,
+                    exc_info=True,
                 )
+                try:
+                    storage.delete(chunk_path)
+                except Exception:
+                    logger.error(
+                        "Failed to remove chunk %s — duplicates may "
+                        "exist on next promotion run",
+                        chunk_path,
+                    )
+                continue
             total_promoted += len(group_rows)
 
     if total_promoted:
@@ -142,7 +164,7 @@ def promote_spans() -> tuple[int, bool]:
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
     """Write a chunk Parquet file for a single org+date group."""
-    chunk_ts = f"{int(time.time())}_{os.getpid()}"
+    chunk_ts = f"{time.time_ns()}_{os.getpid()}"
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
     parquet_path = get_duckdb_parquet_path(storage, relative_path)
@@ -156,7 +178,7 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
     try:
         # Create a table from the data
         duck_conn.execute("""
-            CREATE TEMPORARY TABLE staging (
+            CREATE OR REPLACE TEMPORARY TABLE staging (
                 id VARCHAR,
                 organization_id INTEGER,
                 project_id INTEGER,
@@ -209,7 +231,13 @@ def compact_span_chunks() -> int:
         return 0
 
     spans_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}"
-    today_str = timezone.now().strftime("%Y%m%d")
+    now = timezone.now()
+    # Skip the last 2 days to avoid racing with the promotion job,
+    # which may still be writing chunks for yesterday's timestamps.
+    skip_dates = {
+        now.strftime("%Y%m%d"),
+        (now - timedelta(days=1)).strftime("%Y%m%d"),
+    }
     compacted = 0
 
     try:
@@ -229,8 +257,8 @@ def compact_span_chunks() -> int:
 
         # Process date subdirectories with chunk files
         for date_dir in date_dirs:
-            if date_dir == today_str:
-                continue  # Don't compact today's chunks
+            if date_dir in skip_dates:
+                continue  # Don't compact recent chunks
 
             date_path = f"{org_path}/{date_dir}"
             try:
@@ -259,11 +287,10 @@ def _compact_date_chunks(
 ):
     """Compact multiple chunk files into a single daily Parquet file.
 
-    Note: This does not write atomically (temp file + rename). If the process
-    crashes after writing the compacted file but before deleting all chunks,
-    _enumerate_parquet_files skips chunks when a compacted flat file exists
-    for the same date, so queries remain correct. The next compaction run
-    will clean up the leftover chunks.
+    Crash safety: On filesystem, writes to a .tmp file first, then
+    atomically renames. A crash mid-write leaves a .tmp file (ignored by
+    _enumerate_parquet_files) and chunks remain intact for the next run.
+    On S3, PUT is atomic so no temp file is needed.
     """
     # Build list of chunk paths for DuckDB
     chunk_paths = [
@@ -274,6 +301,14 @@ def _compact_date_chunks(
     output_relative = f"{org_path}/{date_dir}.parquet"
     output_path = get_duckdb_parquet_path(storage, output_relative)
 
+    # Write to a temp file first, then rename for crash safety.
+    # If the process crashes mid-write, the .tmp file is ignored by
+    # _enumerate_parquet_files (doesn't match *.parquet) and chunks
+    # remain intact for the next compaction run.
+    # S3 PUT is atomic, so no temp file needed there.
+    is_s3 = output_path.startswith("s3://")
+    write_path = output_path if is_s3 else output_path + ".tmp"
+
     duck_conn = get_duckdb_connection(storage)
     try:
         paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in chunk_paths)
@@ -281,10 +316,14 @@ def _compact_date_chunks(
             COPY (
                 SELECT * FROM read_parquet([{paths_list}])
                 ORDER BY timestamp
-            ) TO '{duckdb_quote_path(output_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{duckdb_quote_path(write_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
     finally:
         duck_conn.close()
+
+    # Atomic rename on filesystem
+    if not is_s3:
+        os.rename(write_path, output_path)
 
     # Delete chunk files and empty directory
     for chunk in chunks:
