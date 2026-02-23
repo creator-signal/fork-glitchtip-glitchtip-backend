@@ -246,13 +246,13 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
 
     def test_compact_merges_chunks(self):
         """Compaction merges multiple chunk files into a single flat file."""
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
-        self._write_test_chunks(yesterday, num_chunks=3)
+        old_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y%m%d")
+        self._write_test_chunks(old_date, num_chunks=3)
 
         # Verify chunks exist
         date_dir = os.path.join(
             self.cold_dir,
-            f"cold_storage/performance_spans/org_{self.org.id}/{yesterday}",
+            f"cold_storage/performance_spans/org_{self.org.id}/{old_date}",
         )
         self.assertEqual(len(os.listdir(date_dir)), 3)
 
@@ -262,14 +262,16 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
         # Flat file should exist
         flat_file = os.path.join(
             self.cold_dir,
-            f"cold_storage/performance_spans/org_{self.org.id}/{yesterday}.parquet",
+            f"cold_storage/performance_spans/org_{self.org.id}/{old_date}.parquet",
         )
         self.assertTrue(os.path.exists(flat_file))
 
-    def test_compact_skips_today(self):
-        """Today's chunks are not compacted."""
+    def test_compact_skips_recent_dates(self):
+        """Today's and yesterday's chunks are not compacted (promotion may still write)."""
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
         self._write_test_chunks(today, num_chunks=3)
+        self._write_test_chunks(yesterday, num_chunks=3)
 
         compacted = compact_span_chunks()
 
@@ -277,8 +279,8 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
 
     def test_compact_skips_single_chunk(self):
         """A date with only one chunk file is not compacted."""
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
-        self._write_test_chunks(yesterday, num_chunks=1)
+        old_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y%m%d")
+        self._write_test_chunks(old_date, num_chunks=1)
 
         compacted = compact_span_chunks()
 

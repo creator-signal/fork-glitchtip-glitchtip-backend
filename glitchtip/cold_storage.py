@@ -324,7 +324,7 @@ def archive_partition_per_org(
                         clean_rows,
                     )
                     duck_conn.execute(
-                        f"COPY export_data TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                        f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
                     )
                     archived_files.append((org_id, parquet_path))
                     logger.debug(f"Archived org {org_id} to {parquet_path}")
@@ -624,7 +624,7 @@ def query_cold_parquet_files(
             parquet_path = get_duckdb_parquet_path(storage, relative_path)
             sql = f"""
                 SELECT {select_columns}
-                FROM read_parquet('{parquet_path}')
+                FROM read_parquet('{duckdb_quote_path(parquet_path)}')
                 WHERE {where_sql}
                 ORDER BY id DESC
                 LIMIT {limit_param};
@@ -912,7 +912,7 @@ def rewrite_parquet_excluding_project(
             duck_conn = get_duckdb_connection(storage)
             try:
                 # Count remaining rows after filtering
-                count_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}') {where_clause}"
+                count_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}') {where_clause}"
                 remaining = duck_conn.execute(count_sql).fetchone()[0]
 
                 if remaining == 0:
@@ -924,7 +924,7 @@ def rewrite_parquet_excluding_project(
                     continue
 
                 # Check if any rows were actually filtered out
-                total_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')"
+                total_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}')"
                 total = duck_conn.execute(total_sql).fetchone()[0]
 
                 if remaining == total:
@@ -934,9 +934,9 @@ def rewrite_parquet_excluding_project(
                 # Rewrite the file excluding the project's data
                 rewrite_sql = f"""
                     COPY (
-                        SELECT * FROM read_parquet('{parquet_path}')
+                        SELECT * FROM read_parquet('{duckdb_quote_path(parquet_path)}')
                         {where_clause}
-                    ) TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """
                 duck_conn.execute(rewrite_sql)
                 rewritten_count += 1
