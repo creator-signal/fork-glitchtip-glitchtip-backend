@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
@@ -5,6 +6,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import SESSION_KEY
 from django.contrib.auth.models import AnonymousUser
+from django.core.cache import cache
 from django.http import HttpRequest
 from ninja.security import HttpBearer
 from ninja.security import SessionAuth as BaseSessionAuth
@@ -43,6 +45,17 @@ class SessionAuth(BaseSessionAuth):
         return Auth(int(user_id), "session") if user_id else None
 
 
+class OAuthAccessTokenData:
+    """Adapter that provides get_scopes() to match the APIToken interface,
+    so existing permission checks in has_permission() work unchanged."""
+
+    def __init__(self, scopes: list[str]):
+        self._scopes = scopes
+
+    def get_scopes(self) -> list[str]:
+        return self._scopes
+
+
 class TokenAuth(HttpBearer):
     """
     API Token based authentication always connects to a specific user.
@@ -66,6 +79,18 @@ class TokenAuth(HttpBearer):
         try:
             token = await APIToken.objects.aget(token=key, user__is_active=True)
         except APIToken.DoesNotExist:
+            # Fallback: check Valkey cache for OAuth access tokens
+            import time
+
+            data = await cache.aget(f"oauth_access:{key}")
+            if data is not None:
+                parsed = json.loads(data)
+                if parsed["expires_at"] > int(time.time()):
+                    return Auth(
+                        parsed["user_id"],
+                        "token",
+                        data=OAuthAccessTokenData(parsed["scopes"]),
+                    )
             return None
 
         return Auth(token.user_id, "token", data=token)

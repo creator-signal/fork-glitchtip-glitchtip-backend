@@ -41,18 +41,26 @@ class MCPDjangoDispatcher:
     # OAuth endpoints the MCP SDK creates at root level
     _OAUTH_PATHS = frozenset({"/authorize", "/token", "/register", "/revoke"})
 
-    def __init__(self, django_app, mcp_app, mcp_prefix="/mcp", django_lifespan=False):
+    def __init__(
+        self,
+        django_app,
+        mcp_app,
+        mcp_prefix="/mcp",
+        django_lifespan=False,
+        mcp_enabled=True,
+    ):
         self.django_app = django_app
         self.mcp_app = mcp_app
         self.mcp_prefix = mcp_prefix
         self._django_lifespan = django_lifespan
+        self.mcp_enabled = mcp_enabled
 
     def _is_mcp_path(self, path: str) -> bool:
-        return (
-            path.startswith(self.mcp_prefix)
-            or path in self._OAUTH_PATHS
-            or path.startswith("/.well-known/oauth-")
-        )
+        # OAuth endpoints are always available
+        if path in self._OAUTH_PATHS or path.startswith("/.well-known/oauth-"):
+            return True
+        # MCP endpoint only when enabled
+        return self.mcp_enabled and path.startswith(self.mcp_prefix)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
@@ -145,15 +153,15 @@ class MCPDjangoDispatcher:
 
 from django.conf import settings  # noqa: E402
 
-if settings.GLITCHTIP_ENABLE_MCP:
-    from apps.mcp.server import mcp as _mcp_server
+from apps.mcp.server import mcp as _mcp_server
 
-    _mcp_app = _mcp_server.streamable_http_app()
-    application = MCPDjangoDispatcher(
-        django_app=application,
-        mcp_app=_mcp_app,
-        django_lifespan=_embed_worker,
-    )
+_mcp_app = _mcp_server.streamable_http_app()
+application = MCPDjangoDispatcher(
+    django_app=application,
+    mcp_app=_mcp_app,
+    django_lifespan=_embed_worker,
+    mcp_enabled=settings.GLITCHTIP_ENABLE_MCP,
+)
 
 # Wrap application with granian proxy headers support
 # This allows granian to properly handle X-Forwarded-For and X-Forwarded-Proto headers
