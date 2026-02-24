@@ -298,60 +298,78 @@ def archive_partition_per_org(
 
             logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
-            # Export each org's data to a separate Parquet file
-            for org_id in org_ids:
-                relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
-                parquet_path = get_duckdb_parquet_path(storage, relative_path)
+            # Reuse a single DuckDB connection across all orgs to avoid
+            # repeated startup overhead (extension loading, S3 config).
+            duck_conn = get_duckdb_connection(storage)
+            try:
+                # Export each org's data to a separate Parquet file
+                for org_id in org_ids:
+                    relative_path = get_org_cold_storage_path(
+                        table_name, org_id, date_str
+                    )
+                    parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
-                # Read org's data from PostgreSQL
-                cursor.execute(
-                    select_sql.format(partition_name=partition_name),
-                    [org_id],
-                )
-                columns = [desc[0] for desc in cursor.description]
-
-                # Stream rows in batches to bound memory usage
-                # instead of loading entire partition with fetchall()
-                duck_conn = None
-                row_count = 0
-                try:
-                    while True:
-                        batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
-                        if not batch:
-                            break
-
-                        clean_batch = [_normalize_row(row) for row in batch]
-
-                        # Lazily create DuckDB table and output dir on first batch
-                        if duck_conn is None:
-                            if not _is_s3_storage(storage):
-                                os.makedirs(
-                                    os.path.dirname(parquet_path), exist_ok=True
-                                )
-                            duck_conn = get_duckdb_connection(storage)
-                            col_defs = ", ".join(
-                                f"{c} {column_types[c]}" for c in columns
-                            )
-                            duck_conn.execute(
-                                f"CREATE TABLE export_data({col_defs})"
-                            )
-
-                        duck_conn.executemany(
-                            f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                            clean_batch,
-                        )
-                        row_count += len(clean_batch)
-
-                    # Export to Parquet if any rows were inserted
-                    if duck_conn is not None and row_count > 0:
-                        duck_conn.execute(
-                            f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
-                        )
+                    # Skip orgs already archived (idempotent on crash/restart)
+                    if storage.exists(relative_path):
                         archived_files.append((org_id, parquet_path))
-                        logger.debug(f"Archived org {org_id} to {parquet_path}")
-                finally:
-                    if duck_conn is not None:
-                        duck_conn.close()
+                        logger.debug(
+                            "Parquet already exists for org %d, skipping", org_id
+                        )
+                        continue
+
+                    # Read org's data from PostgreSQL
+                    cursor.execute(
+                        select_sql.format(partition_name=partition_name),
+                        [org_id],
+                    )
+                    columns = [desc[0] for desc in cursor.description]
+
+                    # Stream rows in batches to bound memory usage
+                    # instead of loading entire partition with fetchall()
+                    has_data = False
+                    row_count = 0
+                    try:
+                        while True:
+                            batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
+                            if not batch:
+                                break
+
+                            clean_batch = [_normalize_row(row) for row in batch]
+
+                            # Lazily create DuckDB table and output dir on first batch
+                            if not has_data:
+                                if not _is_s3_storage(storage):
+                                    os.makedirs(
+                                        os.path.dirname(parquet_path), exist_ok=True
+                                    )
+                                col_defs = ", ".join(
+                                    f"{c} {column_types[c]}" for c in columns
+                                )
+                                duck_conn.execute(
+                                    f"CREATE TABLE export_data({col_defs})"
+                                )
+                                has_data = True
+
+                            duck_conn.executemany(
+                                f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
+                                clean_batch,
+                            )
+                            row_count += len(clean_batch)
+
+                        # Export to Parquet if any rows were inserted
+                        if has_data and row_count > 0:
+                            duck_conn.execute(
+                                f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                            )
+                            archived_files.append((org_id, parquet_path))
+                            logger.debug(
+                                f"Archived org {org_id} to {parquet_path}"
+                            )
+                    finally:
+                        if has_data:
+                            duck_conn.execute("DROP TABLE IF EXISTS export_data")
+            finally:
+                duck_conn.close()
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
@@ -368,10 +386,19 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
     Detach a partition from its parent table.
 
     This is done before dropping the partition after archival.
+    Safe to call if the partition is already detached or does not exist.
     """
-    with connection.cursor() as cursor:
-        cursor.execute(f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name};")
-    logger.info(f"Detached partition {partition_name} from {parent_table}")
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name};"
+            )
+        logger.info("Detached partition %s from %s", partition_name, parent_table)
+    except Exception:
+        logger.info(
+            "Partition %s already detached or does not exist, continuing",
+            partition_name,
+        )
 
 
 def drop_partition(partition_name: str) -> None:
@@ -639,7 +666,7 @@ def query_cold_parquet_files(
         return []
 
     all_rows: list[tuple] = []
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         for filename in parquet_files:
             relative_path = f"{org_prefix}/{filename}"
@@ -660,8 +687,9 @@ def query_cold_parquet_files(
                     relative_path,
                     exc_info=True,
                 )
-    finally:
-        duck_conn.close()
+    except Exception:
+        close_duckdb_read_connection()
+        raise
 
     return all_rows
 
