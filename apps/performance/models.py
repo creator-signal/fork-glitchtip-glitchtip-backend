@@ -20,10 +20,11 @@ class TransactionGroup(CreatedModel):
     id = models.BigIntegerField(db_default=0, editable=False)
     pk = models.CompositePrimaryKey("id", "organization")
 
-    # 8-byte alignment: FKs
-    project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
+    # 8-byte alignment: FKs (DO_NOTHING = no DB-level FK constraints,
+    # matching SpanStaging pattern for managed=False partitioned tables)
+    project = models.ForeignKey("projects.Project", on_delete=models.DO_NOTHING)
     organization = models.ForeignKey(
-        "organizations_ext.Organization", on_delete=models.CASCADE
+        "organizations_ext.Organization", on_delete=models.DO_NOTHING
     )
 
     # Variable-width fields

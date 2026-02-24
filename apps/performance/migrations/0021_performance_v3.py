@@ -116,7 +116,7 @@ class Migration(migrations.Migration):
                     model_name="transactiongroup",
                     name="organization",
                     field=models.ForeignKey(
-                        on_delete=models.deletion.CASCADE,
+                        on_delete=models.deletion.DO_NOTHING,
                         to="organizations_ext.organization",
                     ),
                     preserve_default=False,
@@ -162,6 +162,16 @@ class Migration(migrations.Migration):
                     model_name="transactiongroup",
                     name="duration_histogram",
                     field=models.JSONField(default=dict),
+                ),
+                # Change FKs to DO_NOTHING (no DB-level constraints for
+                # managed=False partitioned tables — avoids TRUNCATE conflicts)
+                migrations.AlterField(
+                    model_name="transactiongroup",
+                    name="project",
+                    field=models.ForeignKey(
+                        on_delete=models.deletion.DO_NOTHING,
+                        to="projects.project",
+                    ),
                 ),
                 # Update unique constraint to include organization (required
                 # by PG for hash-partitioned tables)

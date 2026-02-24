@@ -103,13 +103,7 @@ CREATE INDEX perf_txgroup_org_lastseen
 CREATE INDEX performance_transactiongroup_created
     ON performance_transactiongroup (created);
 
--- FKs (DEFERRABLE for bulk operations)
-ALTER TABLE performance_transactiongroup
-    ADD CONSTRAINT perf_txgroup_organization_fk
-    FOREIGN KEY (organization_id) REFERENCES organizations_ext_organization(id)
-    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
-
-ALTER TABLE performance_transactiongroup
-    ADD CONSTRAINT perf_txgroup_project_fk
-    FOREIGN KEY (project_id) REFERENCES projects_project(id)
-    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+-- No DB-level FK constraints: managed=False tables are excluded from Django's
+-- TRUNCATE during test flush, which causes "cannot truncate a table referenced
+-- in a foreign key constraint". ORM FK fields still provide joins/validation.
+-- This matches the SpanStaging pattern (DO_NOTHING, no DB FKs).
