@@ -14,14 +14,13 @@ class TransactionGroup(CreatedModel):
     Aggregate stats per unique (transaction, project, op, method).
 
     Hash-partitioned by organization_id for multi-tenant query pruning.
-    managed = False — table created via raw SQL in migration 0021.
+    Table created via raw SQL in migration 0021.
     """
 
     id = models.BigIntegerField(db_default=0, editable=False)
     pk = models.CompositePrimaryKey("id", "organization")
 
-    # 8-byte alignment: FKs (DO_NOTHING = no DB-level FK constraints,
-    # matching SpanStaging pattern for managed=False partitioned tables)
+    # DO_NOTHING = no DB-level FK constraints for partitioned tables
     project = models.ForeignKey("projects.Project", on_delete=models.DO_NOTHING)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.DO_NOTHING
@@ -47,7 +46,6 @@ class TransactionGroup(CreatedModel):
     duration_histogram = models.JSONField(default=dict)
 
     class Meta:
-        managed = False
         constraints = [
             models.UniqueConstraint(
                 fields=["transaction", "project", "op", "method", "organization"],
@@ -88,9 +86,9 @@ class SpanStaging(models.Model):
     """
     Write-heavy staging table for span data before promotion to Parquet.
 
-    managed = False — created via raw SQL.
     Partitioned by RANGE on id (UUIDv7) with HASH sub-partitioning on
     organization_id, matching the IssueEvent pattern.
+    Table created via raw SQL in migration 0021.
     No additional indexes — optimized for bulk inserts.
     """
 
@@ -109,5 +107,4 @@ class SpanStaging(models.Model):
     timestamp = models.DateTimeField(help_text="Span start time")
 
     class Meta:
-        managed = False
         db_table = "performance_spanstaging"

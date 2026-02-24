@@ -74,8 +74,7 @@ class Migration(migrations.Migration):
             ],
         ),
         # 2. Recreate TransactionGroup as hash-partitioned by organization_id.
-        #    Raw SQL handles: backfill org_id from project, create partitioned
-        #    table, copy data, swap tables, add constraints/indexes.
+        #    Raw SQL drops the old table and creates the partitioned replacement.
         #    Hash child partitions are created by RunPython (step 3) so the
         #    bucket count follows settings.PARTITION_HASH_BUCKETS.
         migrations.SeparateDatabaseAndState(
@@ -164,7 +163,7 @@ class Migration(migrations.Migration):
                     field=models.JSONField(default=dict),
                 ),
                 # Change FKs to DO_NOTHING (no DB-level constraints for
-                # managed=False partitioned tables — avoids TRUNCATE conflicts)
+                # partitioned tables)
                 migrations.AlterField(
                     model_name="transactiongroup",
                     name="project",
@@ -204,11 +203,6 @@ class Migration(migrations.Migration):
                         fields=["organization", "last_seen"],
                         name="perf_txgroup_org_lastseen",
                     ),
-                ),
-                # Mark managed = False (table created by raw SQL)
-                migrations.AlterModelOptions(
-                    name="transactiongroup",
-                    options={"managed": False},
                 ),
             ],
             database_operations=[
@@ -281,7 +275,6 @@ class Migration(migrations.Migration):
                     ],
                     options={
                         "db_table": "performance_spanstaging",
-                        "managed": False,
                     },
                 ),
             ],
