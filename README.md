@@ -71,6 +71,22 @@ This automatically configures `pg_partman` but you can update it manually with `
 Default partitioning uses `DATE` partitions managed by Django. Advanced partitioning uses nested `ORG_ID HASH > DATE`
 partitions managed by `pg_partman`.
 
+### Screenshot / demo data
+
+Generate curated, realistic-looking data for product screenshots or local demos:
+
+```shell
+docker compose run --rm web ./manage.py make_screenshot_data
+```
+
+This creates an organization ("GitBot Software") with projects, issues, transactions, logs, uptime monitors, and alerts. Login with `rob.bot@gitbot-software.io` / `screenshot`.
+
+To wipe and recreate the data:
+
+```shell
+docker compose run --rm web ./manage.py make_screenshot_data --clean
+```
+
 ### Load testing
 
 We use [Locust](https://locust.io/) to load test. It's built into the dev dependencies.
