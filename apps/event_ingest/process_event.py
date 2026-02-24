@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -36,11 +37,12 @@ from apps.issue_events.models import (
     TagKey,
     TagValue,
 )
-from apps.performance.models import (
-    TransactionEvent,
-    TransactionGroup,
-    TransactionGroupAggregate,
+from apps.performance.histogram import (
+    merge_durations,
+    percentile_from_histogram,
 )
+from apps.performance.models import SpanStaging, TransactionGroup
+from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
@@ -84,6 +86,7 @@ MAX_TOTAL_FILENAMES = 5
 MAX_FRAMES_PER_STACKTRACE = 3
 MAX_STACKTRACES_TO_PROCESS = 2
 MAX_VECTOR_STRING_SEGMENT_LEN = 2048  # 2KB
+MAX_SPANS_PER_TRANSACTION = 1000
 
 STATS_TABLE_CONFIG = {
     "projects_issueeventprojecthourlystatistic": {"id_column": "project_id"},
@@ -1048,57 +1051,129 @@ def update_org_statistics(
         cursor.execute(sql)
 
 
-def update_transaction_group_stats(
-    stats_data: defaultdict[datetime, defaultdict[int, dict]],
+def _is_error_status(trace_status: str | None) -> bool:
+    """Check if a trace status indicates an error."""
+    return trace_status in (
+        "internal_error",
+        "unavailable",
+        "deadline_exceeded",
+        "unimplemented",
+        "permission_denied",
+        "unauthenticated",
+        "resource_exhausted",
+        "data_loss",
+        "aborted",
+        "failed_precondition",
+        "out_of_range",
+        "unknown",
+    )
+
+
+def _update_transaction_group_stats(
+    group_durations: dict[int, list[float]],
+    group_error_counts: dict[int, int],
 ):
     """
-    Bulk upserts 1-minute statistics for the TransactionGroupAggregate model.
+    Update TransactionGroup stats using append-only SQL.
+
+    Phase 1: A single UPDATE ... FROM (VALUES ...) atomically merges count,
+    error_count, avg_duration, and duration_histogram.
+
+    Phase 2: Reads the merged histogram back and recomputes p50/p95 in Python.
+
+    Both phases run in a single transaction so the Phase 1 row locks are held
+    until p50/p95 are written, preventing concurrent workers from reading a
+    stale histogram between the two phases.
     """
-    table_name = TransactionGroupAggregate._meta.db_table
-    data = []
-
-    for date, inner_dict in stats_data.items():
-        for group_id, stats in inner_dict.items():
-            # Ensure organization_id is present before appending
-            if (organization_id := stats.get("organization_id")) is not None:
-                data.append(
-                    (
-                        date,
-                        organization_id,
-                        group_id,
-                        stats["count"],
-                        stats["total_duration"],
-                        stats["sum_of_squares_duration"],
-                        "{}",
-                    )
-                )
-
-    if not data:
+    if not group_durations:
         return
 
-    # Sort by the primary key to avoid potential deadlocks on concurrent writes
-    data.sort(key=itemgetter(0, 1, 2))
+    # Build VALUES list for a single batched UPDATE ... FROM (VALUES ...)
+    # Each row: (group_id, batch_count, batch_total, error_count, histogram_increment)
+    values_data = []
+    for group_id, durations in group_durations.items():
+        batch_count = len(durations)
+        batch_total = sum(durations)
+        error_count = group_error_counts.get(group_id, 0)
+        histogram_inc = merge_durations({}, durations)
+        histogram_json = json.dumps(histogram_inc)
+        values_data.append(
+            (group_id, batch_count, batch_total, error_count, histogram_json)
+        )
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
+    if not values_data:
+        return
 
-        # The ON CONFLICT target must match the composite PK
-        conflict_target = "(group_id, organization_id, date)"
+    # Sort by group_id so concurrent workers lock rows in the same order
+    values_data.sort(key=lambda x: x[0])
 
-        # Construct the final SQL query for an atomic "upsert"
-        sql = f"""
-            INSERT INTO {table_name} (
-                date, organization_id, group_id, count,
-                total_duration, sum_of_squares_duration, histogram
+    # Wrap both phases in a single transaction so the Phase 1 UPDATE holds
+    # row locks until p50/p95 are written, preventing concurrent workers
+    # from reading a stale histogram between the two phases.
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            # Phase 1: Atomically merge count, error_count, avg_duration,
+            # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
+            placeholders = ",".join(
+                cursor.mogrify("(%s,%s,%s,%s,%s::jsonb)", row) for row in values_data
             )
-            VALUES {args_str}
-            ON CONFLICT {conflict_target}
-            DO UPDATE SET
-                count = {table_name}.count + EXCLUDED.count,
-                total_duration = {table_name}.total_duration + EXCLUDED.total_duration,
-                sum_of_squares_duration = {table_name}.sum_of_squares_duration + EXCLUDED.sum_of_squares_duration;
-        """
-        cursor.execute(sql)
+            cursor.execute(
+                f"""
+                UPDATE performance_transactiongroup AS tg
+                SET count = tg.count + v.batch_count,
+                    error_count = tg.error_count + v.error_count,
+                    avg_duration = CASE
+                        WHEN tg.count + v.batch_count > 0
+                        THEN (tg.avg_duration * tg.count + v.batch_total)
+                             / (tg.count + v.batch_count)
+                        ELSE 0
+                    END,
+                    last_seen = NOW(),
+                    duration_histogram = (
+                        SELECT COALESCE(jsonb_object_agg(key, total), '{{}}'::jsonb)
+                        FROM (
+                            SELECT key, SUM(value::int) AS total
+                            FROM (
+                                SELECT key, value FROM jsonb_each_text(tg.duration_histogram)
+                                UNION ALL
+                                SELECT key, value FROM jsonb_each_text(v.histogram_inc)
+                            ) combined
+                            GROUP BY key
+                        ) merged
+                    )
+                FROM (VALUES {placeholders})
+                    AS v(group_id, batch_count, batch_total, error_count, histogram_inc)
+                WHERE tg.id = v.group_id
+                """
+            )
+
+        # Phase 2: Recompute p50/p95 from the merged histogram.
+        # Within the same transaction, this sees the Phase 1 changes and
+        # the row locks prevent other workers from interleaving.
+        group_ids = [row[0] for row in values_data]
+        updated_groups = TransactionGroup.objects.filter(id__in=group_ids).only(
+            "id", "count", "duration_histogram"
+        )
+        p_updates = []
+        for g in updated_groups:
+            p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
+            p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
+            p_updates.append((p50, p95, g.id))
+
+        if p_updates:
+            p_updates.sort(key=lambda x: x[2])
+            with connection.cursor() as cursor:
+                placeholders = ",".join(
+                    cursor.mogrify("(%s,%s,%s)", row) for row in p_updates
+                )
+                cursor.execute(
+                    f"""
+                    UPDATE performance_transactiongroup AS tg
+                    SET p50 = v.p50, p95 = v.p95
+                    FROM (VALUES {placeholders}) AS v(p50, p95, group_id)
+                    WHERE tg.id = v.group_id
+                    """
+                )
 
 
 TagStats = defaultdict[
@@ -1195,13 +1270,15 @@ def update_tags(processing_events: list[ProcessingEvent]):
 def process_transaction_events(
     ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
 ):
+    now = timezone.now()
+
     projects_to_update = {
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
     if projects_to_update:
         Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
-        ).update(first_event=timezone.now())
+        ).update(first_event=now)
 
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)
@@ -1219,101 +1296,137 @@ def process_transaction_events(
     _get_or_create_related_models(
         release_set, environment_set, project_set, read_only_db
     )
-    transactions = []
+
+    # 1. Parse event data and collect unique group keys
+    GroupKey = tuple[int, str, str, str]  # (project_id, transaction, op, method)
+    event_data: list[
+        tuple[InterchangeTransactionEvent, str, str, str | None, GroupKey]
+    ] = []
+    unique_keys: dict[GroupKey, int] = {}  # key -> organization_id
 
     for ingest_event in ingest_events:
         event = ingest_event.payload
         contexts = event.contexts
         request = event.request
-        trace_id = contexts["trace"]["trace_id"]
         op = ""
+        trace_status = None
         if isinstance(contexts, dict):
             trace = contexts.get("trace", {})
             if isinstance(trace, dict):
                 op = str(trace.get("op", ""))
+                trace_status = trace.get("status")
         method = ""
         if request and request.method:
             method = request.method
 
-        # TODO tags
+        transaction_name = event.transaction[:1024]
+        key: GroupKey = (ingest_event.project_id, transaction_name, op, method)
+        unique_keys.setdefault(key, ingest_event.organization_id)
+        event_data.append((ingest_event, transaction_name, op, trace_status, key))
 
-        group = (
-            TransactionGroup.objects.using(read_only_db)
-            .filter(
-                project_id=ingest_event.project_id,
-                transaction=event.transaction[:1024],  # Truncate
-                op=op,
-                method=method,
+    # 2. Batch fetch existing TransactionGroups (single query)
+    if unique_keys:
+        q = Q()
+        for project_id, txn, op, method in unique_keys:
+            q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
+        existing = {
+            (g.project_id, g.transaction, g.op, g.method): g
+            for g in TransactionGroup.objects.using(read_only_db).filter(q)
+        }
+    else:
+        existing = {}
+
+    # Batch create any missing groups
+    missing_keys = [k for k in unique_keys if k not in existing]
+    if missing_keys:
+        new_groups = [
+            TransactionGroup(
+                project_id=k[0],
+                transaction=k[1],
+                op=k[2],
+                method=k[3],
+                organization_id=unique_keys[k],
+                first_seen=now,
+                last_seen=now,
             )
-            .first()
-        )
-        if not group:
-            group, _ = TransactionGroup.objects.get_or_create(
-                project_id=ingest_event.project_id,
-                transaction=event.transaction[:1024],  # Truncate
-                op=op,
-                method=method,
-            )
+            for k in missing_keys
+        ]
+        TransactionGroup.objects.bulk_create(new_groups, ignore_conflicts=True)
+        # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
+        if missing_keys:
+            q = Q()
+            for project_id, txn, op, method in missing_keys:
+                q |= Q(
+                    project_id=project_id, transaction=txn, op=op, method=method
+                )
+            for g in TransactionGroup.objects.filter(q):
+                existing[(g.project_id, g.transaction, g.op, g.method)] = g
 
-        transactions.append(
-            TransactionEvent(
-                group=group,
-                organization_id=ingest_event.organization_id,
-                data=remove_bad_chars(
-                    {
-                        "request": request.dict() if request else None,
-                        "sdk": event.sdk.dict() if event.sdk else None,
-                        "platform": event.platform,
-                    }
-                ),
-                trace_id=trace_id,
-                event_id=event.event_id,
-                timestamp=event.timestamp,
-                start_timestamp=event.start_timestamp,
-            )
-        )
-    TransactionEvent.objects.bulk_create(transactions, ignore_conflicts=True)
-
-    group_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
-        lambda: defaultdict(
-            lambda: {
-                "count": 0,
-                "total_duration": 0.0,
-                "sum_of_squares_duration": 0.0,
-            }
-        )
-    )
-    for perf_transaction in transactions:
-        # Truncate the timestamp to the minute for our 1-minute aggregation buckets.
-        minute_timestamp = perf_transaction.start_timestamp.replace(
-            second=0, microsecond=0
-        )
-        group_id = perf_transaction.group_id
-        duration: int | None = perf_transaction.duration_ms
-
-        stats_bucket = group_stats[minute_timestamp][group_id]
-
-        # Set organization_id once per bucket, as it's part of the key.
-        if "organization_id" not in stats_bucket:
-            stats_bucket["organization_id"] = perf_transaction.organization_id
-
-        stats_bucket["count"] += 1
-        if duration:
-            stats_bucket["total_duration"] += duration
-            stats_bucket["sum_of_squares_duration"] += duration**2
-    update_transaction_group_stats(group_stats)
+    # 3. Collect durations, error counts, and spans per group
+    group_durations: dict[int, list[float]] = defaultdict(list)
+    group_error_counts: dict[int, int] = defaultdict(int)
+    span_rows: list[SpanStaging] = []
 
     data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
         lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
     )
 
-    for perf_transaction in transactions:
-        hour_received = perf_transaction.start_timestamp.replace(
-            minute=0, second=0, microsecond=0
-        )
-        project_stats = data_stats[hour_received][perf_transaction.group.project_id]
+    for ingest_event, transaction_name, op, trace_status, key in event_data:
+        event = ingest_event.payload
+        group = existing.get(key)
+        if not group:
+            continue  # Should not happen after bulk_create
+
+        # Calculate duration
+        duration_ms = 0.0
+        if event.timestamp and event.start_timestamp:
+            delta = event.timestamp - event.start_timestamp
+            duration_ms = max(0.0, delta.total_seconds() * 1000)
+
+        group_durations[group.id].append(duration_ms)
+
+        if _is_error_status(trace_status):
+            group_error_counts[group.id] += 1
+
+        # Hourly project statistics
+        hour_received = event.start_timestamp.replace(minute=0, second=0, microsecond=0)
+        project_stats = data_stats[hour_received][ingest_event.project_id]
         project_stats["count"] += 1
-        project_stats["organization_id"] = perf_transaction.organization_id
+        project_stats["organization_id"] = ingest_event.organization_id
+
+        # Extract spans (capped to prevent abuse from oversized transactions)
+        event_id_hex = event.event_id.hex if event.event_id else ""
+        if event.spans:
+            for span in event.spans[:MAX_SPANS_PER_TRANSACTION]:
+                span_duration_ms = 0.0
+                if span.timestamp and span.start_timestamp:
+                    span_delta = span.timestamp - span.start_timestamp
+                    span_duration_ms = max(0.0, span_delta.total_seconds() * 1000)
+
+                description = parameterize_description(span.op, span.description)
+
+                span_rows.append(
+                    SpanStaging(
+                        organization_id=ingest_event.organization_id,
+                        project_id=ingest_event.project_id,
+                        transaction_name=transaction_name,
+                        span_id=span.span_id[:32],
+                        transaction_id=event_id_hex[:32],
+                        op=span.op[:255],
+                        description=description,
+                        duration=span_duration_ms,
+                        timestamp=span.start_timestamp or event.start_timestamp,
+                    )
+                )
+
+    # 4. Update TransactionGroup stats atomically (append-only, no read-modify-write)
+    _update_transaction_group_stats(group_durations, group_error_counts)
+
+    # 5. Bulk insert span staging rows
+    if span_rows:
+        SpanStaging.objects.bulk_create(span_rows, batch_size=1000)
+
+    # 6. Update hourly project statistics
     update_statistics(
         data_stats,
         table_name="projects_transactioneventprojecthourlystatistic",

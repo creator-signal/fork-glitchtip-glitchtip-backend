@@ -22,6 +22,7 @@ High-scale deployments can disable manual cleanup and use S3 lifecycle policies.
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -93,6 +94,54 @@ def is_duckdb_available() -> bool:
 
 def get_duckdb_connection(storage=None):
     """
+    Create a fresh standalone DuckDB connection, optionally configured for S3.
+
+    Use this for write operations or when temp tables are needed (e.g. promotion).
+    For read-only queries, prefer ``get_duckdb_read_connection()`` which caches
+    a connection per thread.
+
+    The caller is responsible for closing the returned connection.
+    """
+    return _create_duckdb_connection(storage)
+
+
+# Thread-local storage for cached read-only DuckDB connections.
+_thread_local = threading.local()
+
+
+def get_duckdb_read_connection(storage=None):
+    """
+    Get a thread-local cached DuckDB connection for read-only queries.
+
+    Avoids the overhead of creating a new DuckDB connection (and loading
+    S3 extensions) on every query. The connection is reused across calls
+    within the same thread and lazily created on first use.
+
+    Do NOT call .close() on the returned connection — it is managed by
+    the thread-local cache. Use ``close_duckdb_read_connection()`` for
+    explicit cleanup (e.g. in tests).
+    """
+    conn = getattr(_thread_local, "duckdb_conn", None)
+    if conn is not None:
+        return conn
+    conn = _create_duckdb_connection(storage)
+    _thread_local.duckdb_conn = conn
+    return conn
+
+
+def close_duckdb_read_connection():
+    """Close and discard the thread-local cached DuckDB connection."""
+    conn = getattr(_thread_local, "duckdb_conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _thread_local.duckdb_conn = None
+
+
+def _create_duckdb_connection(storage=None):
+    """
     Create a standalone DuckDB connection, optionally configured for S3 access.
 
     For S3 backends: loads httpfs and configures credentials from the storage instance.
@@ -100,8 +149,6 @@ def get_duckdb_connection(storage=None):
 
     Extensions must be pre-installed (Docker image or CI script).
     When DUCKDB_EXTENSION_DIRECTORY is set, autoinstall is disabled.
-
-    Each call creates a fresh connection — no session state leaks.
     """
     import duckdb
 
@@ -139,6 +186,11 @@ def get_duckdb_connection(storage=None):
             conn.execute("SET s3_url_style = 'path';")
 
     return conn
+
+
+def duckdb_quote_path(path: str) -> str:
+    """Escape a file path for safe interpolation into DuckDB SQL string literals."""
+    return path.replace("'", "''")
 
 
 def get_duckdb_parquet_path(storage, relative_path: str) -> str:
@@ -272,7 +324,7 @@ def archive_partition_per_org(
                         clean_rows,
                     )
                     duck_conn.execute(
-                        f"COPY export_data TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                        f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
                     )
                     archived_files.append((org_id, parquet_path))
                     logger.debug(f"Archived org {org_id} to {parquet_path}")
@@ -425,6 +477,10 @@ def cleanup_cold_storage_for_org(
     """
     Delete cold storage files older than retention period for an org.
 
+    Handles both file layouts:
+    - Compacted flat files: org_{id}/{date}.parquet
+    - Chunk files: org_{id}/{date}/chunk_*.parquet (pre-compaction)
+
     Computes paths directly from a 30-day window before the retention cutoff.
     No external state (cache/DB) needed - storage.delete() is a no-op on
     most backends if the file doesn't exist.
@@ -439,6 +495,7 @@ def cleanup_cold_storage_for_org(
 
     cutoff = timezone.now() - timedelta(days=retention_days)
     deleted_count = 0
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
 
     # Sweep a 30-day window before the retention cutoff.
     # Files older than cutoff-30d would have been cleaned in prior runs.
@@ -446,13 +503,32 @@ def cleanup_cold_storage_for_org(
     for day_offset in range(cleanup_window_days):
         file_date = cutoff - timedelta(days=day_offset)
         date_str = file_date.strftime("%Y%m%d")
+
+        # Delete compacted flat file: org_{id}/{date}.parquet
         storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
         try:
             if storage.exists(storage_path):
                 storage.delete(storage_path)
                 deleted_count += 1
-                logger.debug(f"Deleted {storage_path}")
         except Exception:
+            pass
+
+        # Delete chunk files: org_{id}/{date}/chunk_*.parquet
+        chunk_dir = f"{org_prefix}/{date_str}"
+        try:
+            _, chunk_files = storage.listdir(chunk_dir)
+            for f in chunk_files:
+                try:
+                    storage.delete(f"{chunk_dir}/{f}")
+                    deleted_count += 1
+                except Exception:
+                    pass
+            # Try to remove the empty directory (filesystem only)
+            try:
+                os.rmdir(storage.path(chunk_dir))
+            except (OSError, NotImplementedError):
+                pass
+        except (NotImplementedError, OSError):
             pass
 
     if deleted_count:
@@ -548,7 +624,7 @@ def query_cold_parquet_files(
             parquet_path = get_duckdb_parquet_path(storage, relative_path)
             sql = f"""
                 SELECT {select_columns}
-                FROM read_parquet('{parquet_path}')
+                FROM read_parquet('{duckdb_quote_path(parquet_path)}')
                 WHERE {where_sql}
                 ORDER BY id DESC
                 LIMIT {limit_param};
@@ -686,9 +762,10 @@ def delete_org_cold_storage(
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
     deleted_count = 0
 
-    # Try listing files under the org prefix
+    # Try listing files under the org prefix (including subdirectories
+    # for chunk-file layouts like performance_spans/{date}/chunk_*.parquet)
     try:
-        _dirs, files = storage.listdir(org_prefix)
+        dirs, files = storage.listdir(org_prefix)
         for filename in files:
             file_path = f"{org_prefix}/{filename}"
             try:
@@ -696,6 +773,29 @@ def delete_org_cold_storage(
                 deleted_count += 1
             except Exception:
                 logger.warning("Failed to delete cold file %s", file_path)
+        # Recurse into subdirectories (e.g. date dirs with chunk files)
+        for subdir in dirs:
+            subdir_path = f"{org_prefix}/{subdir}"
+            try:
+                _, subfiles = storage.listdir(subdir_path)
+                for subfile in subfiles:
+                    try:
+                        storage.delete(f"{subdir_path}/{subfile}")
+                        deleted_count += 1
+                    except Exception:
+                        logger.warning(
+                            "Failed to delete cold file %s/%s", subdir_path, subfile
+                        )
+                # Try to remove the empty directory (filesystem only)
+                if not org_prefix.startswith("s3://"):
+                    try:
+                        import os
+
+                        os.rmdir(storage.path(subdir_path))
+                    except OSError:
+                        pass
+            except (NotImplementedError, OSError):
+                pass
     except (NotImplementedError, OSError):
         # listdir not supported — fall back to date sweep
         now = timezone.now()
@@ -751,14 +851,33 @@ def rewrite_parquet_excluding_project(
         return 0
 
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
-    files_to_process = []
+    # List of (relative_path, parquet_path) tuples to process
+    files_to_process: list[tuple[str, str]] = []
 
-    # Collect file list
+    # Collect file list (flat compacted files + chunk files in subdirectories)
     try:
-        _dirs, files = storage.listdir(org_prefix)
-        files_to_process = [f for f in files if f.endswith(".parquet")]
+        dirs, files = storage.listdir(org_prefix)
+        for f in files:
+            if f.endswith(".parquet"):
+                relative = f"{org_prefix}/{f}"
+                files_to_process.append(
+                    (relative, get_duckdb_parquet_path(storage, relative))
+                )
+        # Also collect chunk files in date subdirectories
+        for subdir in dirs:
+            subdir_path = f"{org_prefix}/{subdir}"
+            try:
+                _, subfiles = storage.listdir(subdir_path)
+                for sf in subfiles:
+                    if sf.endswith(".parquet"):
+                        relative = f"{subdir_path}/{sf}"
+                        files_to_process.append(
+                            (relative, get_duckdb_parquet_path(storage, relative))
+                        )
+            except (NotImplementedError, OSError):
+                pass
     except (NotImplementedError, OSError):
-        # Fall back to date sweep
+        # Fall back to date sweep (flat files only)
         now = timezone.now()
         for day_offset in range(365):
             file_date = now - timedelta(days=day_offset)
@@ -766,7 +885,10 @@ def rewrite_parquet_excluding_project(
             storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
             try:
                 if storage.exists(storage_path):
-                    files_to_process.append(f"{date_str}.parquet")
+                    relative = storage_path
+                    files_to_process.append(
+                        (relative, get_duckdb_parquet_path(storage, relative))
+                    )
             except Exception:
                 pass
 
@@ -784,16 +906,13 @@ def rewrite_parquet_excluding_project(
 
     rewritten_count = 0
 
-    for filename in files_to_process:
-        date_str = filename.replace(".parquet", "")
-        relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
-        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+    for relative_path, parquet_path in files_to_process:
 
         try:
             duck_conn = get_duckdb_connection(storage)
             try:
                 # Count remaining rows after filtering
-                count_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}') {where_clause}"
+                count_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}') {where_clause}"
                 remaining = duck_conn.execute(count_sql).fetchone()[0]
 
                 if remaining == 0:
@@ -805,7 +924,7 @@ def rewrite_parquet_excluding_project(
                     continue
 
                 # Check if any rows were actually filtered out
-                total_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')"
+                total_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}')"
                 total = duck_conn.execute(total_sql).fetchone()[0]
 
                 if remaining == total:
@@ -815,9 +934,9 @@ def rewrite_parquet_excluding_project(
                 # Rewrite the file excluding the project's data
                 rewrite_sql = f"""
                     COPY (
-                        SELECT * FROM read_parquet('{parquet_path}')
+                        SELECT * FROM read_parquet('{duckdb_quote_path(parquet_path)}')
                         {where_clause}
-                    ) TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """
                 duck_conn.execute(rewrite_sql)
                 rewritten_count += 1
