@@ -658,15 +658,17 @@ VTASKS_SCHEDULE = {
         "task": "glitchtip.tasks.perform_maintenance",
         "schedule": crontab(hour=5, minute=0),
     },
-    "promote-spans": {
+}
+
+if str(GLITCHTIP_ENABLE_DUCKDB or "").lower() == "true":
+    VTASKS_SCHEDULE["promote-spans"] = {
         "task": "apps.performance.tasks.promote_spans",
         "schedule": 300,
-    },
-    "compact-span-chunks": {
+    }
+    VTASKS_SCHEDULE["compact-span-chunks"] = {
         "task": "apps.performance.tasks.compact_span_chunks",
         "schedule": crontab(hour=3, minute=0),
-    },
-}
+    }
 
 if GLITCHTIP_ENABLE_UPTIME:
     VTASKS_SCHEDULE["uptime-dispatch-checks"] = {

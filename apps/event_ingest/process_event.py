@@ -41,7 +41,7 @@ from apps.performance.histogram import (
     merge_durations,
     percentile_from_histogram,
 )
-from apps.performance.models import SpanStaging, TransactionGroup
+from apps.performance.models import TransactionGroup
 from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
@@ -1363,9 +1363,14 @@ def process_transaction_events(
                 existing[(g.project_id, g.transaction, g.op, g.method)] = g
 
     # 3. Collect durations, error counts, and spans per group
+    from glitchtip.cold_storage import is_duckdb_available
+
+    collect_spans = is_duckdb_available()
+    if collect_spans:
+        from apps.performance.models import SpanStaging
     group_durations: dict[int, list[float]] = defaultdict(list)
     group_error_counts: dict[int, int] = defaultdict(int)
-    span_rows: list[SpanStaging] = []
+    span_rows: list = []
 
     data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
         lambda: defaultdict(lambda: {"count": 0, "organization_id": None})
@@ -1393,6 +1398,9 @@ def process_transaction_events(
         project_stats = data_stats[hour_received][ingest_event.project_id]
         project_stats["count"] += 1
         project_stats["organization_id"] = ingest_event.organization_id
+
+        if not collect_spans:
+            continue
 
         # Extract spans (capped to prevent abuse from oversized transactions)
         event_id_hex = event.event_id.hex if event.event_id else ""
