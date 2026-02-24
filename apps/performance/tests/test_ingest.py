@@ -4,7 +4,7 @@ End-to-end tests for transaction ingest → TransactionGroup stats + SpanStaging
 
 from datetime import datetime, timedelta
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
 
@@ -179,6 +179,7 @@ class TransactionIngestTestCase(TestCase):
         ])
         self.assertEqual(TransactionGroup.objects.count(), 2)
 
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_spans_written_to_staging(self):
         """Spans from the transaction are written to SpanStaging."""
         base = timezone.now() - timedelta(minutes=1)
@@ -218,6 +219,7 @@ class TransactionIngestTestCase(TestCase):
         # SQL should be parameterized
         self.assertIn("%s", db_span.description)
 
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_span_description_parameterized(self):
         """SQL literals in span descriptions are replaced with %s."""
         base = timezone.now() - timedelta(minutes=1)
