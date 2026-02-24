@@ -85,7 +85,7 @@ class DuckDBConnectionTestCase(TestCase):
 
     def test_get_connection_no_s3(self):
         """Test creating a DuckDB connection without S3 (filesystem backend)."""
-        from ..cold_storage import get_duckdb_connection
+        from glitchtip.cold_storage import get_duckdb_connection
 
         conn = get_duckdb_connection()
         try:

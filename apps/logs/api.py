@@ -284,12 +284,10 @@ def query_cold_storage(
     entire query. DuckDB runs in-process — no PostgreSQL extension
     required, no connection pooling interaction.
     """
-    from .cold_storage import is_duckdb_available
+    from glitchtip.cold_storage import is_duckdb_available, query_cold_parquet_files
 
     if not is_duckdb_available():
         return []
-
-    from glitchtip.cold_storage import query_cold_parquet_files
 
     # Build WHERE clause with DuckDB $N positional parameters
     where_parts = ["organization_id = $1"]
@@ -470,12 +468,9 @@ def _get_log_from_cold(
     """Fetch a single log from cold storage (DuckDB/Parquet)."""
     from glitchtip.cold_storage import (
         get_cold_storage_backend,
-        get_org_cold_storage_path,
-    )
-
-    from .cold_storage import (
         get_duckdb_connection,
         get_duckdb_parquet_path,
+        get_org_cold_storage_path,
         is_duckdb_available,
     )
 

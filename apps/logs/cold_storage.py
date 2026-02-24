@@ -2,16 +2,8 @@
 Cold storage utilities for archiving log partitions to Parquet via standalone DuckDB.
 
 This is a thin wrapper around glitchtip.cold_storage with logs-specific configuration.
-Shared functions (is_duckdb_available, etc.) are re-exported for backward compatibility
-with existing imports.
 """
 
-from glitchtip.cold_storage import (  # noqa: F401 - re-exported for callers
-    COLD_STORAGE_PREFIX,
-    get_duckdb_connection,
-    get_duckdb_parquet_path,
-    is_duckdb_available,
-)
 from glitchtip.cold_storage import (
     archive_and_swap_partition as _archive_and_swap_partition,
 )

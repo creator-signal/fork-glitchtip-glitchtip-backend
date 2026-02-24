@@ -16,9 +16,11 @@ from glitchtip.cold_storage import (
     archive_partition_per_org as _archive_partition_per_org,
 )
 from glitchtip.cold_storage import (
+    close_duckdb_read_connection,
+    duckdb_quote_path,
     get_cold_storage_backend,
-    get_duckdb_connection,
     get_duckdb_parquet_path,
+    get_duckdb_read_connection,
     get_org_cold_storage_path,
     is_duckdb_available,
     parse_json_field,
@@ -252,24 +254,21 @@ def get_event_from_cold(
     relative_path = get_org_cold_storage_path(TABLE_NAME, organization_id, date_str)
     parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
+    duck_conn = get_duckdb_read_connection(storage)
     try:
-        duck_conn = get_duckdb_connection(storage)
-        try:
-            sql = f"""
-                SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
-                       type, level, title, transaction, data, tags, hashes
-                FROM read_parquet('{parquet_path}')
-                WHERE id = $1 AND organization_id = $2
-                LIMIT 1;
-            """
-            result = duck_conn.execute(sql, [str(event_id), organization_id])
-            row = result.fetchone()
-            if row:
-                return _row_to_issue_event(row)
-        finally:
-            duck_conn.close()
-
+        sql = f"""
+            SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
+                   type, level, title, transaction, data, tags, hashes
+            FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+            WHERE id = $1 AND organization_id = $2
+            LIMIT 1;
+        """
+        result = duck_conn.execute(sql, [str(event_id), organization_id])
+        row = result.fetchone()
+        if row:
+            return _row_to_issue_event(row)
     except Exception as e:
+        close_duckdb_read_connection()
         error_str = str(e)
         if any(
             msg in error_str

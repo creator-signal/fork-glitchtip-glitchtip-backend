@@ -614,8 +614,8 @@ def cleanup_all_cold_storage(
     qs = Organization.objects.all()
     if settings.BILLING_ENABLED:
         qs = qs.filter(stripe_primary_subscription__isnull=False)
-    for org in qs.iterator():
-        deleted = cleanup_cold_storage_for_org(org.id, retention_days, table_name)
+    for org_id in qs.values_list("id", flat=True):
+        deleted = cleanup_cold_storage_for_org(org_id, retention_days, table_name)
         total_deleted += deleted
 
     logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
