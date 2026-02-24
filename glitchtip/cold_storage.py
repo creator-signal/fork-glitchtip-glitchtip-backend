@@ -694,6 +694,15 @@ def query_cold_parquet_files(
     return all_rows
 
 
+def is_missing_file_error(exc: Exception) -> bool:
+    """Check if a DuckDB exception indicates a missing/inaccessible Parquet file."""
+    error_str = str(exc)
+    return any(
+        msg in error_str
+        for msg in ("No files found", "Could not open", "404", "Not Found")
+    )
+
+
 def parse_json_field(val) -> dict:
     """Parse a value that may be dict, JSON string, or None into a dict."""
     if val is None:
@@ -956,48 +965,48 @@ def rewrite_parquet_excluding_project(
 
     rewritten_count = 0
 
-    for relative_path, parquet_path in files_to_process:
-
-        try:
-            duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        for relative_path, parquet_path in files_to_process:
             try:
+                quoted = duckdb_quote_path(parquet_path)
+
                 # Count remaining rows after filtering
-                count_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}') {where_clause}"
-                remaining = duck_conn.execute(count_sql).fetchone()[0]
+                remaining = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
+                ).fetchone()[0]
 
                 if remaining == 0:
                     # No rows left — delete the file
-                    duck_conn.close()
                     storage.delete(relative_path)
                     rewritten_count += 1
                     logger.debug("Deleted empty cold file %s", relative_path)
                     continue
 
                 # Check if any rows were actually filtered out
-                total_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}')"
-                total = duck_conn.execute(total_sql).fetchone()[0]
+                total = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
+                ).fetchone()[0]
 
                 if remaining == total:
                     # No data from this project in this file, skip
                     continue
 
                 # Rewrite the file excluding the project's data
-                rewrite_sql = f"""
+                duck_conn.execute(f"""
                     COPY (
-                        SELECT * FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+                        SELECT * FROM read_parquet('{quoted}')
                         {where_clause}
-                    ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """
-                duck_conn.execute(rewrite_sql)
+                    ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
                 rewritten_count += 1
                 logger.debug("Rewrote cold file %s", relative_path)
-            finally:
-                duck_conn.close()
-        except Exception as e:
-            error_str = str(e)
-            if "No files found" in error_str or "Could not open" in error_str:
-                continue
-            logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+            except Exception as e:
+                if is_missing_file_error(e):
+                    continue
+                logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+    finally:
+        duck_conn.close()
 
     if rewritten_count:
         logger.info(
