@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 # Prefix for all cold storage files to prevent collisions with other data
 COLD_STORAGE_PREFIX = "cold_storage"
 
+# Rows fetched per batch during partition archival to bound memory usage
+ARCHIVE_BATCH_SIZE = 5000
+
 
 def get_cold_storage_backend():
     """
@@ -211,6 +214,24 @@ def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> st
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
 
 
+def _normalize_row(row: tuple) -> list:
+    """Normalize a database row for DuckDB insertion.
+
+    Converts UUIDs to strings and dicts/lists to JSON strings.
+    """
+    clean = []
+    for val in row:
+        if isinstance(val, dict):
+            clean.append(json.dumps(val))
+        elif isinstance(val, list):
+            clean.append(json.dumps(val))
+        elif hasattr(val, "hex"):  # UUID
+            clean.append(str(val))
+        else:
+            clean.append(val)
+    return clean
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -288,48 +309,49 @@ def archive_partition_per_org(
                     [org_id],
                 )
                 columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
 
-                if not rows:
-                    continue
-
-                # Write to storage via standalone DuckDB
-                import json
-
-                # Normalize values for DuckDB (UUIDs to strings, dicts to JSON, lists to JSON)
-                clean_rows = []
-                for row in rows:
-                    clean_row = []
-                    for val in row:
-                        if isinstance(val, dict):
-                            clean_row.append(json.dumps(val))
-                        elif isinstance(val, list):
-                            clean_row.append(json.dumps(val))
-                        elif hasattr(val, "hex"):  # UUID
-                            clean_row.append(str(val))
-                        else:
-                            clean_row.append(val)
-                    clean_rows.append(clean_row)
-
-                # Ensure parent directory exists for filesystem backends
-                if not _is_s3_storage(storage):
-                    os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-
-                duck_conn = get_duckdb_connection(storage)
+                # Stream rows in batches to bound memory usage
+                # instead of loading entire partition with fetchall()
+                duck_conn = None
+                row_count = 0
                 try:
-                    col_defs = ", ".join(f"{c} {column_types[c]}" for c in columns)
-                    duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
-                    duck_conn.executemany(
-                        f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                        clean_rows,
-                    )
-                    duck_conn.execute(
-                        f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
-                    )
-                    archived_files.append((org_id, parquet_path))
-                    logger.debug(f"Archived org {org_id} to {parquet_path}")
+                    while True:
+                        batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
+                        if not batch:
+                            break
+
+                        clean_batch = [_normalize_row(row) for row in batch]
+
+                        # Lazily create DuckDB table and output dir on first batch
+                        if duck_conn is None:
+                            if not _is_s3_storage(storage):
+                                os.makedirs(
+                                    os.path.dirname(parquet_path), exist_ok=True
+                                )
+                            duck_conn = get_duckdb_connection(storage)
+                            col_defs = ", ".join(
+                                f"{c} {column_types[c]}" for c in columns
+                            )
+                            duck_conn.execute(
+                                f"CREATE TABLE export_data({col_defs})"
+                            )
+
+                        duck_conn.executemany(
+                            f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
+                            clean_batch,
+                        )
+                        row_count += len(clean_batch)
+
+                    # Export to Parquet if any rows were inserted
+                    if duck_conn is not None and row_count > 0:
+                        duck_conn.execute(
+                            f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                        )
+                        archived_files.append((org_id, parquet_path))
+                        logger.debug(f"Archived org {org_id} to {parquet_path}")
                 finally:
-                    duck_conn.close()
+                    if duck_conn is not None:
+                        duck_conn.close()
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
