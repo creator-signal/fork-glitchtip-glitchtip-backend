@@ -40,18 +40,14 @@ class OAuthTokenAPIAuthTest(TestCase):
         """An OAuth access token in cache should authenticate API requests."""
         token = generate_token()
         self._store_oauth_token(token, ["org:read"])
-        res = self.client.get(
-            self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}"
-        )
+        res = self.client.get(self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(res.status_code, 200)
 
     def test_expired_oauth_token_rejected(self):
         """An expired OAuth access token should be rejected."""
         token = generate_token()
         self._store_oauth_token(token, ["org:read"], expires_at=int(time.time()) - 10)
-        res = self.client.get(
-            self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}"
-        )
+        res = self.client.get(self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(res.status_code, 401)
 
     def test_existing_api_token_still_works(self):
@@ -68,18 +64,14 @@ class OAuthTokenAPIAuthTest(TestCase):
         token = generate_token()
         # Token has event:read but endpoint requires org:read
         self._store_oauth_token(token, ["event:read"])
-        res = self.client.get(
-            self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}"
-        )
+        res = self.client.get(self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(res.status_code, 403)
 
     def test_oauth_scope_granted(self):
         """OAuth tokens with the right scope should get 200."""
         token = generate_token()
         self._store_oauth_token(token, ["org:read"])
-        res = self.client.get(
-            self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}"
-        )
+        res = self.client.get(self.list_url, HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(res.status_code, 200)
 
     def test_invalid_token_rejected(self):

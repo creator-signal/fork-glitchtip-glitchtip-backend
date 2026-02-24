@@ -568,9 +568,7 @@ class CorruptParquetTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
             # Corrupt day1's parquet file
             storage = get_cold_storage_backend()
-            day1_path = get_org_cold_storage_path(
-                "logs_logevent", org_id, "20250501"
-            )
+            day1_path = get_org_cold_storage_path("logs_logevent", org_id, "20250501")
             full_path = get_duckdb_parquet_path(storage, day1_path)
             with open(full_path, "wb") as f:
                 f.write(b"CORRUPT DATA")

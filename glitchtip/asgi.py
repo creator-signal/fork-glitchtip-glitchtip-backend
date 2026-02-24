@@ -153,7 +153,7 @@ class MCPDjangoDispatcher:
 
 from django.conf import settings  # noqa: E402
 
-from apps.mcp.server import mcp as _mcp_server
+from apps.mcp.server import mcp as _mcp_server  # noqa: E402
 
 _mcp_app = _mcp_server.streamable_http_app()
 application = MCPDjangoDispatcher(

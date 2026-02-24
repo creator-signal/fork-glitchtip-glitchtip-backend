@@ -57,9 +57,7 @@ class OAuthProviderGetClientTest(TestCase):
 
 
 @override_settings(
-    GLITCHTIP_URL=type(
-        "URL", (), {"geturl": lambda self: "http://localhost:8000"}
-    )()
+    GLITCHTIP_URL=type("URL", (), {"geturl": lambda self: "http://localhost:8000"})()
 )
 class OAuthProviderAuthorizeTest(TestCase):
     def setUp(self):
