@@ -10,6 +10,8 @@ from django.conf import settings
 
 from glitchtip.cold_storage import (
     archive_and_cleanup_partitions,
+    detach_partition,
+    drop_partition,
     get_partitions_older_than,
     is_duckdb_available,
 )
@@ -48,8 +50,6 @@ def cleanup_old_logs():
 
 def delete_old_hot_partitions(days: int):
     """Delete hot partitions older than `days` when cold storage unavailable."""
-    from django.db import connection
-
     partitions = get_partitions_older_than("logs_logevent", days)
 
     if not partitions:
@@ -61,9 +61,8 @@ def delete_old_hot_partitions(days: int):
 
     for name, date in partitions:
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(f"ALTER TABLE logs_logevent DETACH PARTITION {name};")
-                cursor.execute(f"DROP TABLE IF EXISTS {name} CASCADE;")
+            detach_partition(name, "logs_logevent")
+            drop_partition(name)
             logger.info(f"Deleted log partition {name}")
         except Exception as e:
             logger.error(f"Error deleting log partition {name}: {e}")

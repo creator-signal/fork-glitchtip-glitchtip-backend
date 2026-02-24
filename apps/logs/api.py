@@ -284,12 +284,10 @@ def query_cold_storage(
     entire query. DuckDB runs in-process — no PostgreSQL extension
     required, no connection pooling interaction.
     """
-    from .cold_storage import is_duckdb_available
+    from glitchtip.cold_storage import is_duckdb_available, query_cold_parquet_files
 
     if not is_duckdb_available():
         return []
-
-    from glitchtip.cold_storage import query_cold_parquet_files
 
     # Build WHERE clause with DuckDB $N positional parameters
     where_parts = ["organization_id = $1"]
@@ -469,14 +467,14 @@ def _get_log_from_cold(
 ) -> LogEventRow | None:
     """Fetch a single log from cold storage (DuckDB/Parquet)."""
     from glitchtip.cold_storage import (
+        close_duckdb_read_connection,
+        duckdb_quote_path,
         get_cold_storage_backend,
-        get_org_cold_storage_path,
-    )
-
-    from .cold_storage import (
-        get_duckdb_connection,
         get_duckdb_parquet_path,
+        get_duckdb_read_connection,
+        get_org_cold_storage_path,
         is_duckdb_available,
+        is_missing_file_error,
     )
 
     if not is_duckdb_available():
@@ -492,31 +490,22 @@ def _get_log_from_cold(
     )
     parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
+    duck_conn = get_duckdb_read_connection(storage)
     try:
-        duck_conn = get_duckdb_connection(storage)
-        try:
-            sql = f"""
-                SELECT id, trace_id, organization_id, project_id, span_id,
-                       level, severity_number, body, service, environment, host, data
-                FROM read_parquet('{parquet_path}')
-                WHERE id = $1 AND organization_id = $2
-                LIMIT 1;
-            """
-            result = duck_conn.execute(sql, [str(log_id), organization_id])
-            row = result.fetchone()
-            if row:
-                return _row_to_log_event(row)
-        finally:
-            duck_conn.close()
-
+        sql = f"""
+            SELECT id, trace_id, organization_id, project_id, span_id,
+                   level, severity_number, body, service, environment, host, data
+            FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+            WHERE id = $1 AND organization_id = $2
+            LIMIT 1;
+        """
+        result = duck_conn.execute(sql, [str(log_id), organization_id])
+        row = result.fetchone()
+        if row:
+            return _row_to_log_event(row)
     except Exception as e:
-        error_str = str(e)
-        if any(
-            msg in error_str
-            for msg in ("No files found", "Could not open", "404", "Not Found")
-        ):
-            pass  # File doesn't exist, log not in cold storage
-        else:
+        close_duckdb_read_connection()
+        if not is_missing_file_error(e):
             raise
 
     return None
