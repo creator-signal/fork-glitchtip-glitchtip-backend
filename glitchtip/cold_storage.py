@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 # Prefix for all cold storage files to prevent collisions with other data
 COLD_STORAGE_PREFIX = "cold_storage"
 
+# Rows fetched per batch during partition archival to bound memory usage
+ARCHIVE_BATCH_SIZE = 5000
+
 
 def get_cold_storage_backend():
     """
@@ -211,6 +214,24 @@ def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> st
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
 
 
+def _normalize_row(row: tuple) -> list:
+    """Normalize a database row for DuckDB insertion.
+
+    Converts UUIDs to strings and dicts/lists to JSON strings.
+    """
+    clean = []
+    for val in row:
+        if isinstance(val, dict):
+            clean.append(json.dumps(val))
+        elif isinstance(val, list):
+            clean.append(json.dumps(val))
+        elif hasattr(val, "hex"):  # UUID
+            clean.append(str(val))
+        else:
+            clean.append(val)
+    return clean
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -268,6 +289,7 @@ def archive_partition_per_org(
                     Organization.objects.filter(
                         id__in=org_ids,
                         stripe_primary_subscription__isnull=False,
+                        stripe_primary_subscription__price__price__gt=0,
                     ).values_list("id", flat=True)
                 )
                 skipped = len(org_ids) - len(eligible_ids)
@@ -277,59 +299,78 @@ def archive_partition_per_org(
 
             logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
-            # Export each org's data to a separate Parquet file
-            for org_id in org_ids:
-                relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
-                parquet_path = get_duckdb_parquet_path(storage, relative_path)
-
-                # Read org's data from PostgreSQL
-                cursor.execute(
-                    select_sql.format(partition_name=partition_name),
-                    [org_id],
-                )
-                columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
-
-                if not rows:
-                    continue
-
-                # Write to storage via standalone DuckDB
-                import json
-
-                # Normalize values for DuckDB (UUIDs to strings, dicts to JSON, lists to JSON)
-                clean_rows = []
-                for row in rows:
-                    clean_row = []
-                    for val in row:
-                        if isinstance(val, dict):
-                            clean_row.append(json.dumps(val))
-                        elif isinstance(val, list):
-                            clean_row.append(json.dumps(val))
-                        elif hasattr(val, "hex"):  # UUID
-                            clean_row.append(str(val))
-                        else:
-                            clean_row.append(val)
-                    clean_rows.append(clean_row)
-
-                # Ensure parent directory exists for filesystem backends
-                if not _is_s3_storage(storage):
-                    os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-
-                duck_conn = get_duckdb_connection(storage)
-                try:
-                    col_defs = ", ".join(f"{c} {column_types[c]}" for c in columns)
-                    duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
-                    duck_conn.executemany(
-                        f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                        clean_rows,
+            # Reuse a single DuckDB connection across all orgs to avoid
+            # repeated startup overhead (extension loading, S3 config).
+            duck_conn = get_duckdb_connection(storage)
+            try:
+                # Export each org's data to a separate Parquet file
+                for org_id in org_ids:
+                    relative_path = get_org_cold_storage_path(
+                        table_name, org_id, date_str
                     )
-                    duck_conn.execute(
-                        f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+
+                    # Skip orgs already archived (idempotent on crash/restart)
+                    if storage.exists(relative_path):
+                        archived_files.append((org_id, parquet_path))
+                        logger.debug(
+                            "Parquet already exists for org %d, skipping", org_id
+                        )
+                        continue
+
+                    # Read org's data from PostgreSQL
+                    cursor.execute(
+                        select_sql.format(partition_name=partition_name),
+                        [org_id],
                     )
-                    archived_files.append((org_id, parquet_path))
-                    logger.debug(f"Archived org {org_id} to {parquet_path}")
-                finally:
-                    duck_conn.close()
+                    columns = [desc[0] for desc in cursor.description]
+
+                    # Stream rows in batches to bound memory usage
+                    # instead of loading entire partition with fetchall()
+                    has_data = False
+                    row_count = 0
+                    try:
+                        while True:
+                            batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
+                            if not batch:
+                                break
+
+                            clean_batch = [_normalize_row(row) for row in batch]
+
+                            # Lazily create DuckDB table and output dir on first batch
+                            if not has_data:
+                                if not _is_s3_storage(storage):
+                                    os.makedirs(
+                                        os.path.dirname(parquet_path), exist_ok=True
+                                    )
+                                col_defs = ", ".join(
+                                    f"{c} {column_types[c]}" for c in columns
+                                )
+                                duck_conn.execute(
+                                    f"CREATE TABLE export_data({col_defs})"
+                                )
+                                has_data = True
+
+                            duck_conn.executemany(
+                                f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
+                                clean_batch,
+                            )
+                            row_count += len(clean_batch)
+
+                        # Export to Parquet if any rows were inserted
+                        if has_data and row_count > 0:
+                            duck_conn.execute(
+                                f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                            )
+                            archived_files.append((org_id, parquet_path))
+                            logger.debug(
+                                f"Archived org {org_id} to {parquet_path}"
+                            )
+                    finally:
+                        if has_data:
+                            duck_conn.execute("DROP TABLE IF EXISTS export_data")
+            finally:
+                duck_conn.close()
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
@@ -346,10 +387,19 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
     Detach a partition from its parent table.
 
     This is done before dropping the partition after archival.
+    Safe to call if the partition is already detached or does not exist.
     """
-    with connection.cursor() as cursor:
-        cursor.execute(f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name};")
-    logger.info(f"Detached partition {partition_name} from {parent_table}")
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name};"
+            )
+        logger.info("Detached partition %s from %s", partition_name, parent_table)
+    except Exception:
+        logger.info(
+            "Partition %s already detached or does not exist, continuing",
+            partition_name,
+        )
 
 
 def drop_partition(partition_name: str) -> None:
@@ -564,9 +614,12 @@ def cleanup_all_cold_storage(
 
     qs = Organization.objects.all()
     if settings.BILLING_ENABLED:
-        qs = qs.filter(stripe_primary_subscription__isnull=False)
-    for org in qs.iterator():
-        deleted = cleanup_cold_storage_for_org(org.id, retention_days, table_name)
+        qs = qs.filter(
+            stripe_primary_subscription__isnull=False,
+            stripe_primary_subscription__price__price__gt=0,
+        )
+    for org_id in qs.values_list("id", flat=True):
+        deleted = cleanup_cold_storage_for_org(org_id, retention_days, table_name)
         total_deleted += deleted
 
     logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
@@ -617,7 +670,7 @@ def query_cold_parquet_files(
         return []
 
     all_rows: list[tuple] = []
-    duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
         for filename in parquet_files:
             relative_path = f"{org_prefix}/{filename}"
@@ -638,10 +691,20 @@ def query_cold_parquet_files(
                     relative_path,
                     exc_info=True,
                 )
-    finally:
-        duck_conn.close()
+    except Exception:
+        close_duckdb_read_connection()
+        raise
 
     return all_rows
+
+
+def is_missing_file_error(exc: Exception) -> bool:
+    """Check if a DuckDB exception indicates a missing/inaccessible Parquet file."""
+    error_str = str(exc)
+    return any(
+        msg in error_str
+        for msg in ("No files found", "Could not open", "404", "Not Found")
+    )
 
 
 def parse_json_field(val) -> dict:
@@ -906,48 +969,48 @@ def rewrite_parquet_excluding_project(
 
     rewritten_count = 0
 
-    for relative_path, parquet_path in files_to_process:
-
-        try:
-            duck_conn = get_duckdb_connection(storage)
+    duck_conn = get_duckdb_connection(storage)
+    try:
+        for relative_path, parquet_path in files_to_process:
             try:
+                quoted = duckdb_quote_path(parquet_path)
+
                 # Count remaining rows after filtering
-                count_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}') {where_clause}"
-                remaining = duck_conn.execute(count_sql).fetchone()[0]
+                remaining = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
+                ).fetchone()[0]
 
                 if remaining == 0:
                     # No rows left — delete the file
-                    duck_conn.close()
                     storage.delete(relative_path)
                     rewritten_count += 1
                     logger.debug("Deleted empty cold file %s", relative_path)
                     continue
 
                 # Check if any rows were actually filtered out
-                total_sql = f"SELECT COUNT(*) FROM read_parquet('{duckdb_quote_path(parquet_path)}')"
-                total = duck_conn.execute(total_sql).fetchone()[0]
+                total = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
+                ).fetchone()[0]
 
                 if remaining == total:
                     # No data from this project in this file, skip
                     continue
 
                 # Rewrite the file excluding the project's data
-                rewrite_sql = f"""
+                duck_conn.execute(f"""
                     COPY (
-                        SELECT * FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+                        SELECT * FROM read_parquet('{quoted}')
                         {where_clause}
-                    ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """
-                duck_conn.execute(rewrite_sql)
+                    ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
                 rewritten_count += 1
                 logger.debug("Rewrote cold file %s", relative_path)
-            finally:
-                duck_conn.close()
-        except Exception as e:
-            error_str = str(e)
-            if "No files found" in error_str or "Could not open" in error_str:
-                continue
-            logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+            except Exception as e:
+                if is_missing_file_error(e):
+                    continue
+                logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+    finally:
+        duck_conn.close()
 
     if rewritten_count:
         logger.info(

@@ -10,10 +10,21 @@ def _generate_uuid7():
 
 
 class TransactionGroup(CreatedModel):
-    # 8-byte alignment: FKs
-    project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
+    """
+    Aggregate stats per unique (transaction, project, op, method).
+
+    Hash-partitioned by organization_id for multi-tenant query pruning.
+    managed = False — table created via raw SQL in migration 0021.
+    """
+
+    id = models.BigIntegerField(db_default=0, editable=False)
+    pk = models.CompositePrimaryKey("id", "organization")
+
+    # 8-byte alignment: FKs (DO_NOTHING = no DB-level FK constraints,
+    # matching SpanStaging pattern for managed=False partitioned tables)
+    project = models.ForeignKey("projects.Project", on_delete=models.DO_NOTHING)
     organization = models.ForeignKey(
-        "organizations_ext.Organization", on_delete=models.CASCADE
+        "organizations_ext.Organization", on_delete=models.DO_NOTHING
     )
 
     # Variable-width fields
@@ -36,9 +47,10 @@ class TransactionGroup(CreatedModel):
     duration_histogram = models.JSONField(default=dict)
 
     class Meta:
+        managed = False
         constraints = [
             models.UniqueConstraint(
-                fields=["transaction", "project", "op", "method"],
+                fields=["transaction", "project", "op", "method", "organization"],
                 name="unique_transaction_project_op_method",
             )
         ]
