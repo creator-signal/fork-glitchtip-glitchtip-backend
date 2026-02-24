@@ -289,6 +289,7 @@ def archive_partition_per_org(
                     Organization.objects.filter(
                         id__in=org_ids,
                         stripe_primary_subscription__isnull=False,
+                        stripe_primary_subscription__price__price__gt=0,
                     ).values_list("id", flat=True)
                 )
                 skipped = len(org_ids) - len(eligible_ids)
@@ -613,7 +614,10 @@ def cleanup_all_cold_storage(
 
     qs = Organization.objects.all()
     if settings.BILLING_ENABLED:
-        qs = qs.filter(stripe_primary_subscription__isnull=False)
+        qs = qs.filter(
+            stripe_primary_subscription__isnull=False,
+            stripe_primary_subscription__price__price__gt=0,
+        )
     for org_id in qs.values_list("id", flat=True):
         deleted = cleanup_cold_storage_for_org(org_id, retention_days, table_name)
         total_deleted += deleted
