@@ -23,6 +23,7 @@ from glitchtip.cold_storage import (
     get_duckdb_read_connection,
     get_org_cold_storage_path,
     is_duckdb_available,
+    is_missing_file_error,
     parse_json_field,
     parse_json_list_field,
 )
@@ -269,13 +270,7 @@ def get_event_from_cold(
             return _row_to_issue_event(row)
     except Exception as e:
         close_duckdb_read_connection()
-        error_str = str(e)
-        if any(
-            msg in error_str
-            for msg in ("No files found", "Could not open", "404", "Not Found")
-        ):
-            pass  # File doesn't exist
-        else:
+        if not is_missing_file_error(e):
             raise
 
     return None
