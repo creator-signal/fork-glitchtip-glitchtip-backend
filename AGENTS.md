@@ -54,3 +54,4 @@ curl -H "Authorization: Bearer ddddddddddddddddddddddddddddddddddddddddddddddddd
 - We optimize postgres column alignment, when making migrations consider column alignment. Some smaller tales don't matter. When in doubt, ask the user.
 - Some tables use nested postgres partitions, often organization_id HASH > uuid7 (time). When querying a partitioned tabled, consider optimizing the query to be partition aware
 - Target scaling up to 10,000 organizations and 100 million events
+- **Server-side cursors & PgBouncer:** Do NOT use Django's `.iterator(chunk_size=N)` or raw `DECLARE CURSOR` in production code paths. Many deployments use PgBouncer in transaction pooling mode, which does not support server-side cursors. Use `list()` with `values_list()` and explicit `LIMIT`s, or `fetchmany()` on raw cursors (client-side batching) instead.
