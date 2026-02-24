@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 
 from django.conf import settings as django_settings
 from django.core.exceptions import FieldError
@@ -39,6 +40,19 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=False,
     ),
 )
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 datetime string, returning None if not provided."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        raise ValueError(f"Invalid datetime format: {value!r}. Use ISO 8601.")
 
 
 def _error(message: str) -> str:
@@ -214,6 +228,219 @@ async def list_monitors(organization_slug: str) -> str:
         user_id = _check_scopes(["project:read", "project:write", "project:admin"])
         monitors = await data.get_monitors(user_id, organization_slug)
         return json.dumps([serializers.serialize_monitor(m) for m in monitors])
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def list_transaction_groups(
+    organization_slug: str,
+    project_id: int | None = None,
+    query: str | None = None,
+    sort: str = "-avg_duration",
+    limit: int = 25,
+) -> str:
+    """List transaction groups for an organization.
+
+    Shows endpoints/operations with their performance stats (avg duration,
+    p50, p95, count, error count). Useful for identifying slow endpoints.
+
+    Args:
+        organization_slug: Organization slug
+        project_id: Optional project ID to filter by
+        query: Search text in transaction name (case-insensitive)
+        sort: Sort field: "-avg_duration" (default), "avg_duration",
+            "-count", "count", "-created", "created"
+        limit: Max results to return (default 25, max 100)
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        project_ids = [project_id] if project_id else None
+        groups = await data.get_transaction_groups(
+            user_id,
+            organization_slug,
+            project_ids=project_ids,
+            query=query,
+            sort=sort,
+            limit=limit,
+        )
+        return json.dumps([serializers.serialize_transaction_group(g) for g in groups])
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def get_transaction_group(organization_slug: str, group_id: int) -> str:
+    """Get details for a single transaction group by ID.
+
+    Args:
+        organization_slug: Organization slug
+        group_id: Transaction group ID
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        group = await data.get_transaction_group(user_id, organization_slug, group_id)
+        if group is None:
+            return _error("Transaction group not found")
+        return json.dumps(serializers.serialize_transaction_group(group))
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def list_transaction_spans(
+    organization_slug: str,
+    group_id: int,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
+    """Get span breakdown for a specific transaction group.
+
+    Shows child spans grouped by (op, description) with timing stats.
+    Useful for understanding where time is spent within a transaction.
+    Requires DuckDB cold storage to be enabled.
+
+    Args:
+        organization_slug: Organization slug
+        group_id: Transaction group ID
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        spans = await data.get_transaction_spans(
+            user_id,
+            organization_slug,
+            group_id,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
+        return json.dumps([serializers.serialize_span_group(s) for s in spans])
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def list_span_groups(
+    organization_slug: str,
+    project_id: int | None = None,
+    op: str | None = None,
+    sort: str = "-total_time",
+    limit: int = 50,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
+    """Query span groups across the organization (slow queries, etc).
+
+    Groups spans by (op, description) across all transactions. Use op="db"
+    to find slow database queries, or leave empty for all span types.
+    Requires DuckDB cold storage to be enabled.
+
+    Args:
+        organization_slug: Organization slug
+        project_id: Optional project ID to filter by
+        op: Optional op prefix filter (e.g. "db" for database spans)
+        sort: Sort field: "-total_time" (default), "-avg_duration", "-count"
+        limit: Max results to return (default 50, max 100)
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        project_ids = [project_id] if project_id else None
+        spans = await data.get_span_groups(
+            user_id,
+            organization_slug,
+            project_ids=project_ids,
+            op_filter=op,
+            sort=sort,
+            limit=limit,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
+        return json.dumps([serializers.serialize_span_group(s) for s in spans])
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def detect_n_plus_one(
+    organization_slug: str,
+    project_id: int | None = None,
+    op: str | None = "db",
+    threshold: float = 5.0,
+    limit: int = 50,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
+    """Detect N+1 query patterns across transactions.
+
+    Finds span groups that repeat many times per transaction (e.g. a DB
+    query executed 50 times in a single request). High spans_per_txn
+    values strongly suggest N+1 patterns.
+
+    Requires DuckDB cold storage to be enabled.
+
+    Args:
+        organization_slug: Organization slug
+        project_id: Optional project ID to filter by
+        op: Op prefix filter (default "db" for database spans)
+        threshold: Minimum spans-per-transaction to report (default 5.0)
+        limit: Max results to return (default 50, max 100)
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        project_ids = [project_id] if project_id else None
+        patterns = await data.get_n_plus_one_patterns(
+            user_id,
+            organization_slug,
+            project_ids=project_ids,
+            op_filter=op,
+            threshold=threshold,
+            limit=limit,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
+        return json.dumps(
+            [serializers.serialize_n_plus_one_pattern(p) for p in patterns]
+        )
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+async def get_transaction_trend(
+    organization_slug: str,
+    group_id: int,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
+    """Get daily performance trend for a specific transaction group.
+
+    Returns daily stats (request count, avg duration, total time) for the
+    last 7 days. Useful for spotting performance regressions or improvements
+    over time.
+
+    Requires DuckDB cold storage to be enabled.
+
+    Args:
+        organization_slug: Organization slug
+        group_id: Transaction group ID
+        start: Start datetime (ISO 8601). Defaults to 7 days ago.
+        end: End datetime (ISO 8601). Defaults to now.
+    """
+    try:
+        user_id = _check_scopes(["event:read", "event:write", "event:admin"])
+        trend = await data.get_transaction_trend(
+            user_id,
+            organization_slug,
+            group_id,
+            start_dt=_parse_datetime(start),
+            end_dt=_parse_datetime(end),
+        )
+        return json.dumps([serializers.serialize_transaction_trend(t) for t in trend])
     except ValueError as e:
         return _error(str(e))
 

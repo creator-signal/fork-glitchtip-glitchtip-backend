@@ -211,12 +211,11 @@ class OrganizationManager(OrgManager):
             ),
         ).annotate(
             # Calculate weighted total for quota purposes
-            # Weights: errors=1.0, transactions=0.1, logs=0.1, uptime=1.0, file_size=1.0
+            # Weights: errors=1.0, transactions=1.0, uptime=1.0, file_size=1.0, logs=0.1
             # Using integer math: multiply by 10, sum, divide by 10
-            # This gives: issues + uptime + file_size + (transactions + logs) / 10
             total_event_count=(
                 F("issue_event_count") * 10
-                + F("transaction_count")  # 0.1 weight
+                + F("transaction_count") * 10
                 + F("log_count")  # 0.1 weight
                 + F("uptime_check_event_count") * 10
                 + F("file_size") * 10

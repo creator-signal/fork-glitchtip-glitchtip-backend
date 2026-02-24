@@ -3,6 +3,7 @@ from apps.issue_events.utils import get_entries
 from apps.logs.api import LogEventRow
 from apps.logs.constants import LogLevel
 from apps.organizations_ext.models import Organization
+from apps.performance.models import TransactionGroup
 from apps.projects.models import Project
 
 
@@ -136,6 +137,60 @@ def serialize_log_event(log: LogEventRow) -> dict:
     if log.data:
         result["data"] = log.data
     return result
+
+
+def serialize_transaction_group(tg: TransactionGroup) -> dict:
+    return {
+        "id": tg.id,
+        "project": tg.project_id,
+        "transaction": tg.transaction,
+        "op": tg.op,
+        "method": tg.method,
+        "count": tg.count,
+        "avgDuration": tg.avg_duration,
+        "p50": tg.p50,
+        "p95": tg.p95,
+        "errorCount": tg.error_count,
+        "errorRate": tg.error_rate,
+        "throughput": tg.throughput,
+        "firstSeen": tg.first_seen.isoformat(),
+        "lastSeen": tg.last_seen.isoformat(),
+    }
+
+
+def serialize_n_plus_one_pattern(pattern: dict) -> dict:
+    return {
+        "transactionName": pattern["transaction_name"],
+        "op": pattern["op"],
+        "description": pattern["description"],
+        "totalSpans": pattern["total_spans"],
+        "transactionCount": pattern["transaction_count"],
+        "spansPerTxn": pattern["spans_per_txn"],
+        "avgDuration": pattern["avg_duration"],
+        "totalTime": pattern["total_time"],
+    }
+
+
+def serialize_transaction_trend(trend: dict) -> dict:
+    date = trend["date"]
+    return {
+        "date": date.isoformat() if hasattr(date, "isoformat") else date,
+        "count": trend["count"],
+        "transactionCount": trend["transaction_count"],
+        "avgDuration": trend["avg_duration"],
+        "totalTime": trend["total_time"],
+    }
+
+
+def serialize_span_group(span: dict) -> dict:
+    return {
+        "op": span["op"],
+        "description": span["description"],
+        "count": span["count"],
+        "avgDuration": span["avg_duration"],
+        "p95Duration": span["p95_duration"],
+        "totalTime": span["total_time"],
+    }
 
 
 def serialize_monitor(monitor) -> dict:

@@ -16,12 +16,12 @@ class Command(BaseCommand):
         manager = PartitionManager()
         now = datetime.now(timezone.utc)
 
-        # 1. Daily UUIDv7 partitions (Events)
+        # 1. Daily UUIDv7 partitions (Events + SpanStaging)
         daily_v7_models = [
             ("issue_events_issueevent", None),  # Use settings
-            ("performance_transactionevent", None),  # Use settings
             ("uptime_monitorcheck", None),
             ("logs_logevent", None),
+            ("performance_spanstaging", None),
         ]
         start_date_daily = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date_daily = start_date_daily + timedelta(days=7)
@@ -54,8 +54,8 @@ class Command(BaseCommand):
             max_days = settings.GLITCHTIP_EVENT_RETENTION_DAYS
             if "uptime" in table:
                 max_days = settings.GLITCHTIP_UPTIME_RETENTION_DAYS
-            elif "transaction" in table:
-                max_days = settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
+            elif "spanstaging" in table:
+                max_days = 3  # Short retention: promotion drains rows quickly
 
             self.stdout.write(
                 f"Cleaning up old partitions for {table} (retention: {max_days} days)..."
@@ -66,17 +66,25 @@ class Command(BaseCommand):
 
         # 2. Weekly DateTime partitions (Aggregates)
         weekly_models = [
-            "issue_events_issueaggregate",
-            "issue_events_issuetag",
-            "performance_transactiongroupaggregate",
-            "projects_issueeventprojecthourlystatistic",
-            "projects_transactioneventprojecthourlystatistic",
-            "projects_logprojecthourlystatistic",
+            ("issue_events_issueaggregate", settings.GLITCHTIP_EVENT_RETENTION_DAYS),
+            ("issue_events_issuetag", settings.GLITCHTIP_EVENT_RETENTION_DAYS),
+            (
+                "projects_issueeventprojecthourlystatistic",
+                settings.GLITCHTIP_EVENT_RETENTION_DAYS,
+            ),
+            (
+                "projects_transactioneventprojecthourlystatistic",
+                settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS,
+            ),
+            (
+                "projects_logprojecthourlystatistic",
+                settings.GLITCHTIP_LOG_RETENTION_DAYS,
+            ),
         ]
         start_of_week = start_date_daily - timedelta(days=start_date_daily.weekday())
         end_date_weekly = start_of_week + timedelta(weeks=4)
 
-        for table in weekly_models:
+        for table, retention_days in weekly_models:
             if not manager.is_table_partitioned(table):
                 self.stdout.write(f"Skipping {table} (not partitioned yet)...")
                 continue
@@ -91,9 +99,8 @@ class Command(BaseCommand):
                 key_type="datetime",
             )
 
-            # Cleanup old weekly partitions (using a default retention or specific one)
-            # For aggregates, we can use GLITCHTIP_EVENT_RETENTION_DAYS
+            # Cleanup old weekly partitions
             self.stdout.write(f"Cleaning up old weekly partitions for {table}...")
-            manager.drop_old_partitions(table, settings.GLITCHTIP_EVENT_RETENTION_DAYS)
+            manager.drop_old_partitions(table, retention_days)
 
         self.stdout.write(self.style.SUCCESS("Partition maintenance complete."))

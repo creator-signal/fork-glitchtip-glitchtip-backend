@@ -26,6 +26,7 @@ def _rewrite_cold_storage_for_project(project: Project):
     from apps.issue_events.cold_storage import ISSUE_EVENT_EXPORT_COLUMN_TYPES
     from apps.issue_events.models import Issue
     from apps.logs.cold_storage import EXPORT_COLUMN_TYPES as LOG_COLUMN_TYPES
+    from apps.performance.cold_storage import SPAN_PARQUET_COLUMN_TYPES
     from glitchtip.cold_storage import (
         is_duckdb_available,
         rewrite_parquet_excluding_project,
@@ -42,6 +43,14 @@ def _rewrite_cold_storage_for_project(project: Project):
         project_id=project.id,
         table_name="logs_logevent",
         column_types=LOG_COLUMN_TYPES,
+    )
+
+    # Rewrite performance span Parquet files (has project_id column)
+    rewrite_parquet_excluding_project(
+        org_id=org_id,
+        project_id=project.id,
+        table_name="performance_spans",
+        column_types=SPAN_PARQUET_COLUMN_TYPES,
     )
 
     # Rewrite issue event Parquet files (has issue_id, not project_id)
