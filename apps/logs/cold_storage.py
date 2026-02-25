@@ -29,8 +29,8 @@ EXPORT_COLUMN_TYPES = {
 }
 
 LOGS_SELECT_SQL = """
-    SELECT id, trace_id, organization_id, project_id, span_id,
-           level, severity_number, body, service, environment, host, data
+    SELECT id::text, trace_id::text, organization_id, project_id, span_id,
+           level, severity_number, body, service, environment, host, data::text
     FROM {partition_name}
     WHERE organization_id = %s
     ORDER BY environment, service, host, level, id

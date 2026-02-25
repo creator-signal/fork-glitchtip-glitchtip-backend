@@ -236,24 +236,6 @@ def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> st
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
 
 
-def _normalize_row(row: tuple) -> list:
-    """Normalize a database row for DuckDB insertion.
-
-    Converts UUIDs to strings and dicts/lists to JSON strings.
-    """
-    clean = []
-    for val in row:
-        if isinstance(val, dict):
-            clean.append(json.dumps(val))
-        elif isinstance(val, list):
-            clean.append(json.dumps(val))
-        elif hasattr(val, "hex"):  # UUID
-            clean.append(str(val))
-        else:
-            clean.append(val)
-    return clean
-
-
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -357,8 +339,6 @@ def archive_partition_per_org(
                             if not batch:
                                 break
 
-                            clean_batch = [_normalize_row(row) for row in batch]
-
                             # Lazily create DuckDB table and output dir on first batch
                             if not has_data:
                                 if not _is_s3_storage(storage):
@@ -373,11 +353,13 @@ def archive_partition_per_org(
                                 )
                                 has_data = True
 
+                            # Type conversion (UUID::text, JSONB::text) is done
+                            # in the SELECT SQL so rows can be inserted directly.
                             duck_conn.executemany(
                                 f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                                clean_batch,
+                                batch,
                             )
-                            row_count += len(clean_batch)
+                            row_count += len(batch)
 
                         # Export to Parquet if any rows were inserted
                         if has_data and row_count > 0:
@@ -385,9 +367,7 @@ def archive_partition_per_org(
                                 f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
                             )
                             archived_files.append((org_id, parquet_path))
-                            logger.debug(
-                                f"Archived org {org_id} to {parquet_path}"
-                            )
+                            logger.debug(f"Archived org {org_id} to {parquet_path}")
                     finally:
                         if has_data:
                             duck_conn.execute("DROP TABLE IF EXISTS export_data")
@@ -541,10 +521,23 @@ def get_partitions_older_than(
     return partitions
 
 
+def _is_date_before_cutoff(date_str: str, cutoff: datetime) -> bool:
+    """Check if a YYYYMMDD string represents a date before the cutoff."""
+    if len(date_str) != 8 or not date_str.isdigit():
+        return False
+    try:
+        file_date = datetime.strptime(date_str, "%Y%m%d")
+        file_date = timezone.make_aware(file_date)
+        return file_date < cutoff
+    except ValueError:
+        return False
+
+
 def cleanup_cold_storage_for_org(
     org_id: int,
     retention_days: int,
     table_name: str,
+    storage=None,
 ) -> int:
     """
     Delete cold storage files older than retention period for an org.
@@ -553,40 +546,42 @@ def cleanup_cold_storage_for_org(
     - Compacted flat files: org_{id}/{date}.parquet
     - Chunk files: org_{id}/{date}/chunk_*.parquet (pre-compaction)
 
-    Computes paths directly from a 30-day window before the retention cutoff.
-    No external state (cache/DB) needed - storage.delete() is a no-op on
-    most backends if the file doesn't exist.
+    Uses a single listdir on the org prefix instead of per-day I/O sweeps.
 
     Returns:
         Number of files deleted
     """
-    storage = get_cold_storage_backend()
+    if storage is None:
+        storage = get_cold_storage_backend()
     if not storage:
-        logger.warning("No storage backend available for cleanup")
         return 0
 
     cutoff = timezone.now() - timedelta(days=retention_days)
     deleted_count = 0
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
 
-    # Sweep a 30-day window before the retention cutoff.
-    # Files older than cutoff-30d would have been cleaned in prior runs.
-    cleanup_window_days = 30
-    for day_offset in range(cleanup_window_days):
-        file_date = cutoff - timedelta(days=day_offset)
-        date_str = file_date.strftime("%Y%m%d")
+    try:
+        subdirs, files = storage.listdir(org_prefix)
+    except Exception:
+        return 0
 
-        # Delete compacted flat file: org_{id}/{date}.parquet
-        storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
-        try:
-            if storage.exists(storage_path):
-                storage.delete(storage_path)
+    # Delete expired flat files: org_{id}/{date}.parquet
+    for filename in files:
+        if not filename.endswith(".parquet"):
+            continue
+        date_str = filename.removesuffix(".parquet")
+        if _is_date_before_cutoff(date_str, cutoff):
+            try:
+                storage.delete(f"{org_prefix}/{filename}")
                 deleted_count += 1
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-        # Delete chunk files: org_{id}/{date}/chunk_*.parquet
-        chunk_dir = f"{org_prefix}/{date_str}"
+    # Delete expired chunk directories: org_{id}/{date}/chunk_*.parquet
+    for subdir in subdirs:
+        if not _is_date_before_cutoff(subdir, cutoff):
+            continue
+        chunk_dir = f"{org_prefix}/{subdir}"
         try:
             _, chunk_files = storage.listdir(chunk_dir)
             for f in chunk_files:
@@ -595,12 +590,11 @@ def cleanup_cold_storage_for_org(
                     deleted_count += 1
                 except Exception:
                     pass
-            # Try to remove the empty directory (filesystem only)
             try:
                 os.rmdir(storage.path(chunk_dir))
             except (OSError, NotImplementedError):
                 pass
-        except (NotImplementedError, OSError):
+        except Exception:
             pass
 
     if deleted_count:
@@ -616,6 +610,9 @@ def cleanup_all_cold_storage(
     """
     Delete cold storage files older than retention period for all orgs.
 
+    Discovers orgs from storage directory listing instead of querying the
+    database. Only processes orgs that actually have cold data.
+
     Only runs if GLITCHTIP_COLD_STORAGE_CLEANUP_ENABLED is True.
     For high-scale deployments, disable this and use S3 lifecycle policies.
 
@@ -629,22 +626,33 @@ def cleanup_all_cold_storage(
     if retention_days is None:
         retention_days = settings.GLITCHTIP_RETENTION_DAYS
 
-    # Import here to avoid circular imports
-    from apps.organizations_ext.models import Organization
+    storage = get_cold_storage_backend()
+    if not storage:
+        return 0
+
+    # Discover orgs from storage directory instead of querying the database.
+    # Only orgs with actual cold data will have directories.
+    table_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}"
+    try:
+        org_dirs, _ = storage.listdir(table_prefix)
+    except Exception:
+        return 0
 
     total_deleted = 0
-
-    qs = Organization.objects.all()
-    if settings.BILLING_ENABLED:
-        qs = qs.filter(
-            stripe_primary_subscription__isnull=False,
-            stripe_primary_subscription__price__price__gt=0,
+    for dirname in org_dirs:
+        if not dirname.startswith("org_"):
+            continue
+        try:
+            org_id = int(dirname.removeprefix("org_"))
+        except ValueError:
+            continue
+        deleted = cleanup_cold_storage_for_org(
+            org_id, retention_days, table_name, storage=storage
         )
-    for org_id in qs.values_list("id", flat=True):
-        deleted = cleanup_cold_storage_for_org(org_id, retention_days, table_name)
         total_deleted += deleted
 
-    logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
+    if total_deleted:
+        logger.info(f"Cold storage cleanup complete: {total_deleted} files deleted")
     return total_deleted
 
 
