@@ -1,7 +1,10 @@
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from glitchtip.base_models import CreatedModel
 from glitchtip.partition_manager import UUID7Helper
+
+from .histogram import new_histogram
 
 
 def _generate_uuid7():
@@ -45,7 +48,11 @@ class TransactionGroup(CreatedModel):
     error_count = models.PositiveBigIntegerField(default=0)
 
     # Variable-width
-    duration_histogram = models.JSONField(default=dict)
+    duration_histogram = ArrayField(
+        models.IntegerField(),
+        size=50,
+        default=new_histogram,
+    )
 
     class Meta:
         constraints = [

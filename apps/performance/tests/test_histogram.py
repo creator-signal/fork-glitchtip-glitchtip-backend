@@ -4,6 +4,7 @@ from apps.performance.histogram import (
     BUCKET_BOUNDARIES,
     get_bucket_index,
     merge_durations,
+    new_histogram,
     percentile_from_histogram,
 )
 
@@ -33,31 +34,29 @@ class BucketIndexTestCase(TestCase):
 
 class MergeDurationsTestCase(TestCase):
     def test_empty_histogram(self):
-        hist: dict[str, int] = {}
+        hist = new_histogram()
         result = merge_durations(hist, [100.0, 200.0, 100.0])
-        self.assertTrue(len(result) > 0)
-        total = sum(result.values())
-        self.assertEqual(total, 3)
+        self.assertEqual(sum(result), 3)
 
     def test_merge_into_existing(self):
-        hist: dict[str, int] = {"5": 10}
+        hist = new_histogram()
+        hist[5] = 10
         result = merge_durations(hist, [])
-        self.assertEqual(result["5"], 10)
+        self.assertEqual(result[5], 10)
 
     def test_accumulates(self):
-        hist: dict[str, int] = {}
+        hist = new_histogram()
         merge_durations(hist, [100.0])
         merge_durations(hist, [100.0])
-        total = sum(hist.values())
-        self.assertEqual(total, 2)
+        self.assertEqual(sum(hist), 2)
 
 
 class PercentileTestCase(TestCase):
     def test_empty_histogram(self):
-        self.assertIsNone(percentile_from_histogram({}, 0, 50))
+        self.assertIsNone(percentile_from_histogram(new_histogram(), 0, 50))
 
     def test_single_value(self):
-        hist: dict[str, int] = {}
+        hist = new_histogram()
         merge_durations(hist, [100.0])
         result = percentile_from_histogram(hist, 1, 50)
         self.assertIsNotNone(result)
@@ -66,7 +65,7 @@ class PercentileTestCase(TestCase):
         self.assertLess(result, 200)
 
     def test_p50_p95(self):
-        hist: dict[str, int] = {}
+        hist = new_histogram()
         # Create a distribution: many fast, few slow
         durations = [10.0] * 90 + [5000.0] * 10
         merge_durations(hist, durations)
@@ -84,7 +83,7 @@ class PercentileTestCase(TestCase):
         self.assertGreater(p95, p50)
 
     def test_p100(self):
-        hist: dict[str, int] = {}
+        hist = new_histogram()
         merge_durations(hist, [1.0, 100.0, 10000.0])
         result = percentile_from_histogram(hist, 3, 100)
         self.assertIsNotNone(result)

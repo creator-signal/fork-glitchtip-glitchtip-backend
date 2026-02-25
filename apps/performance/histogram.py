@@ -18,6 +18,11 @@ BUCKET_BOUNDARIES: list[float] = [
 ]
 
 
+def new_histogram() -> list[int]:
+    """Return a zero-initialized histogram with _NUM_BUCKETS elements."""
+    return [0] * _NUM_BUCKETS
+
+
 def get_bucket_index(duration_ms: float) -> int:
     """Return the bucket index for a given duration in milliseconds."""
     if duration_ms <= _MIN_MS:
@@ -29,17 +34,16 @@ def get_bucket_index(duration_ms: float) -> int:
 
 
 def merge_durations(
-    histogram: dict[str, int], durations: list[float]
-) -> dict[str, int]:
+    histogram: list[int], durations: list[float]
+) -> list[int]:
     """Merge a list of durations into an existing histogram. Returns updated histogram."""
     for d in durations:
-        key = str(get_bucket_index(d))
-        histogram[key] = histogram.get(key, 0) + 1
+        histogram[get_bucket_index(d)] += 1
     return histogram
 
 
 def percentile_from_histogram(
-    histogram: dict[str, int], total_count: int, pct: float
+    histogram: list[int], total_count: int, pct: float
 ) -> float | None:
     """Approximate a percentile value from a histogram.
 
@@ -52,14 +56,12 @@ def percentile_from_histogram(
     target = math.ceil(total_count * pct / 100.0)
     cumulative = 0
 
-    # Iterate buckets in order
     for i in range(_NUM_BUCKETS):
-        count = histogram.get(str(i), 0)
+        count = histogram[i]
         if count <= 0:
             continue
         cumulative += count
         if cumulative >= target:
-            # Return midpoint of this bucket
             low = BUCKET_BOUNDARIES[i]
             high = BUCKET_BOUNDARIES[i + 1] if i + 1 <= _NUM_BUCKETS else _MAX_MS
             return (low + high) / 2.0
