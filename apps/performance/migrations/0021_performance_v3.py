@@ -191,6 +191,12 @@ class Migration(migrations.Migration):
                         name="unique_transaction_project_op_method",
                     ),
                 ),
+                # Align method default with SQL's DEFAULT ''
+                migrations.AlterField(
+                    model_name="transactiongroup",
+                    name="method",
+                    field=models.CharField(blank=True, default="", max_length=255),
+                ),
                 # Remove old managers (SoftDeleteModel)
                 migrations.AlterModelManagers(
                     name="transactiongroup",
@@ -253,7 +259,7 @@ class Migration(migrations.Migration):
                         ("op", models.CharField(max_length=255)),
                         (
                             "description",
-                            models.CharField(blank=True, max_length=500),
+                            models.CharField(blank=True, default="", max_length=500),
                         ),
                         (
                             "duration",

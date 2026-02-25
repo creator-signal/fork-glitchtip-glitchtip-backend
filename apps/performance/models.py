@@ -29,7 +29,7 @@ class TransactionGroup(CreatedModel):
     # Variable-width fields
     transaction = models.CharField(max_length=1024)
     op = models.CharField(max_length=255)
-    method = models.CharField(max_length=255, blank=True)
+    method = models.CharField(max_length=255, default="", blank=True)
 
     # 8-byte alignment: timestamps and floats
     first_seen = models.DateTimeField()
@@ -102,7 +102,7 @@ class SpanStaging(models.Model):
     span_id = models.CharField(max_length=32)
     transaction_id = models.CharField(max_length=32)
     op = models.CharField(max_length=255)
-    description = models.CharField(max_length=500, blank=True)
+    description = models.CharField(max_length=500, default="", blank=True)
     duration = models.FloatField(help_text="Duration in milliseconds")
     timestamp = models.DateTimeField(help_text="Span start time")
 

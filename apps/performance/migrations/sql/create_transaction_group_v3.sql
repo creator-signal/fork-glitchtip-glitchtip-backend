@@ -30,8 +30,8 @@ CREATE TABLE performance_transactiongroup (
     p95 DOUBLE PRECISION,
 
     -- 8-byte alignment: big integers
-    count BIGINT NOT NULL DEFAULT 0,
-    error_count BIGINT NOT NULL DEFAULT 0,
+    count BIGINT NOT NULL DEFAULT 0 CHECK ("count" >= 0),
+    error_count BIGINT NOT NULL DEFAULT 0 CHECK ("error_count" >= 0),
 
     -- Variable-width
     duration_histogram JSONB NOT NULL DEFAULT '{}',
@@ -50,7 +50,7 @@ CREATE INDEX perf_txgroup_org_lastseen
 CREATE INDEX performance_transactiongroup_created
     ON performance_transactiongroup (created);
 
--- No DB-level FK constraints: managed=False tables are excluded from Django's
--- TRUNCATE during test flush, which causes "cannot truncate a table referenced
--- in a foreign key constraint". ORM FK fields still provide joins/validation.
--- This matches the SpanStaging pattern (DO_NOTHING, no DB FKs).
+-- No DB-level FK constraints: partitioned tables cannot be the target of a
+-- foreign key, and DB-level FKs on the partitioned side cause "cannot truncate
+-- a table referenced in a foreign key constraint" during Django's test flush.
+-- ORM FK fields (DO_NOTHING) still provide joins and validation.
