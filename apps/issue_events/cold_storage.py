@@ -61,8 +61,9 @@ ISSUE_EVENT_EXPORT_COLUMN_TYPES = {
 }
 
 ISSUE_EVENT_SELECT_SQL = """
-    SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
-           type, level, title, transaction, data, tags, hashes
+    SELECT id::text, event_id::text, timestamp, issue_id, organization_id, release_id,
+           type, level, title, transaction, data::text, tags::text,
+           array_to_json(hashes)::text
     FROM {partition_name}
     WHERE organization_id = %s
     ORDER BY issue_id, level, id
