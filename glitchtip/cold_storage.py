@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from django.conf import settings
 from django.core.files.storage import storages
 from django.db import connection
+from django.test.signals import setting_changed
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -83,16 +84,37 @@ def _is_s3_storage(storage) -> bool:
         return False
 
 
+_duckdb_available: bool | None = None
+
+
 def is_duckdb_available() -> bool:
     """
-    Check if DuckDB cold storage is enabled.
+    Check if DuckDB cold storage is enabled and a storage backend exists.
 
-    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
+    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true AND a
+    configured storage backend (S3 bucket, local dir, or STORAGES["cold"]).
+    Result is cached at module level since neither setting changes at runtime.
+    The cache is automatically cleared by Django's setting_changed signal
+    (fired by @override_settings in tests).
     """
+    global _duckdb_available
+    if _duckdb_available is not None:
+        return _duckdb_available
+
     override = settings.GLITCHTIP_ENABLE_DUCKDB
-    if override is not None:
-        return str(override).lower() == "true"
-    return False
+    if override is None or str(override).lower() != "true":
+        _duckdb_available = False
+    else:
+        _duckdb_available = get_cold_storage_backend() is not None
+    return _duckdb_available
+
+
+def _reset_duckdb_available_cache(**kwargs):
+    global _duckdb_available
+    _duckdb_available = None
+
+
+setting_changed.connect(_reset_duckdb_available_cache)
 
 
 def get_duckdb_connection(storage=None):
