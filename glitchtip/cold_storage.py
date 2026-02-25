@@ -521,6 +521,18 @@ def get_partitions_older_than(
     return partitions
 
 
+def _is_date_before_cutoff(date_str: str, cutoff: datetime) -> bool:
+    """Check if a YYYYMMDD string represents a date before the cutoff."""
+    if len(date_str) != 8 or not date_str.isdigit():
+        return False
+    try:
+        file_date = datetime.strptime(date_str, "%Y%m%d")
+        file_date = timezone.make_aware(file_date)
+        return file_date < cutoff
+    except ValueError:
+        return False
+
+
 def cleanup_cold_storage_for_org(
     org_id: int,
     retention_days: int,
@@ -550,7 +562,7 @@ def cleanup_cold_storage_for_org(
 
     try:
         subdirs, files = storage.listdir(org_prefix)
-    except (NotImplementedError, OSError):
+    except Exception:
         return 0
 
     # Delete expired flat files: org_{id}/{date}.parquet
@@ -582,25 +594,13 @@ def cleanup_cold_storage_for_org(
                 os.rmdir(storage.path(chunk_dir))
             except (OSError, NotImplementedError):
                 pass
-        except (NotImplementedError, OSError):
+        except Exception:
             pass
 
     if deleted_count:
         logger.info(f"Deleted {deleted_count} cold files for org {org_id}")
 
     return deleted_count
-
-
-def _is_date_before_cutoff(date_str: str, cutoff: datetime) -> bool:
-    """Check if a YYYYMMDD string represents a date before the cutoff."""
-    if len(date_str) != 8 or not date_str.isdigit():
-        return False
-    try:
-        file_date = datetime.strptime(date_str, "%Y%m%d")
-        file_date = timezone.make_aware(file_date)
-        return file_date < cutoff
-    except ValueError:
-        return False
 
 
 def cleanup_all_cold_storage(
@@ -635,7 +635,7 @@ def cleanup_all_cold_storage(
     table_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}"
     try:
         org_dirs, _ = storage.listdir(table_prefix)
-    except (NotImplementedError, OSError):
+    except Exception:
         return 0
 
     total_deleted = 0
