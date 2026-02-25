@@ -1,4 +1,3 @@
-import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -39,6 +38,7 @@ from apps.issue_events.models import (
 )
 from apps.performance.histogram import (
     merge_durations,
+    new_histogram,
     percentile_from_histogram,
 )
 from apps.performance.models import TransactionGroup
@@ -1076,108 +1076,101 @@ def _is_error_status(trace_status: str | None) -> bool:
 def _update_transaction_group_stats(
     group_durations: dict[int, list[float]],
     group_error_counts: dict[int, int],
+    group_org_ids: dict[int, int],
 ):
     """
     Update TransactionGroup stats using append-only SQL.
 
     Phase 1: A single UPDATE ... FROM (VALUES ...) atomically merges count,
-    error_count, avg_duration, and duration_histogram.
+    error_count, avg_duration, and duration_histogram (integer[] element-wise
+    addition). Row locks are held only for this single statement.
 
     Phase 2: Reads the merged histogram back and recomputes p50/p95 in Python.
-
-    Both phases run in a single transaction so the Phase 1 row locks are held
-    until p50/p95 are written, preventing concurrent workers from reading a
-    stale histogram between the two phases.
+    Runs outside the Phase 1 lock — p50/p95 are eventually consistent, which
+    is acceptable for approximate dashboard values.
     """
     if not group_durations:
         return
 
     # Build VALUES list for a single batched UPDATE ... FROM (VALUES ...)
-    # Each row: (group_id, batch_count, batch_total, error_count, histogram_increment)
     values_data = []
     for group_id, durations in group_durations.items():
         batch_count = len(durations)
         batch_total = sum(durations)
         error_count = group_error_counts.get(group_id, 0)
-        histogram_inc = merge_durations({}, durations)
-        histogram_json = json.dumps(histogram_inc)
+        org_id = group_org_ids[group_id]
+        histogram_inc = merge_durations(new_histogram(), durations)
         values_data.append(
-            (group_id, batch_count, batch_total, error_count, histogram_json)
+            (group_id, org_id, batch_count, batch_total, error_count, histogram_inc)
         )
 
     if not values_data:
         return
 
-    # Sort by group_id so concurrent workers lock rows in the same order
-    values_data.sort(key=lambda x: x[0])
+    # Sort by (org_id, group_id) for partition-friendly lock ordering
+    values_data.sort(key=lambda x: (x[1], x[0]))
 
-    # Wrap both phases in a single transaction so the Phase 1 UPDATE holds
-    # row locks until p50/p95 are written, preventing concurrent workers
-    # from reading a stale histogram between the two phases.
-    with transaction.atomic():
+    # Phase 1: Atomically merge count, error_count, avg_duration,
+    # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
+    # Row locks are held only for the duration of this statement.
+    with connection.cursor() as cursor:
+        placeholders = ",".join(
+            cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row)
+            for row in values_data
+        )
+        cursor.execute(
+            f"""
+            UPDATE performance_transactiongroup AS tg
+            SET count = tg.count + v.batch_count,
+                error_count = tg.error_count + v.error_count,
+                avg_duration = CASE
+                    WHEN tg.count + v.batch_count > 0
+                    THEN (tg.avg_duration * tg.count + v.batch_total)
+                         / (tg.count + v.batch_count)
+                    ELSE 0
+                END,
+                last_seen = NOW(),
+                duration_histogram = ARRAY(
+                    SELECT COALESCE(a, 0) + COALESCE(b, 0)
+                    FROM unnest(tg.duration_histogram, v.hist_arr) AS t(a, b)
+                )
+            FROM (VALUES {placeholders})
+                AS v(group_id, org_id, batch_count, batch_total, error_count, hist_arr)
+            WHERE tg.id = v.group_id
+              AND tg.organization_id = v.org_id
+            """
+        )
+
+    # Phase 2: Recompute p50/p95 from the merged histogram.
+    # Runs after Phase 1 commits — no row locks held. p50/p95 are
+    # eventually consistent (may include other workers' concurrent changes,
+    # which makes them more accurate, not less).
+    org_ids = {row[1] for row in values_data}
+    group_ids = [row[0] for row in values_data]
+    updated_groups = TransactionGroup.objects.filter(
+        id__in=group_ids, organization_id__in=org_ids
+    ).only("id", "organization_id", "count", "duration_histogram")
+    p_updates = []
+    for g in updated_groups:
+        p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
+        p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
+        p_updates.append((p50, p95, g.id, g.organization_id))
+
+    if p_updates:
+        p_updates.sort(key=lambda x: (x[3], x[2]))
         with connection.cursor() as cursor:
-            # Phase 1: Atomically merge count, error_count, avg_duration,
-            # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
             placeholders = ",".join(
-                cursor.mogrify("(%s,%s,%s,%s,%s::jsonb)", row) for row in values_data
+                cursor.mogrify("(%s,%s,%s,%s)", row) for row in p_updates
             )
             cursor.execute(
                 f"""
                 UPDATE performance_transactiongroup AS tg
-                SET count = tg.count + v.batch_count,
-                    error_count = tg.error_count + v.error_count,
-                    avg_duration = CASE
-                        WHEN tg.count + v.batch_count > 0
-                        THEN (tg.avg_duration * tg.count + v.batch_total)
-                             / (tg.count + v.batch_count)
-                        ELSE 0
-                    END,
-                    last_seen = NOW(),
-                    duration_histogram = (
-                        SELECT COALESCE(jsonb_object_agg(key, total), '{{}}'::jsonb)
-                        FROM (
-                            SELECT key, SUM(value::int) AS total
-                            FROM (
-                                SELECT key, value FROM jsonb_each_text(tg.duration_histogram)
-                                UNION ALL
-                                SELECT key, value FROM jsonb_each_text(v.histogram_inc)
-                            ) combined
-                            GROUP BY key
-                        ) merged
-                    )
-                FROM (VALUES {placeholders})
-                    AS v(group_id, batch_count, batch_total, error_count, histogram_inc)
+                SET p50 = v.p50, p95 = v.p95
+                FROM (VALUES {placeholders}) AS v(p50, p95, group_id, org_id)
                 WHERE tg.id = v.group_id
+                  AND tg.organization_id = v.org_id
                 """
             )
-
-        # Phase 2: Recompute p50/p95 from the merged histogram.
-        # Within the same transaction, this sees the Phase 1 changes and
-        # the row locks prevent other workers from interleaving.
-        group_ids = [row[0] for row in values_data]
-        updated_groups = TransactionGroup.objects.filter(id__in=group_ids).only(
-            "id", "count", "duration_histogram"
-        )
-        p_updates = []
-        for g in updated_groups:
-            p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
-            p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
-            p_updates.append((p50, p95, g.id))
-
-        if p_updates:
-            p_updates.sort(key=lambda x: x[2])
-            with connection.cursor() as cursor:
-                placeholders = ",".join(
-                    cursor.mogrify("(%s,%s,%s)", row) for row in p_updates
-                )
-                cursor.execute(
-                    f"""
-                    UPDATE performance_transactiongroup AS tg
-                    SET p50 = v.p50, p95 = v.p95
-                    FROM (VALUES {placeholders}) AS v(p50, p95, group_id)
-                    WHERE tg.id = v.group_id
-                    """
-                )
 
 
 TagStats = defaultdict[
@@ -1372,6 +1365,7 @@ def process_transaction_events(
         from apps.performance.models import SpanStaging
     group_durations: dict[int, list[float]] = defaultdict(list)
     group_error_counts: dict[int, int] = defaultdict(int)
+    group_org_ids: dict[int, int] = {}
     span_rows: list = []
 
     data_stats: defaultdict[datetime, defaultdict[int, dict]] = defaultdict(
@@ -1391,6 +1385,7 @@ def process_transaction_events(
             duration_ms = max(0.0, delta.total_seconds() * 1000)
 
         group_durations[group.id].append(duration_ms)
+        group_org_ids[group.id] = group.organization_id
 
         if _is_error_status(trace_status):
             group_error_counts[group.id] += 1
@@ -1429,8 +1424,8 @@ def process_transaction_events(
                     )
                 )
 
-    # 4. Update TransactionGroup stats atomically (append-only, no read-modify-write)
-    _update_transaction_group_stats(group_durations, group_error_counts)
+    # 4. Update TransactionGroup stats (append-only, no read-modify-write)
+    _update_transaction_group_stats(group_durations, group_error_counts, group_org_ids)
 
     # 5. Bulk insert span staging rows
     if span_rows:
