@@ -13,6 +13,12 @@ from apps.shared.schema.fields import RelativeDateTime
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
+from .cold_storage import (
+    query_n_plus_one_patterns,
+    query_span_groups,
+    query_span_groups_for_transaction,
+    query_transaction_trend,
+)
 from .models import TransactionGroup
 from .schema import (
     NPlusOnePatternSchema,
@@ -146,8 +152,6 @@ async def list_transaction_spans(
     start_dt = filters.start or (now - timedelta(days=7))
     end_dt = filters.end or now
 
-    from .cold_storage import query_span_groups_for_transaction
-
     return await sync_to_async(query_span_groups_for_transaction)(
         org_id=organization.id,
         transaction_name=group.transaction,
@@ -177,8 +181,6 @@ async def list_span_groups(
     start_dt = filters.start or (now - timedelta(days=7))
     end_dt = filters.end or now
     project_ids = filters.project or None
-
-    from .cold_storage import query_span_groups
 
     return await sync_to_async(query_span_groups)(
         org_id=organization.id,
@@ -212,8 +214,6 @@ async def list_n_plus_one_patterns(
     start_dt = filters.start or (now - timedelta(days=7))
     end_dt = filters.end or now
     project_ids = filters.project or None
-
-    from .cold_storage import query_n_plus_one_patterns
 
     return await sync_to_async(query_n_plus_one_patterns)(
         org_id=organization.id,
@@ -253,8 +253,6 @@ async def get_transaction_trend(
     now = timezone.now()
     start_dt = filters.start or (now - timedelta(days=7))
     end_dt = filters.end or now
-
-    from .cold_storage import query_transaction_trend
 
     return await sync_to_async(query_transaction_trend)(
         org_id=organization.id,

@@ -46,6 +46,7 @@ from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
+from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
 from sentry.eventtypes.error import ErrorEvent
@@ -1363,8 +1364,6 @@ def process_transaction_events(
                 existing[(g.project_id, g.transaction, g.op, g.method)] = g
 
     # 3. Collect durations, error counts, and spans per group
-    from glitchtip.cold_storage import is_duckdb_available
-
     collect_spans = is_duckdb_available()
     if collect_spans:
         from apps.performance.models import SpanStaging
