@@ -44,7 +44,7 @@ class TransactionGroupModelTestCase(TestCase):
         self.assertEqual(group.avg_duration, 0)
         self.assertIsNone(group.p50)
         self.assertIsNone(group.p95)
-        self.assertEqual(group.duration_histogram, {})
+        self.assertEqual(group.duration_histogram, [0] * 50)
 
     def test_unique_constraint(self):
         from django.db import IntegrityError
@@ -71,9 +71,13 @@ class TransactionGroupModelTestCase(TestCase):
                 last_seen=now,
             )
 
-    def test_histogram_json_field(self):
+    def test_histogram_array_field(self):
         now = timezone.now()
         project = baker.make("projects.Project")
+        hist = [0] * 50
+        hist[0] = 5
+        hist[10] = 3
+        hist[20] = 1
         group = TransactionGroup.objects.create(
             project=project,
             organization=project.organization,
@@ -81,11 +85,11 @@ class TransactionGroupModelTestCase(TestCase):
             op="http.server",
             first_seen=now,
             last_seen=now,
-            duration_histogram={"0": 5, "10": 3, "20": 1},
+            duration_histogram=hist,
         )
         group.refresh_from_db()
-        self.assertEqual(group.duration_histogram["0"], 5)
-        self.assertEqual(group.duration_histogram["10"], 3)
+        self.assertEqual(group.duration_histogram[0], 5)
+        self.assertEqual(group.duration_histogram[10], 3)
 
 
 class ErrorRatePropertyTestCase(TestCase):
