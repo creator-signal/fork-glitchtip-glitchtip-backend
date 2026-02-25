@@ -102,7 +102,7 @@ class TransactionIngestTestCase(TestCase):
         self.assertAlmostEqual(group.avg_duration, 150.0, places=1)
         self.assertEqual(group.error_count, 0)
         self.assertIsNotNone(group.duration_histogram)
-        self.assertGreater(sum(group.duration_histogram.values()), 0)
+        self.assertGreater(sum(group.duration_histogram), 0)
 
     def test_multiple_transactions_accumulate(self):
         """Multiple transactions for the same endpoint accumulate stats."""
@@ -118,7 +118,7 @@ class TransactionIngestTestCase(TestCase):
         self.assertEqual(group.count, 3)
         # Running average: (100 + 200 + 300) / 3 = 200
         self.assertAlmostEqual(group.avg_duration, 200.0, places=1)
-        self.assertEqual(sum(group.duration_histogram.values()), 3)
+        self.assertEqual(sum(group.duration_histogram), 3)
 
     def test_incremental_batches_merge_correctly(self):
         """Stats from separate batches merge without corruption."""
@@ -137,7 +137,7 @@ class TransactionIngestTestCase(TestCase):
         self.assertEqual(group.count, 3)
         # Running avg: (50*2 + 200) / 3 = 100
         self.assertAlmostEqual(group.avg_duration, 100.0, places=1)
-        self.assertEqual(sum(group.duration_histogram.values()), 3)
+        self.assertEqual(sum(group.duration_histogram), 3)
 
     def test_error_status_increments_error_count(self):
         """Trace statuses indicating errors increment error_count."""

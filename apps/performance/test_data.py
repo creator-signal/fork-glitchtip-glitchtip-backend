@@ -4,7 +4,7 @@ import string
 
 from django.utils import timezone
 
-from .histogram import merge_durations, percentile_from_histogram
+from .histogram import merge_durations, new_histogram, percentile_from_histogram
 from .models import TransactionGroup
 
 TRANSACTIONS = [
@@ -98,7 +98,7 @@ def generate_fake_transaction_group(project):
         count = random.randint(10, 1000)
         sample_size = min(count, 100)
         durations = [generate_random_duration_ms() for _ in range(sample_size)]
-        histogram: dict[str, int] = {}
+        histogram = new_histogram()
         merge_durations(histogram, durations)
         avg = sum(durations) / len(durations)
         # Use sample_size (histogram total) for percentile, not count
