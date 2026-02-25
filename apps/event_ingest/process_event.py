@@ -859,7 +859,10 @@ def process_issue_events(
             processing_event.issue_id = hash_obj["issue_id"]
             if hash_obj["issue__status"] == EventStatus.RESOLVED:
                 resolved_in = hash_obj.get("issue__resolved_in_release_id")
-                if resolved_in is None or resolved_in != processing_event.release_id:
+                event_release = processing_event.release_id
+                if resolved_in is None or (
+                    event_release is not None and resolved_in != event_release
+                ):
                     issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
