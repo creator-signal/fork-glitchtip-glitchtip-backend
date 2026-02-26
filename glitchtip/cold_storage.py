@@ -388,72 +388,60 @@ def archive_partition_per_org(
                     except (OSError, NotImplementedError):
                         pass
 
-                    # Read org's data from PostgreSQL
-                    cursor.execute(
-                        select_sql.format(partition_name=partition_name),
-                        [org_id],
+                    # Page through org's data with LIMIT/OFFSET to bound
+                    # psycopg's client-side buffer (no server-side cursors
+                    # due to PgBouncer).  Each page → one chunk file.
+                    paginated_sql = (
+                        select_sql.format(partition_name=partition_name)
+                        + " LIMIT %s OFFSET %s"
                     )
-                    columns = [desc[0] for desc in cursor.description]
-                    col_defs = ", ".join(
-                        f"{c} {column_types[c]}" for c in columns
-                    )
-                    insert_sql = f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})"
-
-                    # Stream rows in batches, flushing a new chunk file
-                    # every ARCHIVE_CHUNK_ROWS to bound memory.
-                    has_data = False
-                    chunk_rows = 0
+                    columns = None
+                    col_defs = None
+                    insert_sql = None
                     chunk_num = 0
                     total_rows = 0
-                    try:
-                        while True:
-                            batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
-                            if not batch:
-                                break
 
-                            if not has_data:
-                                duck_conn.execute(
-                                    f"CREATE TABLE export_data({col_defs})"
-                                )
-                                has_data = True
+                    offset = 0
+                    while True:
+                        cursor.execute(
+                            paginated_sql,
+                            [org_id, ARCHIVE_CHUNK_ROWS, offset],
+                        )
+                        if columns is None:
+                            columns = [desc[0] for desc in cursor.description]
+                            col_defs = ", ".join(
+                                f"{c} {column_types[c]}" for c in columns
+                            )
+                            insert_sql = f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})"
 
-                            duck_conn.executemany(insert_sql, batch)
-                            chunk_rows += len(batch)
-                            total_rows += len(batch)
+                        rows = cursor.fetchall()
+                        if not rows:
+                            break
 
-                            # Flush chunk when threshold reached
-                            if chunk_rows >= ARCHIVE_CHUNK_ROWS:
-                                chunk_path = _get_chunk_path(
-                                    table_name, org_id, date_str, chunk_num
-                                )
-                                parquet_path = get_duckdb_parquet_path(
-                                    storage, chunk_path
-                                )
-                                if not _is_s3_storage(storage):
-                                    os.makedirs(
-                                        os.path.dirname(parquet_path),
-                                        exist_ok=True,
-                                    )
-                                duck_conn.execute(
-                                    f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
-                                    f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
-                                )
-                                duck_conn.execute("DROP TABLE export_data")
-                                duck_conn.execute(
-                                    f"CREATE TABLE export_data({col_defs})"
-                                )
-                                chunk_num += 1
-                                chunk_rows = 0
+                        page_size = len(rows)
+                        try:
+                            duck_conn.execute(
+                                f"CREATE TABLE export_data({col_defs})"
+                            )
 
-                        # Flush remaining rows
-                        if has_data and chunk_rows > 0:
-                            if chunk_num == 0:
-                                # Small org — write a single flat file
+                            # Insert in sub-batches to avoid huge
+                            # single executemany calls
+                            for i in range(0, page_size, ARCHIVE_BATCH_SIZE):
+                                duck_conn.executemany(
+                                    insert_sql,
+                                    rows[i : i + ARCHIVE_BATCH_SIZE],
+                                )
+
+                            # Determine output path — flat file for
+                            # single-chunk orgs, chunk dir for multi
+                            if offset == 0 and page_size < ARCHIVE_CHUNK_ROWS:
                                 out_path = flat_path
                             else:
                                 out_path = _get_chunk_path(
                                     table_name, org_id, date_str, chunk_num
                                 )
+                                chunk_num += 1
+
                             parquet_path = get_duckdb_parquet_path(
                                 storage, out_path
                             )
@@ -466,18 +454,27 @@ def archive_partition_per_org(
                                 f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
                                 f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
                             )
-
-                        if total_rows > 0:
-                            archived_files.append((org_id, flat_path))
-                            logger.debug(
-                                "Archived org %d: %d rows in %d file(s)",
-                                org_id,
-                                total_rows,
-                                chunk_num + 1 if chunk_num > 0 or chunk_rows > 0 else 0,
+                            total_rows += page_size
+                        finally:
+                            duck_conn.execute(
+                                "DROP TABLE IF EXISTS export_data"
                             )
-                    finally:
-                        if has_data:
-                            duck_conn.execute("DROP TABLE IF EXISTS export_data")
+
+                        # Free Python memory before next page
+                        del rows
+
+                        if page_size < ARCHIVE_CHUNK_ROWS:
+                            break
+                        offset += ARCHIVE_CHUNK_ROWS
+
+                    if total_rows > 0:
+                        archived_files.append((org_id, flat_path))
+                        logger.debug(
+                            "Archived org %d: %d rows in %d file(s)",
+                            org_id,
+                            total_rows,
+                            max(chunk_num, 1),
+                        )
             finally:
                 duck_conn.close()
 
