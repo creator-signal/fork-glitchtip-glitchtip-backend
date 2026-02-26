@@ -88,6 +88,11 @@ class LogEventRow:
 
 def _row_to_log_event(row: tuple) -> LogEventRow:
     """Convert a database row (positional) to LogEventRow."""
+    # span_id: BIGINT from PostgreSQL, VARCHAR from Parquet cold storage
+    span_id = row[4]
+    if isinstance(span_id, str):
+        span_id = int(span_id) if span_id else None
+
     return LogEventRow(
         id=row[0] if isinstance(row[0], UUID) else UUID(str(row[0])),
         trace_id=(
@@ -97,13 +102,13 @@ def _row_to_log_event(row: tuple) -> LogEventRow:
         ),
         organization_id=row[2],
         project_id=row[3],
-        span_id=row[4],
+        span_id=span_id,
         level=row[5],
         severity_number=row[6],
-        body=row[7],
-        service=row[8],
-        environment=row[9],
-        host=row[10],
+        body=row[7] or "",
+        service=row[8] or "",
+        environment=row[9] or "",
+        host=row[10] or "",
         data=parse_json_field(row[11]),
     )
 
@@ -383,8 +388,9 @@ async def query_logs_combined(
     """
     Query logs from both hot and cold storage.
 
-    When the date range spans both tiers, hot and cold are queried in
-    parallel via asyncio.to_thread. Results are merged and sorted by id DESC.
+    Queries hot (PostgreSQL) first. Only queries cold (DuckDB/S3) when hot
+    results don't fill the page — avoids expensive cold queries when recent
+    data is plentiful (the common case).
     """
     now = datetime.now(timezone.utc)
     hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
@@ -405,29 +411,30 @@ async def query_logs_combined(
     needs_hot = end_dt > hot_cutoff
     needs_cold = start_dt < hot_cutoff
 
-    if needs_hot and needs_cold:
-        # Parallel I/O — hot and cold have disjoint time ranges
-        # PG: sync_to_async (Django connection management, async cursors in 6.1)
-        # DuckDB: asyncio.to_thread (in-process C library, no Django DB)
-        hot_task = sync_to_async(query_hot_storage)(
+    # If cursor is in cold range, all remaining data is cold — skip hot
+    if cursor_position and needs_hot and needs_cold:
+        cursor_time = UUID7Helper.extract_datetime(cursor_position)
+        if cursor_time <= hot_cutoff:
+            needs_hot = False
+
+    if needs_hot:
+        hot_results = await sync_to_async(query_hot_storage)(
             start_dt=max(start_dt, hot_cutoff),
             end_dt=end_dt,
             **kwargs,
         )
-        cold_task = asyncio.to_thread(
+        if not needs_cold or len(hot_results) >= limit:
+            # Hot fills the page — no need for cold storage query
+            return sorted(hot_results, key=lambda r: r.id, reverse=True)[:limit]
+
+        # Hot didn't fill the page — supplement with cold
+        cold_results = await asyncio.to_thread(
             query_cold_storage,
             start_dt=start_dt,
             end_dt=min(end_dt, hot_cutoff),
             **kwargs,
         )
-        hot_results, cold_results = await asyncio.gather(hot_task, cold_task)
         results = hot_results + cold_results
-    elif needs_hot:
-        results = await sync_to_async(query_hot_storage)(
-            start_dt=max(start_dt, hot_cutoff),
-            end_dt=end_dt,
-            **kwargs,
-        )
     elif needs_cold:
         results = await asyncio.to_thread(
             query_cold_storage,
