@@ -171,6 +171,9 @@ GLITCHTIP_LOG_HOT_DAYS = env.int(
 
 # DuckDB extension directory (pre-installed in Docker image at /opt/duckdb/extensions)
 DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
+# DuckDB memory limit — prevents OOM during archival by spilling to disk.
+# Set to empty string to disable (unbounded memory).
+DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", "128MB")
 
 # Cold storage bucket — defaults to AWS_STORAGE_BUCKET_NAME so users with S3
 # configured get cold storage automatically. Files use cold_storage/ prefix.
