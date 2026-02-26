@@ -33,17 +33,19 @@ django.setup()
 from django.db import connection
 
 from apps.issue_events.cold_storage import (
-    ISSUE_EVENT_EXPORT_COLUMN_TYPES,
-    ISSUE_EVENT_SELECT_SQL,
     get_event_from_cold,
     query_cold_events,
 )
 from apps.logs.api import (
     query_cold_storage as query_cold_logs,
+)
+from apps.logs.api import (
     query_hot_storage as query_hot_logs,
 )
 from apps.logs.cold_storage import (
     EXPORT_COLUMN_TYPES as LOG_COLUMN_TYPES,
+)
+from apps.logs.cold_storage import (
     LOGS_SELECT_SQL,
 )
 from glitchtip.cold_storage import (
@@ -53,6 +55,7 @@ from glitchtip.cold_storage import (
     get_duckdb_connection,
     get_duckdb_parquet_path,
     get_org_cold_storage_path,
+    get_parquet_paths_for_date,
     get_partitions_older_than,
     is_duckdb_available,
 )
@@ -192,20 +195,27 @@ def bulk_insert_logs(date: datetime, count: int, org_id: int = None, project_id:
 
 
 def count_parquet_rows(org_id: int, date_str: str, table_name: str = "logs_logevent") -> int:
-    """Count rows in a parquet file."""
+    """Count rows across all parquet files (flat + chunks) for an org+date."""
     storage = get_cold_storage_backend()
     if not storage:
         return 0
-    relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
-    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+    paths = get_parquet_paths_for_date(storage, table_name, org_id, date_str)
+    if not paths:
+        return 0
+    total = 0
     try:
         duck = get_duckdb_connection(storage)
         try:
-            return duck.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')").fetchone()[0]
+            for rel_path in paths:
+                parquet_path = get_duckdb_parquet_path(storage, rel_path)
+                total += duck.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')"
+                ).fetchone()[0]
         finally:
             duck.close()
     except Exception:
         return 0
+    return total
 
 
 def parquet_exists(org_id: int, date_str: str, table_name: str = "logs_logevent") -> bool:
@@ -648,7 +658,7 @@ def main():
         logger.error("No storage backend configured.")
         sys.exit(1)
 
-    logger.info(f"DuckDB available: True")
+    logger.info("DuckDB available: True")
     logger.info(f"Storage backend: {type(storage).__name__}")
 
     setup_org_and_project()

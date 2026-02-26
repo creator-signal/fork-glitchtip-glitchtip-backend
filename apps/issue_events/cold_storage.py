@@ -21,7 +21,8 @@ from glitchtip.cold_storage import (
     get_cold_storage_backend,
     get_duckdb_parquet_path,
     get_duckdb_read_connection,
-    get_org_cold_storage_path,
+    get_org_cold_storage_path,  # noqa: F401 — re-exported for tests
+    get_parquet_paths_for_date,
     is_duckdb_available,
     is_missing_file_error,
     parse_json_field,
@@ -66,7 +67,6 @@ ISSUE_EVENT_SELECT_SQL = """
            array_to_json(hashes)::text
     FROM {partition_name}
     WHERE organization_id = %s
-    ORDER BY issue_id, level, id
 """
 
 
@@ -253,25 +253,28 @@ def get_event_from_cold(
         return None
 
     date_str = event_time.strftime("%Y%m%d")
-    relative_path = get_org_cold_storage_path(TABLE_NAME, organization_id, date_str)
-    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+    paths = get_parquet_paths_for_date(storage, TABLE_NAME, organization_id, date_str)
+    if not paths:
+        return None
 
     duck_conn = get_duckdb_read_connection(storage)
-    try:
-        sql = f"""
-            SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
-                   type, level, title, transaction, data, tags, hashes
-            FROM read_parquet('{duckdb_quote_path(parquet_path)}')
-            WHERE id = $1 AND organization_id = $2
-            LIMIT 1;
-        """
-        result = duck_conn.execute(sql, [str(event_id), organization_id])
-        row = result.fetchone()
-        if row:
-            return _row_to_issue_event(row)
-    except Exception as e:
-        close_duckdb_read_connection()
-        if not is_missing_file_error(e):
-            raise
+    for relative_path in paths:
+        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+        try:
+            sql = f"""
+                SELECT id, event_id, timestamp, issue_id, organization_id, release_id,
+                       type, level, title, transaction, data, tags, hashes
+                FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+                WHERE id = $1 AND organization_id = $2
+                LIMIT 1;
+            """
+            result = duck_conn.execute(sql, [str(event_id), organization_id])
+            row = result.fetchone()
+            if row:
+                return _row_to_issue_event(row)
+        except Exception as e:
+            close_duckdb_read_connection()
+            if not is_missing_file_error(e):
+                raise
 
     return None

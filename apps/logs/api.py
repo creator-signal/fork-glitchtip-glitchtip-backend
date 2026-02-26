@@ -472,7 +472,7 @@ def _get_log_from_cold(
         get_cold_storage_backend,
         get_duckdb_parquet_path,
         get_duckdb_read_connection,
-        get_org_cold_storage_path,
+        get_parquet_paths_for_date,
         is_duckdb_available,
         is_missing_file_error,
     )
@@ -485,28 +485,31 @@ def _get_log_from_cold(
         return None
 
     date_str = log_time.strftime("%Y%m%d")
-    relative_path = get_org_cold_storage_path(
-        "logs_logevent", organization_id, date_str
+    paths = get_parquet_paths_for_date(
+        storage, "logs_logevent", organization_id, date_str
     )
-    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+    if not paths:
+        return None
 
     duck_conn = get_duckdb_read_connection(storage)
-    try:
-        sql = f"""
-            SELECT id, trace_id, organization_id, project_id, span_id,
-                   level, severity_number, body, service, environment, host, data
-            FROM read_parquet('{duckdb_quote_path(parquet_path)}')
-            WHERE id = $1 AND organization_id = $2
-            LIMIT 1;
-        """
-        result = duck_conn.execute(sql, [str(log_id), organization_id])
-        row = result.fetchone()
-        if row:
-            return _row_to_log_event(row)
-    except Exception as e:
-        close_duckdb_read_connection()
-        if not is_missing_file_error(e):
-            raise
+    for relative_path in paths:
+        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+        try:
+            sql = f"""
+                SELECT id, trace_id, organization_id, project_id, span_id,
+                       level, severity_number, body, service, environment, host, data
+                FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+                WHERE id = $1 AND organization_id = $2
+                LIMIT 1;
+            """
+            result = duck_conn.execute(sql, [str(log_id), organization_id])
+            row = result.fetchone()
+            if row:
+                return _row_to_log_event(row)
+        except Exception as e:
+            close_duckdb_read_connection()
+            if not is_missing_file_error(e):
+                raise
 
     return None
 
