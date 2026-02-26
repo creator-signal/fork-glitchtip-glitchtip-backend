@@ -47,6 +47,12 @@ def promote_spans() -> tuple[int, bool]:
 
     Returns (rows_promoted, truncated) where truncated is True if any org
     hit the per-org batch limit, indicating more rows likely remain.
+
+    Concurrency note: This function is not guarded by its own lock — it
+    relies on django-tasks' built-in scheduling lock to prevent overlapping
+    runs. If called concurrently (e.g., manual enqueue), duplicate span
+    rows may appear in Parquet. This is acceptable: span data is ephemeral
+    and duplicates only slightly inflate aggregate metrics.
     """
     if not is_duckdb_available():
         logger.debug("DuckDB not available, skipping span promotion")
