@@ -5,22 +5,26 @@ DuckDB runs in-process (no PostgreSQL extension required).
 Tests that need S3 access are skipped when no bucket is configured.
 """
 
+import shutil
 import tempfile
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from glitchtip.cold_storage import (
     get_org_cold_storage_path,
     is_duckdb_available,
 )
-from glitchtip.partition_manager import UUID7Helper
+from glitchtip.partition_manager import PartitionManager, UUID7Helper
+from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..cold_storage import (
     ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+    ISSUE_EVENT_SELECT_SQL,
     TABLE_NAME,
     IssueEventRow,
     get_event_from_cold,
@@ -298,3 +302,163 @@ class MissingParquetTestCase(TestCase):
                 fake_id = UUID7Helper.from_datetime(fake_time)
                 result = get_event_from_cold(99999, fake_id, fake_time)
                 self.assertIsNone(result)
+
+
+def _create_issue_event_partition(date: datetime) -> str:
+    """Create an issue event partition for a specific date. Returns partition name."""
+    manager = PartitionManager()
+    date_str = date.strftime("%Y%m%d")
+    partition_name = f"issue_events_issueevent_{date_str}"
+    next_date = date + timedelta(days=1)
+
+    sqls = manager.create_time_partition(
+        parent_table="issue_events_issueevent",
+        partition_name=partition_name,
+        start_date=date,
+        end_date=next_date,
+        hash_buckets=None,
+        hash_column="organization_id",
+        key_type="uuid7",
+        partition_column="id",
+    )
+    with connection.cursor() as cursor:
+        for sql in sqls:
+            cursor.execute(sql)
+    return partition_name
+
+
+def _drop_issue_event_partition(partition_name: str):
+    """Detach and drop a partition, ignoring errors."""
+    with connection.cursor() as cursor:
+        try:
+            cursor.execute(
+                f"ALTER TABLE issue_events_issueevent DETACH PARTITION {partition_name}"
+            )
+        except Exception:
+            connection.connection.rollback()
+        try:
+            cursor.execute(f"DROP TABLE IF EXISTS {partition_name} CASCADE")
+        except Exception:
+            connection.connection.rollback()
+
+
+class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """
+    End-to-end test: insert issue events into PG, archive to Parquet,
+    then query cold storage and verify results.
+    """
+
+    def setUp(self):
+        self.create_project()
+        self.cold_dir = tempfile.mkdtemp(prefix="glitchtip_cold_test_")
+        self.archive_date = datetime(2025, 5, 1, tzinfo=dt_timezone.utc)
+        self.partition_name = _create_issue_event_partition(self.archive_date)
+
+    def tearDown(self):
+        _drop_issue_event_partition(self.partition_name)
+        shutil.rmtree(self.cold_dir, ignore_errors=True)
+
+    def _insert_events(self, count: int) -> list:
+        """Insert issue events into the partition and return their UUIDs."""
+        from ..models import Issue
+
+        issue = Issue.objects.create(
+            project=self.project,
+            title="Test Issue",
+            metadata={"title": "Test Issue"},
+            type=0,
+            level=40,
+        )
+
+        event_ids = []
+        with connection.cursor() as cursor:
+            for i in range(count):
+                event_time = self.archive_date + timedelta(seconds=i)
+                event_id = UUID7Helper.from_datetime(event_time)
+                event_ids.append(event_id)
+                cursor.execute(
+                    "INSERT INTO issue_events_issueevent "
+                    "(id, timestamp, issue_id, organization_id, type, level, "
+                    "title, transaction, data, tags, hashes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        str(event_id),
+                        event_time,
+                        issue.id,
+                        self.organization.id,
+                        0,  # type
+                        4,  # level (error = 4 in issue_events.constants.LogLevel)
+                        f"Event {i}",
+                        "/api/test",
+                        "{}",
+                        "{}",
+                        "{}",
+                    ],
+                )
+        return event_ids
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_archive_then_query_events(self):
+        """Archived issue events are queryable from cold storage."""
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            event_ids = self._insert_events(20)
+
+            archive_and_swap_partition(
+                self.partition_name,
+                TABLE_NAME,
+                ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+                ISSUE_EVENT_SELECT_SQL,
+            )
+
+            results = query_cold_events(
+                organization_id=self.organization.id,
+                start_dt=self.archive_date,
+                end_dt=self.archive_date + timedelta(days=1),
+                limit=100,
+            )
+
+            self.assertEqual(len(results), 20)
+
+            # Results should be sorted by id DESC
+            result_ids = [r.id for r in results]
+            self.assertEqual(result_ids, sorted(result_ids, reverse=True))
+
+            # All original IDs should be present
+            self.assertEqual(set(result_ids), set(event_ids))
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_get_single_event_from_cold(self):
+        """get_event_from_cold retrieves a specific event by ID."""
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            event_ids = self._insert_events(5)
+
+            archive_and_swap_partition(
+                self.partition_name,
+                TABLE_NAME,
+                ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+                ISSUE_EVENT_SELECT_SQL,
+            )
+
+            target_id = event_ids[2]
+            target_time = UUID7Helper.extract_datetime(target_id)
+
+            result = get_event_from_cold(self.organization.id, target_id, target_time)
+
+            self.assertIsNotNone(result)
+            self.assertEqual(result.id, target_id)
+            self.assertEqual(result.title, "Event 2")
+            self.assertEqual(result.organization_id, self.organization.id)

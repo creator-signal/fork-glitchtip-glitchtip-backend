@@ -162,8 +162,9 @@ def _build_hot_where(
         params.append(trace_id)
 
     if query:
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         where_clauses.append("body ILIKE %s")
-        params.append(f"%{query}%")
+        params.append(f"%{escaped}%")
 
     if cursor_position:
         where_clauses.append("id < %s")
@@ -268,6 +269,115 @@ def count_hot_storage(
         return cursor.fetchone()[0]
 
 
+def count_cold_storage(
+    organization_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    project_ids: list[int] | None = None,
+    level_values: list[int] | None = None,
+    service: str | None = None,
+    environment: str | None = None,
+    host: str | None = None,
+    trace_id: str | None = None,
+    query: str | None = None,
+    max_hits: int = 1000,
+) -> int:
+    """Bounded count of matching logs in cold storage."""
+    from glitchtip.cold_storage import (
+        duckdb_quote_path,
+        enumerate_org_parquet_files,
+        get_cold_storage_backend,
+        get_duckdb_parquet_path,
+        get_duckdb_read_connection,
+        is_duckdb_available,
+    )
+
+    if not is_duckdb_available():
+        return 0
+
+    storage = get_cold_storage_backend()
+    if not storage:
+        return 0
+
+    parquet_paths = enumerate_org_parquet_files(
+        storage, "logs_logevent", organization_id, start_dt, end_dt
+    )
+    if not parquet_paths:
+        return 0
+
+    # Build WHERE clause
+    where_parts = ["organization_id = $1"]
+    params: list = [organization_id]
+
+    start_uuid, end_uuid = UUID7Helper.get_range_for_date(start_dt, end_dt)
+    params.extend([str(start_uuid), str(end_uuid)])
+    where_parts.append(f"id >= ${len(params) - 1}")
+    where_parts.append(f"id < ${len(params)}")
+
+    if project_ids:
+        placeholders = ",".join(
+            f"${len(params) + i + 1}" for i in range(len(project_ids))
+        )
+        params.extend(project_ids)
+        where_parts.append(f"project_id IN ({placeholders})")
+
+    if level_values:
+        placeholders = ",".join(
+            f"${len(params) + i + 1}" for i in range(len(level_values))
+        )
+        params.extend(level_values)
+        where_parts.append(f"level IN ({placeholders})")
+
+    if service:
+        params.append(service)
+        where_parts.append(f"service = ${len(params)}")
+
+    if environment:
+        params.append(environment)
+        where_parts.append(f"environment = ${len(params)}")
+
+    if host:
+        params.append(host)
+        where_parts.append(f"host = ${len(params)}")
+
+    if trace_id:
+        try:
+            validated_trace = UUID(trace_id)
+        except (ValueError, AttributeError):
+            pass
+        else:
+            params.append(str(validated_trace))
+            where_parts.append(f"trace_id = ${len(params)}")
+
+    if query:
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{escaped}%")
+        where_parts.append(f"body ILIKE ${len(params)}")
+
+    where_sql = " AND ".join(where_parts)
+
+    total = 0
+    duck_conn = get_duckdb_read_connection(storage)
+    for relative_path in parquet_paths:
+        if total >= max_hits:
+            break
+        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+        try:
+            sql = f"""
+                SELECT COUNT(*) FROM (
+                    SELECT 1 FROM read_parquet('{duckdb_quote_path(parquet_path)}')
+                    WHERE {where_sql}
+                    LIMIT ${len(params) + 1}
+                ) bounded
+            """
+            row = duck_conn.execute(sql, [*params, max_hits - total]).fetchone()
+            total += row[0]
+        except Exception:
+            logger.debug("Count failed for %s, skipping", relative_path)
+
+    return min(total, max_hits)
+
+
 def query_cold_storage(
     organization_id: int,
     start_dt: datetime,
@@ -340,7 +450,8 @@ def query_cold_storage(
             where_parts.append(f"trace_id = ${len(params)}")
 
     if query:
-        params.append(f"%{query}%")
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{escaped}%")
         where_parts.append(f"body ILIKE ${len(params)}")
 
     if cursor_position:
@@ -364,6 +475,8 @@ def query_cold_storage(
         where_sql=where_sql,
         params=params,
         limit_param=limit_param,
+        start_dt=start_dt,
+        end_dt=end_dt,
     )
 
     results = [_row_to_log_event(row) for row in rows]
@@ -388,8 +501,10 @@ async def query_logs_combined(
     """
     Query logs from both hot and cold storage.
 
-    When the date range spans both tiers, hot and cold are queried in
-    parallel via asyncio.to_thread. Results are merged and sorted by id DESC.
+    Uses a hot-first strategy: queries hot storage first, then cold only
+    if the hot page isn't full. Results are merged and sorted by id DESC.
+    Cursor pagination uses UUIDv7 timestamps to skip tiers that can't
+    contain older data, preventing duplicates across pages.
     """
     now = datetime.now(timezone.utc)
     hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
@@ -410,23 +525,36 @@ async def query_logs_combined(
     needs_hot = end_dt > hot_cutoff
     needs_cold = start_dt < hot_cutoff
 
+    # When paginating with a cursor, use its timestamp to skip tiers that
+    # can't have older data. This prevents duplicate results: if the cursor
+    # is in the cold range, all hot rows have larger UUIDs and were already
+    # returned on a previous page.
+    if cursor_position and needs_hot and needs_cold:
+        cursor_time = UUID7Helper.extract_datetime(cursor_position)
+        if cursor_time <= hot_cutoff:
+            # Cursor is in cold range — all hot data was on earlier pages
+            needs_hot = False
+        # If cursor is in hot range, we still need both tiers (hot query
+        # uses id < cursor, cold query returns its full first page)
+
     if needs_hot and needs_cold:
-        # Parallel I/O — hot and cold have disjoint time ranges
-        # PG: sync_to_async (Django connection management, async cursors in 6.1)
-        # DuckDB: asyncio.to_thread (in-process C library, no Django DB)
-        hot_task = sync_to_async(query_hot_storage)(
+        # Hot-first strategy: query hot, skip cold if hot fills the page.
+        # This avoids an expensive cold query when recent data suffices.
+        hot_results = await sync_to_async(query_hot_storage)(
             start_dt=max(start_dt, hot_cutoff),
             end_dt=end_dt,
             **kwargs,
         )
-        cold_task = asyncio.to_thread(
-            query_cold_storage,
-            start_dt=start_dt,
-            end_dt=min(end_dt, hot_cutoff),
-            **kwargs,
-        )
-        hot_results, cold_results = await asyncio.gather(hot_task, cold_task)
-        results = hot_results + cold_results
+        if len(hot_results) >= limit:
+            results = hot_results
+        else:
+            cold_results = await asyncio.to_thread(
+                query_cold_storage,
+                start_dt=start_dt,
+                end_dt=min(end_dt, hot_cutoff),
+                **kwargs,
+            )
+            results = hot_results + cold_results
     elif needs_hot:
         results = await sync_to_async(query_hot_storage)(
             start_dt=max(start_dt, hot_cutoff),
@@ -515,6 +643,7 @@ def _get_log_from_cold(
             close_duckdb_read_connection()
             if not is_missing_file_error(e):
                 raise
+            duck_conn = get_duckdb_read_connection(storage)
 
     return None
 
@@ -611,8 +740,14 @@ async def list_logs(
     page_results = results[:limit]
 
     # Bounded count (only on first page to avoid repeated cost)
+    max_hits = 1000
     if not cursor_position:
-        hits = await sync_to_async(count_hot_storage)(**query_kwargs)
+        hits = await sync_to_async(count_hot_storage)(**query_kwargs, max_hits=max_hits)
+        if hits < max_hits:
+            cold_hits = await asyncio.to_thread(
+                count_cold_storage, **query_kwargs, max_hits=max_hits - hits
+            )
+            hits += cold_hits
     else:
         hits = len(page_results)
 
