@@ -33,7 +33,6 @@ LOGS_SELECT_SQL = """
            level, severity_number, body, service, environment, host, data::text
     FROM {partition_name}
     WHERE organization_id = %s
-    ORDER BY environment, service, host, level, id
 """
 
 TABLE_NAME = "logs_logevent"
