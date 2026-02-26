@@ -22,7 +22,6 @@ High-scale deployments can disable manual cleanup and use S3 lifecycle policies.
 import json
 import logging
 import os
-import tempfile
 import threading
 from datetime import datetime, timedelta
 
@@ -294,6 +293,53 @@ def get_parquet_paths_for_date(
     return paths
 
 
+def _flush_chunk(
+    duck_conn,
+    storage,
+    rows: list[tuple],
+    col_defs: str,
+    insert_sql: str,
+    table_name: str,
+    org_id: int,
+    date_str: str,
+    flat_path: str,
+    chunk_num: int,
+    total_rows: int,
+) -> tuple[int, int]:
+    """
+    Write a batch of rows to a Parquet chunk file via DuckDB.
+
+    Returns updated (chunk_num, total_rows).
+    Small orgs (first and only chunk) get a flat file.
+    """
+    try:
+        duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
+
+        for i in range(0, len(rows), ARCHIVE_BATCH_SIZE):
+            duck_conn.executemany(insert_sql, rows[i : i + ARCHIVE_BATCH_SIZE])
+
+        # First-and-only chunk → flat file; otherwise chunk dir
+        if chunk_num == 0 and len(rows) < ARCHIVE_CHUNK_ROWS:
+            out_path = flat_path
+        else:
+            out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
+            chunk_num += 1
+
+        parquet_path = get_duckdb_parquet_path(storage, out_path)
+        if not _is_s3_storage(storage):
+            os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+
+        duck_conn.execute(
+            f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
+            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+        )
+        total_rows += len(rows)
+    finally:
+        duck_conn.execute("DROP TABLE IF EXISTS export_data")
+
+    return chunk_num, total_rows
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -396,53 +442,70 @@ def archive_partition_per_org(
                     except (OSError, NotImplementedError):
                         pass
 
-                    # Stream directly from Postgres to disk via COPY TO STDOUT.
-                    # This bypasses Python memory arrays, avoids DB CPU load from
-                    # LIMIT/OFFSET pagination, and streams perfectly through PgBouncer.
-                    query_sql = select_sql.format(partition_name=partition_name).replace("%s", str(org_id))
-                    copy_sql = f"COPY ({query_sql}) TO STDOUT WITH (FORMAT CSV, HEADER)"
+                    # Stream rows via COPY TO STDOUT — constant Python memory,
+                    # O(N) Postgres work, and PgBouncer-safe (single statement).
+                    # org_id is always an int from the database, safe to inline.
+                    query_sql = select_sql.format(
+                        partition_name=partition_name
+                    ).replace("%s", str(int(org_id)))
+                    copy_sql = f"COPY ({query_sql}) TO STDOUT"
 
+                    columns = list(column_types.keys())
+                    col_defs = ", ".join(
+                        f"{c} {column_types[c]}" for c in columns
+                    )
+                    insert_sql = f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})"
+
+                    chunk_num = 0
                     total_rows = 0
+                    batch: list[tuple] = []
 
-                    with tempfile.NamedTemporaryFile(suffix=".csv") as f:
-                        with cursor.connection.cursor() as raw_cursor:
-                            with raw_cursor.copy(copy_sql) as copy_op:
-                                for data in copy_op:
-                                    f.write(data)
-                        
-                        f.flush()
-                        
-                        col_defs = ", ".join(f"{c} {column_types[c]}" for c in column_types)
-                        try:
-                            duck_conn.execute(f"CREATE TABLE export_data({col_defs})")
-                            duck_conn.execute(f"COPY export_data FROM '{f.name}' (FORMAT CSV, HEADER)")
-                            
-                            res = duck_conn.execute("SELECT COUNT(*) FROM export_data").fetchone()
-                            if res:
-                                total_rows = res[0]
+                    raw_conn = cursor.connection
+                    with raw_conn.cursor() as copy_cur:
+                        with copy_cur.copy(copy_sql) as copy_op:
+                            for row in copy_op.rows():
+                                batch.append(row)
 
-                            if total_rows > 0:
-                                parquet_path = get_duckdb_parquet_path(
-                                    storage, flat_path
-                                )
-                                if not _is_s3_storage(storage):
-                                    os.makedirs(
-                                        os.path.dirname(parquet_path),
-                                        exist_ok=True,
+                                if len(batch) >= ARCHIVE_CHUNK_ROWS:
+                                    chunk_num, total_rows = _flush_chunk(
+                                        duck_conn,
+                                        storage,
+                                        batch,
+                                        col_defs,
+                                        insert_sql,
+                                        table_name,
+                                        org_id,
+                                        date_str,
+                                        flat_path,
+                                        chunk_num,
+                                        total_rows,
                                     )
-                                duck_conn.execute(
-                                    f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
-                                    f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
-                                )
-                        finally:
-                            duck_conn.execute("DROP TABLE IF EXISTS export_data")
+                                    batch = []
+
+                    # Flush remaining rows
+                    if batch:
+                        chunk_num, total_rows = _flush_chunk(
+                            duck_conn,
+                            storage,
+                            batch,
+                            col_defs,
+                            insert_sql,
+                            table_name,
+                            org_id,
+                            date_str,
+                            flat_path,
+                            chunk_num,
+                            total_rows,
+                        )
+                        del batch
 
                     if total_rows > 0:
                         archived_files.append((org_id, flat_path))
                         logger.debug(
-                            "Archived org %d: %d rows in 1 file",
+                            "Archived org %d: %d rows in %d file(s)",
                             org_id,
                             total_rows,
+                            max(chunk_num, 1),
                         )
             finally:
                 duck_conn.close()
