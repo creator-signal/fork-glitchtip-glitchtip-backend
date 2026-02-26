@@ -22,7 +22,6 @@ High-scale deployments can disable manual cleanup and use S3 lifecycle policies.
 import json
 import logging
 import os
-import tempfile
 import threading
 from datetime import datetime, timedelta
 
@@ -189,9 +188,16 @@ def _create_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     memory_limit = getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB")
-    if memory_limit:
+    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "")
+    if memory_limit and temp_dir and os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
         conn.execute(f"SET memory_limit = '{memory_limit}'")
-        conn.execute(f"SET temp_directory = '{tempfile.gettempdir()}'")
+        conn.execute(f"SET temp_directory = '{temp_dir}'")
+    elif memory_limit and temp_dir:
+        logger.warning(
+            "DUCKDB_TEMP_DIRECTORY=%s is not writable, "
+            "running DuckDB without memory limit",
+            temp_dir,
+        )
 
     if storage and _is_s3_storage(storage):
         conn.load_extension("httpfs")

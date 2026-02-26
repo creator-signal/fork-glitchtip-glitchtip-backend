@@ -174,6 +174,9 @@ DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
 # DuckDB memory limit — prevents OOM during archival by spilling to disk.
 # Set to empty string to disable (unbounded memory).
 DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", "128MB")
+# Writable directory for DuckDB spill-to-disk. Set to empty string to disable
+# the memory limit (needed for read-only root filesystems with no writable mount).
+DUCKDB_TEMP_DIRECTORY = env.str("DUCKDB_TEMP_DIRECTORY", "/tmp")
 
 # Cold storage bucket — defaults to AWS_STORAGE_BUCKET_NAME so users with S3
 # configured get cold storage automatically. Files use cold_storage/ prefix.
