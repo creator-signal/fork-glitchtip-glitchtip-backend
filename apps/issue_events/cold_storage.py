@@ -67,7 +67,6 @@ ISSUE_EVENT_SELECT_SQL = """
            array_to_json(hashes)::text
     FROM {partition_name}
     WHERE organization_id = %s
-    ORDER BY issue_id, level, id
 """
 
 
