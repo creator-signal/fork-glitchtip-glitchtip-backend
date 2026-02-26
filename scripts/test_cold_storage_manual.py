@@ -22,7 +22,6 @@ from django.db import models
 from apps.issue_events.cold_storage import (
     ISSUE_EVENT_EXPORT_COLUMN_TYPES,
     ISSUE_EVENT_SELECT_SQL,
-    archive_and_swap_partition as ie_archive_and_swap,
     get_event_from_cold,
     is_duckdb_available,
     query_cold_events,

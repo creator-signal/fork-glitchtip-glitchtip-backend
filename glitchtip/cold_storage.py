@@ -37,8 +37,10 @@ logger = logging.getLogger(__name__)
 # Prefix for all cold storage files to prevent collisions with other data
 COLD_STORAGE_PREFIX = "cold_storage"
 
-# Rows fetched per batch during partition archival to bound memory usage
-ARCHIVE_BATCH_SIZE = 5000
+# Max rows per CSV chunk during archival.
+# Each chunk is streamed as CSV bytes (~40MB for 50K wide log rows), written
+# to a temp file, then converted to Parquet by DuckDB's native CSV reader.
+ARCHIVE_CHUNK_ROWS = 50_000
 
 
 def get_cold_storage_backend():
@@ -128,7 +130,13 @@ def get_duckdb_connection(storage=None):
 
     The caller is responsible for closing the returned connection.
     """
-    return _create_duckdb_connection(storage)
+    conn = _create_duckdb_connection(storage)
+    # Reduce DuckDB's internal buffer overhead for writes — archival is
+    # background work that doesn't need parallelism or insertion-order
+    # preservation.  Read connections keep defaults for query parallelism.
+    conn.execute("SET threads = 1")
+    conn.execute("SET preserve_insertion_order = false")
+    return conn
 
 
 # Thread-local storage for cached read-only DuckDB connections.
@@ -189,9 +197,16 @@ def _create_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     memory_limit = getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB")
-    if memory_limit:
+    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "")
+    if memory_limit and temp_dir and os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
         conn.execute(f"SET memory_limit = '{memory_limit}'")
-        conn.execute(f"SET temp_directory = '{tempfile.gettempdir()}'")
+        conn.execute(f"SET temp_directory = '{temp_dir}'")
+    elif memory_limit and temp_dir:
+        logger.warning(
+            "DUCKDB_TEMP_DIRECTORY=%s is not writable, "
+            "running DuckDB without memory limit",
+            temp_dir,
+        )
 
     if storage and _is_s3_storage(storage):
         conn.load_extension("httpfs")
@@ -240,6 +255,101 @@ def get_duckdb_parquet_path(storage, relative_path: str) -> str:
 def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> str:
     """Get the storage-relative path for an org's daily Parquet file (without bucket)."""
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
+
+
+def _get_chunk_dir(table_name: str, org_id: int, date_str: str) -> str:
+    """Get the storage-relative directory for chunked Parquet files."""
+    return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}"
+
+
+def _get_chunk_path(table_name: str, org_id: int, date_str: str, chunk: int) -> str:
+    """Get the storage-relative path for a specific chunk file."""
+    return f"{_get_chunk_dir(table_name, org_id, date_str)}/chunk_{chunk:03d}.parquet"
+
+
+def get_parquet_paths_for_date(
+    storage, table_name: str, org_id: int, date_str: str
+) -> list[str]:
+    """
+    Return all Parquet file paths for an org+date — flat file and/or chunks.
+
+    Used by single-event lookups to find the right file(s) to search.
+    """
+    paths = []
+    flat = get_org_cold_storage_path(table_name, org_id, date_str)
+    if storage.exists(flat):
+        paths.append(flat)
+
+    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
+    try:
+        _, chunk_files = storage.listdir(chunk_dir)
+        for cf in sorted(chunk_files):
+            if cf.endswith(".parquet"):
+                paths.append(f"{chunk_dir}/{cf}")
+    except (OSError, NotImplementedError):
+        pass
+
+    return paths
+
+
+def _flush_csv_to_parquet(
+    duck_conn,
+    storage,
+    csv_data: bytes | bytearray,
+    column_types: dict[str, str],
+    table_name: str,
+    org_id: int,
+    date_str: str,
+    flat_path: str,
+    chunk_num: int,
+    total_rows: int,
+    row_count: int,
+) -> tuple[int, int]:
+    """
+    Write CSV data to a Parquet file via DuckDB's native CSV reader.
+
+    ~90x faster than executemany — DuckDB reads CSV in C++ without
+    per-row Python overhead.
+
+    Returns updated (chunk_num, total_rows).
+    Small orgs (first and only chunk) get a flat file.
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".csv", delete=False
+    ) as f:
+        csv_path = f.name
+        f.write(csv_data)
+
+    try:
+        # First-and-only chunk → flat file; otherwise chunk dir
+        if chunk_num == 0 and row_count < ARCHIVE_CHUNK_ROWS:
+            out_path = flat_path
+        else:
+            out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
+            chunk_num += 1
+
+        parquet_path = get_duckdb_parquet_path(storage, out_path)
+        if not _is_s3_storage(storage):
+            os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+
+        columns = list(column_types.keys())
+        col_spec = ", ".join(f"'{c}': '{column_types[c]}'" for c in columns)
+
+        duck_conn.execute(
+            f"COPY (SELECT * FROM read_csv("
+            f"'{duckdb_quote_path(csv_path)}', "
+            f"columns={{{col_spec}}}, header=true)) "
+            f"TO '{duckdb_quote_path(parquet_path)}' "
+            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+        )
+        total_rows += row_count
+    finally:
+        try:
+            os.unlink(csv_path)
+        except OSError:
+            pass
+
+    return chunk_num, total_rows
 
 
 def archive_partition_per_org(
@@ -313,70 +423,111 @@ def archive_partition_per_org(
             # repeated startup overhead (extension loading, S3 config).
             duck_conn = get_duckdb_connection(storage)
             try:
-                # Export each org's data to a separate Parquet file
+                # Export each org's data to separate Parquet files.
+                # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
+                # to bound DuckDB memory and temp-disk usage.
                 for org_id in org_ids:
-                    relative_path = get_org_cold_storage_path(
+                    flat_path = get_org_cold_storage_path(
                         table_name, org_id, date_str
                     )
-                    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+                    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
 
-                    # Skip orgs already archived (idempotent on crash/restart)
-                    if storage.exists(relative_path):
-                        archived_files.append((org_id, parquet_path))
+                    # Skip orgs already archived (flat file is atomic/complete)
+                    if storage.exists(flat_path):
+                        archived_files.append(
+                            (org_id, get_duckdb_parquet_path(storage, flat_path))
+                        )
                         logger.debug(
                             "Parquet already exists for org %d, skipping", org_id
                         )
                         continue
 
-                    # Read org's data from PostgreSQL
-                    cursor.execute(
-                        select_sql.format(partition_name=partition_name),
-                        [org_id],
-                    )
-                    columns = [desc[0] for desc in cursor.description]
-
-                    # Stream rows in batches to bound memory usage
-                    # instead of loading entire partition with fetchall()
-                    has_data = False
-                    row_count = 0
+                    # Delete any partial chunks from a previous crashed run
+                    # so we re-archive cleanly from Postgres.
                     try:
-                        while True:
-                            batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
-                            if not batch:
-                                break
+                        _, existing_chunks = storage.listdir(chunk_dir)
+                        for f in existing_chunks:
+                            try:
+                                storage.delete(f"{chunk_dir}/{f}")
+                            except Exception:
+                                pass
+                    except (OSError, NotImplementedError):
+                        pass
 
-                            # Lazily create DuckDB table and output dir on first batch
-                            if not has_data:
-                                if not _is_s3_storage(storage):
-                                    os.makedirs(
-                                        os.path.dirname(parquet_path), exist_ok=True
+                    # Stream CSV via COPY TO STDOUT — constant Python memory,
+                    # O(N) Postgres work, PgBouncer-safe (single statement),
+                    # and ~90x faster than executemany for DuckDB writes.
+                    # org_id is always an int from the database, safe to inline.
+                    query_sql = select_sql.format(
+                        partition_name=partition_name
+                    ).replace("%s", str(int(org_id)), 1)
+                    copy_sql = (
+                        f"COPY ({query_sql}) TO STDOUT "
+                        f"WITH (FORMAT CSV, HEADER)"
+                    )
+
+                    chunk_num = 0
+                    total_rows = 0
+                    header = None
+                    csv_buf = bytearray()
+                    buf_rows = 0
+
+                    raw_conn = cursor.connection
+                    with raw_conn.cursor() as copy_cur:
+                        with copy_cur.copy(copy_sql) as copy_op:
+                            for line in copy_op:
+                                if header is None:
+                                    header = bytes(line)
+                                    csv_buf = bytearray(header)
+                                    continue
+
+                                csv_buf.extend(line)
+                                buf_rows += 1
+
+                                if buf_rows >= ARCHIVE_CHUNK_ROWS:
+                                    chunk_num, total_rows = (
+                                        _flush_csv_to_parquet(
+                                            duck_conn,
+                                            storage,
+                                            csv_buf,
+                                            column_types,
+                                            table_name,
+                                            org_id,
+                                            date_str,
+                                            flat_path,
+                                            chunk_num,
+                                            total_rows,
+                                            buf_rows,
+                                        )
                                     )
-                                col_defs = ", ".join(
-                                    f"{c} {column_types[c]}" for c in columns
-                                )
-                                duck_conn.execute(
-                                    f"CREATE TABLE export_data({col_defs})"
-                                )
-                                has_data = True
+                                    csv_buf = bytearray(header)
+                                    buf_rows = 0
 
-                            # Type conversion (UUID::text, JSONB::text) is done
-                            # in the SELECT SQL so rows can be inserted directly.
-                            duck_conn.executemany(
-                                f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                                batch,
-                            )
-                            row_count += len(batch)
+                    # Flush remaining rows
+                    if buf_rows > 0:
+                        chunk_num, total_rows = _flush_csv_to_parquet(
+                            duck_conn,
+                            storage,
+                            csv_buf,
+                            column_types,
+                            table_name,
+                            org_id,
+                            date_str,
+                            flat_path,
+                            chunk_num,
+                            total_rows,
+                            buf_rows,
+                        )
+                    del csv_buf
 
-                        # Export to Parquet if any rows were inserted
-                        if has_data and row_count > 0:
-                            duck_conn.execute(
-                                f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
-                            )
-                            archived_files.append((org_id, parquet_path))
-                            logger.debug(f"Archived org {org_id} to {parquet_path}")
-                    finally:
-                        if has_data:
-                            duck_conn.execute("DROP TABLE IF EXISTS export_data")
+                    if total_rows > 0:
+                        archived_files.append((org_id, flat_path))
+                        logger.debug(
+                            "Archived org %d: %d rows in %d file(s)",
+                            org_id,
+                            total_rows,
+                            max(chunk_num, 1),
+                        )
             finally:
                 duck_conn.close()
 
@@ -694,22 +845,34 @@ def query_cold_parquet_files(
 
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{organization_id}"
 
-    # Enumerate parquet files for this org
+    # Enumerate parquet files for this org — both flat files and chunk dirs
     try:
-        _dirs, files = storage.listdir(org_prefix)
+        dirs, files = storage.listdir(org_prefix)
     except (NotImplementedError, OSError):
         # Directory doesn't exist or listdir unsupported — no cold data
         return []
 
-    parquet_files = sorted(f for f in files if f.endswith(".parquet"))
-    if not parquet_files:
+    # Collect all parquet paths: flat files + chunks inside date subdirs
+    parquet_paths: list[str] = []
+    for filename in sorted(files):
+        if filename.endswith(".parquet"):
+            parquet_paths.append(f"{org_prefix}/{filename}")
+    for subdir in sorted(dirs):
+        try:
+            _, chunk_files = storage.listdir(f"{org_prefix}/{subdir}")
+            for cf in sorted(chunk_files):
+                if cf.endswith(".parquet"):
+                    parquet_paths.append(f"{org_prefix}/{subdir}/{cf}")
+        except (OSError, NotImplementedError):
+            pass
+
+    if not parquet_paths:
         return []
 
     all_rows: list[tuple] = []
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        for filename in parquet_files:
-            relative_path = f"{org_prefix}/{filename}"
+        for relative_path in parquet_paths:
             parquet_path = get_duckdb_parquet_path(storage, relative_path)
             sql = f"""
                 SELECT {select_columns}
