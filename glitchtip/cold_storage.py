@@ -39,6 +39,10 @@ COLD_STORAGE_PREFIX = "cold_storage"
 # Rows fetched per batch during partition archival to bound memory usage
 ARCHIVE_BATCH_SIZE = 5000
 
+# Flush to a new Parquet chunk file every N rows to bound DuckDB memory/disk.
+# Each chunk stays well under the DUCKDB_MEMORY_LIMIT even for wide rows.
+ARCHIVE_CHUNK_ROWS = 500_000
+
 
 def get_cold_storage_backend():
     """
@@ -248,6 +252,41 @@ def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> st
     return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
 
 
+def _get_chunk_dir(table_name: str, org_id: int, date_str: str) -> str:
+    """Get the storage-relative directory for chunked Parquet files."""
+    return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}"
+
+
+def _get_chunk_path(table_name: str, org_id: int, date_str: str, chunk: int) -> str:
+    """Get the storage-relative path for a specific chunk file."""
+    return f"{_get_chunk_dir(table_name, org_id, date_str)}/chunk_{chunk:03d}.parquet"
+
+
+def get_parquet_paths_for_date(
+    storage, table_name: str, org_id: int, date_str: str
+) -> list[str]:
+    """
+    Return all Parquet file paths for an org+date — flat file and/or chunks.
+
+    Used by single-event lookups to find the right file(s) to search.
+    """
+    paths = []
+    flat = get_org_cold_storage_path(table_name, org_id, date_str)
+    if storage.exists(flat):
+        paths.append(flat)
+
+    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
+    try:
+        _, chunk_files = storage.listdir(chunk_dir)
+        for cf in sorted(chunk_files):
+            if cf.endswith(".parquet"):
+                paths.append(f"{chunk_dir}/{cf}")
+    except (OSError, NotImplementedError):
+        pass
+
+    return paths
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -319,20 +358,35 @@ def archive_partition_per_org(
             # repeated startup overhead (extension loading, S3 config).
             duck_conn = get_duckdb_connection(storage)
             try:
-                # Export each org's data to a separate Parquet file
+                # Export each org's data to separate Parquet files.
+                # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
+                # to bound DuckDB memory and temp-disk usage.
                 for org_id in org_ids:
-                    relative_path = get_org_cold_storage_path(
+                    flat_path = get_org_cold_storage_path(
                         table_name, org_id, date_str
                     )
-                    parquet_path = get_duckdb_parquet_path(storage, relative_path)
+                    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
 
-                    # Skip orgs already archived (idempotent on crash/restart)
-                    if storage.exists(relative_path):
-                        archived_files.append((org_id, parquet_path))
+                    # Skip orgs already archived (flat file or chunk dir)
+                    if storage.exists(flat_path):
+                        archived_files.append(
+                            (org_id, get_duckdb_parquet_path(storage, flat_path))
+                        )
                         logger.debug(
                             "Parquet already exists for org %d, skipping", org_id
                         )
                         continue
+                    try:
+                        _, existing_chunks = storage.listdir(chunk_dir)
+                        if any(f.endswith(".parquet") for f in existing_chunks):
+                            archived_files.append((org_id, chunk_dir))
+                            logger.debug(
+                                "Chunk dir already exists for org %d, skipping",
+                                org_id,
+                            )
+                            continue
+                    except (OSError, NotImplementedError):
+                        pass
 
                     # Read org's data from PostgreSQL
                     cursor.execute(
@@ -340,46 +394,87 @@ def archive_partition_per_org(
                         [org_id],
                     )
                     columns = [desc[0] for desc in cursor.description]
+                    col_defs = ", ".join(
+                        f"{c} {column_types[c]}" for c in columns
+                    )
+                    insert_sql = f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})"
 
-                    # Stream rows in batches to bound memory usage
-                    # instead of loading entire partition with fetchall()
+                    # Stream rows in batches, flushing a new chunk file
+                    # every ARCHIVE_CHUNK_ROWS to bound memory.
                     has_data = False
-                    row_count = 0
+                    chunk_rows = 0
+                    chunk_num = 0
+                    total_rows = 0
                     try:
                         while True:
                             batch = cursor.fetchmany(ARCHIVE_BATCH_SIZE)
                             if not batch:
                                 break
 
-                            # Lazily create DuckDB table and output dir on first batch
                             if not has_data:
-                                if not _is_s3_storage(storage):
-                                    os.makedirs(
-                                        os.path.dirname(parquet_path), exist_ok=True
-                                    )
-                                col_defs = ", ".join(
-                                    f"{c} {column_types[c]}" for c in columns
-                                )
                                 duck_conn.execute(
                                     f"CREATE TABLE export_data({col_defs})"
                                 )
                                 has_data = True
 
-                            # Type conversion (UUID::text, JSONB::text) is done
-                            # in the SELECT SQL so rows can be inserted directly.
-                            duck_conn.executemany(
-                                f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(columns))})",
-                                batch,
-                            )
-                            row_count += len(batch)
+                            duck_conn.executemany(insert_sql, batch)
+                            chunk_rows += len(batch)
+                            total_rows += len(batch)
 
-                        # Export to Parquet if any rows were inserted
-                        if has_data and row_count > 0:
-                            duck_conn.execute(
-                                f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+                            # Flush chunk when threshold reached
+                            if chunk_rows >= ARCHIVE_CHUNK_ROWS:
+                                chunk_path = _get_chunk_path(
+                                    table_name, org_id, date_str, chunk_num
+                                )
+                                parquet_path = get_duckdb_parquet_path(
+                                    storage, chunk_path
+                                )
+                                if not _is_s3_storage(storage):
+                                    os.makedirs(
+                                        os.path.dirname(parquet_path),
+                                        exist_ok=True,
+                                    )
+                                duck_conn.execute(
+                                    f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
+                                    f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+                                )
+                                duck_conn.execute("DROP TABLE export_data")
+                                duck_conn.execute(
+                                    f"CREATE TABLE export_data({col_defs})"
+                                )
+                                chunk_num += 1
+                                chunk_rows = 0
+
+                        # Flush remaining rows
+                        if has_data and chunk_rows > 0:
+                            if chunk_num == 0:
+                                # Small org — write a single flat file
+                                out_path = flat_path
+                            else:
+                                out_path = _get_chunk_path(
+                                    table_name, org_id, date_str, chunk_num
+                                )
+                            parquet_path = get_duckdb_parquet_path(
+                                storage, out_path
                             )
-                            archived_files.append((org_id, parquet_path))
-                            logger.debug(f"Archived org {org_id} to {parquet_path}")
+                            if not _is_s3_storage(storage):
+                                os.makedirs(
+                                    os.path.dirname(parquet_path),
+                                    exist_ok=True,
+                                )
+                            duck_conn.execute(
+                                f"COPY export_data TO '{duckdb_quote_path(parquet_path)}' "
+                                f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+                            )
+
+                        if total_rows > 0:
+                            archived_files.append((org_id, flat_path))
+                            logger.debug(
+                                "Archived org %d: %d rows in %d file(s)",
+                                org_id,
+                                total_rows,
+                                chunk_num + 1 if chunk_num > 0 or chunk_rows > 0 else 0,
+                            )
                     finally:
                         if has_data:
                             duck_conn.execute("DROP TABLE IF EXISTS export_data")
@@ -700,22 +795,34 @@ def query_cold_parquet_files(
 
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{organization_id}"
 
-    # Enumerate parquet files for this org
+    # Enumerate parquet files for this org — both flat files and chunk dirs
     try:
-        _dirs, files = storage.listdir(org_prefix)
+        dirs, files = storage.listdir(org_prefix)
     except (NotImplementedError, OSError):
         # Directory doesn't exist or listdir unsupported — no cold data
         return []
 
-    parquet_files = sorted(f for f in files if f.endswith(".parquet"))
-    if not parquet_files:
+    # Collect all parquet paths: flat files + chunks inside date subdirs
+    parquet_paths: list[str] = []
+    for filename in sorted(files):
+        if filename.endswith(".parquet"):
+            parquet_paths.append(f"{org_prefix}/{filename}")
+    for subdir in sorted(dirs):
+        try:
+            _, chunk_files = storage.listdir(f"{org_prefix}/{subdir}")
+            for cf in sorted(chunk_files):
+                if cf.endswith(".parquet"):
+                    parquet_paths.append(f"{org_prefix}/{subdir}/{cf}")
+        except (OSError, NotImplementedError):
+            pass
+
+    if not parquet_paths:
         return []
 
     all_rows: list[tuple] = []
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        for filename in parquet_files:
-            relative_path = f"{org_prefix}/{filename}"
+        for relative_path in parquet_paths:
             parquet_path = get_duckdb_parquet_path(storage, relative_path)
             sql = f"""
                 SELECT {select_columns}
