@@ -373,7 +373,7 @@ def archive_partition_per_org(
                     )
                     chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
 
-                    # Skip orgs already archived (flat file or chunk dir)
+                    # Skip orgs already archived (flat file is atomic/complete)
                     if storage.exists(flat_path):
                         archived_files.append(
                             (org_id, get_duckdb_parquet_path(storage, flat_path))
@@ -382,15 +382,16 @@ def archive_partition_per_org(
                             "Parquet already exists for org %d, skipping", org_id
                         )
                         continue
+
+                    # Delete any partial chunks from a previous crashed run
+                    # so we re-archive cleanly from Postgres.
                     try:
                         _, existing_chunks = storage.listdir(chunk_dir)
-                        if any(f.endswith(".parquet") for f in existing_chunks):
-                            archived_files.append((org_id, chunk_dir))
-                            logger.debug(
-                                "Chunk dir already exists for org %d, skipping",
-                                org_id,
-                            )
-                            continue
+                        for f in existing_chunks:
+                            try:
+                                storage.delete(f"{chunk_dir}/{f}")
+                            except Exception:
+                                pass
                     except (OSError, NotImplementedError):
                         pass
 
