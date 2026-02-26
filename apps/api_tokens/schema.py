@@ -43,7 +43,20 @@ class APITokenIn(ModelSchema):
         return bitfield_to_internal_value(cls.Meta.model, v, info)
 
 
+def _resolve_scopes(obj) -> list[str]:
+    """Example: ['member:read']"""
+    scopes: BitHandler
+    # Must accept both kwarg and model object
+    if isinstance(obj, APIToken):
+        scopes = obj.scopes
+    if isinstance(obj, dict):
+        scopes = obj.get("scopes")
+    return [i[0] for i in scopes.items() if i[1] is True]
+
+
 class APITokenSchema(ModelSchema):
+    """Full token schema — used only for POST create response."""
+
     id: int
     label: str
     scopes: list[str]
@@ -53,13 +66,24 @@ class APITokenSchema(ModelSchema):
         model = APIToken
         fields = ("created",)
 
+    resolve_scopes = staticmethod(_resolve_scopes)
+
+
+class APITokenListSchema(ModelSchema):
+    """Masked token schema — used for GET list response."""
+
+    id: int
+    label: str
+    scopes: list[str]
+    token: str
+
+    class Meta:
+        model = APIToken
+        fields = ("created",)
+
+    resolve_scopes = staticmethod(_resolve_scopes)
+
     @staticmethod
-    def resolve_scopes(obj) -> list[str]:
-        """Example: ['member:read']"""
-        scopes: BitHandler
-        # Must accept both kwarg and model object
-        if isinstance(obj, APIToken):
-            scopes = obj.scopes
-        if isinstance(obj, dict):
-            scopes = obj.get("scopes")
-        return [i[0] for i in scopes.items() if i[1] is True]
+    def resolve_token(obj) -> str:
+        token = obj.token if isinstance(obj, APIToken) else obj["token"]
+        return f"…{token[-8:]}"
