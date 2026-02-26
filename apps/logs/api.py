@@ -88,6 +88,11 @@ class LogEventRow:
 
 def _row_to_log_event(row: tuple) -> LogEventRow:
     """Convert a database row (positional) to LogEventRow."""
+    # span_id: BIGINT from PostgreSQL, VARCHAR from Parquet cold storage
+    span_id = row[4]
+    if isinstance(span_id, str):
+        span_id = int(span_id) if span_id else None
+
     return LogEventRow(
         id=row[0] if isinstance(row[0], UUID) else UUID(str(row[0])),
         trace_id=(
@@ -97,13 +102,13 @@ def _row_to_log_event(row: tuple) -> LogEventRow:
         ),
         organization_id=row[2],
         project_id=row[3],
-        span_id=row[4],
+        span_id=span_id,
         level=row[5],
         severity_number=row[6],
-        body=row[7],
-        service=row[8],
-        environment=row[9],
-        host=row[10],
+        body=row[7] or "",
+        service=row[8] or "",
+        environment=row[9] or "",
+        host=row[10] or "",
         data=parse_json_field(row[11]),
     )
 
