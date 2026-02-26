@@ -501,8 +501,10 @@ async def query_logs_combined(
     """
     Query logs from both hot and cold storage.
 
-    When the date range spans both tiers, hot and cold are queried in
-    parallel via asyncio.to_thread. Results are merged and sorted by id DESC.
+    Uses a hot-first strategy: queries hot storage first, then cold only
+    if the hot page isn't full. Results are merged and sorted by id DESC.
+    Cursor pagination uses UUIDv7 timestamps to skip tiers that can't
+    contain older data, preventing duplicates across pages.
     """
     now = datetime.now(timezone.utc)
     hot_cutoff = now - timedelta(days=HOT_STORAGE_DAYS)
@@ -740,9 +742,7 @@ async def list_logs(
     # Bounded count (only on first page to avoid repeated cost)
     max_hits = 1000
     if not cursor_position:
-        hits = await sync_to_async(count_hot_storage)(
-            **query_kwargs, max_hits=max_hits
-        )
+        hits = await sync_to_async(count_hot_storage)(**query_kwargs, max_hits=max_hits)
         if hits < max_hits:
             cold_hits = await asyncio.to_thread(
                 count_cold_storage, **query_kwargs, max_hits=max_hits - hits
