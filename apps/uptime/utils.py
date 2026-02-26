@@ -1,8 +1,10 @@
 import asyncio
+import ipaddress
 import logging
 import time
 from datetime import timedelta
 from ssl import SSLError
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import ClientTimeout
@@ -22,6 +24,64 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 20  # Seconds
 PAYLOAD_LIMIT = 2_000_000  # 2mb
 PAYLOAD_SAVE_LIMIT = 500_000  # pseudo 500kb
+
+
+def is_ip_blocked(ip_str: str) -> bool:
+    """
+    Return True if IP is private, loopback, link-local, or reserved.
+
+    Raises ValueError if ip_str is not a valid IP address.
+    """
+    ip = ipaddress.ip_address(ip_str)
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+    )
+
+
+async def check_url_safe(url: str) -> bool:
+    """
+    Resolve hostname and verify it doesn't point to a private/internal IP.
+
+    Returns True if the URL is safe to fetch, False if it targets a blocked IP.
+    Always returns True when GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS is enabled.
+    """
+    if settings.GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS:
+        return True
+
+    try:
+        # Handle both full URLs and host:port format (PORT monitors)
+        if "://" in url:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+        else:
+            hostname = url.split(":")[0]
+
+        if not hostname:
+            return False
+
+        # Check if hostname is already an IP literal
+        try:
+            if is_ip_blocked(hostname):
+                return False
+            return True  # Valid IP that is not blocked
+        except ValueError:
+            pass  # Not an IP literal, proceed to DNS resolution
+
+        # Resolve hostname to IPs
+        loop = asyncio.get_event_loop()
+        infos = await loop.getaddrinfo(hostname, None)
+        for family, type_, proto, canonname, sockaddr in infos:
+            if is_ip_blocked(sockaddr[0]):
+                return False
+    except OSError:
+        # DNS resolution failure is not an SSRF concern — the fetch will
+        # also fail with a proper network error.
+        pass
+    return True
 
 
 async def process_response(monitor, response):
@@ -62,6 +122,14 @@ async def fetch(session, monitor):
 
     url = monitor["url"]
     timeout = monitor["timeout"] or DEFAULT_TIMEOUT
+
+    if not await check_url_safe(url):
+        logger.warning(
+            "Monitor %s blocked: URL targets a private/reserved IP", monitor["id"]
+        )
+        monitor["reason"] = MonitorCheckReason.NETWORK
+        return monitor
+
     try:
         start = time.monotonic()
         if monitor["monitor_type"] == MonitorType.PORT:

@@ -31,6 +31,7 @@ from django.core.files.storage import storages
 from django.db import connection
 from django.test.signals import setting_changed
 from django.utils import timezone
+from psycopg.sql import SQL, Identifier
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,12 @@ def _create_duckdb_connection(storage=None):
 
     memory_limit = getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB")
     temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "")
-    if memory_limit and temp_dir and os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
+    if (
+        memory_limit
+        and temp_dir
+        and os.path.isdir(temp_dir)
+        and os.access(temp_dir, os.W_OK)
+    ):
         conn.execute(f"SET memory_limit = '{memory_limit}'")
         conn.execute(f"SET temp_directory = '{temp_dir}'")
     elif memory_limit and temp_dir:
@@ -351,7 +357,9 @@ def get_parquet_paths_for_date(
     except ValueError:
         return []
     return enumerate_org_parquet_files(
-        storage, table_name, org_id,
+        storage,
+        table_name,
+        org_id,
         start_dt=file_date,
         end_dt=file_date + timedelta(days=1),
     )
@@ -379,9 +387,7 @@ def _flush_csv_to_parquet(
     Returns updated (chunk_num, total_rows).
     Small orgs (first and only chunk) get a flat file.
     """
-    with tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".csv", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False) as f:
         csv_path = f.name
         f.write(csv_data)
 
@@ -458,7 +464,9 @@ def archive_partition_per_org(
         with connection.cursor() as cursor:
             # Find all orgs with data in this partition
             cursor.execute(
-                f"SELECT DISTINCT organization_id FROM {partition_name} ORDER BY organization_id;"
+                SQL(
+                    "SELECT DISTINCT organization_id FROM {} ORDER BY organization_id;"
+                ).format(Identifier(partition_name))
             )
             org_ids = [row[0] for row in cursor.fetchall()]
 
@@ -492,9 +500,7 @@ def archive_partition_per_org(
                 # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
                 # to bound DuckDB memory and temp-disk usage.
                 for org_id in org_ids:
-                    flat_path = get_org_cold_storage_path(
-                        table_name, org_id, date_str
-                    )
+                    flat_path = get_org_cold_storage_path(table_name, org_id, date_str)
                     chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
 
                     # Skip orgs already archived (flat file is atomic/complete)
@@ -526,10 +532,7 @@ def archive_partition_per_org(
                     query_sql = select_sql.format(
                         partition_name=partition_name
                     ).replace("%s", str(int(org_id)), 1)
-                    copy_sql = (
-                        f"COPY ({query_sql}) TO STDOUT "
-                        f"WITH (FORMAT CSV, HEADER)"
-                    )
+                    copy_sql = f"COPY ({query_sql}) TO STDOUT WITH (FORMAT CSV, HEADER)"
 
                     chunk_num = 0
                     total_rows = 0
@@ -550,20 +553,18 @@ def archive_partition_per_org(
                                 buf_rows += 1
 
                                 if buf_rows >= ARCHIVE_CHUNK_ROWS:
-                                    chunk_num, total_rows = (
-                                        _flush_csv_to_parquet(
-                                            duck_conn,
-                                            storage,
-                                            csv_buf,
-                                            column_types,
-                                            table_name,
-                                            org_id,
-                                            date_str,
-                                            flat_path,
-                                            chunk_num,
-                                            total_rows,
-                                            buf_rows,
-                                        )
+                                    chunk_num, total_rows = _flush_csv_to_parquet(
+                                        duck_conn,
+                                        storage,
+                                        csv_buf,
+                                        column_types,
+                                        table_name,
+                                        org_id,
+                                        date_str,
+                                        flat_path,
+                                        chunk_num,
+                                        total_rows,
+                                        buf_rows,
                                     )
                                     csv_buf = bytearray(header)
                                     buf_rows = 0
@@ -616,7 +617,9 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name};"
+                SQL("ALTER TABLE {} DETACH PARTITION {};").format(
+                    Identifier(parent_table), Identifier(partition_name)
+                )
             )
         logger.info("Detached partition %s from %s", partition_name, parent_table)
     except Exception:
@@ -630,7 +633,9 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
 def drop_partition(partition_name: str) -> None:
     """Drop a partition table after it has been archived."""
     with connection.cursor() as cursor:
-        cursor.execute(f"DROP TABLE IF EXISTS {partition_name};")
+        cursor.execute(
+            SQL("DROP TABLE IF EXISTS {};").format(Identifier(partition_name))
+        )
     logger.info(f"Dropped partition {partition_name}")
 
 
@@ -714,13 +719,11 @@ def get_partitions_older_than(
         name_column = "tablename"
 
     with connection.cursor() as cursor:
+        col = Identifier(name_column)
         cursor.execute(
-            f"""
-            SELECT {name_column} FROM {source_table}
-            WHERE {name_column} LIKE %s
-            AND {name_column} ~ %s
-            ORDER BY {name_column};
-            """,
+            SQL("SELECT {} FROM {} WHERE {} LIKE %s AND {} ~ %s ORDER BY {};").format(
+                col, Identifier(source_table), col, col, col
+            ),
             [f"{table_name}_%", pattern],
         )
         partitions = []
