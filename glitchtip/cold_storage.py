@@ -293,7 +293,6 @@ def get_parquet_paths_for_date(
 
 
 def _flush_csv_to_parquet(
-    duck_conn,
     storage,
     csv_data: bytes | bytearray,
     column_types: dict[str, str],
@@ -310,6 +309,10 @@ def _flush_csv_to_parquet(
 
     ~90x faster than executemany — DuckDB reads CSV in C++ without
     per-row Python overhead.
+
+    Creates a fresh DuckDB connection per chunk so the buffer manager
+    releases all memory between operations (a single long-lived connection
+    holds onto allocated blocks even after queries complete).
 
     Returns updated (chunk_num, total_rows).
     Small orgs (first and only chunk) get a flat file.
@@ -335,13 +338,17 @@ def _flush_csv_to_parquet(
         columns = list(column_types.keys())
         col_spec = ", ".join(f"'{c}': '{column_types[c]}'" for c in columns)
 
-        duck_conn.execute(
-            f"COPY (SELECT * FROM read_csv("
-            f"'{duckdb_quote_path(csv_path)}', "
-            f"columns={{{col_spec}}}, header=true)) "
-            f"TO '{duckdb_quote_path(parquet_path)}' "
-            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
-        )
+        duck_conn = get_duckdb_connection(storage)
+        try:
+            duck_conn.execute(
+                f"COPY (SELECT * FROM read_csv("
+                f"'{duckdb_quote_path(csv_path)}', "
+                f"columns={{{col_spec}}}, header=true)) "
+                f"TO '{duckdb_quote_path(parquet_path)}' "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+            )
+        finally:
+            duck_conn.close()
         total_rows += row_count
     finally:
         try:
@@ -419,117 +426,109 @@ def archive_partition_per_org(
 
             logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
-            # Reuse a single DuckDB connection across all orgs to avoid
-            # repeated startup overhead (extension loading, S3 config).
-            duck_conn = get_duckdb_connection(storage)
-            try:
-                # Export each org's data to separate Parquet files.
-                # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
-                # to bound DuckDB memory and temp-disk usage.
-                for org_id in org_ids:
-                    flat_path = get_org_cold_storage_path(
-                        table_name, org_id, date_str
+            # Export each org's data to separate Parquet files.
+            # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
+            # to bound DuckDB memory and temp-disk usage.
+            for org_id in org_ids:
+                flat_path = get_org_cold_storage_path(
+                    table_name, org_id, date_str
+                )
+                chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
+
+                # Skip orgs already archived (flat file is atomic/complete)
+                if storage.exists(flat_path):
+                    archived_files.append(
+                        (org_id, get_duckdb_parquet_path(storage, flat_path))
                     )
-                    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
-
-                    # Skip orgs already archived (flat file is atomic/complete)
-                    if storage.exists(flat_path):
-                        archived_files.append(
-                            (org_id, get_duckdb_parquet_path(storage, flat_path))
-                        )
-                        logger.debug(
-                            "Parquet already exists for org %d, skipping", org_id
-                        )
-                        continue
-
-                    # Delete any partial chunks from a previous crashed run
-                    # so we re-archive cleanly from Postgres.
-                    try:
-                        _, existing_chunks = storage.listdir(chunk_dir)
-                        for f in existing_chunks:
-                            try:
-                                storage.delete(f"{chunk_dir}/{f}")
-                            except Exception:
-                                pass
-                    except (OSError, NotImplementedError):
-                        pass
-
-                    # Stream CSV via COPY TO STDOUT — constant Python memory,
-                    # O(N) Postgres work, PgBouncer-safe (single statement),
-                    # and ~90x faster than executemany for DuckDB writes.
-                    # org_id is always an int from the database, safe to inline.
-                    query_sql = select_sql.format(
-                        partition_name=partition_name
-                    ).replace("%s", str(int(org_id)), 1)
-                    copy_sql = (
-                        f"COPY ({query_sql}) TO STDOUT "
-                        f"WITH (FORMAT CSV, HEADER)"
+                    logger.debug(
+                        "Parquet already exists for org %d, skipping", org_id
                     )
+                    continue
 
-                    chunk_num = 0
-                    total_rows = 0
-                    header = None
-                    csv_buf = bytearray()
-                    buf_rows = 0
+                # Delete any partial chunks from a previous crashed run
+                # so we re-archive cleanly from Postgres.
+                try:
+                    _, existing_chunks = storage.listdir(chunk_dir)
+                    for f in existing_chunks:
+                        try:
+                            storage.delete(f"{chunk_dir}/{f}")
+                        except Exception:
+                            pass
+                except (OSError, NotImplementedError):
+                    pass
 
-                    raw_conn = cursor.connection
-                    with raw_conn.cursor() as copy_cur:
-                        with copy_cur.copy(copy_sql) as copy_op:
-                            for line in copy_op:
-                                if header is None:
-                                    header = bytes(line)
-                                    csv_buf = bytearray(header)
-                                    continue
+                # Stream CSV via COPY TO STDOUT — constant Python memory,
+                # O(N) Postgres work, PgBouncer-safe (single statement),
+                # and ~90x faster than executemany for DuckDB writes.
+                # org_id is always an int from the database, safe to inline.
+                query_sql = select_sql.format(
+                    partition_name=partition_name
+                ).replace("%s", str(int(org_id)), 1)
+                copy_sql = (
+                    f"COPY ({query_sql}) TO STDOUT "
+                    f"WITH (FORMAT CSV, HEADER)"
+                )
 
-                                csv_buf.extend(line)
-                                buf_rows += 1
+                chunk_num = 0
+                total_rows = 0
+                header = None
+                csv_buf = bytearray()
+                buf_rows = 0
 
-                                if buf_rows >= ARCHIVE_CHUNK_ROWS:
-                                    chunk_num, total_rows = (
-                                        _flush_csv_to_parquet(
-                                            duck_conn,
-                                            storage,
-                                            csv_buf,
-                                            column_types,
-                                            table_name,
-                                            org_id,
-                                            date_str,
-                                            flat_path,
-                                            chunk_num,
-                                            total_rows,
-                                            buf_rows,
-                                        )
+                raw_conn = cursor.connection
+                with raw_conn.cursor() as copy_cur:
+                    with copy_cur.copy(copy_sql) as copy_op:
+                        for line in copy_op:
+                            if header is None:
+                                header = bytes(line)
+                                csv_buf = bytearray(header)
+                                continue
+
+                            csv_buf.extend(line)
+                            buf_rows += 1
+
+                            if buf_rows >= ARCHIVE_CHUNK_ROWS:
+                                chunk_num, total_rows = (
+                                    _flush_csv_to_parquet(
+                                        storage,
+                                        csv_buf,
+                                        column_types,
+                                        table_name,
+                                        org_id,
+                                        date_str,
+                                        flat_path,
+                                        chunk_num,
+                                        total_rows,
+                                        buf_rows,
                                     )
-                                    csv_buf = bytearray(header)
-                                    buf_rows = 0
+                                )
+                                csv_buf = bytearray(header)
+                                buf_rows = 0
 
-                    # Flush remaining rows
-                    if buf_rows > 0:
-                        chunk_num, total_rows = _flush_csv_to_parquet(
-                            duck_conn,
-                            storage,
-                            csv_buf,
-                            column_types,
-                            table_name,
-                            org_id,
-                            date_str,
-                            flat_path,
-                            chunk_num,
-                            total_rows,
-                            buf_rows,
-                        )
-                    del csv_buf
+                # Flush remaining rows
+                if buf_rows > 0:
+                    chunk_num, total_rows = _flush_csv_to_parquet(
+                        storage,
+                        csv_buf,
+                        column_types,
+                        table_name,
+                        org_id,
+                        date_str,
+                        flat_path,
+                        chunk_num,
+                        total_rows,
+                        buf_rows,
+                    )
+                del csv_buf
 
-                    if total_rows > 0:
-                        archived_files.append((org_id, flat_path))
-                        logger.debug(
-                            "Archived org %d: %d rows in %d file(s)",
-                            org_id,
-                            total_rows,
-                            max(chunk_num, 1),
-                        )
-            finally:
-                duck_conn.close()
+                if total_rows > 0:
+                    archived_files.append((org_id, flat_path))
+                    logger.debug(
+                        "Archived org %d: %d rows in %d file(s)",
+                        org_id,
+                        total_rows,
+                        max(chunk_num, 1),
+                    )
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
