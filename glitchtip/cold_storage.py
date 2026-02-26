@@ -131,7 +131,13 @@ def get_duckdb_connection(storage=None):
 
     The caller is responsible for closing the returned connection.
     """
-    return _create_duckdb_connection(storage)
+    conn = _create_duckdb_connection(storage)
+    # Reduce DuckDB's internal buffer overhead for writes — archival is
+    # background work that doesn't need parallelism or insertion-order
+    # preservation.  Read connections keep defaults for query parallelism.
+    conn.execute("SET threads = 1")
+    conn.execute("SET preserve_insertion_order = false")
+    return conn
 
 
 # Thread-local storage for cached read-only DuckDB connections.
