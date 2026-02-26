@@ -17,7 +17,7 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.performance.cold_storage import (
-    _enumerate_parquet_files,
+    TABLE_NAME,
     query_n_plus_one_patterns,
     query_span_groups,
     query_span_groups_for_transaction,
@@ -29,6 +29,7 @@ from apps.performance.promotion import (
     compact_span_chunks,
     promote_spans,
 )
+from glitchtip.cold_storage import enumerate_org_parquet_files
 from glitchtip.partition_manager import UUID7Helper
 
 
@@ -288,7 +289,7 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
 
 
 class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
-    """Test that _enumerate_parquet_files handles compaction crash recovery."""
+    """Test that enumerate_org_parquet_files handles compaction crash recovery."""
 
     def setUp(self):
         super().setUp()
@@ -353,7 +354,9 @@ class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
         # Enumerate — should return only the flat file, not chunks
         start_dt = datetime(2026, 2, 20, 0, 0, 0, tzinfo=timezone.utc)
         end_dt = datetime(2026, 2, 21, 0, 0, 0, tzinfo=timezone.utc)
-        paths = _enumerate_parquet_files(self.storage, self.org.id, start_dt, end_dt)
+        paths = enumerate_org_parquet_files(
+            self.storage, TABLE_NAME, self.org.id, start_dt, end_dt
+        )
 
         self.assertEqual(len(paths), 1)
         self.assertIn(f"{date_str}.parquet", paths[0])
