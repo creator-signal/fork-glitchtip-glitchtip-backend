@@ -113,6 +113,10 @@ def assemble_artifacts(
     artifacts = manifest.get("files", {})
     files = []
     for rel_path, artifact in artifacts.items():
+        full_path = path.normpath(path.join(scratchpad, rel_path))
+        if not full_path.startswith(path.normpath(scratchpad) + path.sep):
+            raise AssembleArtifactsError("invalid path in manifest")
+
         artifact_url = artifact.get("url", rel_path)
         artifact_basename = artifact_url.rsplit("/", 1)[-1]
         headers = artifact.get("headers", {})
@@ -124,7 +128,6 @@ def assemble_artifacts(
         )
         files.append(file)
 
-        full_path = path.join(scratchpad, rel_path)
         with open(full_path, "rb") as fp:
             file.putfile(fp)
 
