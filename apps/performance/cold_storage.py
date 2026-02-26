@@ -8,12 +8,12 @@ Handles two file layouts:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from glitchtip.cold_storage import (
-    COLD_STORAGE_PREFIX,
     close_duckdb_read_connection,
     duckdb_quote_path,
+    enumerate_org_parquet_files,
     get_cold_storage_backend,
     get_duckdb_parquet_path,
     get_duckdb_read_connection,
@@ -37,71 +37,56 @@ SPAN_PARQUET_COLUMN_TYPES = {
 }
 
 
-def _date_in_range(date_str: str, start_dt: datetime, end_dt: datetime) -> bool:
-    """Check if a YYYYMMDD date string falls within the query range."""
+def _execute_resilient_query(storage, duckdb_paths, sql_builder, params):
+    """
+    Execute a DuckDB query across multiple parquet files.
+
+    Fast path: query all files at once. If any file is corrupt,
+    validates files individually and retries with only valid ones.
+    """
+    paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in duckdb_paths)
+    duck_conn = get_duckdb_read_connection(storage)
     try:
-        file_date = datetime.strptime(date_str, "%Y%m%d").replace(
-            tzinfo=start_dt.tzinfo
+        return duck_conn.execute(sql_builder(paths_list), params).fetchall()
+    except Exception:
+        close_duckdb_read_connection()
+        logger.warning(
+            "Multi-file parquet query failed, validating individual files",
+            exc_info=True,
         )
-    except ValueError:
-        return True  # Unknown format — include to be safe
-    # Include if the file's day overlaps [start_dt, end_dt)
-    return file_date < end_dt and file_date + timedelta(days=1) > start_dt
 
+    # Identify valid files
+    valid = []
+    for p in duckdb_paths:
+        conn = get_duckdb_read_connection(storage)
+        try:
+            conn.execute(
+                f"SELECT 1 FROM read_parquet('{duckdb_quote_path(p)}') LIMIT 0"
+            )
+            valid.append(p)
+        except Exception:
+            close_duckdb_read_connection()
+            logger.error("Corrupt parquet file skipped: %s", p, exc_info=True)
 
-def _enumerate_parquet_files(
-    storage, org_id: int, start_dt: datetime, end_dt: datetime
-) -> list[str]:
-    """
-    Enumerate parquet files for an org within a date range.
-
-    Prunes files by date from the directory/file name to avoid reading
-    irrelevant data.
-
-    When a compacted flat file (``{date}.parquet``) exists for a given date,
-    chunk files in the ``{date}/`` subdirectory are skipped. This ensures
-    correct results even if a compaction run crashed after writing the
-    compacted file but before deleting all chunks.
-
-    Returns list of DuckDB-readable paths.
-    """
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}"
-
-    try:
-        subdirs, flat_files = storage.listdir(org_prefix)
-    except (NotImplementedError, OSError):
+    if not valid:
         return []
 
-    paths = []
-    compacted_dates: set[str] = set()
+    paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in valid)
+    conn = get_duckdb_read_connection(storage)
+    try:
+        return conn.execute(sql_builder(paths_list), params).fetchall()
+    except Exception:
+        close_duckdb_read_connection()
+        logger.error("Query failed even after file validation", exc_info=True)
+        return []
 
-    # Compacted flat files: org_{id}/{date}.parquet
-    for f in flat_files:
-        if f.endswith(".parquet"):
-            date_str = f.removesuffix(".parquet")
-            if _date_in_range(date_str, start_dt, end_dt):
-                relative = f"{org_prefix}/{f}"
-                paths.append(get_duckdb_parquet_path(storage, relative))
-                compacted_dates.add(date_str)
 
-    # Chunk files in date subdirectories: org_{id}/{date}/chunk_*.parquet
-    # Skip dates that already have a compacted flat file (crash recovery).
-    for subdir in subdirs:
-        if subdir in compacted_dates:
-            continue
-        if not _date_in_range(subdir, start_dt, end_dt):
-            continue
-        subdir_path = f"{org_prefix}/{subdir}"
-        try:
-            _, chunk_files = storage.listdir(subdir_path)
-        except (NotImplementedError, OSError):
-            continue
-        for f in chunk_files:
-            if f.endswith(".parquet"):
-                relative = f"{subdir_path}/{f}"
-                paths.append(get_duckdb_parquet_path(storage, relative))
-
-    return paths
+def _get_duckdb_paths(storage, org_id, start_dt, end_dt):
+    """Get DuckDB-readable paths for an org's parquet files in a date range."""
+    rel_paths = enumerate_org_parquet_files(
+        storage, TABLE_NAME, org_id, start_dt, end_dt
+    )
+    return [get_duckdb_parquet_path(storage, p) for p in rel_paths]
 
 
 def query_span_groups_for_transaction(
@@ -128,14 +113,14 @@ def query_span_groups_for_transaction(
     if not storage:
         return []
 
-    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
-    if not parquet_files:
+    duckdb_paths = _get_duckdb_paths(storage, org_id, start_dt, end_dt)
+    if not duckdb_paths:
         return []
 
-    duck_conn = get_duckdb_read_connection(storage)
-    try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
-        sql = f"""
+    params = [transaction_name, start_dt, end_dt, limit]
+
+    def sql_builder(paths_list):
+        return f"""
             SELECT
                 op,
                 description,
@@ -151,13 +136,8 @@ def query_span_groups_for_transaction(
             ORDER BY total_time DESC
             LIMIT $4
         """
-        rows = duck_conn.execute(
-            sql, [transaction_name, start_dt, end_dt, limit]
-        ).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.error("Error querying span groups", exc_info=True)
-        return []
+
+    rows = _execute_resilient_query(storage, duckdb_paths, sql_builder, params)
 
     return [
         {
@@ -196,8 +176,8 @@ def query_n_plus_one_patterns(
     if not storage:
         return []
 
-    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
-    if not parquet_files:
+    duckdb_paths = _get_duckdb_paths(storage, org_id, start_dt, end_dt)
+    if not duckdb_paths:
         return []
 
     # Build optional WHERE clauses
@@ -218,10 +198,8 @@ def query_n_plus_one_patterns(
 
     params.extend([threshold, limit])
 
-    duck_conn = get_duckdb_read_connection(storage)
-    try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
-        sql = f"""
+    def sql_builder(paths_list):
+        return f"""
             SELECT
                 transaction_name,
                 op,
@@ -240,11 +218,8 @@ def query_n_plus_one_patterns(
             ORDER BY spans_per_txn DESC
             LIMIT ${param_idx + 1}
         """
-        rows = duck_conn.execute(sql, params).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.error("Error querying N+1 patterns", exc_info=True)
-        return []
+
+    rows = _execute_resilient_query(storage, duckdb_paths, sql_builder, params)
 
     return [
         {
@@ -288,8 +263,8 @@ def query_span_groups(
     if not storage:
         return []
 
-    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
-    if not parquet_files:
+    duckdb_paths = _get_duckdb_paths(storage, org_id, start_dt, end_dt)
+    if not duckdb_paths:
         return []
 
     # Build optional WHERE clauses
@@ -318,10 +293,8 @@ def query_span_groups(
 
     params.append(limit)
 
-    duck_conn = get_duckdb_read_connection(storage)
-    try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
-        sql = f"""
+    def sql_builder(paths_list):
+        return f"""
             SELECT
                 op,
                 description,
@@ -337,11 +310,8 @@ def query_span_groups(
             ORDER BY {sort_field} {sort_dir}
             LIMIT ${param_idx}
         """
-        rows = duck_conn.execute(sql, params).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.error("Error querying span groups", exc_info=True)
-        return []
+
+    rows = _execute_resilient_query(storage, duckdb_paths, sql_builder, params)
 
     return [
         {
@@ -380,8 +350,8 @@ def query_transaction_trend(
     if not storage:
         return []
 
-    parquet_files = _enumerate_parquet_files(storage, org_id, start_dt, end_dt)
-    if not parquet_files:
+    duckdb_paths = _get_duckdb_paths(storage, org_id, start_dt, end_dt)
+    if not duckdb_paths:
         return []
 
     extra_where = ""
@@ -393,10 +363,8 @@ def query_transaction_trend(
         extra_where += f" AND project_id IN ({placeholders})"
         params.extend(project_ids)
 
-    duck_conn = get_duckdb_read_connection(storage)
-    try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in parquet_files)
-        sql = f"""
+    def sql_builder(paths_list):
+        return f"""
             SELECT
                 DATE_TRUNC('day', timestamp) as date,
                 COUNT(*) as count,
@@ -411,11 +379,8 @@ def query_transaction_trend(
             GROUP BY DATE_TRUNC('day', timestamp)
             ORDER BY date
         """
-        rows = duck_conn.execute(sql, params).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.error("Error querying transaction trend", exc_info=True)
-        return []
+
+    rows = _execute_resilient_query(storage, duckdb_paths, sql_builder, params)
 
     return [
         {

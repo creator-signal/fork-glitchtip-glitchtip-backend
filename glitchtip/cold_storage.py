@@ -267,6 +267,76 @@ def _get_chunk_path(table_name: str, org_id: int, date_str: str, chunk: int) -> 
     return f"{_get_chunk_dir(table_name, org_id, date_str)}/chunk_{chunk:03d}.parquet"
 
 
+def _date_in_range(date_str: str, start_dt: datetime, end_dt: datetime) -> bool:
+    """Check if a YYYYMMDD date string's day overlaps [start_dt, end_dt)."""
+    try:
+        file_date = datetime.strptime(date_str, "%Y%m%d").replace(
+            tzinfo=start_dt.tzinfo
+        )
+    except ValueError:
+        return True  # Unknown format — include to be safe
+    return file_date < end_dt and file_date + timedelta(days=1) > start_dt
+
+
+def enumerate_org_parquet_files(
+    storage,
+    table_name: str,
+    org_id: int,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+) -> list[str]:
+    """
+    Enumerate Parquet files for an org, optionally filtered by date range.
+
+    Handles both layouts:
+    - Flat files: org_{id}/{date}.parquet
+    - Chunk files: org_{id}/{date}/chunk_*.parquet
+
+    When a flat file exists for a date, chunk files for that date are
+    skipped (crash-safety: flat file indicates successful compaction).
+
+    Returns list of storage-relative paths.
+    """
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+
+    try:
+        subdirs, flat_files = storage.listdir(org_prefix)
+    except (NotImplementedError, OSError):
+        return []
+
+    paths = []
+    compacted_dates: set[str] = set()
+
+    # Flat files: org_{id}/{date}.parquet
+    for f in sorted(flat_files):
+        if not f.endswith(".parquet"):
+            continue
+        date_str = f.removesuffix(".parquet")
+        if start_dt is not None and end_dt is not None:
+            if not _date_in_range(date_str, start_dt, end_dt):
+                continue
+        paths.append(f"{org_prefix}/{f}")
+        compacted_dates.add(date_str)
+
+    # Chunk files in date subdirectories — skip dates with a flat file
+    for subdir in sorted(subdirs):
+        if subdir in compacted_dates:
+            continue
+        if start_dt is not None and end_dt is not None:
+            if not _date_in_range(subdir, start_dt, end_dt):
+                continue
+        subdir_path = f"{org_prefix}/{subdir}"
+        try:
+            _, chunk_files = storage.listdir(subdir_path)
+            for cf in sorted(chunk_files):
+                if cf.endswith(".parquet"):
+                    paths.append(f"{subdir_path}/{cf}")
+        except (OSError, NotImplementedError):
+            pass
+
+    return paths
+
+
 def get_parquet_paths_for_date(
     storage, table_name: str, org_id: int, date_str: str
 ) -> list[str]:
@@ -275,21 +345,16 @@ def get_parquet_paths_for_date(
 
     Used by single-event lookups to find the right file(s) to search.
     """
-    paths = []
-    flat = get_org_cold_storage_path(table_name, org_id, date_str)
-    if storage.exists(flat):
-        paths.append(flat)
-
-    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
     try:
-        _, chunk_files = storage.listdir(chunk_dir)
-        for cf in sorted(chunk_files):
-            if cf.endswith(".parquet"):
-                paths.append(f"{chunk_dir}/{cf}")
-    except (OSError, NotImplementedError):
-        pass
-
-    return paths
+        file_date = datetime.strptime(date_str, "%Y%m%d")
+        file_date = timezone.make_aware(file_date)
+    except ValueError:
+        return []
+    return enumerate_org_parquet_files(
+        storage, table_name, org_id,
+        start_dt=file_date,
+        end_dt=file_date + timedelta(days=1),
+    )
 
 
 def _flush_csv_to_parquet(
@@ -843,29 +908,7 @@ def query_cold_parquet_files(
     if not storage:
         return []
 
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{organization_id}"
-
-    # Enumerate parquet files for this org — both flat files and chunk dirs
-    try:
-        dirs, files = storage.listdir(org_prefix)
-    except (NotImplementedError, OSError):
-        # Directory doesn't exist or listdir unsupported — no cold data
-        return []
-
-    # Collect all parquet paths: flat files + chunks inside date subdirs
-    parquet_paths: list[str] = []
-    for filename in sorted(files):
-        if filename.endswith(".parquet"):
-            parquet_paths.append(f"{org_prefix}/{filename}")
-    for subdir in sorted(dirs):
-        try:
-            _, chunk_files = storage.listdir(f"{org_prefix}/{subdir}")
-            for cf in sorted(chunk_files):
-                if cf.endswith(".parquet"):
-                    parquet_paths.append(f"{org_prefix}/{subdir}/{cf}")
-        except (OSError, NotImplementedError):
-            pass
-
+    parquet_paths = enumerate_org_parquet_files(storage, table_name, organization_id)
     if not parquet_paths:
         return []
 
@@ -1112,49 +1155,8 @@ def rewrite_parquet_excluding_project(
     if not storage:
         return 0
 
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
-    # List of (relative_path, parquet_path) tuples to process
-    files_to_process: list[tuple[str, str]] = []
-
-    # Collect file list (flat compacted files + chunk files in subdirectories)
-    try:
-        dirs, files = storage.listdir(org_prefix)
-        for f in files:
-            if f.endswith(".parquet"):
-                relative = f"{org_prefix}/{f}"
-                files_to_process.append(
-                    (relative, get_duckdb_parquet_path(storage, relative))
-                )
-        # Also collect chunk files in date subdirectories
-        for subdir in dirs:
-            subdir_path = f"{org_prefix}/{subdir}"
-            try:
-                _, subfiles = storage.listdir(subdir_path)
-                for sf in subfiles:
-                    if sf.endswith(".parquet"):
-                        relative = f"{subdir_path}/{sf}"
-                        files_to_process.append(
-                            (relative, get_duckdb_parquet_path(storage, relative))
-                        )
-            except (NotImplementedError, OSError):
-                pass
-    except (NotImplementedError, OSError):
-        # Fall back to date sweep (flat files only)
-        now = timezone.now()
-        for day_offset in range(365):
-            file_date = now - timedelta(days=day_offset)
-            date_str = file_date.strftime("%Y%m%d")
-            storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
-            try:
-                if storage.exists(storage_path):
-                    relative = storage_path
-                    files_to_process.append(
-                        (relative, get_duckdb_parquet_path(storage, relative))
-                    )
-            except Exception:
-                pass
-
-    if not files_to_process:
+    parquet_paths = enumerate_org_parquet_files(storage, table_name, org_id)
+    if not parquet_paths:
         return 0
 
     # Build the WHERE filter
@@ -1168,48 +1170,48 @@ def rewrite_parquet_excluding_project(
 
     rewritten_count = 0
 
-    duck_conn = get_duckdb_connection(storage)
-    try:
-        for relative_path, parquet_path in files_to_process:
-            try:
-                quoted = duckdb_quote_path(parquet_path)
+    for relative_path in parquet_paths:
+        parquet_path = get_duckdb_parquet_path(storage, relative_path)
+        duck_conn = get_duckdb_connection(storage)
+        try:
+            quoted = duckdb_quote_path(parquet_path)
 
-                # Count remaining rows after filtering
-                remaining = duck_conn.execute(
-                    f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
-                ).fetchone()[0]
+            # Count remaining rows after filtering
+            remaining = duck_conn.execute(
+                f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
+            ).fetchone()[0]
 
-                if remaining == 0:
-                    # No rows left — delete the file
-                    storage.delete(relative_path)
-                    rewritten_count += 1
-                    logger.debug("Deleted empty cold file %s", relative_path)
-                    continue
-
-                # Check if any rows were actually filtered out
-                total = duck_conn.execute(
-                    f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
-                ).fetchone()[0]
-
-                if remaining == total:
-                    # No data from this project in this file, skip
-                    continue
-
-                # Rewrite the file excluding the project's data
-                duck_conn.execute(f"""
-                    COPY (
-                        SELECT * FROM read_parquet('{quoted}')
-                        {where_clause}
-                    ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """)
+            if remaining == 0:
+                # No rows left — delete the file
+                storage.delete(relative_path)
                 rewritten_count += 1
-                logger.debug("Rewrote cold file %s", relative_path)
-            except Exception as e:
-                if is_missing_file_error(e):
-                    continue
-                logger.warning("Error rewriting cold file %s: %s", relative_path, e)
-    finally:
-        duck_conn.close()
+                logger.debug("Deleted empty cold file %s", relative_path)
+                continue
+
+            # Check if any rows were actually filtered out
+            total = duck_conn.execute(
+                f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
+            ).fetchone()[0]
+
+            if remaining == total:
+                # No data from this project in this file, skip
+                continue
+
+            # Rewrite the file excluding the project's data
+            duck_conn.execute(f"""
+                COPY (
+                    SELECT * FROM read_parquet('{quoted}')
+                    {where_clause}
+                ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD);
+            """)
+            rewritten_count += 1
+            logger.debug("Rewrote cold file %s", relative_path)
+        except Exception as e:
+            if is_missing_file_error(e):
+                continue
+            logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+        finally:
+            duck_conn.close()
 
     if rewritten_count:
         logger.info(

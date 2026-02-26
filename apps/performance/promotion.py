@@ -5,8 +5,10 @@ Promotes span_staging rows to per-org Parquet files, then compacts
 chunk files into daily files for efficient analytical queries.
 """
 
+import csv
 import logging
 import os
+import tempfile
 import time
 from datetime import timedelta
 
@@ -22,6 +24,8 @@ from glitchtip.cold_storage import (
     is_duckdb_available,
 )
 from glitchtip.partition_manager import UUID7Helper
+
+from .cold_storage import SPAN_PARQUET_COLUMN_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +85,6 @@ def promote_spans() -> tuple[int, bool]:
                 id__lt=cutoff_uuid,
                 organization_id=org_id,
             )
-            .order_by("id")
             .values_list(
                 "id",
                 "organization_id",
@@ -163,7 +166,7 @@ def promote_spans() -> tuple[int, bool]:
 
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
-    """Write a chunk Parquet file for a single org+date group."""
+    """Write a chunk Parquet file for a single org+date group via CSV."""
     chunk_ts = f"{time.time_ns()}_{os.getpid()}"
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
@@ -174,42 +177,42 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
     if not parquet_path.startswith("s3://"):
         os.makedirs(parquet_dir, exist_ok=True)
 
-    duck_conn = get_duckdb_connection(storage)
+    # Write rows to CSV — skip the staging id (index 0)
+    columns = list(SPAN_PARQUET_COLUMN_TYPES.keys())
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, newline=""
+    ) as f:
+        csv_path = f.name
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        for row in rows:
+            ts = row[9]
+            writer.writerow([
+                row[1], row[2], row[3], row[4], row[5],
+                row[6], row[7], row[8],
+                ts.isoformat() if ts else "",
+            ])
+
     try:
-        # Create a table from the data
-        duck_conn.execute("""
-            CREATE OR REPLACE TEMPORARY TABLE staging (
-                id VARCHAR,
-                organization_id INTEGER,
-                project_id INTEGER,
-                transaction_name VARCHAR,
-                span_id VARCHAR,
-                transaction_id VARCHAR,
-                op VARCHAR,
-                description VARCHAR,
-                duration DOUBLE,
-                timestamp TIMESTAMP WITH TIME ZONE
-            )
-        """)
-
-        # Insert rows — UUID id is converted to string by DuckDB
-        duck_conn.executemany(
-            "INSERT INTO staging VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(str(r[0]), *r[1:]) for r in rows],
+        col_spec = ", ".join(
+            f"'{c}': '{SPAN_PARQUET_COLUMN_TYPES[c]}'" for c in columns
         )
-
-        # Write to parquet (exclude the staging id)
-        duck_conn.execute(f"""
-            COPY (
-                SELECT organization_id, project_id, transaction_name,
-                       span_id, transaction_id, op, description,
-                       duration, timestamp
-                FROM staging
-                ORDER BY timestamp
-            ) TO '{duckdb_quote_path(parquet_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
-        """)
+        duck_conn = get_duckdb_connection(storage)
+        try:
+            duck_conn.execute(
+                f"COPY (SELECT * FROM read_csv("
+                f"'{duckdb_quote_path(csv_path)}', "
+                f"columns={{{col_spec}}}, header=true)) "
+                f"TO '{duckdb_quote_path(parquet_path)}' "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD);"
+            )
+        finally:
+            duck_conn.close()
     finally:
-        duck_conn.close()
+        try:
+            os.unlink(csv_path)
+        except OSError:
+            pass
 
     return relative_path
 
@@ -289,7 +292,7 @@ def _compact_date_chunks(
 
     Crash safety: On filesystem, writes to a .tmp file first, then
     atomically renames. A crash mid-write leaves a .tmp file (ignored by
-    _enumerate_parquet_files) and chunks remain intact for the next run.
+    enumerate_org_parquet_files) and chunks remain intact for the next run.
     On S3, PUT is atomic so no temp file is needed.
     """
     # Build list of chunk paths for DuckDB
@@ -303,7 +306,7 @@ def _compact_date_chunks(
 
     # Write to a temp file first, then rename for crash safety.
     # If the process crashes mid-write, the .tmp file is ignored by
-    # _enumerate_parquet_files (doesn't match *.parquet) and chunks
+    # enumerate_org_parquet_files (doesn't match *.parquet) and chunks
     # remain intact for the next compaction run.
     # S3 PUT is atomic, so no temp file needed there.
     is_s3 = output_path.startswith("s3://")
