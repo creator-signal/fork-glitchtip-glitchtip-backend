@@ -1,3 +1,4 @@
+import socket
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -14,6 +15,7 @@ from glitchtip.schema import CamelSchema
 
 from .constants import HTTP_MONITOR_TYPES, MonitorType
 from .models import Monitor, MonitorCheck, StatusPage
+from .utils import is_ip_blocked
 
 
 class MonitorCheckSchema(CamelSchema, ModelSchema):
@@ -47,6 +49,28 @@ class MonitorIn(CamelSchema, ModelSchema):
             except DjangoValidationError as err:
                 raise ValidationError("Invalid Url") from err
 
+            if not settings.GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS:
+                try:
+                    parsed = urlparse(self.url)
+                    hostname = parsed.hostname
+                    if hostname:
+                        # Check IP literal
+                        try:
+                            if is_ip_blocked(hostname):
+                                raise ValidationError(
+                                    "URLs targeting private/internal IPs are not allowed"
+                                )
+                        except ValueError:
+                            pass
+                        # Resolve and check
+                        for info in socket.getaddrinfo(hostname, None):
+                            if is_ip_blocked(info[4][0]):
+                                raise ValidationError(
+                                    "URLs targeting private/internal IPs are not allowed"
+                                )
+                except (socket.gaierror, OSError):
+                    pass  # DNS resolution failure is not an SSRF concern
+
         if self.expected_status is None and monitor_type in [
             MonitorType.GET,
             MonitorType.POST,
@@ -65,6 +89,20 @@ class MonitorIn(CamelSchema, ModelSchema):
             except ValueError as err:
                 raise ValidationError(message) from err
             self.url = f"{parsed_url.hostname}:{parsed_url.port}"
+
+        if (
+            monitor_type == MonitorType.PORT
+            and not settings.GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS
+        ):
+            hostname = self.url.split(":")[0]
+            try:
+                for info in socket.getaddrinfo(hostname, None):
+                    if is_ip_blocked(info[4][0]):
+                        raise ValidationError(
+                            "URLs targeting private/internal IPs are not allowed"
+                        )
+            except (socket.gaierror, OSError):
+                pass
 
         return self
 

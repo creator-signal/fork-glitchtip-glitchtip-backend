@@ -158,6 +158,13 @@ GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", False)
 # and uptime API endpoints are not registered.
 GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
 
+# Allow uptime monitors to target private/internal IPs (RFC1918, loopback, link-local).
+# Set to True if running GlitchTip on an internal network to monitor private services.
+# Default False blocks SSRF attacks against internal infrastructure.
+GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS = env.bool(
+    "GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS", False
+)
+
 
 # Hot storage (PostgreSQL retention before archival to cold)
 GLITCHTIP_EVENT_HOT_DAYS = env.int(
@@ -470,8 +477,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "glitchtip.wsgi.application"
 
+# SECURITY WARNING: Defaults to True for backward compatibility. Set to False and
+# configure CORS_ORIGIN_WHITELIST in production to prevent cross-origin attacks.
 CORS_ORIGIN_ALLOW_ALL = env.bool("CORS_ORIGIN_ALLOW_ALL", True)
 CORS_ORIGIN_WHITELIST = env.tuple("CORS_ORIGIN_WHITELIST", str, default=())
+if CORS_ORIGIN_ALLOW_ALL and not DEBUG:
+    warnings.warn(
+        "CORS_ORIGIN_ALLOW_ALL is True. Set CORS_ORIGIN_ALLOW_ALL=False and "
+        "configure CORS_ORIGIN_WHITELIST for production deployments.",
+        stacklevel=1,
+    )
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-sentry-auth",
     "baggage",
