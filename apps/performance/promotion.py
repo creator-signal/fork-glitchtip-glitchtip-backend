@@ -6,7 +6,6 @@ chunk files into daily files for efficient analytical queries.
 """
 
 import csv
-import io
 import logging
 import os
 import tempfile
@@ -180,22 +179,19 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
 
     # Write rows to CSV — skip the staging id (index 0)
     columns = list(SPAN_PARQUET_COLUMN_TYPES.keys())
-    csv_buf = io.StringIO()
-    writer = csv.writer(csv_buf)
-    writer.writerow(columns)
-    for row in rows:
-        ts = row[9]
-        writer.writerow([
-            row[1], row[2], row[3], row[4], row[5],
-            row[6], row[7], row[8],
-            ts.isoformat() if ts else "",
-        ])
-
     with tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".csv", delete=False
+        mode="w", suffix=".csv", delete=False, newline=""
     ) as f:
         csv_path = f.name
-        f.write(csv_buf.getvalue().encode())
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        for row in rows:
+            ts = row[9]
+            writer.writerow([
+                row[1], row[2], row[3], row[4], row[5],
+                row[6], row[7], row[8],
+                ts.isoformat() if ts else "",
+            ])
 
     try:
         col_spec = ", ".join(
