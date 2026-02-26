@@ -620,9 +620,10 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
             )
         logger.info("Detached partition %s from %s", partition_name, parent_table)
     except Exception:
-        logger.info(
+        logger.warning(
             "Partition %s already detached or does not exist, continuing",
             partition_name,
+            exc_info=True,
         )
 
 
@@ -885,6 +886,8 @@ def query_cold_parquet_files(
     where_sql: str,
     params: list,
     limit_param: str,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
 ) -> list[tuple]:
     """
     Query cold storage parquet files individually with per-file error handling.
@@ -900,6 +903,8 @@ def query_cold_parquet_files(
         where_sql: WHERE clause with DuckDB $N positional parameters
         params: Parameter values (without limit — limit_param references it)
         limit_param: DuckDB positional parameter for LIMIT (e.g., "$5")
+        start_dt: Optional start datetime for date-based file filtering
+        end_dt: Optional end datetime for date-based file filtering
 
     Returns:
         List of raw row tuples from all successfully read files.
@@ -908,7 +913,9 @@ def query_cold_parquet_files(
     if not storage:
         return []
 
-    parquet_paths = enumerate_org_parquet_files(storage, table_name, organization_id)
+    parquet_paths = enumerate_org_parquet_files(
+        storage, table_name, organization_id, start_dt, end_dt
+    )
     if not parquet_paths:
         return []
 
@@ -928,6 +935,8 @@ def query_cold_parquet_files(
                 result = duck_conn.execute(sql, params)
                 all_rows.extend(result.fetchall())
             except Exception:
+                close_duckdb_read_connection()
+                duck_conn = get_duckdb_read_connection(storage)
                 logger.error(
                     "Corrupt parquet file skipped: %s",
                     relative_path,
@@ -1128,7 +1137,6 @@ def rewrite_parquet_excluding_project(
     project_id: int | None = None,
     issue_ids: list[int] | None = None,
     table_name: str = "logs_logevent",
-    column_types: dict[str, str] | None = None,
 ) -> int:
     """
     Rewrite Parquet files for an org, excluding a deleted project's data.
@@ -1143,7 +1151,6 @@ def rewrite_parquet_excluding_project(
         project_id: Project ID to exclude (used for logs)
         issue_ids: Issue IDs to exclude (used for issue events)
         table_name: Table name for path construction
-        column_types: DuckDB column types for the table
 
     Returns:
         Number of files rewritten or deleted
@@ -1197,13 +1204,17 @@ def rewrite_parquet_excluding_project(
                 # No data from this project in this file, skip
                 continue
 
-            # Rewrite the file excluding the project's data
+            # Rewrite to a temp file then replace for crash safety
+            is_s3 = parquet_path.startswith("s3://")
+            write_path = parquet_path if is_s3 else parquet_path + ".tmp"
             duck_conn.execute(f"""
                 COPY (
                     SELECT * FROM read_parquet('{quoted}')
                     {where_clause}
-                ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                ) TO '{duckdb_quote_path(write_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
             """)
+            if not is_s3:
+                os.rename(write_path, parquet_path)
             rewritten_count += 1
             logger.debug("Rewrote cold file %s", relative_path)
         except Exception as e:
