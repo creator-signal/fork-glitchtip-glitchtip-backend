@@ -228,6 +228,8 @@ def query_cold_events(
         where_sql=where_sql,
         params=params,
         limit_param=limit_param,
+        start_dt=start_dt,
+        end_dt=end_dt,
     )
 
     results = [_row_to_issue_event(row) for row in rows]
@@ -276,5 +278,6 @@ def get_event_from_cold(
             close_duckdb_read_connection()
             if not is_missing_file_error(e):
                 raise
+            duck_conn = get_duckdb_read_connection(storage)
 
     return None

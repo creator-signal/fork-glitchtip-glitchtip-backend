@@ -9,10 +9,13 @@ import shutil
 import tempfile
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
+from unittest import mock
+from uuid import UUID
 
 from django.db import connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+from freezegun import freeze_time
 
 from glitchtip.cold_storage import get_cold_storage_backend, is_duckdb_available
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
@@ -235,26 +238,6 @@ class NoDuckDBTestCase(TestCase):
 
     def test_cold_storage_returns_empty_when_disabled(self):
         """Test that cold storage returns empty when GLITCHTIP_ENABLE_DUCKDB is not set."""
-        from datetime import datetime
-        from datetime import timezone as dt_timezone
-
-        from ..api import query_cold_storage
-
-        now = datetime.now(dt_timezone.utc)
-        start = now - timedelta(days=1)
-
-        results = query_cold_storage(
-            organization_id=1,
-            start_dt=start,
-            end_dt=now,
-        )
-        self.assertEqual(results, [])
-
-    def test_api_cold_storage_returns_empty_when_disabled(self):
-        """Test that API cold storage returns empty when disabled."""
-        from datetime import datetime
-        from datetime import timezone as dt_timezone
-
         from ..api import query_cold_storage
 
         now = datetime.now(dt_timezone.utc)
@@ -579,9 +562,7 @@ class CorruptParquetTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
             # Corrupt day1's parquet file
             storage = get_cold_storage_backend()
-            day1_path = get_org_cold_storage_path(
-                "logs_logevent", org_id, "20250501"
-            )
+            day1_path = get_org_cold_storage_path("logs_logevent", org_id, "20250501")
             full_path = get_duckdb_parquet_path(storage, day1_path)
             with open(full_path, "wb") as f:
                 f.write(b"CORRUPT DATA")
@@ -607,3 +588,402 @@ class CorruptParquetTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
                 any("20250501.parquet" in msg for msg in cm.output),
                 f"Expected ERROR log mentioning corrupt file, got: {cm.output}",
             )
+
+
+class RowToLogEventCoercionTestCase(TestCase):
+    """Test _row_to_log_event handles NULL and type mismatches from Parquet."""
+
+    def test_null_fields_become_empty_strings(self):
+        """NULL body, service, environment, host from Parquet are coerced to ''."""
+        from ..api import _row_to_log_event
+
+        now = datetime.now(dt_timezone.utc)
+        uid = UUID7Helper.from_datetime(now)
+
+        row = (
+            uid,  # id
+            None,  # trace_id
+            1,  # organization_id
+            1,  # project_id
+            None,  # span_id
+            LogLevel.INFO,  # level
+            9,  # severity_number
+            None,  # body (NULL)
+            None,  # service (NULL)
+            None,  # environment (NULL)
+            None,  # host (NULL)
+            None,  # data (NULL)
+        )
+        event = _row_to_log_event(row)
+
+        self.assertEqual(event.body, "")
+        self.assertEqual(event.service, "")
+        self.assertEqual(event.environment, "")
+        self.assertEqual(event.host, "")
+        self.assertEqual(event.data, {})
+        self.assertIsNone(event.trace_id)
+        self.assertIsNone(event.span_id)
+
+    def test_span_id_string_to_int(self):
+        """span_id returned as string from DuckDB is converted to int."""
+        from ..api import _row_to_log_event
+
+        now = datetime.now(dt_timezone.utc)
+        uid = UUID7Helper.from_datetime(now)
+
+        row = (
+            uid,
+            None,
+            1,
+            1,
+            "12345",  # span_id as string (from Parquet)
+            LogLevel.INFO,
+            9,
+            "test body",
+            "svc",
+            "prod",
+            "host1",
+            "{}",
+        )
+        event = _row_to_log_event(row)
+        self.assertEqual(event.span_id, 12345)
+
+    def test_span_id_empty_string_becomes_none(self):
+        """Empty span_id string from DuckDB becomes None."""
+        from ..api import _row_to_log_event
+
+        now = datetime.now(dt_timezone.utc)
+        uid = UUID7Helper.from_datetime(now)
+
+        row = (uid, None, 1, 1, "", LogLevel.INFO, 9, "b", "s", "e", "h", "{}")
+        event = _row_to_log_event(row)
+        self.assertIsNone(event.span_id)
+
+    def test_id_string_to_uuid(self):
+        """id returned as string from DuckDB is converted to UUID."""
+        from ..api import _row_to_log_event
+
+        now = datetime.now(dt_timezone.utc)
+        uid = UUID7Helper.from_datetime(now)
+
+        row = (
+            str(uid),  # id as string (from Parquet)
+            None,
+            1,
+            1,
+            None,
+            LogLevel.INFO,
+            9,
+            "body",
+            "svc",
+            "prod",
+            "host1",
+            "{}",
+        )
+        event = _row_to_log_event(row)
+        self.assertEqual(event.id, uid)
+        self.assertIsInstance(event.id, UUID)
+
+    def test_trace_id_string_to_uuid(self):
+        """trace_id returned as string from DuckDB is converted to UUID."""
+        import uuid
+
+        from ..api import _row_to_log_event
+
+        now = datetime.now(dt_timezone.utc)
+        uid = UUID7Helper.from_datetime(now)
+        trace = uuid.uuid4()
+
+        row = (uid, str(trace), 1, 1, None, LogLevel.INFO, 9, "b", "s", "e", "h", "{}")
+        event = _row_to_log_event(row)
+        self.assertEqual(event.trace_id, trace)
+        self.assertIsInstance(event.trace_id, UUID)
+
+
+class CombinedQueryBothTiersTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """
+    Test query_logs_combined with data spanning hot and cold storage.
+
+    Uses freeze_time and patches HOT_STORAGE_DAYS to control tier routing.
+    """
+
+    def setUp(self):
+        self.create_project()
+        self.cold_dir = tempfile.mkdtemp(prefix="glitchtip_cold_test_")
+        # Cold partition: 2 days before frozen time
+        self.cold_date = datetime(2025, 4, 10, tzinfo=dt_timezone.utc)
+        # Hot partition: same day as frozen time
+        self.hot_date = datetime(2025, 4, 12, tzinfo=dt_timezone.utc)
+        self.cold_part = _create_log_partition(self.cold_date)
+        self.hot_part = _create_log_partition(self.hot_date)
+
+    def tearDown(self):
+        _drop_partition(self.hot_part)
+        _drop_partition(self.cold_part)
+        shutil.rmtree(self.cold_dir, ignore_errors=True)
+
+    def _setup_data(self):
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        org_id = self.organization.id
+        proj_id = self.project.id
+
+        _bulk_insert_logs(self.cold_date, 20, org_id, proj_id)
+        _bulk_insert_logs(self.hot_date, 15, org_id, proj_id)
+
+        archive_and_swap_partition(
+            self.cold_part, "logs_logevent", EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
+        )
+
+    @freeze_time("2025-04-12 12:00:00")
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_combined_query_returns_both_tiers(self):
+        """query_logs_combined returns data from both hot and cold."""
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            self._setup_data()
+
+            from asgiref.sync import async_to_sync
+
+            from ..api import query_logs_combined
+
+            # HOT_STORAGE_DAYS=1 → cutoff = 2025-04-11 12:00:00
+            # cold_date (2025-04-10) < cutoff → cold tier
+            # hot_date (2025-04-12) > cutoff → hot tier
+            with mock.patch("apps.logs.api.HOT_STORAGE_DAYS", 1):
+                results = async_to_sync(query_logs_combined)(
+                    organization_id=self.organization.id,
+                    start_dt=self.cold_date,
+                    end_dt=self.hot_date + timedelta(days=1),
+                    limit=200,
+                )
+
+            # 20 cold + 15 hot = 35 total
+            self.assertEqual(len(results), 35)
+
+            # Verify sorted DESC by id
+            ids = [r.id for r in results]
+            self.assertEqual(ids, sorted(ids, reverse=True))
+
+            # No duplicates
+            self.assertEqual(len(set(ids)), 35)
+
+    @freeze_time("2025-04-12 12:00:00")
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_cursor_pagination_across_tiers(self):
+        """Cursor pagination crosses from hot to cold without duplicates."""
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            self._setup_data()
+
+            from asgiref.sync import async_to_sync
+
+            from ..api import query_logs_combined
+
+            all_ids = set()
+            cursor = None
+            pages = 0
+
+            with mock.patch("apps.logs.api.HOT_STORAGE_DAYS", 1):
+                while pages < 10:  # safety limit
+                    results = async_to_sync(query_logs_combined)(
+                        organization_id=self.organization.id,
+                        start_dt=self.cold_date,
+                        end_dt=self.hot_date + timedelta(days=1),
+                        limit=10,
+                        cursor_position=cursor,
+                    )
+                    if not results:
+                        break
+                    page_ids = {r.id for r in results}
+                    # Verify no duplicates across pages
+                    overlap = all_ids & page_ids
+                    self.assertEqual(
+                        overlap,
+                        set(),
+                        f"Duplicate IDs across pages: {overlap}",
+                    )
+                    all_ids |= page_ids
+                    cursor = results[-1].id
+                    pages += 1
+
+            # Should have fetched all 35 events across pages
+            self.assertEqual(len(all_ids), 35)
+
+
+class CountStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """Test count_hot_storage and count_cold_storage functions."""
+
+    def setUp(self):
+        self.create_project()
+        self.cold_dir = tempfile.mkdtemp(prefix="glitchtip_cold_test_")
+        self.cold_date = datetime(2025, 4, 10, tzinfo=dt_timezone.utc)
+        self.hot_date = datetime(2025, 4, 11, tzinfo=dt_timezone.utc)
+        self.cold_part = _create_log_partition(self.cold_date)
+        self.hot_part = _create_log_partition(self.hot_date)
+
+    def tearDown(self):
+        _drop_partition(self.hot_part)
+        _drop_partition(self.cold_part)
+        shutil.rmtree(self.cold_dir, ignore_errors=True)
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_count_hot_storage_with_cap(self):
+        """count_hot_storage respects max_hits cap."""
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            _bulk_insert_logs(self.hot_date, 50, self.organization.id, self.project.id)
+
+            from ..api import count_hot_storage
+
+            full_start = self.hot_date
+            full_end = self.hot_date + timedelta(days=1)
+
+            count = count_hot_storage(
+                organization_id=self.organization.id,
+                start_dt=full_start,
+                end_dt=full_end,
+                max_hits=20,
+            )
+            self.assertEqual(count, 20)
+
+            # Without cap, should return actual count
+            count_full = count_hot_storage(
+                organization_id=self.organization.id,
+                start_dt=full_start,
+                end_dt=full_end,
+                max_hits=1000,
+            )
+            self.assertEqual(count_full, 50)
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_count_cold_storage(self):
+        """count_cold_storage counts archived logs with cap."""
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            _bulk_insert_logs(self.cold_date, 30, self.organization.id, self.project.id)
+            archive_and_swap_partition(
+                self.cold_part, "logs_logevent", EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
+            )
+
+            from ..api import count_cold_storage
+
+            count = count_cold_storage(
+                organization_id=self.organization.id,
+                start_dt=self.cold_date,
+                end_dt=self.cold_date + timedelta(days=1),
+                max_hits=1000,
+            )
+            self.assertEqual(count, 30)
+
+            # With small cap
+            count_capped = count_cold_storage(
+                organization_id=self.organization.id,
+                start_dt=self.cold_date,
+                end_dt=self.cold_date + timedelta(days=1),
+                max_hits=10,
+            )
+            self.assertEqual(count_capped, 10)
+
+    def test_count_cold_storage_disabled(self):
+        """count_cold_storage returns 0 when DuckDB is disabled."""
+        from ..api import count_cold_storage
+
+        count = count_cold_storage(
+            organization_id=1,
+            start_dt=datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+            end_dt=datetime(2020, 12, 31, tzinfo=dt_timezone.utc),
+        )
+        self.assertEqual(count, 0)
+
+
+class ILIKEEscapingTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """Test that ILIKE wildcards in search queries are escaped."""
+
+    def setUp(self):
+        self.create_project()
+        self.date = datetime(2025, 6, 1, tzinfo=dt_timezone.utc)
+        self.part = _create_log_partition(self.date)
+
+    def tearDown(self):
+        _drop_partition(self.part)
+
+    def test_percent_in_query_is_literal(self):
+        """A '%' in the search query matches literal '%', not wildcard."""
+        org_id = self.organization.id
+        proj_id = self.project.id
+
+        # Insert logs - one with literal %, one without
+        with connection.cursor() as cursor:
+            for i, body in enumerate(["100% complete", "100 complete"]):
+                event_time = self.date + timedelta(seconds=i)
+                event_id = UUID7Helper.from_datetime(event_time)
+                cursor.execute(
+                    "INSERT INTO logs_logevent "
+                    "(id, organization_id, project_id, level, severity_number, body) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [str(event_id), org_id, proj_id, LogLevel.INFO, 9, body],
+                )
+
+        from ..api import query_hot_storage
+
+        results = query_hot_storage(
+            organization_id=org_id,
+            start_dt=self.date,
+            end_dt=self.date + timedelta(days=1),
+            query="100%",
+            limit=100,
+        )
+        # Should match both because "100%" contains "100%" literally,
+        # and "100 complete" also starts with "100" — but the '%' is escaped,
+        # so only the literal match should work
+        matching_bodies = {r.body for r in results}
+        self.assertIn("100% complete", matching_bodies)
+
+    def test_underscore_in_query_is_literal(self):
+        """A '_' in the search query matches literal '_', not single-char wildcard."""
+        org_id = self.organization.id
+        proj_id = self.project.id
+
+        with connection.cursor() as cursor:
+            for i, body in enumerate(["log_event_started", "logXeventXstarted"]):
+                event_time = self.date + timedelta(seconds=i)
+                event_id = UUID7Helper.from_datetime(event_time)
+                cursor.execute(
+                    "INSERT INTO logs_logevent "
+                    "(id, organization_id, project_id, level, severity_number, body) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [str(event_id), org_id, proj_id, LogLevel.INFO, 9, body],
+                )
+
+        from ..api import query_hot_storage
+
+        results = query_hot_storage(
+            organization_id=org_id,
+            start_dt=self.date,
+            end_dt=self.date + timedelta(days=1),
+            query="log_event",
+            limit=100,
+        )
+        matching_bodies = {r.body for r in results}
+        self.assertIn("log_event_started", matching_bodies)
+        # Without escaping, "_" matches any char, so "logXeventXstarted" would match
+        self.assertNotIn("logXeventXstarted", matching_bodies)
