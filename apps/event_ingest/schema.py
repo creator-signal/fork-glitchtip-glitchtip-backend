@@ -275,7 +275,9 @@ class WebIngestIssueEvent(BaseIssueEvent):
     ] = None
     errors: list[Any] | None = None
 
-    exception: IngestValueEventException | None = None
+    exception: Annotated[
+        IngestValueEventException | None, WrapValidator(report_error_on_fail)
+    ] = None
     threads: Annotated[ValueEventThread | None, WrapValidator(report_error_on_fail)] = (
         None
     )

@@ -18,6 +18,18 @@ def cleanup_old_releases():
         batch_ids = list(queryset.values_list("id", flat=True)[:1000])
         if not batch_ids:
             break
+        # Nullify SET_NULL FK references before deleting releases.
+        # _raw_delete() bypasses Django's collector, so SET_NULL doesn't fire.
+        from apps.issue_events.models import Issue, IssueEvent
+        from apps.sourcecode.models import DebugSymbolBundle
+
+        Issue.objects.filter(first_release_id__in=batch_ids).update(first_release=None)
+        Issue.objects.filter(last_release_id__in=batch_ids).update(last_release=None)
+        Issue.objects.filter(resolved_in_release_id__in=batch_ids).update(
+            resolved_in_release=None
+        )
+        IssueEvent.objects.filter(release_id__in=batch_ids).update(release=None)
+        DebugSymbolBundle.objects.filter(release_id__in=batch_ids).update(release=None)
         # Delete CASCADE'd FKs explicitly via _raw_delete to avoid collector overhead
         Deploy.objects.filter(release_id__in=batch_ids)._raw_delete(queryset.db)
         ReleaseProject.objects.filter(release_id__in=batch_ids)._raw_delete(queryset.db)

@@ -112,10 +112,10 @@ class StacktraceProcessor:
                 # Nodejs crash report doesn't contain this field.
                 # In future, we need to support.
                 return
-            arch = contexts.get("device").get("arch")
+            arch = (contexts.get("device") or {}).get("arch")
 
             # Process the first exception only.
-            exceptions = event.get("exception").get("values")
+            exceptions = (event.get("exception") or {}).get("values")
             stacktrace = exceptions[0].get("stacktrace")
         except Exception as e:
             getLogger().error(
@@ -244,7 +244,7 @@ class StacktraceProcessor:
     def update_frames(cls, event, frames):
         try:
             data = event.data
-            exceptions = data.get("exception").get("values")
+            exceptions = (data.get("exception") or {}).get("values")
             stacktrace = exceptions[0].get("stacktrace")
             stacktrace["frames"] = frames
             event.data = data
