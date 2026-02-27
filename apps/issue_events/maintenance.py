@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.db.models import Exists, OuterRef
 from django.utils.timezone import now
 
@@ -83,8 +84,14 @@ def cleanup_old_issues():
         IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
         UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(queryset.db)
-        # Delete the issues
-        count = Issue.objects.filter(id__in=batch_ids)._raw_delete(queryset.db)
+        # Delete the issues. A new event may arrive between the EXCLUDE check
+        # above and this DELETE (TOCTOU race). Catch and skip — the issue will
+        # be re-evaluated on the next maintenance run.
+        try:
+            count = Issue.objects.filter(id__in=batch_ids)._raw_delete(queryset.db)
+        except IntegrityError:
+            logger.info("Skipped batch due to concurrent FK insert, will retry later")
+            continue
         total_deleted += count
 
     if total_deleted:
