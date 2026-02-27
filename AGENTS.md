@@ -18,6 +18,7 @@
 - `apps/`: Django apps (feature modules).
 - `glitchtip/`: Core project settings and configuration.
 - `compose.yml`: Service definitions.
+- `docs/ai/staging_qa_plan.md`: Reusable QA prompt for staging. Includes workflow, heuristics, testing checklist, and known API differences.
 
 ## Licensing — Sentry Code
 
