@@ -477,16 +477,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "glitchtip.wsgi.application"
 
-# SECURITY WARNING: Defaults to True for backward compatibility. Set to False and
-# configure CORS_ORIGIN_WHITELIST in production to prevent cross-origin attacks.
+# Defaults to True because Sentry SDKs send events from arbitrary user domains.
+# Set to False and configure CORS_ORIGIN_WHITELIST only if you control all client origins.
 CORS_ORIGIN_ALLOW_ALL = env.bool("CORS_ORIGIN_ALLOW_ALL", True)
 CORS_ORIGIN_WHITELIST = env.tuple("CORS_ORIGIN_WHITELIST", str, default=())
-if CORS_ORIGIN_ALLOW_ALL and not DEBUG:
-    warnings.warn(
-        "CORS_ORIGIN_ALLOW_ALL is True. Set CORS_ORIGIN_ALLOW_ALL=False and "
-        "configure CORS_ORIGIN_WHITELIST for production deployments.",
-        stacklevel=1,
-    )
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-sentry-auth",
     "baggage",
