@@ -59,6 +59,13 @@ class ProjectsAPITestCase(TestCase):
         self.assertNotIn("keys", data_keys, "Project keys shouldn't be in list")
         self.assertNotIn("teams", data_keys, "Teams shouldn't be in list")
 
+        # When an org is soft deleted, that org's projects should not show up in list,
+        # even if they haven't been soft deleted yet
+        self.organization.is_deleted = True
+        self.organization.save()
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), [])
+
     def test_default_ordering(self):
         projectA = self.project
         projectZ = baker.make(
