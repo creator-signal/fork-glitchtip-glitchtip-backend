@@ -1115,8 +1115,7 @@ def _update_transaction_group_stats(
     # Row locks are held only for the duration of this statement.
     with connection.cursor() as cursor:
         placeholders = ",".join(
-            cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row)
-            for row in values_data
+            cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row) for row in values_data
         )
         cursor.execute(
             f"""
@@ -1160,7 +1159,8 @@ def _update_transaction_group_stats(
         p_updates.sort(key=lambda x: (x[3], x[2]))
         with connection.cursor() as cursor:
             placeholders = ",".join(
-                cursor.mogrify("(%s,%s,%s,%s)", row) for row in p_updates
+                cursor.mogrify("(%s::double precision,%s::double precision,%s,%s)", row)
+                for row in p_updates
             )
             cursor.execute(
                 f"""
@@ -1353,9 +1353,7 @@ def process_transaction_events(
         if missing_keys:
             q = Q()
             for project_id, txn, op, method in missing_keys:
-                q |= Q(
-                    project_id=project_id, transaction=txn, op=op, method=method
-                )
+                q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
             for g in TransactionGroup.objects.filter(q):
                 existing[(g.project_id, g.transaction, g.op, g.method)] = g
 

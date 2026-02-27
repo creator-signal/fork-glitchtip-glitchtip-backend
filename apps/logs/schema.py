@@ -16,9 +16,9 @@ class LogEventSchema(CamelSchema):
     timestamp: datetime
     level: str
     body: str
-    service: str
-    environment: str
-    host: str
+    service: str | None = ""
+    environment: str | None = ""
+    host: str | None = ""
     trace_id: UUID | None = Field(None, alias="traceID")
     span_id: str | None = Field(None, alias="spanID")
     severity_number: int | None = None

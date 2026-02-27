@@ -38,13 +38,19 @@ class TimedTestRunner(DiscoverRunner):
     def setup_databases(self, **kwargs):
         from django.db.models.signals import post_migrate
 
-        def create_test_default_partitions(sender, **kwargs):
+        def create_test_partitions(sender, **kwargs):
             from django.db import connections
 
             using = kwargs.get("using")
             if not using:
                 return
 
+            # DEFAULT partitions are used here intentionally for tests.
+            # In production, DEFAULT partitions must never be used (see AGENTS.md)
+            # because they silently absorb rows and block nested RANGE->HASH
+            # partition creation. In tests, they're safe: they catch all data
+            # regardless of date, and PostgreSQL correctly routes rows to more
+            # specific partitions when tests create their own.
             tables = [
                 "issue_events_issueevent",
                 "issue_events_issueaggregate",
@@ -60,12 +66,13 @@ class TimedTestRunner(DiscoverRunner):
             with connections[using].cursor() as cursor:
                 for table in tables:
                     cursor.execute(
-                        f"CREATE TABLE IF NOT EXISTS {table}_default PARTITION OF {table} DEFAULT;"
+                        f"CREATE TABLE IF NOT EXISTS {table}_default "
+                        f"PARTITION OF {table} DEFAULT"
                     )
 
-        post_migrate.connect(create_test_default_partitions)
+        post_migrate.connect(create_test_partitions)
         try:
             result = super().setup_databases(**kwargs)
         finally:
-            post_migrate.disconnect(create_test_default_partitions)
+            post_migrate.disconnect(create_test_partitions)
         return result

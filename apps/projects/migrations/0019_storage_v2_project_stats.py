@@ -139,19 +139,6 @@ class Migration(migrations.Migration):
                     DROP TABLE IF EXISTS projects_transactioneventprojecthourlystatistic CASCADE;
                     """,
                 ),
-                # Ensure default partitions attached
-                RunSQL(
-                    sql="""
-                    DROP TABLE IF EXISTS projects_issueeventprojecthourlystatistic_default;
-                    CREATE TABLE projects_issueeventprojecthourlystatistic_default
-                    PARTITION OF projects_issueeventprojecthourlystatistic DEFAULT;
-
-                    DROP TABLE IF EXISTS projects_transactioneventprojecthourlystatistic_default;
-                    CREATE TABLE projects_transactioneventprojecthourlystatistic_default
-                    PARTITION OF projects_transactioneventprojecthourlystatistic DEFAULT;
-                    """,
-                    reverse_sql="",
-                ),
             ],
         ),
         migrations.RunPython(

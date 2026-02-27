@@ -9,9 +9,6 @@ WORKERS=${GRANIAN_WORKERS:-${WEB_CONCURRENCY:-1}}
 HOST=${GRANIAN_HOST:-0.0.0.0}
 PORT=${GRANIAN_PORT:-${PORT:-8000}}
 
-# Use async by default
-USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
-
 # Serve static files by default if the directory exists
 # If GRANIAN_STATIC_PATH_MOUNT is explicitly set, we respect it (and let Granian fail if it's missing)
 # If it's NOT set, we check for the default 'static' directory.
@@ -30,10 +27,14 @@ if [ "${ENABLE_OBSERVABILITY_API}" = "True" ] || [ "${ENABLE_OBSERVABILITY_API}"
     fi
 fi
 
-if [ "$USE_ASYNC_SERVER" = "true" ]; then
-    echo "Start GlitchTip with ${WORKERS} granian worker(s) (ASGI)"
-    exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --no-ws "$@"
+# Determine ASGI interface mode.
+# MCP requires lifespan for its Starlette session manager.
+# When MCP is disabled, use asginl (no lifespan) since Django doesn't support it.
+if [ "$GLITCHTIP_ENABLE_MCP" = "True" ] || [ "$GLITCHTIP_ENABLE_MCP" = "true" ] || [ "$GLITCHTIP_ENABLE_MCP" = "1" ]; then
+    INTERFACE="asgi"
 else
-    echo "Start GlitchTip with ${WORKERS} granian worker(s) (WSGI)"
-    exec granian --interface wsgi glitchtip.wsgi:application --host $HOST --port $PORT --workers $WORKERS "$@"
+    INTERFACE="asginl"
 fi
+
+echo "Start GlitchTip with ${WORKERS} granian worker(s) (${INTERFACE})"
+exec granian --interface $INTERFACE glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --no-ws "$@"
