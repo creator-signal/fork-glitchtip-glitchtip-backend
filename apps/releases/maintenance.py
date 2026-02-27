@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 def cleanup_old_releases():
+    from apps.issue_events.models import Issue, IssueEvent
+    from apps.sourcecode.models import DebugSymbolBundle
+
     days_ago = now() - timedelta(days=settings.GLITCHTIP_RELEASE_RETENTION_DAYS)
     queryset = Release.objects.filter(created__lt=days_ago).order_by("id")
 
@@ -20,9 +23,6 @@ def cleanup_old_releases():
             break
         # Nullify SET_NULL FK references before deleting releases.
         # _raw_delete() bypasses Django's collector, so SET_NULL doesn't fire.
-        from apps.issue_events.models import Issue, IssueEvent
-        from apps.sourcecode.models import DebugSymbolBundle
-
         Issue.objects.filter(first_release_id__in=batch_ids).update(first_release=None)
         Issue.objects.filter(last_release_id__in=batch_ids).update(last_release=None)
         Issue.objects.filter(resolved_in_release_id__in=batch_ids).update(

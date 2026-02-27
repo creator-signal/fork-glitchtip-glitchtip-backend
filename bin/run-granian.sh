@@ -9,9 +9,6 @@ WORKERS=${GRANIAN_WORKERS:-${WEB_CONCURRENCY:-1}}
 HOST=${GRANIAN_HOST:-0.0.0.0}
 PORT=${GRANIAN_PORT:-${PORT:-8000}}
 
-# Use async by default
-USE_ASYNC_SERVER=${USE_ASYNC_SERVER:-true}
-
 # Serve static files by default if the directory exists
 # If GRANIAN_STATIC_PATH_MOUNT is explicitly set, we respect it (and let Granian fail if it's missing)
 # If it's NOT set, we check for the default 'static' directory.
