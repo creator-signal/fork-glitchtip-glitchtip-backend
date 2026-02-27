@@ -12,7 +12,17 @@ from django_extensions.db.fields import AutoSlugField
 from apps.issue_events.models import Issue, IssueEvent
 from apps.logs.models import LogEvent
 from apps.observability.utils import clear_metrics_cache
-from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
+from glitchtip.base_models import (
+    AggregationModel,
+    CreatedModel,
+    SoftDeleteManager,
+    SoftDeleteModel,
+)
+
+
+class ProjectSoftDeleteManager(SoftDeleteManager):
+    def get_queryset(self):
+        return super().get_queryset().filter(organization__is_deleted=False)
 
 
 class Project(CreatedModel, SoftDeleteModel):
@@ -39,6 +49,7 @@ class Project(CreatedModel, SoftDeleteModel):
         validators=[MaxValueValidator(100)],
         help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
     )
+    undeleted_objects = ProjectSoftDeleteManager()
 
     class Meta:
         unique_together = (("organization", "slug"),)

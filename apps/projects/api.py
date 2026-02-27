@@ -46,10 +46,7 @@ def get_projects_queryset(
     user_id: int, organization_slug: str = None, team_slug: str = None
 ):
     qs = Project.annotate_is_member(
-        Project.undeleted_objects.filter(
-            organization__users=user_id, organization__is_deleted=False
-        ),
-        user_id,
+        Project.undeleted_objects.filter(organization__users=user_id), user_id
     )
     if organization_slug:
         qs = qs.filter(organization__slug=organization_slug)
