@@ -149,9 +149,7 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
     def test_promote_skips_recent_rows(self):
         """Rows newer than 5 minutes are not promoted."""
         recent_ts = datetime(2026, 2, 23, 11, 59, 0, tzinfo=timezone.utc)
-        span = _make_span_staging_row(
-            self.org.id, self.project.id, timestamp=recent_ts
-        )
+        span = _make_span_staging_row(self.org.id, self.project.id, timestamp=recent_ts)
         SpanStaging.objects.bulk_create([span])
 
         promoted, truncated = promote_spans()
@@ -166,10 +164,12 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         org2 = project2.organization
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
 
-        SpanStaging.objects.bulk_create([
-            _make_span_staging_row(self.org.id, self.project.id, timestamp=ts),
-            _make_span_staging_row(org2.id, project2.id, timestamp=ts, span_id="x"),
-        ])
+        SpanStaging.objects.bulk_create(
+            [
+                _make_span_staging_row(self.org.id, self.project.id, timestamp=ts),
+                _make_span_staging_row(org2.id, project2.id, timestamp=ts, span_id="x"),
+            ]
+        )
 
         promoted, truncated = promote_spans()
 
@@ -177,9 +177,7 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         self.assertFalse(truncated)
         self.assertEqual(SpanStaging.objects.count(), 0)
 
-        spans_dir = os.path.join(
-            self.cold_dir, "cold_storage/performance_spans"
-        )
+        spans_dir = os.path.join(self.cold_dir, "cold_storage/performance_spans")
         org_dirs = sorted(os.listdir(spans_dir))
         self.assertEqual(len(org_dirs), 2)
         self.assertIn(f"org_{self.org.id}", org_dirs)
@@ -219,7 +217,9 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
                 for j in range(3)
             ]
             # Write directly with unique filenames to avoid timestamp collision
-            org_dir = f"{COLD_STORAGE_PREFIX}/performance_spans/org_{self.org.id}/{date_str}"
+            org_dir = (
+                f"{COLD_STORAGE_PREFIX}/performance_spans/org_{self.org.id}/{date_str}"
+            )
             relative_path = f"{org_dir}/chunk_{i}.parquet"
             parquet_path = get_duckdb_parquet_path(self.storage, relative_path)
             os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
@@ -327,7 +327,9 @@ class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
         )
 
         org_prefix = f"cold_storage/performance_spans/org_{self.org.id}"
-        flat_path = get_duckdb_parquet_path(self.storage, f"{org_prefix}/{date_str}.parquet")
+        flat_path = get_duckdb_parquet_path(
+            self.storage, f"{org_prefix}/{date_str}.parquet"
+        )
 
         duck_conn = get_duckdb_connection(self.storage)
         try:
@@ -342,8 +344,17 @@ class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
             """)
             duck_conn.execute(
                 "INSERT INTO flat_data VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [self.org.id, self.project.id, "/api/test/", "span1", "txn1",
-                 "db", "SELECT %s", 10.0, ts],
+                [
+                    self.org.id,
+                    self.project.id,
+                    "/api/test/",
+                    "span1",
+                    "txn1",
+                    "db",
+                    "SELECT %s",
+                    10.0,
+                    ts,
+                ],
             )
             duck_conn.execute(
                 f"COPY flat_data TO '{flat_path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
@@ -463,9 +474,9 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
                 i = txn_idx * 10 + span_idx
                 rows.append(
                     self._make_row(
-                        id=str(UUID7Helper.from_datetime(
-                            self.ts + timedelta(seconds=i)
-                        )),
+                        id=str(
+                            UUID7Helper.from_datetime(self.ts + timedelta(seconds=i))
+                        ),
                         span_id=f"s{i}",
                         transaction_id=f"txn{txn_idx}",
                         op="db",
@@ -522,9 +533,7 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
 
         start = datetime(2026, 2, 20, 0, 0, 0, tzinfo=timezone.utc)
         end = datetime(2026, 2, 22, 0, 0, 0, tzinfo=timezone.utc)
-        results = query_transaction_trend(
-            self.org.id, "/api/test/", start, end
-        )
+        results = query_transaction_trend(self.org.id, "/api/test/", start, end)
 
         self.assertEqual(len(results), 2)
         # Day 1: 3 spans at 10ms

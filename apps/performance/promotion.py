@@ -90,8 +90,7 @@ def promote_spans() -> tuple[int, bool]:
             SpanStaging.objects.filter(
                 id__lt=cutoff_uuid,
                 organization_id=org_id,
-            )
-            .values_list(
+            ).values_list(
                 "id",
                 "organization_id",
                 "project_id",
@@ -120,9 +119,7 @@ def promote_spans() -> tuple[int, bool]:
 
         for date_str, group_rows in date_groups.items():
             try:
-                chunk_path = _write_chunk_parquet(
-                    storage, org_id, date_str, group_rows
-                )
+                chunk_path = _write_chunk_parquet(storage, org_id, date_str, group_rows)
             except Exception:
                 logger.error(
                     "Failed to write parquet chunk for org %d date %s",
@@ -193,11 +190,19 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
         writer.writerow(columns)
         for row in rows:
             ts = row[9]
-            writer.writerow([
-                row[1], row[2], row[3], row[4], row[5],
-                row[6], row[7], row[8],
-                ts.isoformat() if ts else "",
-            ])
+            writer.writerow(
+                [
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7],
+                    row[8],
+                    ts.isoformat() if ts else "",
+                ]
+            )
 
     try:
         col_spec = ", ".join(

@@ -41,10 +41,20 @@ class MCPSerializerTestCase(TestCase):
         result = serialize_transaction_group(group)
 
         expected_keys = {
-            "id", "project", "transaction", "op", "method",
-            "count", "avgDuration", "p50", "p95",
-            "errorCount", "errorRate", "throughput",
-            "firstSeen", "lastSeen",
+            "id",
+            "project",
+            "transaction",
+            "op",
+            "method",
+            "count",
+            "avgDuration",
+            "p50",
+            "p95",
+            "errorCount",
+            "errorRate",
+            "throughput",
+            "firstSeen",
+            "lastSeen",
         }
         self.assertEqual(set(result.keys()), expected_keys)
 

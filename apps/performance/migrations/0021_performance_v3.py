@@ -213,9 +213,7 @@ class Migration(migrations.Migration):
             ],
             database_operations=[
                 migrations.RunSQL(
-                    sql=get_sql_content(
-                        __file__, "create_transaction_group_v3.sql"
-                    ),
+                    sql=get_sql_content(__file__, "create_transaction_group_v3.sql"),
                     reverse_sql="DROP TABLE IF EXISTS performance_transactiongroup CASCADE;",
                 ),
             ],
@@ -263,9 +261,7 @@ class Migration(migrations.Migration):
                         ),
                         (
                             "duration",
-                            models.FloatField(
-                                help_text="Duration in milliseconds"
-                            ),
+                            models.FloatField(help_text="Duration in milliseconds"),
                         ),
                         (
                             "timestamp",
