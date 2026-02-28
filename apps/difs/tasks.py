@@ -86,7 +86,6 @@ def update_frames(event: ErrorIssueEventSchema, frames):
         event.exception.values[0].stacktrace.frames = new_frames
     except Exception as e:
         getLogger().error(f"StacktraceProcessor: Unexpected error: {e}")
-        pass
 
 
 def difs_get_file_from_chunks(checksum, chunks):
