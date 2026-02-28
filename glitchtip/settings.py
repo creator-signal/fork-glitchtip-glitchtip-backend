@@ -303,6 +303,16 @@ if SENTRY_DSN:
         return SENTRY_TRACES_SAMPLE_RATE
 
     release = "glitchtip@" + GLITCHTIP_VERSION if GLITCHTIP_VERSION else None
+
+    _is_worker = env.bool("IS_WORKER", False)
+    _embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
+    if _is_worker:
+        _default_service = "glitchtip-worker"
+    elif _embed_worker:
+        _default_service = "glitchtip"
+    else:
+        _default_service = "glitchtip-web"
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         transport=InternalTransport if _is_self_referencing else None,
@@ -310,6 +320,7 @@ if SENTRY_DSN:
         before_send=before_send,
         release=release,
         environment=ENVIRONMENT,
+        server_name=env.str("SENTRY_SERVICE_NAME", _default_service),
         auto_session_tracking=False,
         send_client_reports=False,
         sample_rate=SENTRY_SAMPLE_RATE,
@@ -318,6 +329,9 @@ if SENTRY_DSN:
         max_value_length=2048,
         max_breadcrumbs=50,
         enable_logs=SENTRY_ENABLE_LOGS,
+    )
+    sentry_sdk.get_global_scope().set_attribute(
+        "service.name", env.str("SENTRY_SERVICE_NAME", _default_service)
     )
 
 
