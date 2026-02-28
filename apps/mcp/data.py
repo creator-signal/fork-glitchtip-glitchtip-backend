@@ -368,7 +368,10 @@ async def update_issue(
     if obj is None:
         return None
 
-    obj.status = EventStatus.from_string(status)
+    new_status = EventStatus.from_string(status)
+    if new_status is None:
+        raise ValueError(f"Invalid status: {status!r}")
+    obj.status = new_status
     update_fields = ["status"]
 
     if obj.status == EventStatus.RESOLVED:
