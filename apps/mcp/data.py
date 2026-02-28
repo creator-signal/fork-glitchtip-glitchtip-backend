@@ -6,6 +6,7 @@ from django.db.models import Q, QuerySet
 
 from apps.alerts.api import get_project_alert_queryset
 from apps.alerts.models import ProjectAlert
+from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent
 from apps.issue_events.services import filter_issue_list
 from apps.issue_events.services import get_queryset as get_issues_qs
@@ -19,6 +20,7 @@ from apps.organizations_ext.queryset_utils import (
 from apps.performance.models import TransactionGroup
 from apps.projects.api import get_projects_queryset
 from apps.projects.models import Project
+from apps.releases.models import Release
 from apps.uptime.api import get_monitor_queryset
 from apps.uptime.models import Monitor
 from glitchtip.api.pagination import AsyncLinkHeaderPagination
@@ -343,3 +345,53 @@ async def get_span_groups(
         sort=sort,
         limit=min(limit, 100),
     )
+
+
+async def update_issue(
+    user_id: int,
+    issue_id: int,
+    status: str,
+    in_next_release: bool = False,
+    in_release: str | None = None,
+) -> Issue | None:
+    """Update an issue's status (resolve, unresolve, ignore).
+
+    Optionally associate a release when resolving.
+    Returns the updated issue, or None if not found / no access.
+    """
+    qs = Issue.objects.filter(project__organization__users=user_id).select_related(
+        "project__organization", "resolved_in_release"
+    )
+    qs = _apply_compliance_filter(qs)
+
+    obj = await qs.filter(id=issue_id).afirst()
+    if obj is None:
+        return None
+
+    obj.status = EventStatus.from_string(status)
+    update_fields = ["status"]
+
+    if obj.status == EventStatus.RESOLVED:
+        if in_release:
+            release = await Release.objects.filter(
+                version=in_release,
+                organization_id=obj.project.organization_id,
+            ).afirst()
+            if release:
+                obj.resolved_in_release = release
+                update_fields.append("resolved_in_release_id")
+        elif in_next_release:
+            release = await (
+                Release.objects.filter(projects=obj.project_id)
+                .order_by("-created")
+                .afirst()
+            )
+            if release:
+                obj.resolved_in_release = release
+                update_fields.append("resolved_in_release_id")
+    else:
+        obj.resolved_in_release = None
+        update_fields.append("resolved_in_release_id")
+
+    await obj.asave(update_fields=update_fields)
+    return obj
