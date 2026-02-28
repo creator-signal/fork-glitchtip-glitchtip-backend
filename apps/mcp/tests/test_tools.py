@@ -6,6 +6,7 @@ from django.utils import timezone
 from mcp.server.auth.provider import AccessToken
 from model_bakery import baker
 
+from apps.issue_events.constants import EventStatus
 from apps.mcp.auth import GlitchTipTokenVerifier, validate_token
 from apps.mcp.data import (
     get_alerts,
@@ -16,6 +17,7 @@ from apps.mcp.data import (
     get_monitors,
     get_organizations,
     get_projects,
+    update_issue,
 )
 from apps.mcp.serializers import (
     serialize_alert,
@@ -310,6 +312,84 @@ class DataLayerTest(TestCase):
         monitors = async_to_sync(get_monitors)(self.user.id, self.organization.slug)
         self.assertEqual(len(monitors), 1)
         self.assertEqual(monitors[0].id, monitor.id)
+
+    def test_update_issue_resolve(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.UNRESOLVED,
+        )
+        result = async_to_sync(update_issue)(self.user.id, issue.id, "resolved")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, EventStatus.RESOLVED)
+
+    def test_update_issue_unresolve(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.RESOLVED,
+        )
+        result = async_to_sync(update_issue)(self.user.id, issue.id, "unresolved")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, EventStatus.UNRESOLVED)
+        self.assertIsNone(result.resolved_in_release)
+
+    def test_update_issue_ignore(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.UNRESOLVED,
+        )
+        result = async_to_sync(update_issue)(self.user.id, issue.id, "ignored")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, EventStatus.IGNORED)
+
+    def test_update_issue_resolve_in_next_release(self):
+        release = baker.make(
+            "releases.Release",
+            organization=self.organization,
+            version="1.0.0",
+        )
+        release.projects.add(self.project)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.UNRESOLVED,
+        )
+        result = async_to_sync(update_issue)(
+            self.user.id, issue.id, "resolved", in_next_release=True
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, EventStatus.RESOLVED)
+        self.assertEqual(result.resolved_in_release, release)
+
+    def test_update_issue_resolve_in_release(self):
+        release = baker.make(
+            "releases.Release",
+            organization=self.organization,
+            version="2.0.0",
+        )
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.UNRESOLVED,
+        )
+        result = async_to_sync(update_issue)(
+            self.user.id, issue.id, "resolved", in_release="2.0.0"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, EventStatus.RESOLVED)
+        self.assertEqual(result.resolved_in_release, release)
+
+    def test_update_issue_access_control(self):
+        """User should not be able to update other org's issues."""
+        other_issue = baker.make("issue_events.Issue")
+        result = async_to_sync(update_issue)(self.user.id, other_issue.id, "resolved")
+        self.assertIsNone(result)
+
+    def test_update_issue_not_found(self):
+        result = async_to_sync(update_issue)(self.user.id, 999999, "resolved")
+        self.assertIsNone(result)
 
 
 class SerializerTest(TestCase):

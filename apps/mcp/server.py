@@ -201,6 +201,45 @@ async def get_event(event_id: str) -> str:
 
 
 @mcp.tool()
+async def update_issue(
+    issue_id: int,
+    status: str,
+    in_next_release: bool = False,
+    in_release: str | None = None,
+) -> str:
+    """Update an issue's status. Use this after investigating an issue to
+    resolve, unresolve, or ignore it.
+
+    Args:
+        issue_id: Issue ID to update
+        status: New status — one of "resolved", "unresolved", "ignored"
+        in_next_release: If true and resolving, mark resolved in the latest
+            release for the issue's project
+        in_release: If provided and resolving, mark resolved in this specific
+            release version string
+    """
+    try:
+        user_id = _check_scopes(["event:write", "event:admin"])
+        valid_statuses = ("resolved", "unresolved", "ignored")
+        if status not in valid_statuses:
+            return _error(
+                f"Invalid status: {status!r}. Must be one of: {', '.join(valid_statuses)}"
+            )
+        issue = await data.update_issue(
+            user_id,
+            issue_id,
+            status,
+            in_next_release=in_next_release,
+            in_release=in_release,
+        )
+        if issue is None:
+            return _error("Issue not found")
+        return json.dumps(serializers.serialize_issue(issue))
+    except ValueError as e:
+        return _error(str(e))
+
+
+@mcp.tool()
 async def list_alerts(
     organization_slug: str,
     project_slug: str | None = None,
