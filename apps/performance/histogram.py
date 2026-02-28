@@ -33,9 +33,7 @@ def get_bucket_index(duration_ms: float) -> int:
     return max(0, min(idx, _NUM_BUCKETS - 1))
 
 
-def merge_durations(
-    histogram: list[int], durations: list[float]
-) -> list[int]:
+def merge_durations(histogram: list[int], durations: list[float]) -> list[int]:
     """Merge a list of durations into an existing histogram. Returns updated histogram."""
     for d in durations:
         histogram[get_bucket_index(d)] += 1

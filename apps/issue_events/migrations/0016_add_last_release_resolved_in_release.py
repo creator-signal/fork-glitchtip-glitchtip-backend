@@ -5,21 +5,32 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('issue_events', '0015_add_first_release_to_issue'),
-        ('releases', '0008_deploy'),
+        ("issue_events", "0015_add_first_release_to_issue"),
+        ("releases", "0008_deploy"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='issue',
-            name='last_release',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='releases.release'),
+            model_name="issue",
+            name="last_release",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="releases.release",
+            ),
         ),
         migrations.AddField(
-            model_name='issue',
-            name='resolved_in_release',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='releases.release'),
+            model_name="issue",
+            name="resolved_in_release",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="releases.release",
+            ),
         ),
     ]

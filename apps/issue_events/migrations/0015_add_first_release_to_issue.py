@@ -5,16 +5,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('issue_events', '0014_alter_issuetag_tag_key_alter_issuetag_tag_value'),
-        ('releases', '0008_deploy'),
+        ("issue_events", "0014_alter_issuetag_tag_key_alter_issuetag_tag_value"),
+        ("releases", "0008_deploy"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='issue',
-            name='first_release',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='releases.release'),
+            model_name="issue",
+            name="first_release",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                to="releases.release",
+            ),
         ),
     ]

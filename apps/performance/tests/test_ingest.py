@@ -123,10 +123,12 @@ class TransactionIngestTestCase(TestCase):
     def test_incremental_batches_merge_correctly(self):
         """Stats from separate batches merge without corruption."""
         # Batch 1: two fast transactions
-        self._ingest([
-            _make_transaction_payload(duration_ms=50.0),
-            _make_transaction_payload(duration_ms=50.0),
-        ])
+        self._ingest(
+            [
+                _make_transaction_payload(duration_ms=50.0),
+                _make_transaction_payload(duration_ms=50.0),
+            ]
+        )
         group = TransactionGroup.objects.first()
         self.assertEqual(group.count, 2)
         self.assertAlmostEqual(group.avg_duration, 50.0, places=1)
@@ -157,10 +159,9 @@ class TransactionIngestTestCase(TestCase):
     def test_p50_p95_computed(self):
         """p50 and p95 are computed from the histogram after ingest."""
         # 90 fast + 10 slow → p50 near 10ms, p95 near 5000ms
-        payloads = (
-            [_make_transaction_payload(duration_ms=10.0)] * 90
-            + [_make_transaction_payload(duration_ms=5000.0)] * 10
-        )
+        payloads = [_make_transaction_payload(duration_ms=10.0)] * 90 + [
+            _make_transaction_payload(duration_ms=5000.0)
+        ] * 10
         self._ingest(payloads)
 
         group = TransactionGroup.objects.first()
@@ -173,10 +174,12 @@ class TransactionIngestTestCase(TestCase):
 
     def test_different_endpoints_create_separate_groups(self):
         """Different transaction names create separate groups."""
-        self._ingest([
-            _make_transaction_payload(transaction_name="/api/users/"),
-            _make_transaction_payload(transaction_name="/api/projects/"),
-        ])
+        self._ingest(
+            [
+                _make_transaction_payload(transaction_name="/api/users/"),
+                _make_transaction_payload(transaction_name="/api/projects/"),
+            ]
+        )
         self.assertEqual(TransactionGroup.objects.count(), 2)
 
     @override_settings(
