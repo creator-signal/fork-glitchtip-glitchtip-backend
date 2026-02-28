@@ -1,3 +1,4 @@
+from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent
 from apps.issue_events.utils import get_entries
 from apps.logs.api import LogEventRow
@@ -57,6 +58,11 @@ def serialize_issue(issue: Issue) -> dict:
         }
     if hasattr(issue, "num_comments"):
         result["numComments"] = issue.num_comments
+    resolved_in_release = getattr(issue, "resolved_in_release", None)
+    if issue.status == EventStatus.RESOLVED and resolved_in_release:
+        result["statusDetails"] = {"inRelease": resolved_in_release.version}
+    else:
+        result["statusDetails"] = {}
     return result
 
 

@@ -44,6 +44,7 @@ DEFAULT_SCOPES = [
     "project:read",
     "team:read",
     "event:read",
+    "event:write",
     "org:read",
     "member:read",
 ]
