@@ -136,11 +136,20 @@ class SourceMapImage(BaseModel):
 
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
+class JvmDebugImage(BaseModel):
+    type: Literal["jvm"]
+    debug_id: uuid.UUID
+
+
+# Important, for some reason using Schema will cause the DebugImage union not to work
 class OtherDebugImage(BaseModel):
     type: str
 
 
-DebugImage = Annotated[SourceMapImage, Field(discriminator="type")] | OtherDebugImage
+DebugImage = (
+    Annotated[SourceMapImage | JvmDebugImage, Field(discriminator="type")]
+    | OtherDebugImage
+)
 
 
 class DebugMeta(LaxIngestSchema):
