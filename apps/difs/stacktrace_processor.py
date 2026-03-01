@@ -147,16 +147,6 @@ class StacktraceProcessor:
         pass
 
     @classmethod
-    def is_supported(cls, event_json, dif):
-        is_android = cls.is_android_event(event_json)
-        is_proguard = dif.is_proguard_mapping()
-
-        if is_android:
-            return is_proguard
-
-        return True
-
-    @classmethod
     def resolve_stacktrace(cls, event, symbol_file, project_id=None, debug_id=None):
         # Process event
         try:

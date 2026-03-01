@@ -38,10 +38,13 @@ class Command(BaseCommand):
             if not batch_ids:
                 break
 
-            blobs = FileBlob.objects.filter(id__in=batch_ids)
+            blobs = list(FileBlob.objects.filter(id__in=batch_ids))
             for blob in blobs:
-                blob.blob.delete(save=False)
-            blobs.delete()
+                try:
+                    blob.blob.delete(save=False)
+                except Exception as e:
+                    self.stderr.write(f"Warning: failed to delete storage for FileBlob {blob.id}: {e}")
+            FileBlob.objects.filter(id__in=[b.id for b in blobs]).delete()
 
             deleted += len(batch_ids)
             self.stdout.write(f"Deleted {deleted}/{total} orphaned FileBlobs...")

@@ -537,3 +537,104 @@ class JvmSourceContextTestCase(GlitchTestCase):
             event_json, self.project.id, [debug_id]
         )
         self.assertFalse(result)
+
+
+class DifTypeFilteringTestCase(GlitchTestCase):
+    """Test that event_difs_resolve_stacktrace filters DIFs by type at the DB level."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
+    def test_source_bundles_excluded_from_native_loop(self):
+        """Source bundles (kind='src'/'sources') should never enter the native/proguard loop."""
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        # Create a source bundle DIF — should be excluded
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"kind": "sources", "debug_id": "aaa"},
+        )
+        # Create a native DIF — should be excluded for Android events
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"kind": "debug", "symbol_type": "native"},
+        )
+
+        event = ErrorIssueEventSchema(
+            platform="java",
+            exception={
+                "values": [
+                    {
+                        "type": "RuntimeException",
+                        "value": "test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.Foo",
+                                    "filename": "Foo.java",
+                                    "function": "bar",
+                                    "lineno": 1,
+                                    "in_app": True,
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            contexts={"os": {"name": "Android"}},
+        )
+
+        with patch(
+            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
+        ) as mock_concat:
+            event_difs_resolve_stacktrace(event, self.project.id)
+            # Android event should only try proguard DIFs — neither the source
+            # bundle nor the native DIF should cause a blob download.
+            mock_concat.assert_not_called()
+
+    def test_proguard_excluded_for_non_android(self):
+        """Proguard DIFs should be excluded for non-Android events."""
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"symbol_type": "proguard", "debug_id": "bbb"},
+        )
+
+        event = ErrorIssueEventSchema(
+            platform="cocoa",
+            exception={
+                "values": [
+                    {
+                        "type": "NSError",
+                        "value": "test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "function": "foo",
+                                    "filename": "bar.m",
+                                    "lineno": 1,
+                                    "in_app": True,
+                                    "image_addr": "0x0",
+                                    "instruction_addr": "0x0",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            contexts={"os": {"name": "iOS"}, "device": {"arch": "arm64"}},
+        )
+
+        with patch(
+            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
+        ) as mock_concat:
+            event_difs_resolve_stacktrace(event, self.project.id)
+            # Non-Android event should exclude proguard DIFs — no blob download.
+            mock_concat.assert_not_called()
