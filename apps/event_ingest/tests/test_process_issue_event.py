@@ -829,6 +829,107 @@ struct ContentView: View {
         self.assertIsNotNone(frame.post_context)
         self.assertEqual(len(frame.pre_context), 4)
 
+    def test_jvm_source_context_pipeline_no_release_env(self):
+        """
+        Test that JVM source context works through the full process_issue_events
+        pipeline even when the event has NO release or environment.
+
+        This is a regression test: previously, project_set was built only from
+        events with release/environment, so projects from events missing both
+        were never annotated with has_difs and DIF resolution was silently skipped.
+        """
+        debug_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+        # Create source bundle with Java source code
+        source_code = (
+            "package com.example;\n"
+            "\n"
+            "public class PipelineTest {\n"
+            "    public void trigger() {\n"
+            '        throw new RuntimeException("pipeline test");\n'
+            "    }\n"
+            "}\n"
+        )
+        file_path = "/_/_/com/example/PipelineTest.jvm"
+        manifest = {
+            "files": {
+                f"files{file_path}": {
+                    "type": "source",
+                    "url": "~/com/example/PipelineTest.jvm",
+                }
+            },
+            "debug_id": debug_id,
+        }
+
+        in_memory_buffer = tempfile.NamedTemporaryFile(delete=False)
+        with zipfile.ZipFile(in_memory_buffer, mode="w") as zipf:
+            zipf.writestr("manifest.json", json.dumps(manifest))
+            zipf.writestr(f"files{file_path}", source_code)
+
+        in_memory_buffer.seek(0)
+        content = in_memory_buffer.read()
+        checksum = sha1(content).hexdigest()
+
+        fileblob = baker.make("files.FileBlob", checksum=checksum)
+        in_memory_buffer.seek(0)
+        fileblob.blob.save("jvm_pipeline_bundle.zip", DjangoFile(in_memory_buffer))
+        in_memory_buffer.close()
+
+        file = baker.make("files.File", checksum=checksum, blob=fileblob)
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=file,
+            data={"kind": "sources", "debug_id": debug_id},
+        )
+
+        payload = {
+            "platform": "java",
+            "timestamp": timezone.now().isoformat(),
+            "event_id": uuid.uuid4().hex,
+            # Intentionally NO release or environment
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeException",
+                        "value": "pipeline test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.PipelineTest",
+                                    "filename": "PipelineTest.java",
+                                    "function": "trigger",
+                                    "lineno": 5,
+                                    "in_app": True,
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            "debug_meta": {"images": [{"type": "jvm", "debug_id": debug_id}]},
+        }
+
+        # Go through the full pipeline with ErrorIssueEventSchema
+        event = IssueTaskMessage(
+            organization_id=self.organization.id,
+            project_id=self.project.id,
+            payload=ErrorIssueEventSchema(**payload),
+            received=timezone.now(),
+        )
+        process_issue_events([event])
+
+        # Verify source context was persisted on the stored event
+        issue_event = IssueEvent.objects.get_event(event.payload.event_id)
+        self.assertIsNotNone(issue_event)
+        frame = issue_event.data["exception"]["values"][0]["stacktrace"]["frames"][0]
+        self.assertEqual(
+            frame["context_line"],
+            '        throw new RuntimeException("pipeline test");',
+        )
+        self.assertIsNotNone(frame.get("pre_context"))
+        self.assertIsNotNone(frame.get("post_context"))
+
 
 class SentryCompatTestCase(EventIngestTestCase):
     """
