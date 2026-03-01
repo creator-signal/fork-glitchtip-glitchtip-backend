@@ -735,6 +735,100 @@ struct ContentView: View {
         frames = thread["stacktrace"]["frames"]
         self.assertEqual(len(frames), 61)
 
+    def test_jvm_event_with_source_context(self):
+        """
+        Test that event_difs_resolve_stacktrace adds source context to JVM frames.
+        Calls the DIF resolver directly to test the JVM source context wiring
+        without depending on the pipeline's has_difs gating logic.
+        """
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+
+        debug_id = "b1c2d3e4-f5a6-7890-abcd-ef1234567890"
+
+        # Create source bundle with Java source code
+        source_code = (
+            "package com.example;\n"
+            "\n"
+            "public class MyClass {\n"
+            "    public void doSomething() {\n"
+            '        throw new RuntimeException("test error");\n'
+            "    }\n"
+            "}\n"
+        )
+        # Use the real sentry-cli bundle path format: _/_/ prefix, .jvm extension
+        file_path = "/_/_/com/example/MyClass.jvm"
+        manifest = {
+            "files": {
+                f"files{file_path}": {
+                    "type": "source",
+                    "url": "~/com/example/MyClass.jvm",
+                }
+            },
+            "debug_id": debug_id,
+        }
+
+        in_memory_buffer = tempfile.NamedTemporaryFile(delete=False)
+        with zipfile.ZipFile(in_memory_buffer, mode="w") as zipf:
+            zipf.writestr("manifest.json", json.dumps(manifest))
+            zipf.writestr(f"files{file_path}", source_code)
+
+        in_memory_buffer.seek(0)
+        content = in_memory_buffer.read()
+        checksum = sha1(content).hexdigest()
+
+        fileblob = baker.make("files.FileBlob", checksum=checksum)
+        in_memory_buffer.seek(0)
+        fileblob.blob.save("jvm_bundle.zip", DjangoFile(in_memory_buffer))
+        in_memory_buffer.close()
+
+        file = baker.make("files.File", checksum=checksum, blob=fileblob)
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=file,
+            data={"kind": "sources", "debug_id": debug_id},
+        )
+
+        payload = {
+            "platform": "java",
+            "timestamp": timezone.now().isoformat(),
+            "event_id": uuid.uuid4().hex,
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeException",
+                        "value": "test error",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.MyClass",
+                                    "filename": "MyClass.java",
+                                    "function": "doSomething",
+                                    "lineno": 5,
+                                    "in_app": True,
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            "debug_meta": {"images": [{"type": "jvm", "debug_id": debug_id}]},
+        }
+        event_schema = ErrorIssueEventSchema(**payload)
+
+        # Call the DIF resolver directly
+        event_difs_resolve_stacktrace(event_schema, self.project.id)
+
+        # Verify source context was added to the frame
+        frame = event_schema.exception.values[0].stacktrace.frames[0]
+        self.assertEqual(
+            frame.context_line,
+            '        throw new RuntimeException("test error");',
+        )
+        self.assertIsNotNone(frame.pre_context)
+        self.assertIsNotNone(frame.post_context)
+        self.assertEqual(len(frame.pre_context), 4)
+
 
 class SentryCompatTestCase(EventIngestTestCase):
     """

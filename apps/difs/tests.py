@@ -11,9 +11,11 @@ from django.urls import reverse
 from model_bakery import baker
 
 from apps.difs.stacktrace_processor import (
+    StacktraceProcessor,
     digest_symbol,
     extract_source_from_bundle,
     find_source_bundle,
+    jvm_module_to_path,
 )
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
 from apps.files.models import File
@@ -376,3 +378,162 @@ struct ContentView: View {
         lines = extract_source_from_bundle(dif, "/NonExistent.swift")
 
         self.assertIsNone(lines)
+
+
+class JvmSourceContextTestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
+    def test_jvm_module_to_path_standard(self):
+        result = jvm_module_to_path("com.example.MyClass", "MyClass.java")
+        self.assertEqual(result, "/_/_/com/example/MyClass.jvm")
+
+    def test_jvm_module_to_path_inner_class(self):
+        result = jvm_module_to_path("com.example.MyClass$Inner", "MyClass.java")
+        self.assertEqual(result, "/_/_/com/example/MyClass.jvm")
+
+    def test_jvm_module_to_path_kotlin(self):
+        result = jvm_module_to_path("com.example.MainKt", "Main.kt")
+        self.assertEqual(result, "/_/_/com/example/Main.jvm")
+
+    def test_jvm_module_to_path_no_package(self):
+        result = jvm_module_to_path("Main", "Main.java")
+        self.assertEqual(result, "/_/_/Main.jvm")
+
+    def test_jvm_module_to_path_missing_module(self):
+        result = jvm_module_to_path(None, "Main.java")
+        self.assertIsNone(result)
+
+    def test_jvm_module_to_path_missing_filename(self):
+        result = jvm_module_to_path("com.example.MyClass", None)
+        self.assertIsNone(result)
+
+    def test_find_source_bundle_kind_sources(self):
+        """Verify find_source_bundle finds DIFs with kind='sources' (real uploads)."""
+        debug_id = "a959d2e6-e4e5-303e-b508-670eb84b392c"
+        dif = baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"kind": "sources", "debug_id": debug_id},
+        )
+        found = find_source_bundle(self.project.id, debug_id)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.id, dif.id)
+
+    def create_jvm_source_bundle(self, debug_id, source_code, file_path):
+        """Create a source bundle ZIP with a Java/Kotlin source file."""
+        manifest = {
+            "files": {
+                f"files{file_path}": {
+                    "type": "source",
+                    "path": file_path,
+                }
+            },
+            "debug_id": debug_id,
+        }
+        in_memory_buffer = tempfile.NamedTemporaryFile(delete=False)
+        with zipfile.ZipFile(in_memory_buffer, mode="w") as zipf:
+            zipf.writestr("manifest.json", json.dumps(manifest))
+            zipf.writestr(f"files{file_path}", source_code)
+
+        in_memory_buffer.seek(0)
+        content = in_memory_buffer.read()
+        checksum = sha1(content).hexdigest()
+
+        fileblob = baker.make("files.FileBlob", checksum=checksum)
+        in_memory_buffer.seek(0)
+        fileblob.blob.save("jvm_source_bundle.zip", DjangoFile(in_memory_buffer))
+        in_memory_buffer.close()
+
+        file = baker.make("files.File", checksum=checksum, blob=fileblob)
+        return baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=file,
+            data={
+                "kind": "sources",
+                "debug_id": debug_id,
+            },
+        )
+
+    def test_resolve_jvm_source_context(self):
+        debug_id = "b1c2d3e4-f5a6-7890-abcd-ef1234567890"
+        source_code = (
+            "package com.example;\n"
+            "\n"
+            "public class MyClass {\n"
+            "    public void doSomething() {\n"
+            '        throw new RuntimeException("test");\n'
+            "    }\n"
+            "}\n"
+        )
+        # Use the real sentry-cli bundle path format: _/_/ prefix, .jvm extension
+        self.create_jvm_source_bundle(
+            debug_id, source_code, "/_/_/com/example/MyClass.jvm"
+        )
+
+        event_json = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeException",
+                        "value": "test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.MyClass",
+                                    "filename": "MyClass.java",
+                                    "function": "doSomething",
+                                    "lineno": 5,
+                                    "in_app": True,
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+        }
+
+        result = StacktraceProcessor.resolve_jvm_source_context(
+            event_json, self.project.id, [debug_id]
+        )
+
+        self.assertTrue(result)
+        frame = event_json["exception"]["values"][0]["stacktrace"]["frames"][0]
+        self.assertEqual(
+            frame["context_line"],
+            '        throw new RuntimeException("test");',
+        )
+        self.assertEqual(len(frame["pre_context"]), 4)
+        self.assertEqual(frame["pre_context"][0], "package com.example;")
+        self.assertEqual(len(frame["post_context"]), 2)
+
+    def test_resolve_jvm_source_context_skips_existing(self):
+        """Frames with context_line already set should be skipped."""
+        debug_id = "b1c2d3e4-f5a6-7890-abcd-ef1234567890"
+        self.create_jvm_source_bundle(
+            debug_id, "line1\nline2\n", "/_/_/com/example/MyClass.jvm"
+        )
+        event_json = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.MyClass",
+                                    "filename": "MyClass.java",
+                                    "lineno": 1,
+                                    "context_line": "already set",
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        result = StacktraceProcessor.resolve_jvm_source_context(
+            event_json, self.project.id, [debug_id]
+        )
+        self.assertFalse(result)

@@ -8,7 +8,7 @@ from symbolic import Archive
 
 from apps.difs.models import DebugInformationFile
 from apps.difs.stacktrace_processor import StacktraceProcessor
-from apps.event_ingest.schema import ErrorIssueEventSchema
+from apps.event_ingest.schema import ErrorIssueEventSchema, JvmDebugImage
 from apps.files.models import File, FileBlob
 from apps.projects.models import Project
 from apps.shared.schema.exception import StackTraceFrame
@@ -48,6 +48,36 @@ def difs_assemble(project_id, name, checksum, chunks, debug_id):
         getLogger().error("difs_assemble: %s", err)
 
 
+def _extract_jvm_debug_ids(event: ErrorIssueEventSchema) -> list[str]:
+    """Extract debug_ids from JVM debug images in the event."""
+    if not event.debug_meta:
+        return []
+    return [
+        str(image.debug_id)
+        for image in event.debug_meta.images
+        if isinstance(image, JvmDebugImage)
+    ]
+
+
+def _update_source_context_on_event(event: ErrorIssueEventSchema, event_json: dict):
+    """Copy enriched source context from event_json dict back onto the Pydantic event."""
+    try:
+        json_exceptions = (event_json.get("exception") or {}).get("values", [])
+        for i, exc_data in enumerate(json_exceptions):
+            stacktrace = exc_data.get("stacktrace")
+            if not stacktrace:
+                continue
+            json_frames = stacktrace.get("frames", [])
+            pydantic_frames = event.exception.values[i].stacktrace.frames
+            for j, json_frame in enumerate(json_frames):
+                if json_frame.get("context_line") and j < len(pydantic_frames):
+                    pydantic_frames[j].context_line = json_frame["context_line"]
+                    pydantic_frames[j].pre_context = json_frame.get("pre_context")
+                    pydantic_frames[j].post_context = json_frame.get("post_context")
+    except Exception as e:
+        getLogger().error(f"_update_source_context_on_event: {e}")
+
+
 def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int):
     difs = (
         DebugInformationFile.objects.filter(project_id=project_id)
@@ -77,6 +107,15 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
             resolved_stracktrackes, key=lambda item: item.score
         )
         update_frames(event, best_remapped_stacktrace.frames)
+
+    # JVM source context (runs after proguard deobfuscation if applicable)
+    jvm_debug_ids = _extract_jvm_debug_ids(event)
+    if jvm_debug_ids:
+        event_json = event.dict()
+        if StacktraceProcessor.resolve_jvm_source_context(
+            event_json, project_id, jvm_debug_ids
+        ):
+            _update_source_context_on_event(event, event_json)
 
 
 def update_frames(event: ErrorIssueEventSchema, frames):
