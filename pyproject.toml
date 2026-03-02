@@ -44,6 +44,7 @@ dependencies = [
     "uuid6>=2024.1.12",
     "mcp[cli]>=1.9",
     "duckdb>=1.2.0",
+    "minidump>=0.0.24",
 ]
 
 [dependency-groups]
