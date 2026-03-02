@@ -31,27 +31,10 @@ PLATFORM_MAP = {
     PLATFORM_ID.VER_PLATFORM_CRASHPAD_FUSCHIA: ("Fuchsia", "elf"),
 }
 
-# Human-readable names for exception codes.
-# The minidump library's ExceptionCode enum already maps these, so we derive
-# display names from the enum member name (strip the EXCEPTION_ prefix).
-EXCEPTION_DISPLAY_NAMES: dict[ExceptionCode, str] = {
-    ExceptionCode.EXCEPTION_SIGSEGV: "SIGSEGV",
-    ExceptionCode.EXCEPTION_SIGBUS: "SIGBUS",
-    ExceptionCode.EXCEPTION_SIGFPE: "SIGFPE",
-    ExceptionCode.EXCEPTION_SIGILL: "SIGILL",
-    ExceptionCode.EXCEPTION_SIGIOT: "SIGABRT",  # SIGIOT = SIGABRT (signal 6)
-    ExceptionCode.EXCEPTION_SIGTRAP: "SIGTRAP",
-    ExceptionCode.EXCEPTION_SIGINT: "SIGINT",
-    ExceptionCode.EXCEPTION_SIGTERM: "SIGTERM",
-    ExceptionCode.EXCEPTION_SIGHUP: "SIGHUP",
-    ExceptionCode.EXCEPTION_SIGKILL: "SIGKILL",
-    ExceptionCode.EXCEPTION_SIGQUIT: "SIGQUIT",
-    ExceptionCode.EXCEPTION_ACCESS_VIOLATION: "EXCEPTION_ACCESS_VIOLATION",
-    ExceptionCode.EXCEPTION_STACK_OVERFLOW: "EXCEPTION_STACK_OVERFLOW",
-    ExceptionCode.EXCEPTION_BREAKPOINT: "EXCEPTION_BREAKPOINT",
-    ExceptionCode.EXCEPTION_ILLEGAL_INSTRUCTION: "EXCEPTION_ILLEGAL_INSTRUCTION",
-    ExceptionCode.EXCEPTION_INT_DIVIDE_BY_ZERO: "EXCEPTION_INT_DIVIDE_BY_ZERO",
-    ExceptionCode.EXCEPTION_FLT_DIVIDE_BY_ZERO: "EXCEPTION_FLT_DIVIDE_BY_ZERO",
+# Overrides for exception code display names where the enum member name
+# doesn't produce the expected result after stripping the EXCEPTION_ prefix.
+_EXCEPTION_NAME_OVERRIDES: dict[ExceptionCode, str] = {
+    ExceptionCode.EXCEPTION_SIGIOT: "SIGABRT",  # SIGIOT is the obscure name for SIGABRT
 }
 
 # Instruction pointer offsets for each architecture's context structure.
@@ -187,12 +170,18 @@ def _build_debug_images(mf: MinidumpFile, image_type: str) -> list[dict]:
 
 
 def _get_exception_name(exc_code: ExceptionCode) -> str:
-    """Get a human-readable exception name."""
-    if exc_code in EXCEPTION_DISPLAY_NAMES:
-        return EXCEPTION_DISPLAY_NAMES[exc_code]
-    # Fall back to the enum name, stripping EXCEPTION_ prefix
+    """Get a human-readable exception name.
+
+    Derives display names from the ExceptionCode enum member name:
+    - Unix signals: strip EXCEPTION_ prefix (EXCEPTION_SIGSEGV → SIGSEGV)
+    - Windows exceptions: keep the full name (EXCEPTION_ACCESS_VIOLATION)
+    - Explicit overrides for edge cases (SIGIOT → SIGABRT)
+    """
+    if exc_code in _EXCEPTION_NAME_OVERRIDES:
+        return _EXCEPTION_NAME_OVERRIDES[exc_code]
     name = exc_code.name
-    if name.startswith("EXCEPTION_"):
+    # Strip EXCEPTION_ prefix only for Unix signals (result starts with SIG)
+    if name.startswith("EXCEPTION_SIG"):
         return name[len("EXCEPTION_") :]
     return name
 
