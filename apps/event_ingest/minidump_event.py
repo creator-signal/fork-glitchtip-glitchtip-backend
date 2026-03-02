@@ -3,6 +3,7 @@ import logging
 import struct
 import uuid
 
+from minidump.directory import MINIDUMP_STREAM_TYPE
 from minidump.minidumpfile import MinidumpFile
 from minidump.streams.ExceptionStream import ExceptionCode
 from minidump.streams.ModuleListStream import MINIDUMP_MODULE_LIST
@@ -94,8 +95,6 @@ def _read_cv_records(mf: MinidumpFile) -> list[bytes | None]:
     re-parse the module list stream to access the raw MINIDUMP_MODULE
     structures which contain CvRecord location descriptors.
     """
-    from minidump.directory import MINIDUMP_STREAM_TYPE
-
     cv_records: list[bytes | None] = []
     for dir_entry in mf.directories:
         if dir_entry.StreamType == MINIDUMP_STREAM_TYPE.ModuleListStream:
