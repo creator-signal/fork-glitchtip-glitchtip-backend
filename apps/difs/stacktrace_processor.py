@@ -4,7 +4,7 @@ import logging
 import zipfile
 
 import cxxfilt
-from symbolic import Archive, ProguardMapper, SymCache, parse_addr
+from symbolic import Archive, ProguardMapper, SymCache, normalize_debug_id, parse_addr
 
 alternative_arch = {"x86": ["x86", "x86_64"]}
 
@@ -58,7 +58,7 @@ def find_source_bundle(project_id, debug_id):
         return DebugInformationFile.objects.filter(
             project_id=project_id,
             data__kind__in=["src", "sources"],
-            data__debug_id=debug_id,
+            data__debug_id=normalize_debug_id(debug_id),
         ).first()
     except Exception as e:
         getLogger().error(f"find_source_bundle: Error finding source bundle: {e}")

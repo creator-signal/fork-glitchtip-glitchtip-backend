@@ -6,7 +6,7 @@ from os.path import splitext
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from symbolic import SourceMapView, SourceView
+from symbolic import SourceMapCache
 
 from apps.sourcecode.models import DebugSymbolBundle
 from sentry.utils.safe import get_path
@@ -95,19 +95,20 @@ class JavascriptEventProcessor:
 
         minified_source.blob.blob.seek(0)
         map_file.blob.blob.seek(0)
-        sourcemap_view = SourceMapView.from_json_bytes(map_file.blob.blob.read())
-        minified_source_view = SourceView.from_bytes(minified_source.blob.blob.read())
-        token = sourcemap_view.lookup(
-            frame.lineno - 1,
+        cache = SourceMapCache.from_bytes(
+            minified_source.blob.blob.read(),
+            map_file.blob.blob.read(),
+        )
+        token = cache.lookup(
+            frame.lineno,
             frame.colno - 1,
-            frame.function,
-            minified_source_view,
+            5,  # context_lines
         )
 
         if not token:
             return
-        frame.lineno = token.src_line + 1
-        frame.colno = token.src_col + 1
+        frame.lineno = token.line
+        frame.colno = token.col
         if token.function_name:
             frame.function = token.function_name
 
@@ -160,30 +161,13 @@ class JavascriptEventProcessor:
         if in_app is not None:
             frame.in_app = in_app
 
-        # Extract frame context
-        source_result = next(
-            (x for x in sourcemap_view.iter_sources() if x[1] == token.src), None
-        )
-        if source_result is not None:
-            sourceview = sourcemap_view.get_sourceview(source_result[0])
-            if sourceview is not None:
-                source = sourceview.get_source().splitlines()
-                if token.src_line < len(source):
-                    pre_lines = max(0, token.src_line - 5)
-                    past_lines = min(len(source), token.src_line + 5)
-                    frame.context_line = source[token.src_line]
-                    frame.pre_context = source[pre_lines : token.src_line]
-                    frame.post_context = source[token.src_line + 1 : past_lines]
-                else:
-                    logger.warning(
-                        "Invalid sourcemap token or line number out of range.",
-                        extra={
-                            "token": token,
-                            "source_lines": len(source)
-                            if "source" in locals()
-                            else "N/A",
-                        },
-                    )
+        # Source context — built into SourceMapCacheToken
+        if token.context_line is not None:
+            frame.context_line = token.context_line.rstrip("\n")
+            frame.pre_context = [line.rstrip("\n") for line in token.pre_context]
+            frame.post_context = [
+                line.rstrip("\n") for line in token.post_context if line != ""
+            ]
 
     def transform(self):
         stacktraces = self.get_stacktraces()

@@ -142,12 +142,25 @@ class JvmDebugImage(BaseModel):
 
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
+class NativeDebugImage(BaseModel):
+    type: Literal["macho", "elf", "pe", "wasm"]
+    debug_id: uuid.UUID | None = None
+    image_addr: str | None = None
+    image_size: int | None = None
+    code_file: str | None = None
+    code_id: str | None = None
+
+
+# Important, for some reason using Schema will cause the DebugImage union not to work
 class OtherDebugImage(BaseModel):
     type: str
 
 
 DebugImage = (
-    Annotated[SourceMapImage | JvmDebugImage, Field(discriminator="type")]
+    Annotated[
+        SourceMapImage | JvmDebugImage | NativeDebugImage,
+        Field(discriminator="type"),
+    ]
     | OtherDebugImage
 )
 
