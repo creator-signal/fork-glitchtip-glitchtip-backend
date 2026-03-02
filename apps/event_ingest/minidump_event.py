@@ -9,7 +9,7 @@ from minidump.streams.ModuleListStream import MINIDUMP_MODULE_LIST
 from minidump.streams.SystemInfoStream import PLATFORM_ID, PROCESSOR_ARCHITECTURE
 from symbolic import normalize_debug_id
 
-# Maps PROCESSOR_ARCHITECTURE enum to Sentry arch strings
+# Maps PROCESSOR_ARCHITECTURE enum to standard arch strings
 ARCH_MAP = {
     PROCESSOR_ARCHITECTURE.AMD64: "x86_64",
     PROCESSOR_ARCHITECTURE.INTEL: "x86",
@@ -198,7 +198,7 @@ def _get_exception_name(exc_code: ExceptionCode) -> str:
 
 
 def minidump_to_event(data: bytes, sentry_meta: dict | None = None) -> dict:
-    """Parse a minidump binary and return a Sentry-compatible error event dict.
+    """Parse a minidump binary and return an error event dict.
 
     Args:
         data: Raw minidump file bytes (must start with b'MDMP').
