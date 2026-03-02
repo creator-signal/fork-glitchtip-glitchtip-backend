@@ -112,8 +112,9 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         return JsonResponse({"detail": "Invalid envelope header"}, status=400)
     envelope_header_event_id = envelope_header.event_id
 
-    # Track minidump attachment for SDK-based minidump submissions
-    # (sentry-rust-minidump sends a minimal event + minidump attachment)
+    # Track minidump attachment for SDK-based minidump submissions.
+    # If the envelope already contains a processed event or transaction,
+    # skip the minidump fallback (the SDK already sent a rich event).
     minidump_bytes: bytes | None = None
     event_processed = False
 
@@ -231,6 +232,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         await ingest_transaction.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
+                    event_processed = True
 
                 elif item_header.type in ("user_report", "feedback"):
                     if item_header.type == "feedback":
