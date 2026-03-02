@@ -30,7 +30,7 @@ class ParseCvRecordDebugIdTest(TestCase):
 
         result = parse_cv_record_debug_id(cv)
         self.assertIsNotNone(result)
-        self.assertEqual(result, "01020304-0506-0708-090a-0b0c0d0e0f10")
+        self.assertEqual(result, "01020304-0506-0708-090a-0b0c0d0e0f10-1")
 
     def test_invalid_signature(self):
         """Non-RSDS records return None."""
@@ -108,7 +108,7 @@ class MinidumpToEventTest(TestCase):
         self.assertEqual(images[0]["type"], "elf")
         self.assertEqual(images[0]["image_addr"], "0x400000")
         self.assertEqual(images[0]["image_size"], 0x10000)
-        self.assertEqual(images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10")
+        self.assertEqual(images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1")
 
     def test_sentry_metadata_merged(self):
         data = self._load_fixture()

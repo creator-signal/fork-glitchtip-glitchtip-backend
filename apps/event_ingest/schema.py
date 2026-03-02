@@ -164,9 +164,25 @@ DebugImage = (
     | OtherDebugImage
 )
 
+# Types we intentionally ignore (no processing needed).
+# Anything not in this set AND not handled by a typed model above is unknown.
+KNOWN_IGNORED_IMAGE_TYPES = frozenset(
+    {
+        "proguard",  # Handled via ProguardMapper, not debug images
+    }
+)
+
 
 class DebugMeta(LaxIngestSchema):
     images: list[DebugImage]
+
+    @model_validator(mode="after")
+    def _warn_unknown_image_types(self):
+        for image in self.images:
+            if isinstance(image, OtherDebugImage):
+                if image.type not in KNOWN_IGNORED_IMAGE_TYPES:
+                    logger.warning("Unknown debug image type: %s", image.type)
+        return self
 
 
 class ValueEventBreadcrumb(LaxIngestSchema):
