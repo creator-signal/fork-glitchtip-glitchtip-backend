@@ -23,6 +23,7 @@ from glitchtip.partition_manager import UUID7Helper
 
 from .api import get_ip_address
 from .authentication import EventAuthHttpRequest, event_auth
+from .minidump_event import minidump_to_event
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
@@ -38,6 +39,8 @@ from .tasks import ingest_event, ingest_transaction, ingest_user_report
 from .utils import serialize_for_vtasks
 
 logger = logging.getLogger(__name__)
+
+MINIDUMP_MAGIC = b"MDMP"
 
 
 def handle_supported_payload_error(
@@ -108,6 +111,11 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         # Return 400 Bad Request for malformed envelope structure
         return JsonResponse({"detail": "Invalid envelope header"}, status=400)
     envelope_header_event_id = envelope_header.event_id
+
+    # Track minidump attachment for SDK-based minidump submissions
+    # (sentry-rust-minidump sends a minimal event + minidump attachment)
+    minidump_bytes: bytes | None = None
+    event_processed = False
 
     # Loop through items
     while True:
@@ -206,6 +214,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         await ingest_event.aenqueue(
                             serialize_for_vtasks(asdict(interchange_event))
                         )
+                    event_processed = True
 
                 elif item_header.type == "transaction":
                     item = TransactionEventSchema.model_validate_json(payload_bytes)
@@ -282,10 +291,46 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                 continue
 
         else:
-            # Item type is IgnoredItemType or unknown.
-            # The payload_bytes were already read and are now implicitly discarded.
-            # No logging, no processing. Silently continue.
-            pass
+            # Check for minidump attachment (sent by sentry-rust-minidump SDK)
+            if (
+                item_header.type == "attachment"
+                and item_header.attachment_type == "event.minidump"
+                and len(payload_bytes) >= 4
+                and payload_bytes[:4] == MINIDUMP_MAGIC
+            ):
+                minidump_bytes = payload_bytes
+
+    # If we got a minidump attachment but no event was processed from the
+    # envelope, parse the minidump into a full event and enqueue it.
+    if minidump_bytes and not event_processed:
+        try:
+            event_data = await sync_to_async(minidump_to_event)(minidump_bytes)
+            item = WebIngestIssueEvent.model_validate(event_data)
+            if item.event_id is None:
+                item.event_id = envelope_header_event_id or uuid.uuid4()
+            issue_type = (
+                IssueEventType.ERROR if item.exception else IssueEventType.DEFAULT
+            )
+            primary_id = UUID7Helper.from_datetime()
+            interchange_event = IngestTaskMessage(
+                project_id=project_id,
+                organization_id=project.organization_id,
+                payload=item.dict() | {"type": issue_type},
+                received=timezone.now(),
+                update_first_event=update_first_event,
+                uuid=primary_id.hex,
+            )
+            if await cache.aadd("uuid" + item.event_id.hex, True):
+                await ingest_event.aenqueue(
+                    serialize_for_vtasks(asdict(interchange_event))
+                )
+        except Exception as e:
+            capture_exception(e)
+            logger.error(
+                "Failed to process minidump attachment on %s",
+                request.path,
+                exc_info=e,
+            )
 
     # Final Response
     # Return event_id from envelope header if it exists, as it might relate
@@ -293,3 +338,90 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     if envelope_header.event_id:
         return JsonResponse({"id": envelope_header.event_id.hex})
     return JsonResponse({})  # Success, but maybe no specific ID to return
+
+
+@csrf_exempt
+async def minidump_view(request: EventAuthHttpRequest, project_id: int):
+    """Accept Crashpad/Breakpad minidump uploads.
+
+    POST /api/<project_id>/minidump/?sentry_key=<public_key>
+    Content-Type: multipart/form-data
+
+    Fields:
+        upload_file_minidump: The binary minidump file
+        sentry: Optional JSON with release, environment, tags
+    """
+    if request.method != "POST":
+        return JsonResponse({"detail": "Method not allowed"}, status=405)
+
+    try:
+        project = await event_auth(request)
+    except ThrottleException as e:
+        response = HttpResponse("Too Many Requests", status=429)
+        response["Retry-After"] = str(e.retry_after)
+        return response
+    except AuthenticationError:
+        return JsonResponse({"detail": "Denied"}, status=403)
+    except NinjaValidationError:
+        return JsonResponse({"detail": "Invalid DSN"}, status=403)
+
+    if project is None:
+        return JsonResponse({"detail": "Denied"}, status=403)
+
+    update_first_event = project.first_event is None
+
+    # Extract multipart fields
+    upload_file = request.FILES.get("upload_file_minidump")
+    if not upload_file:
+        return JsonResponse({"detail": "Missing upload_file_minidump"}, status=400)
+
+    minidump_data = upload_file.read()
+    if len(minidump_data) < 4 or minidump_data[:4] != MINIDUMP_MAGIC:
+        return JsonResponse({"detail": "Invalid minidump file"}, status=400)
+
+    # Parse optional sentry metadata
+    sentry_meta = {}
+    sentry_raw = request.POST.get("sentry")
+    if sentry_raw:
+        try:
+            sentry_meta = orjson.loads(sentry_raw)
+        except orjson.JSONDecodeError:
+            pass  # Ignore malformed metadata
+
+    # Parse minidump into event
+    try:
+        event_data = await sync_to_async(minidump_to_event)(minidump_data, sentry_meta)
+    except Exception as e:
+        capture_exception(e)
+        logger.error("Failed to parse minidump on %s", request.path, exc_info=e)
+        return JsonResponse({"detail": "Failed to parse minidump"}, status=400)
+
+    # Validate and enqueue
+    try:
+        item = WebIngestIssueEvent.model_validate(event_data)
+    except ValidationError as e:
+        set_level("warning")
+        capture_exception(e)
+        logger.warning(
+            "Minidump event validation error on %s", request.path, exc_info=e
+        )
+        return JsonResponse({"detail": "Event validation failed"}, status=400)
+
+    if item.event_id is None:
+        item.event_id = uuid.uuid4()
+
+    issue_type = IssueEventType.ERROR if item.exception else IssueEventType.DEFAULT
+
+    primary_id = UUID7Helper.from_datetime()
+    interchange_event = IngestTaskMessage(
+        project_id=project_id,
+        organization_id=project.organization_id,
+        payload=item.dict() | {"type": issue_type},
+        received=timezone.now(),
+        update_first_event=update_first_event,
+        uuid=primary_id.hex,
+    )
+    if await cache.aadd("uuid" + item.event_id.hex, True):
+        await ingest_event.aenqueue(serialize_for_vtasks(asdict(interchange_event)))
+
+    return JsonResponse({"id": item.event_id.hex})
