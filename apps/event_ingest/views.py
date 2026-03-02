@@ -2,12 +2,14 @@ import io
 import logging
 import uuid
 from dataclasses import asdict
+from urllib.parse import urlparse
+from uuid import UUID
 
 import orjson
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from ninja.errors import AuthenticationError
@@ -22,7 +24,7 @@ from glitchtip.api.exceptions import ThrottleException
 from glitchtip.partition_manager import UUID7Helper
 
 from .api import get_ip_address
-from .authentication import EventAuthHttpRequest, event_auth
+from .authentication import EventAuthHttpRequest, ProjectAuthInfo, event_auth
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
@@ -38,6 +40,73 @@ from .tasks import ingest_event, ingest_transaction, ingest_user_report
 from .utils import serialize_for_vtasks
 
 logger = logging.getLogger(__name__)
+
+# Maximum bytes to read from the request stream when extracting DSN from the
+# envelope body (tunnel fallback).  Envelope headers are small JSON (~100-200
+# bytes); 2 KB is generous while keeping decompression work negligible.
+TUNNEL_AUTH_MAX_BYTES = 2048
+
+
+def _extract_sentry_key_from_dsn(dsn: str) -> UUID | None:
+    """Parse a Sentry DSN URL, return the sentry_key (username portion) as UUID."""
+    try:
+        parsed = urlparse(dsn)
+        if parsed.username:
+            return UUID(parsed.username)
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+async def _try_tunnel_auth(
+    request: HttpRequest,
+) -> tuple[ProjectAuthInfo | None, EnvelopeHeaderSchema | None, bytes]:
+    """
+    Tunnel fallback: extract DSN from the first line of the envelope body.
+
+    Reads at most TUNNEL_AUTH_MAX_BYTES from the request stream.  The
+    DecompressBodyMiddleware wraps the stream with size-limited streaming
+    decompressors, so even compressed payloads only decompress the bytes we
+    actually read — a gzip bomb is harmless here.
+
+    Returns (project, envelope_header, body_prefix) on success.
+    Returns (None, None, b"") when the DSN cannot be found or is invalid.
+    Raises ThrottleException if the project is throttled (propagates to view).
+    """
+    try:
+        first_chunk = await sync_to_async(lambda: request.read(TUNNEL_AUTH_MAX_BYTES))()
+    except Exception:
+        return None, None, b""
+
+    if not first_chunk:
+        return None, None, b""
+
+    # Envelope header must end with a newline within the bounded read
+    newline_pos = first_chunk.find(b"\n")
+    if newline_pos < 1:
+        return None, None, b""
+
+    first_line = first_chunk[:newline_pos]
+    try:
+        envelope_header = EnvelopeHeaderSchema.model_validate_json(first_line)
+    except ValidationError:
+        return None, None, b""
+
+    if not envelope_header.dsn:
+        return None, None, b""
+
+    sentry_key = _extract_sentry_key_from_dsn(envelope_header.dsn)
+    if sentry_key is None:
+        return None, None, b""
+
+    # Validate through normal auth pipeline (cache, DB, throttle).
+    # ThrottleException propagates intentionally.
+    try:
+        project = await event_auth(request, sentry_key=sentry_key)
+    except (AuthenticationError, NinjaValidationError):
+        return None, None, b""
+
+    return project, envelope_header, first_chunk
 
 
 def handle_supported_payload_error(
@@ -68,45 +137,64 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
 
+    # --- Phase 1: Authentication ---
+    # Fast path: DSN from headers/query params (99% of requests).
+    # Tunnel fallback: bounded read of first envelope line to extract DSN.
+    envelope_header = None
+    body_prefix = b""
+
     try:
         project = await event_auth(request)
     except ThrottleException as e:
         response = HttpResponse("Too Many Requests", status=429)
         response["Retry-After"] = str(e.retry_after)
         return response
-    except AuthenticationError:
-        return JsonResponse({"detail": "Denied"}, status=403)
-    except NinjaValidationError:
-        return JsonResponse({"detail": "Invalid DSN"}, status=403)
+    except (AuthenticationError, NinjaValidationError):
+        # Tunnel fallback — reads at most TUNNEL_AUTH_MAX_BYTES
+        try:
+            project, envelope_header, body_prefix = await _try_tunnel_auth(request)
+        except ThrottleException as e:
+            response = HttpResponse("Too Many Requests", status=429)
+            response["Retry-After"] = str(e.retry_after)
+            return response
+        if project is None:
+            return JsonResponse({"detail": "Denied"}, status=403)
 
     if project is None:
-        # Should be caught by event_auth, but defensive check
         return JsonResponse({"detail": "Denied"}, status=403)
-    request.auth = project  # Assuming event_auth returns the project object
+    request.auth = project
     update_first_event = project.first_event is None
     client_ip = get_ip_address(request)
 
+    # --- Phase 2: Read body ---
     try:
-        body = await sync_to_async(lambda: request.body)()
+        if body_prefix:
+            # Tunnel path: first chunk already read, get the rest
+            rest = await sync_to_async(lambda: request.read())()
+            body = body_prefix + rest
+        else:
+            body = await sync_to_async(lambda: request.body)()
     except RequestDataTooBig as e:
         return HttpResponseForbidden(f"{e}", status=413)
     stream = io.BytesIO(body)
 
-    # Read and validate Envelope Header
-    header_line = stream.readline()
-    if not header_line:
-        return JsonResponse({"detail": "Empty request body"}, status=400)
-    try:
-        envelope_header = EnvelopeHeaderSchema.model_validate_json(header_line)
-    except ValidationError as e:
-        set_level("warning")
-        capture_exception(e)
-        logger.warning(
-            f"Envelope Header validation error on {request.path}", exc_info=e
-        )
-        # Consider adding context about the invalid line if possible
-        # Return 400 Bad Request for malformed envelope structure
-        return JsonResponse({"detail": "Invalid envelope header"}, status=400)
+    # --- Phase 3: Parse Envelope Header ---
+    if envelope_header is not None:
+        # Tunnel path: already parsed, skip the header line in the stream
+        stream.readline()
+    else:
+        header_line = stream.readline()
+        if not header_line:
+            return JsonResponse({"detail": "Empty request body"}, status=400)
+        try:
+            envelope_header = EnvelopeHeaderSchema.model_validate_json(header_line)
+        except ValidationError as e:
+            set_level("warning")
+            capture_exception(e)
+            logger.warning(
+                f"Envelope Header validation error on {request.path}", exc_info=e
+            )
+            return JsonResponse({"detail": "Invalid envelope header"}, status=400)
     envelope_header_event_id = envelope_header.event_id
 
     # Loop through items
