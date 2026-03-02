@@ -441,6 +441,8 @@ class ItemHeaderSchema(LaxIngestSchema):
     content_type: str | None = None
     type: SupportedItemType | IgnoredItemType
     length: int | None = None
+    attachment_type: str | None = None
+    filename: str | None = None
 
 
 class FeedbackContext(LaxIngestSchema):
