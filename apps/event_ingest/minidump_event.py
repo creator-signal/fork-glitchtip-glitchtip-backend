@@ -183,7 +183,7 @@ def _build_debug_images(mf: MinidumpFile, image_type: str) -> list[dict]:
     return images
 
 
-def _get_exception_name(exc_code: ExceptionCode, raw_code: int) -> str:
+def _get_exception_name(exc_code: ExceptionCode) -> str:
     """Get a human-readable exception name."""
     if exc_code in EXCEPTION_DISPLAY_NAMES:
         return EXCEPTION_DISPLAY_NAMES[exc_code]
@@ -210,7 +210,9 @@ def minidump_to_event(data: bytes, sentry_meta: dict | None = None) -> dict:
 
     # The minidump library logs a noisy "PEB parsing error!" at ERROR level
     # via the root logger when memory segments are absent (normal for
-    # crashpad/breakpad minidumps).  Suppress it during parsing.
+    # crashpad/breakpad minidumps).  Suppress during parsing.
+    # Note: not fully thread-safe, but parsing is fast (<10ms) and this
+    # runs in sync_to_async's thread pool, limiting blast radius.
     _root = logging.getLogger()
     _prev_level = _root.level
     _root.setLevel(logging.CRITICAL)
@@ -235,9 +237,7 @@ def minidump_to_event(data: bytes, sentry_meta: dict | None = None) -> dict:
         # ExceptionAddress is the instruction pointer at crash time
         crash_ip = exc_record.ExceptionAddress
 
-        exc_name = _get_exception_name(
-            exc_record.ExceptionCode, exc_record.ExceptionCode_raw
-        )
+        exc_name = _get_exception_name(exc_record.ExceptionCode)
         exc_value = f"Crash with signal {exc_name} at address {hex(crash_ip)}"
 
         # Build crashing frame
