@@ -136,15 +136,53 @@ class SourceMapImage(BaseModel):
 
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
+class JvmDebugImage(BaseModel):
+    type: Literal["jvm"]
+    debug_id: uuid.UUID
+
+
+# Important, for some reason using Schema will cause the DebugImage union not to work
+class NativeDebugImage(BaseModel):
+    type: Literal["macho", "elf", "pe", "wasm"]
+    debug_id: uuid.UUID | None = None
+    image_addr: str | None = None
+    image_size: int | None = None
+    code_file: str | None = None
+    code_id: str | None = None
+
+
+# Important, for some reason using Schema will cause the DebugImage union not to work
 class OtherDebugImage(BaseModel):
     type: str
 
 
-DebugImage = Annotated[SourceMapImage, Field(discriminator="type")] | OtherDebugImage
+DebugImage = (
+    Annotated[
+        SourceMapImage | JvmDebugImage | NativeDebugImage,
+        Field(discriminator="type"),
+    ]
+    | OtherDebugImage
+)
+
+# Types we intentionally ignore (no processing needed).
+# Anything not in this set AND not handled by a typed model above is unknown.
+KNOWN_IGNORED_IMAGE_TYPES = frozenset(
+    {
+        "proguard",  # Handled via ProguardMapper, not debug images
+    }
+)
 
 
 class DebugMeta(LaxIngestSchema):
     images: list[DebugImage]
+
+    @model_validator(mode="after")
+    def _warn_unknown_image_types(self):
+        for image in self.images:
+            if isinstance(image, OtherDebugImage):
+                if image.type not in KNOWN_IGNORED_IMAGE_TYPES:
+                    logger.warning("Unknown debug image type: %s", image.type)
+        return self
 
 
 class ValueEventBreadcrumb(LaxIngestSchema):
@@ -419,6 +457,8 @@ class ItemHeaderSchema(LaxIngestSchema):
     content_type: str | None = None
     type: SupportedItemType | IgnoredItemType
     length: int | None = None
+    attachment_type: str | None = None
+    filename: str | None = None
 
 
 class FeedbackContext(LaxIngestSchema):

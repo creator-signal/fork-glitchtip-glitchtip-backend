@@ -13,13 +13,14 @@ from ninja import File as NinjaFile
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
-from symbolic import ProguardMapper
+from symbolic import ProguardMapper, normalize_debug_id
 
 from apps.files.models import File, FileBlob
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.decorators import optional_slash
+from glitchtip.api.permissions import has_permission
 
 from .models import DebugInformationFile
 from .schema import AssemblePayload
@@ -36,6 +37,7 @@ router = Router()
     "post",
     "projects/{slug:organization_slug}/{slug:project_slug}/files/difs/assemble/",
 )
+@has_permission(["project:write", "project:admin", "project:releases"])
 async def difs_assemble_api(
     request: AuthHttpRequest,
     organization_slug: str,
@@ -99,6 +101,7 @@ async def difs_assemble_api(
     "post",
     "projects/{slug:organization_slug}/{slug:project_slug}/reprocessing/",
 )
+@has_permission(["project:write", "project:admin", "project:releases"])
 async def project_reprocessing(
     request: AuthHttpRequest,
     organization_slug: str,
@@ -172,7 +175,7 @@ async def create_dif_from_read_only_file(proguard_file, project, proguard_id, fi
             dif.file = fileobj
             dif.data = {
                 "arch": metadata["arch"],
-                "debug_id": proguard_id,
+                "debug_id": normalize_debug_id(proguard_id),
                 "symbol_type": "proguard",
                 "features": ["mapping"],
             }
@@ -197,6 +200,7 @@ async def create_dif_from_read_only_file(proguard_file, project, proguard_id, fi
 @optional_slash(
     router, "post", "projects/{slug:organization_slug}/{slug:project_slug}/files/dsyms/"
 )
+@has_permission(["project:write", "project:admin", "project:releases"])
 async def dsyms(
     request: AuthHttpRequest,
     organization_slug: str,

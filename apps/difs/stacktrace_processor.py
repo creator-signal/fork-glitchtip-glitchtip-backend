@@ -1,9 +1,10 @@
+import contextlib
 import copy
 import logging
 import zipfile
 
 import cxxfilt
-from symbolic import Archive, ProguardMapper, SymCache, parse_addr
+from symbolic import Archive, ProguardMapper, SymCache, normalize_debug_id, parse_addr
 
 alternative_arch = {"x86": ["x86", "x86_64"]}
 
@@ -47,14 +48,17 @@ def getLogger():
 
 def find_source_bundle(project_id, debug_id):
     """
-    Find a source bundle (kind='src') matching the given debug_id.
+    Find a source bundle matching the given debug_id.
+    Matches kind='src' (test data) or kind='sources' (real uploads via symbolic.Archive).
     Returns the DebugInformationFile object or None.
     """
     try:
         from apps.difs.models import DebugInformationFile
 
         return DebugInformationFile.objects.filter(
-            project_id=project_id, data__kind="src", data__debug_id=debug_id
+            project_id=project_id,
+            data__kind__in=["src", "sources"],
+            data__debug_id=normalize_debug_id(debug_id),
         ).first()
     except Exception as e:
         getLogger().error(f"find_source_bundle: Error finding source bundle: {e}")
@@ -84,6 +88,55 @@ def extract_source_from_bundle(source_bundle, file_path):
         return None
 
 
+def jvm_module_to_path(module, filename):
+    """
+    Convert JVM frame module + filename to a source file path for bundle lookup.
+
+    sentry-cli bundle-jvm stores files with:
+    - .jvm extension (replacing .java/.kt)
+    - _/_/ prefix (corresponding to ~ in Sentry's source mapping)
+
+    e.g. module="com.example.MyClass", filename="MyClass.java"
+         -> "/_/_/com/example/MyClass.jvm"
+    """
+    if not module or not filename:
+        return None
+    # Change extension to .jvm (sentry-cli renames .java/.kt to .jvm)
+    base, _, ext = filename.rpartition(".")
+    if base and ext in ("java", "kt", "scala", "groovy"):
+        jvm_filename = f"{base}.jvm"
+    else:
+        jvm_filename = filename
+    # Extract package from module (everything before last dot)
+    parts = module.rsplit(".", 1)
+    if len(parts) == 2:
+        package_path = parts[0].replace(".", "/")
+        return f"/_/_/{package_path}/{jvm_filename}"
+    # No package (default package)
+    return f"/_/_/{jvm_filename}"
+
+
+@contextlib.contextmanager
+def open_source_bundle(source_bundle_dif):
+    """
+    Context manager that opens a source bundle ZIP once and yields a lookup function.
+    Avoids re-opening the ZIP for every frame.
+    """
+    from apps.difs.tasks import difs_concat_file_blobs_to_disk
+
+    with difs_concat_file_blobs_to_disk([source_bundle_dif.file.blob]) as temp_file:
+        with zipfile.ZipFile(temp_file.name, "r") as zf:
+            namelist = set(zf.namelist())
+
+            def get_source_lines(file_path):
+                bundle_path = f"files{file_path}"
+                if bundle_path in namelist:
+                    return zf.read(bundle_path).decode("utf-8").splitlines()
+                return None
+
+            yield get_source_lines
+
+
 class StacktraceProcessor:
     """
     This class process an event with exceptions. Try to load DIF and resolve
@@ -92,16 +145,6 @@ class StacktraceProcessor:
 
     def __init__(self):
         pass
-
-    @classmethod
-    def is_supported(cls, event_json, dif):
-        is_android = cls.is_android_event(event_json)
-        is_proguard = dif.is_proguard_mapping()
-
-        if is_android:
-            return is_proguard
-
-        return True
 
     @classmethod
     def resolve_stacktrace(cls, event, symbol_file, project_id=None, debug_id=None):
@@ -258,3 +301,71 @@ class StacktraceProcessor:
             return event["contexts"]["os"]["name"] == "Android"
         except Exception:
             return False
+
+    @classmethod
+    def resolve_jvm_source_context(cls, event_json, project_id, debug_ids):
+        """
+        Resolve source context for JVM stack frames using source bundles.
+        Returns True if any frames were enriched.
+        """
+        try:
+            exceptions = (event_json.get("exception") or {}).get("values")
+            if not exceptions:
+                return False
+        except Exception as e:
+            getLogger().error(f"resolve_jvm_source_context: Invalid event: {e}")
+            return False
+
+        # Find source bundles for all debug_ids
+        bundles = []
+        for debug_id in debug_ids:
+            bundle = find_source_bundle(project_id, debug_id)
+            if bundle:
+                bundles.append(bundle)
+
+        if not bundles:
+            return False
+
+        enriched = False
+        for bundle in bundles:
+            try:
+                with open_source_bundle(bundle) as get_source_lines:
+                    for exc in exceptions:
+                        stacktrace = exc.get("stacktrace")
+                        if not stacktrace:
+                            continue
+                        frames = stacktrace.get("frames")
+                        if not frames:
+                            continue
+
+                        for frame in frames:
+                            if frame.get("context_line"):
+                                continue
+
+                            module = frame.get("module")
+                            filename = frame.get("filename")
+                            lineno = frame.get("lineno")
+                            if not lineno or lineno < 1:
+                                continue
+
+                            file_path = jvm_module_to_path(module, filename)
+                            if not file_path:
+                                continue
+
+                            source_lines = get_source_lines(file_path)
+                            if source_lines and lineno <= len(source_lines):
+                                line_idx = lineno - 1
+                                frame["context_line"] = source_lines[line_idx]
+                                frame["pre_context"] = source_lines[
+                                    max(0, line_idx - 5) : line_idx
+                                ]
+                                frame["post_context"] = source_lines[
+                                    line_idx + 1 : min(len(source_lines), line_idx + 6)
+                                ]
+                                enriched = True
+            except Exception as e:
+                getLogger().error(
+                    f"resolve_jvm_source_context: Error reading bundle: {e}"
+                )
+
+        return enriched

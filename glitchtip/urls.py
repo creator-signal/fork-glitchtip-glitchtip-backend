@@ -6,7 +6,7 @@ from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
-from apps.event_ingest.views import event_envelope_view
+from apps.event_ingest.views import event_envelope_view, minidump_view
 from apps.stripe.views import stripe_webhook_view
 
 from .api.api import api
@@ -24,6 +24,7 @@ urlpatterns = [
         TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),
     ),
     path("api/<int:project_id>/envelope/", event_envelope_view, name="event_envelope"),
+    path("api/<int:project_id>/minidump/", minidump_view, name="minidump"),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
     # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
     path(

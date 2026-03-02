@@ -28,6 +28,7 @@ GlitchTip is API-compatible with Sentry, but **Sentry is NOT open source**. Thei
 - **ALLOWED:** Reading Sentry's **public documentation** (docs.sentry.io) for API compatibility is fine. We aim to be API-compatible based on their documented public interfaces.
 - **ALLOWED:** Reading Sentry's **MIT-licensed SDKs** (e.g., `sentry-python`, `sentry-javascript`, `sentry-ruby`, etc.) is fine — these are genuinely open source.
 - **Rule of thumb:** If it's a client SDK (sends data *to* Sentry/GlitchTip), it's MIT and fair game. If it's server-side code (processes/stores data), it's BSL and off limits.
+- **Avoid confusion:** Avoid mentioning Sentry (capital S) the company unless there is a good reason to do so. We must avoid any confusion with users thinking incorrectly that we are Sentry. Mentioning an MIT sentry SDK is fine. In that latter case, sentry refers to open source software and not a company.
 
 ## Local Development
 

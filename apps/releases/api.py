@@ -5,6 +5,7 @@ from ninja import Router
 from ninja.errors import ValidationError
 from ninja.pagination import paginate
 
+from apps.files.models import FileBlob
 from apps.files.tasks import assemble_artifacts_task
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
@@ -531,6 +532,17 @@ async def assemble_release(
         Organization, slug=organization_slug, users=user_id
     )
 
+    existing_chunks = [
+        checksum
+        async for checksum in FileBlob.objects.filter(
+            checksum__in=payload.chunks
+        ).values_list("checksum", flat=True)
+    ]
+    missing_chunks = list(set(payload.chunks) - set(existing_chunks))
+
+    if missing_chunks:
+        return {"state": "not_found", "missingChunks": missing_chunks}
+
     await assemble_artifacts_task.aenqueue(
         organization.id,
         version,
@@ -538,5 +550,4 @@ async def assemble_release(
         payload.chunks,
     )
 
-    # TODO should return more state's
-    return {"state": "ok", "missingChunks": []}
+    return {"state": "created", "missingChunks": []}

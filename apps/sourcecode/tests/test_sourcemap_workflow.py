@@ -136,7 +136,7 @@ class SourceCodeTestCase(GlitchTestCase):
                                         "filename": "http://127.0.0.1:8080/assets/minified.js",
                                         "function": "?",
                                         "in_app": True,
-                                        "lineno": 2,
+                                        "lineno": 1,
                                         "colno": 4,
                                     },
                                 ]

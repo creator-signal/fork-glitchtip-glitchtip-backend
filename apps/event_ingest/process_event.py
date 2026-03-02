@@ -685,19 +685,25 @@ def process_issue_events(
                     or debug_file.data.get("code_file")
                 ],
             ).transform()
-        elif (
-            isinstance(event, ErrorIssueEventSchema)
-            and event.exception
-            and next(
+        elif isinstance(event, ErrorIssueEventSchema) and event.exception:
+            # Events with debug_meta may not appear in projects_with_data
+            # (which is built from release/environment joins), so check
+            # has_difs from the annotation when available, otherwise fall
+            # back to a direct existence check for events with debug_meta.
+            _has_difs = next(
                 (
                     project["has_difs"]
                     for project in projects_with_data
                     if project["id"] == ingest_event.project_id
                 ),
-                False,
+                None,
             )
-        ):
-            event_difs_resolve_stacktrace(event, ingest_event.project_id)
+            if _has_difs is None and event.debug_meta:
+                _has_difs = DebugInformationFile.objects.filter(
+                    project_id=ingest_event.project_id
+                ).exists()
+            if _has_difs:
+                event_difs_resolve_stacktrace(event, ingest_event.project_id)
 
         event_data = event.model_dump(
             mode="json",
