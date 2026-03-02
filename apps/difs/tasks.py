@@ -4,11 +4,15 @@ import tempfile
 from hashlib import sha1
 
 from django.tasks import task
-from symbolic import Archive
+from symbolic import Archive, normalize_debug_id
 
 from apps.difs.models import DebugInformationFile
 from apps.difs.stacktrace_processor import StacktraceProcessor
-from apps.event_ingest.schema import ErrorIssueEventSchema, JvmDebugImage
+from apps.event_ingest.schema import (
+    ErrorIssueEventSchema,
+    JvmDebugImage,
+    NativeDebugImage,
+)
 from apps.files.models import File, FileBlob
 from apps.projects.models import Project
 from apps.shared.schema.exception import StackTraceFrame
@@ -53,9 +57,20 @@ def _extract_jvm_debug_ids(event: ErrorIssueEventSchema) -> list[str]:
     if not event.debug_meta:
         return []
     return [
-        str(image.debug_id)
+        normalize_debug_id(str(image.debug_id))
         for image in event.debug_meta.images
         if isinstance(image, JvmDebugImage)
+    ]
+
+
+def _extract_native_debug_ids(event: ErrorIssueEventSchema) -> list[str]:
+    """Extract normalized debug_ids from native debug images."""
+    if not event.debug_meta:
+        return []
+    return [
+        normalize_debug_id(str(image.debug_id))
+        for image in event.debug_meta.images
+        if isinstance(image, NativeDebugImage) and image.debug_id
     ]
 
 
@@ -100,6 +115,9 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
         difs = difs.filter(data__symbol_type="proguard")
     else:
         difs = difs.exclude(data__symbol_type="proguard")
+        native_debug_ids = _extract_native_debug_ids(event)
+        if native_debug_ids:
+            difs = difs.filter(data__debug_id__in=native_debug_ids)
     difs = difs.select_related("file", "file__blob").order_by("-created")
 
     resolved_stracktrackes = []
@@ -206,7 +224,9 @@ def difs_extract_metadata_from_file(file):
                     "arch": obj.arch,
                     "file_format": obj.file_format,
                     "code_id": obj.code_id,
-                    "debug_id": obj.debug_id,
+                    "debug_id": normalize_debug_id(obj.debug_id)
+                    if obj.debug_id
+                    else obj.debug_id,
                     "kind": obj.kind,
                     "features": list(obj.features),
                     "symbol_type": "native",

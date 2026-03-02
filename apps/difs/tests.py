@@ -638,3 +638,163 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             event_difs_resolve_stacktrace(event, self.project.id)
             # Non-Android event should exclude proguard DIFs — no blob download.
             mock_concat.assert_not_called()
+
+    def test_native_difs_filtered_by_debug_id(self):
+        """When event has native debug images, only matching DIFs should be tried."""
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        matching_id = "df398b02-1681-3b54-8fa5-b205e1ecfd7e"
+        non_matching_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={
+                "kind": "debug",
+                "symbol_type": "native",
+                "debug_id": matching_id,
+            },
+        )
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={
+                "kind": "debug",
+                "symbol_type": "native",
+                "debug_id": non_matching_id,
+            },
+        )
+
+        event = ErrorIssueEventSchema(
+            platform="cocoa",
+            exception={
+                "values": [
+                    {
+                        "type": "NSError",
+                        "value": "test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "function": "foo",
+                                    "filename": "bar.m",
+                                    "lineno": 1,
+                                    "in_app": True,
+                                    "image_addr": "0x0",
+                                    "instruction_addr": "0x0",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            contexts={"os": {"name": "iOS"}, "device": {"arch": "arm64"}},
+            debug_meta={
+                "images": [
+                    {
+                        "type": "macho",
+                        "debug_id": "DF398B02-1681-3B54-8FA5-B205E1ECFD7E",
+                        "image_addr": "0x100000",
+                    }
+                ]
+            },
+        )
+
+        with patch(
+            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
+        ) as mock_concat:
+            event_difs_resolve_stacktrace(event, self.project.id)
+            # Should only try the matching DIF (1 call), not both
+            self.assertEqual(mock_concat.call_count, 1)
+
+
+class NormalizeDebugIdTestCase(GlitchTestCase):
+    """Test that normalize_debug_id is applied at all boundaries."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
+    def test_extract_jvm_debug_ids_normalizes(self):
+        from apps.difs.tasks import _extract_jvm_debug_ids
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        event = ErrorIssueEventSchema(
+            platform="java",
+            exception={
+                "values": [
+                    {
+                        "type": "RuntimeException",
+                        "value": "test",
+                        "stacktrace": {"frames": [{"lineno": 1}]},
+                    }
+                ]
+            },
+            debug_meta={
+                "images": [
+                    {
+                        "type": "jvm",
+                        "debug_id": "DF398B02-1681-3B54-8FA5-B205E1ECFD7E",
+                    }
+                ]
+            },
+        )
+        ids = _extract_jvm_debug_ids(event)
+        self.assertEqual(ids, ["df398b02-1681-3b54-8fa5-b205e1ecfd7e"])
+
+    def test_extract_native_debug_ids_normalizes(self):
+        from apps.difs.tasks import _extract_native_debug_ids
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        event = ErrorIssueEventSchema(
+            platform="cocoa",
+            exception={
+                "values": [
+                    {
+                        "type": "NSError",
+                        "value": "test",
+                        "stacktrace": {"frames": [{"lineno": 1}]},
+                    }
+                ]
+            },
+            debug_meta={
+                "images": [
+                    {
+                        "type": "macho",
+                        "debug_id": "DF398B02-1681-3B54-8FA5-B205E1ECFD7E",
+                        "image_addr": "0x100000",
+                    }
+                ]
+            },
+        )
+        ids = _extract_native_debug_ids(event)
+        self.assertEqual(ids, ["df398b02-1681-3b54-8fa5-b205e1ecfd7e"])
+
+    def test_native_debug_image_schema(self):
+        """NativeDebugImage should parse macho/elf/pe/wasm types with fields."""
+        from apps.event_ingest.schema import DebugMeta
+
+        meta = DebugMeta.model_validate(
+            {
+                "images": [
+                    {
+                        "type": "macho",
+                        "debug_id": "df398b02-1681-3b54-8fa5-b205e1ecfd7e",
+                        "image_addr": "0x100000",
+                        "image_size": 4096,
+                        "code_file": "/usr/lib/libfoo.dylib",
+                    },
+                    {
+                        "type": "elf",
+                        "debug_id": "abcdef01-2345-6789-abcd-ef0123456789",
+                    },
+                    {"type": "unknown_type"},
+                ]
+            }
+        )
+        from apps.event_ingest.schema import NativeDebugImage, OtherDebugImage
+
+        self.assertIsInstance(meta.images[0], NativeDebugImage)
+        self.assertEqual(meta.images[0].image_addr, "0x100000")
+        self.assertIsInstance(meta.images[1], NativeDebugImage)
+        self.assertIsInstance(meta.images[2], OtherDebugImage)

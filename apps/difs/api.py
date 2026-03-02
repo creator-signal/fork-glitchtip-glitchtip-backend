@@ -13,7 +13,7 @@ from ninja import File as NinjaFile
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
-from symbolic import ProguardMapper
+from symbolic import ProguardMapper, normalize_debug_id
 
 from apps.files.models import File, FileBlob
 from apps.organizations_ext.models import Organization
@@ -175,7 +175,7 @@ async def create_dif_from_read_only_file(proguard_file, project, proguard_id, fi
             dif.file = fileobj
             dif.data = {
                 "arch": metadata["arch"],
-                "debug_id": proguard_id,
+                "debug_id": normalize_debug_id(proguard_id),
                 "symbol_type": "proguard",
                 "features": ["mapping"],
             }
