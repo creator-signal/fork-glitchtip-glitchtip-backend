@@ -77,10 +77,13 @@ def parse_cv_record_debug_id(cv_record_bytes: bytes) -> str | None:
         return None
 
     guid_bytes = cv_record_bytes[4:20]
+    (age,) = struct.unpack_from("<I", cv_record_bytes, 20)
     # GUID fields: Data1 (LE 4B), Data2 (LE 2B), Data3 (LE 2B), Data4 (BE 8B)
     a, b, c = struct.unpack_from("<IHH", guid_bytes, 0)
     d = guid_bytes[8:16]
     debug_id = f"{a:08x}-{b:04x}-{c:04x}-{d[:2].hex()}-{d[2:].hex()}"
+    if age > 0:
+        debug_id += f"-{age:x}"
     return normalize_debug_id(debug_id)
 
 
