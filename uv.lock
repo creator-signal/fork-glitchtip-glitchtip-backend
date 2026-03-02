@@ -1284,6 +1284,7 @@ dependencies = [
     { name = "google-cloud-logging" },
     { name = "granian", extra = ["reload", "uvloop"] },
     { name = "mcp", extra = ["cli"] },
+    { name = "minidump" },
     { name = "orjson" },
     { name = "psycopg", extra = ["c", "pool"] },
     { name = "pydantic", extra = ["email"] },
@@ -1344,6 +1345,7 @@ requires-dist = [
     { name = "google-cloud-logging", specifier = "~=3.0" },
     { name = "granian", extras = ["reload", "uvloop"], specifier = ">=2.6.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
+    { name = "minidump", specifier = ">=0.0.24" },
     { name = "orjson", specifier = "~=3.9" },
     { name = "psycopg", extras = ["c", "pool"], specifier = "~=3.1" },
     { name = "pydantic", extras = ["email"], specifier = "~=2.11" },
@@ -2270,6 +2272,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/37/9c/100deced3999e748500dda3027e2a19b0074199ba27cdc5a6988d22919b8/milksnake-0.1.6.tar.gz", hash = "sha256:0198f8932b4e136c29c0d0d490ff1bac03f82c3a7b2ee6f666e3683b64314fd9", size = 10483, upload-time = "2023-10-12T11:34:39.781Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/5b/1688cbd7244f039a2c1a762e246f04f7fc3eff07932776ac9944da3ea208/milksnake-0.1.6-py2.py3-none-any.whl", hash = "sha256:31e3eafaf2a48e177bb4b2dacef2c7ae8c5b2147a19c6d626209b819490e6f1d", size = 11136, upload-time = "2023-10-12T11:34:37.927Z" },
+]
+
+[[package]]
+name = "minidump"
+version = "0.0.24"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/4b/bc695b99dc7d77d28223765c3ee5a31d34fd2850c52eb683ccdd1206067d/minidump-0.0.24.tar.gz", hash = "sha256:f7ae09b944f3b17ccf5cecc66f9ff5a7a45b053474a13aeb012f4c9204470437", size = 60709, upload-time = "2024-08-15T14:54:22.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/8b/3a148750e6d65f4fe6e249f6d0d6c497eeadd867a63ed69cee3fa17e7c83/minidump-0.0.24-py3-none-any.whl", hash = "sha256:9c016e35c8fe37c82a01b0a266f5416a0b0138934d92affb436ac2e72372bec6", size = 78365, upload-time = "2024-08-15T14:54:21.124Z" },
 ]
 
 [[package]]
