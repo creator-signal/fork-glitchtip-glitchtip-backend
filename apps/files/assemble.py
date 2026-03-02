@@ -80,19 +80,19 @@ def assemble_artifacts(
     if rv is None:
         return
 
-    bundle, temp_file = rv
+    bundle_file, temp_file = rv
     scratchpad = tempfile.mkdtemp()
 
     try:
         safe_extract_zip(temp_file, scratchpad, strip_toplevel=False)
-    except BaseException as ex:
+    except Exception as ex:
         raise AssembleArtifactsError("failed to extract bundle") from ex
 
     try:
         manifest_path = path.join(scratchpad, "manifest.json")
         with open(manifest_path, "rb") as manifest:
             manifest = json.loads(manifest.read())
-    except BaseException as ex:
+    except Exception as ex:
         raise AssembleArtifactsError("failed to open release manifest") from ex
 
     if organization.slug != manifest.get("org"):
@@ -131,7 +131,11 @@ def assemble_artifacts(
         with open(full_path, "rb") as fp:
             file.putfile(fp)
 
-    bundles: list[DebugSymbolBundle] = []
+    # Build bundles, deduplicating by debug_id. When a minified_source and its
+    # source_map share the same debug-id, keep only the minified_source bundle
+    # (which carries the sourcemap_file reference).
+    bundles_by_debug_id: dict[str, DebugSymbolBundle] = {}
+    bundles_without_debug_id: list[DebugSymbolBundle] = []
     for file in files:
         sourcemap_file = None
         if file.type == "minified_source":
@@ -153,34 +157,68 @@ def assemble_artifacts(
             except StopIteration:
                 pass
 
-        bundles.append(
-            DebugSymbolBundle(
-                organization=organization,
-                debug_id=file.headers.get("debug-id"),
-                release=release,
-                sourcemap_file=sourcemap_file,
-                file=file,
-            )
+        bundle = DebugSymbolBundle(
+            organization=organization,
+            debug_id=file.headers.get("debug-id"),
+            release=release,
+            sourcemap_file=sourcemap_file,
+            file=file,
+        )
+        debug_id = bundle.debug_id
+        if debug_id is None:
+            bundles_without_debug_id.append(bundle)
+        elif debug_id not in bundles_by_debug_id or sourcemap_file is not None:
+            bundles_by_debug_id[debug_id] = bundle
+
+    bundles = list(bundles_by_debug_id.values()) + bundles_without_debug_id
+
+    # Split bundles: complete bundles (with sourcemap_file) can upsert to
+    # replace stale data. Incomplete bundles (no sourcemap_file) should only
+    # insert if the debug_id doesn't exist yet — partial re-uploads from the
+    # SDK must not overwrite a complete bundle.
+    complete_bundles = [b for b in bundles if b.sourcemap_file is not None]
+    incomplete_bundles = [b for b in bundles if b.sourcemap_file is None]
+
+    # Collect old file IDs before upsert so we can clean them up
+    old_file_ids: set[int] = set()
+    if complete_bundles:
+        complete_debug_ids = [b.debug_id for b in complete_bundles if b.debug_id]
+        if complete_debug_ids:
+            for file_id, sm_id in DebugSymbolBundle.objects.filter(
+                organization=organization, debug_id__in=complete_debug_ids
+            ).values_list("file_id", "sourcemap_file_id"):
+                if file_id:
+                    old_file_ids.add(file_id)
+                if sm_id:
+                    old_file_ids.add(sm_id)
+
+        DebugSymbolBundle.objects.bulk_create(
+            complete_bundles,
+            update_conflicts=True,
+            unique_fields=["organization", "debug_id"],
+            update_fields=["file", "sourcemap_file", "release"],
         )
 
-    DebugSymbolBundle.objects.bulk_create(
-        bundles,
-        ignore_conflicts=True,
-        # unique_fields=["organization", "debug_id", "release"],
-        # update_fields=["file", "sourcemap_file"],
-    )
-    # May need to readd this logic but in bulk
-    # if not created:
-    #     old_file = release_file.file
-    #     release_file.file = file
-    #     release_file.save(update_fields=["file"])
-    #     old_file.delete()
+    if incomplete_bundles:
+        DebugSymbolBundle.objects.bulk_create(
+            incomplete_bundles,
+            ignore_conflicts=True,
+        )
+
+    # Clean up replaced files
+    if old_file_ids:
+        new_file_ids = {b.file_id for b in bundles if b.file_id} | {
+            b.sourcemap_file_id for b in bundles if b.sourcemap_file_id
+        }
+        orphaned_ids = old_file_ids - new_file_ids
+        if orphaned_ids:
+            File.objects.filter(id__in=orphaned_ids).delete()
 
     set_assemble_status(
         AssembleTask.ARTIFACTS, organization.pk, checksum, ChunkFileState.OK
     )
     shutil.rmtree(scratchpad)
-    bundle.delete()
+    bundle_file.delete()
 
 
 def assemble_file(
