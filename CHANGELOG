@@ -1,3 +1,19 @@
+# 6.0.8
+
+- Feat: Add minidump ingestion for native crash reporting
+- Feat: Add JVM source context support for Java/Kotlin stack traces
+- Feat: Add SourceMapCache for improved source map resolution
+- Feat: Track first and latest release per issue; support "resolve in next release"
+- Fix: Don't reopen resolved issues when the incoming event has no release
+- Fix: Security hardening — SSRF protection in uptime monitoring, path traversal in artifact assembly
+- Fix: Filter out projects belonging to soft-deleted organizations
+- Fix: Set event_processed flag for transactions in envelope view
+- Fix: Weight transactions at 1:1 parity with issue events for quota accounting
+- Fix: Use per-type retention for hourly stat partition cleanup
+- Fix: Remove misleading CORS_ORIGIN_ALLOW_ALL warning
+- Fix: Various debug information file (DIF) pipeline fixes
+- Improved stability for experimental features not yet enabled by default (logs, cold storage, performance monitoring v2, MCP server)
+
 # 6.0.7
 
 - Feat: Add MCP (Model Context Protocol) server with OAuth 2.0 authorization
