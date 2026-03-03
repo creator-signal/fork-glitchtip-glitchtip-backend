@@ -253,14 +253,26 @@ class StripeSubscription(StripeModel):
                 fetched_sub.items.data[0].price.recurring
                 and fetched_sub.items.data[0].price.recurring.get("interval") == "year"
             )
-            subscription.subscription_cycle_start, subscription.subscription_cycle_end = (
-                compute_cycle(
-                    subscription.current_period_start,
-                    subscription.current_period_end,
-                    is_annual,
-                )
+            (
+                subscription.subscription_cycle_start,
+                subscription.subscription_cycle_end,
+            ) = compute_cycle(
+                subscription.current_period_start,
+                subscription.current_period_end,
+                is_annual,
             )
-            await subscription.asave()
+            await subscription.asave(
+                update_fields=[
+                    "status",
+                    "created",
+                    "current_period_start",
+                    "current_period_end",
+                    "start_date",
+                    "collection_method",
+                    "subscription_cycle_start",
+                    "subscription_cycle_end",
+                ]
+            )
 
     @classmethod
     async def remove_inactive_primary_subscriptions(cls):
@@ -348,8 +360,7 @@ class StripeSubscription(StripeModel):
                         subscription.items.data[0].current_period_end
                     )
                     is_annual = bool(
-                        price.recurring
-                        and price.recurring.get("interval") == "year"
+                        price.recurring and price.recurring.get("interval") == "year"
                     )
                     cycle_start, cycle_end = compute_cycle(
                         period_start, period_end, is_annual

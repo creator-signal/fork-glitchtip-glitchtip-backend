@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 from django.test import SimpleTestCase
 from django.utils.timezone import make_aware
 
-from apps.stripe.utils import compute_cycle
+from apps.stripe.utils import _MAX_CYCLE_MONTHS, compute_cycle
 
 
 def dt(year, month, day):
@@ -89,3 +89,20 @@ class ComputeCycleTests(SimpleTestCase):
             # Cycle must cover now
             self.assertLessEqual(cycle_start, now)
             self.assertGreaterEqual(cycle_end, now)
+
+    def test_annual_stale_period_start_caps_at_max(self):
+        """A period_start far in the past should not loop forever."""
+        start = dt(2010, 6, 15)
+        end = dt(2011, 6, 15)
+        now = dt(2026, 3, 15)
+        with (
+            patch("apps.stripe.utils.timezone.now", return_value=now),
+            patch("apps.stripe.utils.logger") as mock_logger,
+        ):
+            cycle_start, cycle_end = compute_cycle(start, end, is_annual=True)
+        # Should have stopped at the cap, not looped to 2026
+        self.assertEqual(
+            cycle_start,
+            start + relativedelta(months=_MAX_CYCLE_MONTHS),
+        )
+        mock_logger.warning.assert_called_once()

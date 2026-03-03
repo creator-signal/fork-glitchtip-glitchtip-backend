@@ -9,6 +9,7 @@ from apps.organizations_ext.models import Organization
 from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripePrice, StripeProduct, StripeSubscription
 from apps.stripe.schema import Price, Subscription, SubscriptionItem, SubscriptionItems
+from apps.stripe.utils import unix_to_datetime
 
 
 class TestPeriodicSync(TestCase):
@@ -121,16 +122,16 @@ class TestPeriodicSync(TestCase):
         subscription = await StripeSubscription.objects.aget(stripe_id="sub_outdated")
 
         # Check if period was updated
-        self.assertEqual(subscription.current_period_end.timestamp(), new_end_ts)
+        self.assertEqual(subscription.current_period_end, unix_to_datetime(new_end_ts))
 
-        # Check if cycles were updated
+        # Check if cycles were updated — period started 3 days ago so we're
+        # in month 1 and cycle_start should equal period_start.
+        expected_cycle_start = unix_to_datetime(new_start_ts)
+        self.assertEqual(subscription.subscription_cycle_start, expected_cycle_start)
         self.assertEqual(
-            subscription.subscription_cycle_start.timestamp(), new_start_ts
+            subscription.subscription_cycle_end,
+            expected_cycle_start + relativedelta(months=1),
         )
-        expected_cycle_end = subscription.subscription_cycle_start + relativedelta(
-            months=1
-        )
-        self.assertEqual(subscription.subscription_cycle_end, expected_cycle_end)
 
     @override_settings(STRIPE_WEBHOOK_SECRET="test")
     async def test_update_outdated_subscriptions_mid_year_cycle(self):
@@ -236,8 +237,11 @@ class TestPeriodicSync(TestCase):
         # Old buggy code set cycle_end = period_start + 1 month (4 months ago).
         self.assertGreaterEqual(subscription.subscription_cycle_end, now)
         self.assertLessEqual(subscription.subscription_cycle_start, now)
-        # Cycle should be exactly 1 month wide
-        self.assertEqual(
-            subscription.subscription_cycle_end,
-            subscription.subscription_cycle_start + relativedelta(months=1),
-        )
+        # Boundaries must be anchored to current_period_start + N months (not
+        # chained from cycle_start, which drifts on month-end dates like Jan 31).
+        # Use the DB value (integer-timestamp precision) not the local variable.
+        anchor = subscription.current_period_start
+        diff = relativedelta(subscription.subscription_cycle_end, anchor)
+        self.assertEqual(diff.days, 0, "cycle_end should be period_start + N months")
+        diff = relativedelta(subscription.subscription_cycle_start, anchor)
+        self.assertEqual(diff.days, 0, "cycle_start should be period_start + N months")
