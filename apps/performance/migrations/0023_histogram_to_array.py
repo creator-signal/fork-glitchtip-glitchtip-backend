@@ -9,7 +9,7 @@ import apps.performance.histogram
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("performance", "0021_performance_v3"),
+        ("performance", "0022_performance_v3"),
     ]
 
     operations = [
