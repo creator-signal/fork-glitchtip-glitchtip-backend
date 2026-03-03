@@ -177,8 +177,26 @@ build_arm_x86:
     - 'echo "Building tags: latest, ${VERSION_FULL}, ${VERSION_MINOR}, ${VERSION_MAJOR}"'
 
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
+    - docker login -u ${GITLAB_DEPLOY_USER} -p ${GITLAB_DEPLOY_TOKEN} registry.gitlab.com
+    - docker login -u ${QUAY_USER} -p ${QUAY_TOKEN} quay.io
     - docker buildx create --use
-    - docker buildx build --platform linux/arm64/v8,linux/amd64 --push -t ${DOCKER_CI_REGISTRY_IMAGE}:latest -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MINOR} -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MAJOR} --build-arg IS_CI="True" --build-arg GLITCHTIP_VERSION=${VERSION_FULL} --build-arg COLLECT_STATIC="True" .
+    - >-
+      docker buildx build --platform linux/arm64/v8,linux/amd64 --push
+      -t ${DOCKER_CI_REGISTRY_IMAGE}:latest
+      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL}
+      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MINOR}
+      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MAJOR}
+      -t registry.gitlab.com/glitchtip/glitchtip:latest
+      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_FULL}
+      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_MINOR}
+      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_MAJOR}
+      -t quay.io/glitchtip/glitchtip:latest
+      -t quay.io/glitchtip/glitchtip:${VERSION_FULL}
+      -t quay.io/glitchtip/glitchtip:${VERSION_MINOR}
+      -t quay.io/glitchtip/glitchtip:${VERSION_MAJOR}
+      --build-arg IS_CI="True"
+      --build-arg GLITCHTIP_VERSION=${VERSION_FULL}
+      --build-arg COLLECT_STATIC="True" .
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
