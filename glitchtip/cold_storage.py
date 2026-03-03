@@ -38,10 +38,46 @@ logger = logging.getLogger(__name__)
 # Prefix for all cold storage files to prevent collisions with other data
 COLD_STORAGE_PREFIX = "cold_storage"
 
-# Max rows per CSV chunk during archival.
-# Each chunk is streamed as CSV bytes (~40MB for 50K wide log rows), written
-# to a temp file, then converted to Parquet by DuckDB's native CSV reader.
+# Max rows per CSV chunk during archival — secondary safety limit.
+# The primary limit is byte-based, auto-derived from DUCKDB_MEMORY_LIMIT.
 ARCHIVE_CHUNK_ROWS = 50_000
+
+
+def _parse_duckdb_memory_bytes(limit_str: str) -> int | None:
+    """Parse a DuckDB memory limit string (e.g. '128MB') to bytes.
+
+    Returns None if the string is empty or unparseable.
+    """
+    if not limit_str:
+        return None
+    limit_str = limit_str.strip().upper()
+    units = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+    for suffix, mult in units.items():
+        if limit_str.endswith(suffix):
+            return int(float(limit_str[: -len(suffix)]) * mult)
+    try:
+        return int(limit_str)
+    except ValueError:
+        return None
+
+
+def _get_archive_chunk_bytes() -> int:
+    """Derive the max CSV chunk size from the DuckDB memory limit.
+
+    DuckDB's COPY TO Parquet cannot spill to disk — it must hold the entire
+    chunk in columnar form in memory.  The columnar representation is roughly
+    2x the CSV byte size, plus DuckDB needs internal overhead.  Using 1/4 of
+    the memory limit keeps us well within budget.
+
+    The 1 MB floor prevents degenerate cases with very low memory limits.
+    """
+    limit_str = getattr(settings, "DUCKDB_MEMORY_LIMIT", "") or ""
+    mem_bytes = _parse_duckdb_memory_bytes(limit_str)
+    if mem_bytes is None:
+        # Memory limit disabled — DuckDB is unbounded, but we still cap the
+        # Python-side CSV buffer to avoid runaway bytearray growth.
+        return 64 * 1024 * 1024  # 64 MB
+    return max(mem_bytes // 4, 1024 * 1024)
 
 
 def get_cold_storage_backend():
@@ -377,6 +413,8 @@ def _flush_csv_to_parquet(
     chunk_num: int,
     total_rows: int,
     row_count: int,
+    *,
+    is_final_flush: bool = False,
 ) -> tuple[int, int]:
     """
     Write CSV data to a Parquet file via DuckDB's native CSV reader.
@@ -393,7 +431,7 @@ def _flush_csv_to_parquet(
 
     try:
         # First-and-only chunk → flat file; otherwise chunk dir
-        if chunk_num == 0 and row_count < ARCHIVE_CHUNK_ROWS:
+        if chunk_num == 0 and is_final_flush:
             out_path = flat_path
         else:
             out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
@@ -406,12 +444,15 @@ def _flush_csv_to_parquet(
         columns = list(column_types.keys())
         col_spec = ", ".join(f"'{c}': '{column_types[c]}'" for c in columns)
 
+        # Match ROW_GROUP_SIZE to actual rows so DuckDB doesn't over-allocate.
+        row_group_size = min(row_count, 100_000)
+
         duck_conn.execute(
             f"COPY (SELECT * FROM read_csv("
             f"'{duckdb_quote_path(csv_path)}', "
             f"columns={{{col_spec}}}, header=true)) "
             f"TO '{duckdb_quote_path(parquet_path)}' "
-            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);"
+            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {row_group_size});"
         )
         total_rows += row_count
     finally:
@@ -536,6 +577,7 @@ def archive_partition_per_org(
 
                     chunk_num = 0
                     total_rows = 0
+                    chunk_bytes_limit = _get_archive_chunk_bytes()
                     header = None
                     csv_buf = bytearray()
                     buf_rows = 0
@@ -552,7 +594,10 @@ def archive_partition_per_org(
                                 csv_buf.extend(line)
                                 buf_rows += 1
 
-                                if buf_rows >= ARCHIVE_CHUNK_ROWS:
+                                if (
+                                    len(csv_buf) >= chunk_bytes_limit
+                                    or buf_rows >= ARCHIVE_CHUNK_ROWS
+                                ):
                                     chunk_num, total_rows = _flush_csv_to_parquet(
                                         duck_conn,
                                         storage,
@@ -583,6 +628,7 @@ def archive_partition_per_org(
                             chunk_num,
                             total_rows,
                             buf_rows,
+                            is_final_flush=True,
                         )
                     del csv_buf
 
