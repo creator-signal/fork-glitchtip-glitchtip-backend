@@ -36,9 +36,11 @@ def compute_cycle(period_start: datetime, period_end: datetime, is_annual: bool)
         return period_start, period_end
 
     now = timezone.now()
+    month = 0
     cycle_start = period_start
-    cycle_end = cycle_start + relativedelta(months=1)
+    cycle_end = period_start + relativedelta(months=1)
     while cycle_end < now:
-        cycle_start = cycle_end
-        cycle_end = cycle_start + relativedelta(months=1)
+        month += 1
+        cycle_start = period_start + relativedelta(months=month)
+        cycle_end = period_start + relativedelta(months=month + 1)
     return cycle_start, cycle_end
