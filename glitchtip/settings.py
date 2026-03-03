@@ -178,9 +178,26 @@ GLITCHTIP_LOG_HOT_DAYS = env.int(
 
 # DuckDB extension directory (pre-installed in Docker image at /opt/duckdb/extensions)
 DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
-# DuckDB memory limit — prevents OOM during archival by spilling to disk.
+
+
+def _default_duckdb_memory_limit() -> str:
+    """Auto-detect 25% of container/system memory for DuckDB."""
+    try:
+        import os
+
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        quarter = total // 4
+        mb = quarter // (1024 * 1024)
+        return f"{mb}MB"
+    except (ValueError, OSError, AttributeError):
+        return "128MB"
+
+
+# DuckDB memory limit — controls peak RAM for both reads and writes.
+# Defaults to 25% of container/system memory.  Archival automatically derives
+# its chunk size from this value so COPY TO Parquet stays within budget.
 # Set to empty string to disable (unbounded memory).
-DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", "128MB")
+DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", _default_duckdb_memory_limit())
 # Writable directory for DuckDB spill-to-disk. Set to empty string to disable
 # the memory limit (needed for read-only root filesystems with no writable mount).
 DUCKDB_TEMP_DIRECTORY = env.str("DUCKDB_TEMP_DIRECTORY", "/tmp")
