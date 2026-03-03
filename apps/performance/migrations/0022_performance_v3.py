@@ -2,6 +2,10 @@
 # - Drop TransactionEvent and TransactionGroupAggregate
 # - Recreate TransactionGroup as hash-partitioned by organization_id
 # - Create SpanStaging partitioned table (UUID7 + HASH by org)
+#
+# The previous migration (0021) already detached and dropped all child
+# partitions, so the DROP TABLE CASCADE statements here only touch the
+# empty parent tables — well within max_locks_per_transaction.
 
 from datetime import datetime, timedelta, timezone
 
@@ -52,12 +56,12 @@ def noop(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("performance", "0020_alter_transactionevent_duration_and_more"),
+        ("performance", "0021_detach_old_partitions"),
         ("organizations_ext", "0001_squashed_0008_merge_20250210_1625"),
     ]
 
     operations = [
-        # 1. Drop old partitioned tables
+        # 1. Drop old (now-empty) parent tables.
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.DeleteModel(name="TransactionEvent"),
