@@ -275,11 +275,18 @@ class OrganizationThrottleCheckTestCase(TestCase):
         self.price.interval = "year"
         self.price.save()
 
-        # Set cycle to LAST month
-        start_cycle = timezone.now() - relativedelta(months=1, days=1)
-        end_cycle = start_cycle + relativedelta(months=1)  # Ends 1 day ago
+        now = timezone.now()
+        # Annual billing period started 2 months ago
+        period_start = now - relativedelta(months=2, days=1)
+        period_end = period_start + relativedelta(years=1)
+
+        # Set stale cycle to month 1 (ended ~1 month ago)
+        start_cycle = period_start
+        end_cycle = period_start + relativedelta(months=1)
 
         self.subscription.price = self.price
+        self.subscription.current_period_start = period_start
+        self.subscription.current_period_end = period_end
         self.subscription.subscription_cycle_start = start_cycle
         self.subscription.subscription_cycle_end = end_cycle
         self.subscription.save()
@@ -287,12 +294,13 @@ class OrganizationThrottleCheckTestCase(TestCase):
         update_subscription_cycles.call()
 
         self.subscription.refresh_from_db()
-        # Should have advanced by 1 month
-        self.assertEqual(self.subscription.subscription_cycle_start, end_cycle)
-        self.assertEqual(
-            self.subscription.subscription_cycle_end,
-            end_cycle + relativedelta(months=1),
-        )
+        # Should have advanced to month 3 (covering now)
+        expected_start = period_start + relativedelta(months=2)
+        expected_end = expected_start + relativedelta(months=1)
+        self.assertEqual(self.subscription.subscription_cycle_start, expected_start)
+        self.assertEqual(self.subscription.subscription_cycle_end, expected_end)
+        self.assertLessEqual(self.subscription.subscription_cycle_start, now)
+        self.assertGreaterEqual(self.subscription.subscription_cycle_end, now)
 
 
 class FreeTierCycleTestCase(TestCase):

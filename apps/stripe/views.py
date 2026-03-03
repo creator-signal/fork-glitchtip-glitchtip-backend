@@ -3,7 +3,6 @@ import logging
 import time
 
 import aiohttp
-from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.cache import cache
 from django.http import (
@@ -23,7 +22,7 @@ from .client import stripe_get
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .schema import Customer, Price, Product, StripeEvent, Subscription
-from .utils import unix_to_datetime
+from .utils import compute_cycle, unix_to_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +122,13 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         subscription.items.data[0].current_period_start
     )
     current_period_end = unix_to_datetime(subscription.items.data[0].current_period_end)
-    cycle_start = current_period_start
-    cycle_end = current_period_end
     price = subscription.items.data[0].price
-    if price.recurring and price.recurring.get("interval") == "year":
-        cycle_end = cycle_start + relativedelta(months=1)
+    is_annual = bool(
+        price.recurring and price.recurring.get("interval") == "year"
+    )
+    cycle_start, cycle_end = compute_cycle(
+        current_period_start, current_period_end, is_annual
+    )
 
     stripe_subscription, created = await StripeSubscription.objects.aupdate_or_create(
         stripe_id=subscription.id,
