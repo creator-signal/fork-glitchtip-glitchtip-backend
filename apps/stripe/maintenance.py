@@ -1,9 +1,9 @@
-from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.utils import timezone
 
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
 from .models import StripePrice, StripeProduct, StripeSubscription
+from .utils import compute_cycle
 
 
 async def sync_stripe_models():
@@ -31,13 +31,10 @@ async def update_subscription_cycles():
         price__interval="year",
     ).select_related("price")
 
-    async for sub in qs.aiterator():
-        while sub.subscription_cycle_end < now:
-            sub.subscription_cycle_start = sub.subscription_cycle_end
-            sub.subscription_cycle_end = sub.subscription_cycle_start + relativedelta(
-                months=1
-            )
-
+    async for sub in qs:
+        sub.subscription_cycle_start, sub.subscription_cycle_end = compute_cycle(
+            sub.current_period_start, sub.current_period_end, is_annual=True
+        )
         await sub.asave(
             update_fields=["subscription_cycle_start", "subscription_cycle_end"]
         )
