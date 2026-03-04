@@ -13,7 +13,7 @@ class Command(BaseCommand):
     help = "Create future partitions and cleanup old ones"
 
     def handle(self, *args, **options):
-        manager = PartitionManager()
+        manager = PartitionManager(db_connection=settings.MAINTENANCE_DATABASE_ALIAS)
         now = datetime.now(timezone.utc)
 
         # 1. Daily UUIDv7 partitions (Events + SpanStaging)

@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.files.storage import storages
-from django.db import connection
+from django.db import connection, connections
 from django.test.signals import setting_changed
 from django.utils import timezone
 from psycopg.sql import SQL, Identifier
@@ -653,15 +653,18 @@ def archive_partition_per_org(
         raise
 
 
-def detach_partition(partition_name: str, parent_table: str) -> None:
+def detach_partition(
+    partition_name: str, parent_table: str, db_alias: str | None = None
+) -> None:
     """
     Detach a partition from its parent table.
 
     This is done before dropping the partition after archival.
     Safe to call if the partition is already detached or does not exist.
     """
+    db_conn = connections[db_alias] if db_alias else connection
     try:
-        with connection.cursor() as cursor:
+        with db_conn.cursor() as cursor:
             cursor.execute(
                 SQL("ALTER TABLE {} DETACH PARTITION {};").format(
                     Identifier(parent_table), Identifier(partition_name)
@@ -676,9 +679,10 @@ def detach_partition(partition_name: str, parent_table: str) -> None:
         )
 
 
-def drop_partition(partition_name: str) -> None:
+def drop_partition(partition_name: str, db_alias: str | None = None) -> None:
     """Drop a partition table after it has been archived."""
-    with connection.cursor() as cursor:
+    db_conn = connections[db_alias] if db_alias else connection
+    with db_conn.cursor() as cursor:
         cursor.execute(
             SQL("DROP TABLE IF EXISTS {};").format(Identifier(partition_name))
         )
@@ -690,6 +694,7 @@ def archive_and_swap_partition(
     table_name: str,
     column_types: dict[str, str],
     select_sql: str,
+    db_alias: str | None = None,
 ) -> bool:
     """
     Full archival workflow: Export per-org files -> Detach -> Drop partition.
@@ -728,10 +733,10 @@ def archive_and_swap_partition(
         # Still proceed to drop empty partition
 
     # Step 2: Detach partition from parent table
-    detach_partition(partition_name, table_name)
+    detach_partition(partition_name, table_name, db_alias=db_alias)
 
     # Step 3: Drop the original partition (and its hash sub-partitions via CASCADE)
-    drop_partition(partition_name)
+    drop_partition(partition_name, db_alias=db_alias)
 
     logger.info(
         f"Successfully archived {partition_name}: {len(archived_files)} org files"
@@ -1041,6 +1046,7 @@ def archive_and_cleanup_partitions(
     column_types: dict[str, str],
     select_sql: str,
     retention_days: int | None = None,
+    db_alias: str | None = None,
 ) -> tuple[int, int, int]:
     """
     Archive old hot partitions to cold storage and clean up expired cold files.
@@ -1077,7 +1083,7 @@ def archive_and_cleanup_partitions(
         for name, date in partitions:
             try:
                 if archive_and_swap_partition(
-                    name, table_name, column_types, select_sql
+                    name, table_name, column_types, select_sql, db_alias=db_alias
                 ):
                     archived += 1
                     logger.info(f"Archived partition {name}")

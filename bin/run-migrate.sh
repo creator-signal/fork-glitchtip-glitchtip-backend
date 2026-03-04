@@ -2,7 +2,12 @@
 set -e
 
 echo "Run Django migrations"
-./manage.py migrate --skip-checks
+if [ -n "$MAINTENANCE_DATABASE_URL" ]; then
+    DB_FLAG="--database maintenance"
+else
+    DB_FLAG=""
+fi
+./manage.py migrate --skip-checks $DB_FLAG
 echo "Create Django cache table, if needed"
 ./manage.py createcachetable
 echo "Create and delete Postgres partitions"

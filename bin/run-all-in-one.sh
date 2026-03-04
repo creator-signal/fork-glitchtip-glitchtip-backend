@@ -4,7 +4,12 @@ set -e
 # Run initialization commands unless SKIP_INIT is set
 # Set SKIP_INIT=true when running migrations as a pre-deploy hook
 if [ "${SKIP_INIT}" != "True" ] && [ "${SKIP_INIT}" != "true" ] && [ "${SKIP_INIT}" != "1" ]; then
-    python manage.py migrate --no-input --skip-checks
+    if [ -n "$MAINTENANCE_DATABASE_URL" ]; then
+        DB_FLAG="--database maintenance"
+    else
+        DB_FLAG=""
+    fi
+    python manage.py migrate --no-input --skip-checks $DB_FLAG
     python manage.py maintain_partitions
 
     if [ "$GLITCHTIP_BOOTSTRAP_DEV" = "True" ] || [ "$GLITCHTIP_BOOTSTRAP_DEV" = "true" ] || [ "$GLITCHTIP_BOOTSTRAP_DEV" = "1" ]; then
