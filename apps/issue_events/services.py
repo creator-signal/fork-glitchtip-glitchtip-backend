@@ -123,7 +123,9 @@ def filter_issue_list(
         qs = qs.filter(**qs_filters)
 
     if event_id:
-        qs = qs.filter(issueevent__id=event_id)
+        qs = qs.filter(
+            Q(issueevent__id=event_id) | Q(issueevent__event_id=event_id)
+        )
     elif query:
         queries = shlex.split(query)
         # First look for structured queries
