@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
@@ -200,7 +199,7 @@ async def test_project_alert(
             )
             continue
         try:
-            await sync_to_async(send_test_notification)(
+            await send_test_notification(
                 recipient.url,
                 recipient.recipient_type,
                 alert.project,
