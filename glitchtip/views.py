@@ -24,6 +24,6 @@ def index(request, *args):
             "index.html", {"base_path": base_path}, request=request
         )
         # Replace base href (Not easy to add this as a django template var from angular index.html)
-        content = re.sub(r'<base href="/"/>', f'<base href="/{base_path}/">', content)
+        content = re.sub(r'<base href="/"/>', f'<base href="{base_path}/">', content)
         return HttpResponse(content)
     return render(request, "index.html")
