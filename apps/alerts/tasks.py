@@ -81,4 +81,4 @@ async def send_notification(notification_id: int):
     notification = await Notification.objects.select_related("project_alert").aget(
         pk=notification_id
     )
-    await notification.asend_notifications()
+    await notification.send_notifications()
