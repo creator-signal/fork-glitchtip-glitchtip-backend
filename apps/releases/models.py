@@ -22,6 +22,13 @@ class Release(CreatedModel):
         on_delete=models.SET_NULL,
         help_text="Release manager - the person initiating the release",
     )
+    repository = models.ForeignKey(
+        "sourcecode.Repository",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="releases",
+    )
     commit_count = models.PositiveSmallIntegerField(default=0)
     # last commit - not implemented
     # authors - not implemented
