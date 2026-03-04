@@ -3,6 +3,34 @@ from django.db import models
 from glitchtip.base_models import CreatedModel
 
 
+class RepositoryStatus(models.TextChoices):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    HIDDEN = "hidden"
+    PENDING_DELETION = "pending_deletion"
+    DELETION_IN_PROGRESS = "deletion_in_progress"
+
+
+class Repository(CreatedModel):
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    name = models.CharField(max_length=200)
+    url = models.URLField(blank=True, default="")
+    provider = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=24,
+        choices=RepositoryStatus.choices,
+        default=RepositoryStatus.ACTIVE,
+    )
+
+    class Meta:
+        unique_together = ("organization", "name")
+
+    def __str__(self):
+        return self.name
+
+
 class DebugSymbolBundle(CreatedModel):
     """
     Supports Artifact Bundles, Release Bundles, and DIFs
