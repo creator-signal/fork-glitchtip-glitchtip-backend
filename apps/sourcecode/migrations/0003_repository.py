@@ -49,8 +49,12 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={
-                "unique_together": {("organization", "name")},
-            },
+        ),
+        migrations.AddConstraint(
+            model_name="repository",
+            constraint=models.UniqueConstraint(
+                fields=["organization", "name"],
+                name="sourcecode_repository_unique_org_name",
+            ),
         ),
     ]

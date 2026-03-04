@@ -25,7 +25,12 @@ class Repository(CreatedModel):
     )
 
     class Meta:
-        unique_together = ("organization", "name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "name"],
+                name="sourcecode_repository_unique_org_name",
+            ),
+        ]
 
     def __str__(self):
         return self.name
