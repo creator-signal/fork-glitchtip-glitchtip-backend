@@ -58,7 +58,6 @@ dev = [
     "django-stubs[compatible-mypy]~=5.0",
     "django-sslserver~=0.22",
     "aioresponses~=0.7",
-    "requests-mock~=1.9",
     "memray~=1.9",
     "ruff~=0.6",
     "tblib~=3.0",                         # Needed for test --parallel
