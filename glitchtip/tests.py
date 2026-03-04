@@ -1,9 +1,9 @@
 import logging
 from datetime import datetime, timezone
+from unittest import mock
 from unittest.mock import patch
 from uuid import UUID
 
-import requests_mock
 from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -42,11 +42,11 @@ class SettingsTestCase(TestCase):
                 "socialaccount.socialapp",
                 provider=provider,
             )
-        with requests_mock.Mocker() as m:
-            m.get(
-                "https://example.com/.well-known/openid-configuration",
-                json={"authorization_endpoint": ""},
-            )
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {"authorization_endpoint": ""}
+        with mock.patch("requests.Session.send", return_value=mock_response):
             res = self.client.get(self.url)
         self.assertContains(res, social_app.name)
 
