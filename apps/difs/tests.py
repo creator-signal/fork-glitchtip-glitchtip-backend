@@ -539,6 +539,58 @@ class JvmSourceContextTestCase(GlitchTestCase):
         self.assertFalse(result)
 
 
+class NativeSymbolicationTestCase(GlitchTestCase):
+    """Test native stacktrace symbolication via StacktraceProcessor."""
+
+    def test_resolve_with_mismatched_function_names(self):
+        """Obfuscated function names (e.g. Flutter --obfuscate) should still resolve."""
+        mock_symbol = MagicMock()
+        mock_symbol.symbol = "_MyHomePageState._incrementCounter"
+        mock_symbol.full_path = "/lib/main.dart"
+        mock_symbol.line = 68
+        mock_symbol.lang = "unknown"
+
+        mock_sym_cache = MagicMock()
+        mock_sym_cache.lookup.return_value = [mock_symbol]
+
+        mock_obj = MagicMock()
+        mock_obj.arch = "x86_64"
+
+        mock_archive = MagicMock()
+        mock_archive.get_object.return_value = mock_obj
+
+        stacktrace = {
+            "frames": [
+                {
+                    "instruction_addr": "0x20d9a0",
+                    "image_addr": "0x0",
+                    "function": "bK",  # obfuscated name
+                }
+            ]
+        }
+
+        with (
+            patch("apps.difs.stacktrace_processor.Archive") as MockArchive,
+            patch("apps.difs.stacktrace_processor.SymCache") as MockSymCache,
+        ):
+            MockArchive.open.return_value = mock_archive
+            MockSymCache.from_object.return_value = mock_sym_cache
+
+            result = StacktraceProcessor.resolve_native_stacktrace(
+                stacktrace, "/fake/symbols.elf", arch="x86_64"
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.score, 1)
+        self.assertEqual(
+            result.frames[0]["function"],
+            "_MyHomePageState._incrementCounter",
+        )
+        self.assertEqual(result.frames[0]["filename"], "/lib/main.dart")
+        self.assertEqual(result.frames[0]["lineno"], 68)
+        self.assertTrue(result.frames[0]["resolved"])
+
+
 class DifTypeFilteringTestCase(GlitchTestCase):
     """Test that event_difs_resolve_stacktrace filters DIFs by type at the DB level."""
 
