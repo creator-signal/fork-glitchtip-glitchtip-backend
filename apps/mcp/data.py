@@ -64,7 +64,7 @@ async def get_issues(
 
 async def get_issue(user_id: int, issue_id: int) -> Issue | None:
     qs = Issue.objects.filter(project__organization__users=user_id).select_related(
-        "project"
+        "project", "resolved_in_release"
     )
     qs = _apply_compliance_filter(qs)
     return await qs.filter(id=issue_id).afirst()
