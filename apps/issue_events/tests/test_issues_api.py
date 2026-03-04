@@ -964,6 +964,78 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(day_minus_2_stat[1], 10)
 
 
+class IssueCommitsAPITestCase(GlitchTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_user()
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_list_issue_commits_no_release(self):
+        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
+        url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_list_issue_commits_release_no_commits(self):
+        release = baker.make(
+            "releases.Release", organization=self.organization, data={}
+        )
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            first_release=release,
+        )
+        url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_list_issue_commits(self):
+        commits = [
+            {
+                "id": "abc123",
+                "message": "fix: login bug",
+                "authorName": "Alice",
+                "authorEmail": "alice@example.com",
+            },
+            {
+                "id": "def456",
+                "message": "feat: add logout",
+                "authorName": "",
+                "authorEmail": "",
+            },
+        ]
+        release = baker.make(
+            "releases.Release",
+            organization=self.organization,
+            data={"commits": commits},
+        )
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            short_id=1,
+            first_release=release,
+        )
+        url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data), 2)
+        self.assertEqual(data[0]["id"], "abc123")
+        self.assertEqual(data[0]["message"], "fix: login bug")
+        self.assertEqual(data[0]["authorName"], "Alice")
+        self.assertEqual(data[1]["id"], "def456")
+
+    def test_list_issue_commits_not_found(self):
+        url = reverse("api:list_issue_commits", kwargs={"issue_id": 99999})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 404)
+
+
 class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
     def setUp(self):
         self.create_org_team_project()
