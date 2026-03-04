@@ -41,7 +41,7 @@ class AlertRecipient(models.Model):
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
 
-    async def asend(self, notification):
+    async def send(self, notification):
         if self.recipient_type == RecipientType.EMAIL:
             await sync_to_async(send_email_notification)(notification)
         else:
@@ -59,11 +59,11 @@ class Notification(CreatedModel):
     is_sent = models.BooleanField(default=False)
     issues = models.ManyToManyField("issue_events.Issue")
 
-    async def asend_notifications(self):
+    async def send_notifications(self):
         has_recipients = False
         async for recipient in self.project_alert.alertrecipient_set.all():
             has_recipients = True
-            await recipient.asend(self)
+            await recipient.send(self)
         if not has_recipients:
             await sync_to_async(send_email_notification)(self)
         self.is_sent = True
