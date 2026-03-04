@@ -70,7 +70,7 @@ def get_releases_queryset(
         qs = qs.filter(version=version)
     if project_slug:
         qs = qs.filter(projects__slug=project_slug)
-    return qs.prefetch_related("projects")
+    return qs.select_related("repository").prefetch_related("projects")
 
 
 def get_release_files_queryset(

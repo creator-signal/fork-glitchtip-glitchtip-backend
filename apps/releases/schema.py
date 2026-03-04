@@ -23,11 +23,19 @@ class ReleaseIn(ReleaseBase):
     projects: list[str]
 
 
+class ReleaseRepositorySchema(CamelSchema):
+    id: str
+    name: str
+
+
 class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
     created: datetime = Field(serialization_alias="dateCreated")
     released: Optional[datetime] = Field(serialization_alias="dateReleased")
     short_version: str = Field(validation_alias="version")
     projects: list[NameSlugProjectSchema]
+    repository: ReleaseRepositorySchema | None = Field(
+        default=None, validation_alias="repository"
+    )
 
     class Meta:
         model = Release
