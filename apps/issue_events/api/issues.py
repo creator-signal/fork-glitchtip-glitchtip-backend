@@ -15,6 +15,7 @@ from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
 from apps.releases.models import Release
+from apps.releases.schema import CommitSchema
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
@@ -62,6 +63,24 @@ async def get_issue(request: AuthHttpRequest, issue_id: int):
         return await qs.filter(id=issue_id).aget()
     except Issue.DoesNotExist:
         raise Http404()
+
+
+@router.get(
+    "/issues/{int:issue_id}/commits/",
+    response=list[CommitSchema],
+    by_alias=True,
+)
+@has_permission(["event:read", "event:write", "event:admin"])
+async def list_issue_commits(request: AuthHttpRequest, issue_id: int):
+    """Return commits from the release where this issue first appeared."""
+    qs = await get_queryset(request.auth.user_id)
+    try:
+        issue = await qs.select_related("first_release").filter(id=issue_id).aget()
+    except Issue.DoesNotExist:
+        raise Http404()
+    if not issue.first_release_id:
+        return []
+    return issue.first_release.data.get("commits", [])
 
 
 @router.put(

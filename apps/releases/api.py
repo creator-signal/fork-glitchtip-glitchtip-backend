@@ -19,6 +19,7 @@ from .models import Deploy, Release
 from .schema import (
     AssembleSchema,
     CommitIn,
+    CommitSchema,
     DeployIn,
     DeploySchema,
     ReleaseBase,
@@ -70,7 +71,7 @@ def get_releases_queryset(
         qs = qs.filter(version=version)
     if project_slug:
         qs = qs.filter(projects__slug=project_slug)
-    return qs.prefetch_related("projects")
+    return qs.select_related("repository").prefetch_related("projects")
 
 
 def get_release_files_queryset(
@@ -500,7 +501,7 @@ async def create_commits(
     router,
     "get",
     "/organizations/{slug:organization_slug}/releases/{str:version}/commits/",
-    response=list[CommitIn],
+    response=list[CommitSchema],
     by_alias=True,
 )
 @has_permission(["project:releases", "project:write", "project:admin"])

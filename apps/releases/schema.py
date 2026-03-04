@@ -23,11 +23,19 @@ class ReleaseIn(ReleaseBase):
     projects: list[str]
 
 
+class ReleaseRepositorySchema(CamelSchema):
+    id: str
+    name: str
+
+
 class ReleaseSchema(CamelSchema, ReleaseBase, ModelSchema):
     created: datetime = Field(serialization_alias="dateCreated")
     released: Optional[datetime] = Field(serialization_alias="dateReleased")
     short_version: str = Field(validation_alias="version")
     projects: list[NameSlugProjectSchema]
+    repository: ReleaseRepositorySchema | None = Field(
+        default=None, validation_alias="repository"
+    )
 
     class Meta:
         model = Release
@@ -63,6 +71,22 @@ class CommitIn(Schema):
     message: str = ""
     author_name: str = Field(alias="authorName", default="")
     author_email: str = Field(alias="authorEmail", default="")
+
+
+class CommitSchema(CamelSchema):
+    """Output schema for commit data, matching documented public API."""
+
+    id: str
+    message: str | None = ""
+    date_created: str | None = Field(
+        default=None, serialization_alias="dateCreated", validation_alias="dateCreated"
+    )
+    author_name: str | None = Field(
+        default=None, serialization_alias="authorName", validation_alias="authorName"
+    )
+    author_email: str | None = Field(
+        default=None, serialization_alias="authorEmail", validation_alias="authorEmail"
+    )
 
 
 class AssembleSchema(Schema):
