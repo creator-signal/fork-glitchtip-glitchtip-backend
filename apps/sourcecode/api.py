@@ -1,5 +1,8 @@
+from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
+from ninja.errors import HttpError
+from ninja.pagination import paginate
 
 from apps.files.models import FileBlob
 from apps.files.tasks import assemble_artifacts_task
@@ -8,9 +11,56 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.decorators import optional_slash
 from glitchtip.api.permissions import has_permission
 
-from .schema import ArtifactBundleAssembleIn
+from .models import Repository
+from .schema import ArtifactBundleAssembleIn, RepositoryIn, RepositorySchema
 
 router = Router()
+
+
+def get_repositories_queryset(organization_slug: str, user_id: int):
+    return Repository.objects.filter(
+        organization__slug=organization_slug,
+        organization__users=user_id,
+    ).order_by("-created")
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/repos/",
+    response=list[RepositorySchema],
+    by_alias=True,
+)
+@paginate
+@has_permission(["org:read", "org:write", "org:admin"])
+async def list_repositories(
+    request: AuthHttpRequest, response: HttpResponse, organization_slug: str
+):
+    return get_repositories_queryset(organization_slug, request.auth.user_id)
+
+
+@router.post(
+    "organizations/{slug:organization_slug}/repos/",
+    response={201: RepositorySchema},
+    by_alias=True,
+)
+@has_permission(["org:write", "org:admin"])
+async def create_repository(
+    request: AuthHttpRequest, organization_slug: str, payload: RepositoryIn
+):
+    user_id = request.auth.user_id
+    organization = await aget_object_or_404(
+        Organization, slug=organization_slug, users=user_id
+    )
+    if await Repository.objects.filter(
+        organization=organization, name=payload.name
+    ).aexists():
+        raise HttpError(409, "A repository with this name already exists.")
+    repo = await Repository.objects.acreate(
+        organization=organization,
+        name=payload.name,
+        url=payload.url,
+        provider=payload.provider or {},
+    )
+    return 201, repo
 
 
 @optional_slash(
