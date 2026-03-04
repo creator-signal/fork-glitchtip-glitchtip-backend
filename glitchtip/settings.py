@@ -43,6 +43,7 @@ env = environ.FileAwareEnv(
     STATIC_URL=(str, "/"),
     ENABLE_OBSERVABILITY_API=(bool, False),
     READ_ONLY_DATABASE_URL=(str, None),
+    MAINTENANCE_DATABASE_URL=(str, None),
     GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL=(bool, False),
 )
 path = environ.Path()
@@ -633,6 +634,10 @@ DATABASES = {
 }
 if env("READ_ONLY_DATABASE_URL"):
     DATABASES["read_only"] = env.db("READ_ONLY_DATABASE_URL")
+if env("MAINTENANCE_DATABASE_URL"):
+    DATABASES["maintenance"] = env.db("MAINTENANCE_DATABASE_URL")
+
+MAINTENANCE_DATABASE_ALIAS = "maintenance" if "maintenance" in DATABASES else "default"
 
 # If component variables like DATABASE_HOST are provided, update the base config
 if env.str("DATABASE_HOST", None):

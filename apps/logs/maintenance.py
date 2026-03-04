@@ -35,6 +35,7 @@ def cleanup_old_logs():
     hot_days = settings.GLITCHTIP_LOG_HOT_DAYS
     retention_days = settings.GLITCHTIP_LOG_RETENTION_DAYS
 
+    db_alias = settings.MAINTENANCE_DATABASE_ALIAS
     if is_duckdb_available():
         archive_and_cleanup_partitions(
             table_name="logs_logevent",
@@ -42,13 +43,14 @@ def cleanup_old_logs():
             column_types=EXPORT_COLUMN_TYPES,
             select_sql=LOGS_SELECT_SQL,
             retention_days=retention_days,
+            db_alias=db_alias,
         )
     else:
         # No cold storage available - delete partitions at total retention
-        delete_old_hot_partitions(retention_days)
+        delete_old_hot_partitions(retention_days, db_alias=db_alias)
 
 
-def delete_old_hot_partitions(days: int):
+def delete_old_hot_partitions(days: int, db_alias: str | None = None):
     """Delete hot partitions older than `days` when cold storage unavailable."""
     partitions = get_partitions_older_than("logs_logevent", days)
 
@@ -61,8 +63,8 @@ def delete_old_hot_partitions(days: int):
 
     for name, date in partitions:
         try:
-            detach_partition(name, "logs_logevent")
-            drop_partition(name)
+            detach_partition(name, "logs_logevent", db_alias=db_alias)
+            drop_partition(name, db_alias=db_alias)
             logger.info(f"Deleted log partition {name}")
         except Exception as e:
             logger.error(f"Error deleting log partition {name}: {e}")
