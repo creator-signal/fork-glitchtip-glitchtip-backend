@@ -22,6 +22,11 @@ from .models import Issue
 RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")
 
 
+def _is_uuid7(u: UUID) -> bool:
+    """Check if a UUID has version 7 (RFC 9562) based on the version nibble."""
+    return u.version == 7
+
+
 def relative_to_datetime(v: Any) -> datetime:
     """
     Allow relative terms like now or now-1h. Only 0 or 1 subtraction operation is permitted.
@@ -123,9 +128,14 @@ def filter_issue_list(
         qs = qs.filter(**qs_filters)
 
     if event_id:
-        qs = qs.filter(
-            Q(issueevent__id=event_id) | Q(issueevent__event_id=event_id)
-        )
+        if _is_uuid7(event_id):
+            # UUIDv7 id — prunes to a single time-range partition
+            qs = qs.filter(issueevent__id=event_id)
+        else:
+            # Client-provided sentry SDK event_id (typically UUIDv4).
+            # Scans event_id index across all time partitions (no pruning).
+            qs = qs.filter(issueevent__event_id=event_id)
+
     elif query:
         queries = shlex.split(query)
         # First look for structured queries
