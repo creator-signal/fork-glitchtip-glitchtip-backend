@@ -19,6 +19,7 @@ from .models import Deploy, Release
 from .schema import (
     AssembleSchema,
     CommitIn,
+    CommitSchema,
     DeployIn,
     DeploySchema,
     ReleaseBase,
@@ -500,7 +501,7 @@ async def create_commits(
     router,
     "get",
     "/organizations/{slug:organization_slug}/releases/{str:version}/commits/",
-    response=list[CommitIn],
+    response=list[CommitSchema],
     by_alias=True,
 )
 @has_permission(["project:releases", "project:write", "project:admin"])

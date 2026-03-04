@@ -73,6 +73,22 @@ class CommitIn(Schema):
     author_email: str = Field(alias="authorEmail", default="")
 
 
+class CommitSchema(CamelSchema):
+    """Output schema for commit data, matching documented public API."""
+
+    id: str
+    message: str | None = ""
+    date_created: str | None = Field(
+        default=None, serialization_alias="dateCreated", validation_alias="dateCreated"
+    )
+    author_name: str | None = Field(
+        default=None, serialization_alias="authorName", validation_alias="authorName"
+    )
+    author_email: str | None = Field(
+        default=None, serialization_alias="authorEmail", validation_alias="authorEmail"
+    )
+
+
 class AssembleSchema(Schema):
     checksum: str
     chunks: list[str]
