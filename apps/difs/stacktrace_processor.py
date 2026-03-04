@@ -218,7 +218,6 @@ class StacktraceProcessor:
         # Open symbol file
         try:
             archive = Archive.open(symbol_file)
-            archive.open(symbol_file)
             obj = find_arch_object(archive, arch)
             if obj is None:
                 return
@@ -236,12 +235,11 @@ class StacktraceProcessor:
 
                 image_addr = parse_addr(frame.get("image_addr"))
                 instruction_addr = parse_addr(frame.get("instruction_addr"))
-                function = frame.get("function")
                 addr = instruction_addr - image_addr
                 symbol = sym_cache.lookup(addr)
                 digested_symbol = digest_symbol(symbol)
 
-                if digested_symbol is not None and digested_symbol.symbol == function:
+                if digested_symbol is not None:
                     frame["resolved"] = True
                     frame["filename"] = digested_symbol.full_path
                     frame["lineno"] = digested_symbol.line
