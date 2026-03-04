@@ -14,6 +14,7 @@ from .views import health, index, internal_health
 
 urlpatterns = [
     path("_health/", health),
+    path("api/0/internal/health/", internal_health),
     path("api/0/internal/health", internal_health),
     re_path(
         r"^favicon\.ico$",

@@ -96,7 +96,7 @@ class APICatchallTestCase(TestCase):
 
 class InternalHealthTestCase(TestCase):
     def setUp(self):
-        self.url = "/api/0/internal/health"
+        self.url = "/api/0/internal/health/"
 
     def test_get_health(self):
         res = self.client.get(self.url)
