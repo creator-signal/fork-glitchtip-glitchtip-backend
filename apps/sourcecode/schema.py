@@ -1,12 +1,31 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from ninja import Schema
+from ninja import ModelSchema, Schema
 from pydantic import ConfigDict, Field
 
 from glitchtip.schema import CamelSchema
 
+from .models import Repository
+
 HexField = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{40}$")]
+
+
+class RepositoryIn(CamelSchema):
+    name: str
+    url: str = ""
+    provider: dict | None = None
+
+
+class RepositorySchema(CamelSchema, ModelSchema):
+    id: str
+    created: datetime = Field(serialization_alias="dateCreated")
+
+    class Meta:
+        model = Repository
+        fields = ["name", "url", "status", "provider"]
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
 
 class ArtifactBundleAssembleIn(Schema):
