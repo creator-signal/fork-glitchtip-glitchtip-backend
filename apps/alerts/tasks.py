@@ -77,6 +77,8 @@ def process_event_alerts():
 
 
 @task
-def send_notification(notification_id: int):
-    notification = Notification.objects.get(pk=notification_id)
-    notification.send_notifications()
+async def send_notification(notification_id: int):
+    notification = await Notification.objects.select_related("project_alert").aget(
+        pk=notification_id
+    )
+    await notification.asend_notifications()

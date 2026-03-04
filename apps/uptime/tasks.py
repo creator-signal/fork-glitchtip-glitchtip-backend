@@ -4,6 +4,7 @@ import time
 from uuid import UUID
 
 import aiohttp
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import F, Q
@@ -154,7 +155,7 @@ async def perform_checks(monitor_ids: list[int], now: str | None = None):
 
 
 @task
-def send_monitor_notification(
+async def send_monitor_notification(
     monitor_id: int, monitor_check_pk: list, went_down: bool, last_change: str | None
 ):
     if last_change:
@@ -166,12 +167,16 @@ def send_monitor_notification(
     recipients = AlertRecipient.objects.filter(
         alert__project__monitor__id=monitor_id, alert__uptime=True
     )
-    for recipient in recipients:
+    async for recipient in recipients:
         if recipient.recipient_type == RecipientType.EMAIL:
-            MonitorEmail(
-                pk=monitor_check_id,
-                went_down=went_down,
-                last_change=last_change if last_change else None,
-            ).send_users_email()
+            await sync_to_async(
+                MonitorEmail(
+                    pk=monitor_check_id,
+                    went_down=went_down,
+                    last_change=last_change if last_change else None,
+                ).send_users_email
+            )()
         else:
-            send_uptime_as_webhook(recipient, monitor_check_id, went_down, last_change)
+            await send_uptime_as_webhook(
+                recipient, monitor_check_id, went_down, last_change
+            )

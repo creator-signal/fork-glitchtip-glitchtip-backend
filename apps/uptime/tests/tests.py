@@ -161,10 +161,10 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(check.data["payload"], "Status: Failure")
 
     @aioresponses()
-    @mock.patch("requests.post")
-    def test_monitor_notifications(self, mocked, mock_post):
+    def test_monitor_notifications(self, mocked):
         self.create_user_and_project()
         test_url = "https://example.com"
+        webhook_url = "https://webhook.example.com"
         mocked.get(test_url, status=200)
         with freeze_time("2020-01-01"):
             baker.make(
@@ -185,10 +185,11 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
                 alert__uptime=True,
                 alert__project=self.project,
                 recipient_type="webhook",
-                url="https://example.com",
+                url=webhook_url,
             )
 
         mocked.get(test_url, status=500)
+        mocked.post(webhook_url, status=200)
 
         # We need to hit the tick that matches the monitor ID
         async def run_loop():
@@ -213,34 +214,39 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             f"<{self.project.slug}.{self.project.organization.slug}.{settings.GLITCHTIP_URL.hostname}>",
         )
 
-        mock_post.assert_called_once()
-
         mocked.get(test_url, status=500)
         with freeze_time("2020-01-03"):
             async_to_sync(run_loop)()
         self.assertEqual(len(mail.outbox), 1)
 
         mocked.get(test_url, status=200)
+        mocked.post(webhook_url, status=200)
         with freeze_time("2020-01-04"):
             async_to_sync(run_loop)()
         self.assertEqual(len(mail.outbox), 2)
         self.assertIn("is back up", mail.outbox[1].body)
 
-    @aioresponses()
-    @mock.patch("requests.post")
-    def test_discord_webhook(self, mocked, mocked_post):
+    @mock.patch("aiohttp.ClientSession")
+    def test_discord_webhook(self, MockSession):
+        from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
+
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
         self.create_user_and_project()
         test_url = "https://example.com"
-        mocked.get(test_url, status=200)
+        webhook_url = "https://discord.com/api/webhooks/test/test"
         check = baker.make(
             "uptime.MonitorCheck",
             monitor__monitor_type=MonitorType.GET,
             monitor__url=test_url,
             monitor__project=self.project,
         )
-        recipient = baker.make("alerts.AlertRecipient", recipient_type="discord")
-        send_uptime_as_webhook(recipient, check.pk, True, timezone.now())
-        mocked_post.assert_called_once()
+        recipient = baker.make(
+            "alerts.AlertRecipient", recipient_type="discord", url=webhook_url
+        )
+        async_to_sync(send_uptime_as_webhook)(recipient, check.pk, True, timezone.now())
+        mock_post.assert_called_once()
 
     @aioresponses()
     def test_notification_default_scope(self, mocked):

@@ -1,9 +1,8 @@
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
-import requests
+import aiohttp
 from django.conf import settings
-from requests.exceptions import ReadTimeout
 
 from .constants import RecipientType
 
@@ -27,17 +26,20 @@ STANDARD_TAG_LABELS = {
 STANDARD_TAG_KEYS = list(STANDARD_TAG_LABELS.keys())
 
 
-def gather_issue_tags(issue, tags_to_add: list[str] | None = None) -> list[TagData]:
+async def gather_issue_tags(
+    issue, tags_to_add: list[str] | None = None
+) -> list[TagData]:
     """Fetch standard + custom tags in a single query."""
     all_keys = list(dict.fromkeys(STANDARD_TAG_KEYS + (tags_to_add or [])))
     if not all_keys:
         return []
 
-    results = dict(
-        issue.issuetag_set.filter(tag_key__key__in=all_keys).values_list(
-            "tag_key__key", "tag_value__value"
-        )
-    )
+    results = {
+        k: v
+        async for k, v in issue.issuetag_set.filter(
+            tag_key__key__in=all_keys
+        ).values_list("tag_key__key", "tag_value__value")
+    }
 
     tags = []
     for key in all_keys:
@@ -73,7 +75,7 @@ class WebhookPayload:
     attachments: list[WebhookAttachment]
 
 
-def send_webhook(
+async def send_webhook(
     url: str,
     message: str,
     attachments: list[WebhookAttachment] | None = None,
@@ -81,19 +83,15 @@ def send_webhook(
     if not attachments:
         attachments = []
     data = WebhookPayload(text=message, attachments=attachments)
+    timeout = aiohttp.ClientTimeout(total=10)
     try:
-        return requests.post(
-            url,
-            json=asdict(data),
-            headers={"Content-type": "application/json"},
-            timeout=10,
-        )
-    except ReadTimeout:
-        # Ignore timeout
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(url, json=asdict(data), timeout=timeout)
+    except (TimeoutError, aiohttp.ClientError):
         return None
 
 
-def send_issue_as_webhook(
+async def send_issue_as_webhook(
     url,
     issues: list,
     issue_count: int = 1,
@@ -115,7 +113,7 @@ def send_issue_as_webhook(
                 short=True,
             )
         ]
-        tags = gather_issue_tags(issue, tags_to_add)
+        tags = await gather_issue_tags(issue, tags_to_add)
         for tag in tags:
             fields.append(
                 WebhookAttachmentField(
@@ -138,7 +136,7 @@ def send_issue_as_webhook(
     message = "GlitchTip Alert"
     if issue_count > 1:
         message += f" ({issue_count} issues)"
-    return send_webhook(url, message, attachments)
+    return await send_webhook(url, message, attachments)
 
 
 @dataclass
@@ -163,7 +161,7 @@ class DiscordWebhookPayload:
     embeds: list[DiscordEmbed]
 
 
-def send_issue_as_discord_webhook(
+async def send_issue_as_discord_webhook(
     url,
     issues: list,
     issue_count: int = 1,
@@ -180,7 +178,7 @@ def send_issue_as_discord_webhook(
                 inline=True,
             )
         ]
-        tags = gather_issue_tags(issue, tags_to_add)
+        tags = await gather_issue_tags(issue, tags_to_add)
         for tag in tags:
             fields.append(
                 DiscordField(
@@ -206,12 +204,17 @@ def send_issue_as_discord_webhook(
     if issue_count > 1:
         message += f" ({issue_count} issues)"
 
-    return send_discord_webhook(url, message, embeds)
+    return await send_discord_webhook(url, message, embeds)
 
 
-def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed]):
+async def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed]):
     payload = DiscordWebhookPayload(content=message, embeds=embeds)
-    return requests.post(url, json=asdict(payload), timeout=10)
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(url, json=asdict(payload), timeout=timeout)
+    except (TimeoutError, aiohttp.ClientError):
+        return None
 
 
 @dataclass
@@ -275,17 +278,22 @@ class GoogleChatWebhookPayload:
         return self.cardsV2.append(dict(cardId="createCardMessage", card=card))
 
 
-def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
+async def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
     """
     Send Google Chat compatible message as documented in
     https://developers.google.com/chat/messages-overview
     """
     payload = GoogleChatWebhookPayload()
     [payload.add_card(card) for card in cards]
-    return requests.post(url, json=asdict(payload), timeout=10)
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(url, json=asdict(payload), timeout=timeout)
+    except (TimeoutError, aiohttp.ClientError):
+        return None
 
 
-def send_issue_as_googlechat_webhook(
+async def send_issue_as_googlechat_webhook(
     url,
     issues: list,
     issue_count: int = 1,
@@ -294,17 +302,17 @@ def send_issue_as_googlechat_webhook(
 ):
     cards = []
     for issue in issues:
-        tags = gather_issue_tags(issue, tags_to_add)
+        tags = await gather_issue_tags(issue, tags_to_add)
         card = GoogleChatCard().construct_issue_card(
             title="GlitchTip Alert",
             issue=issue,
             tags=tags,
         )
         cards.append(card)
-    return send_googlechat_webhook(url, cards)
+    return await send_googlechat_webhook(url, cards)
 
 
-def send_ntfy(
+async def send_ntfy(
     url: str,
     title: str,
     message: str,
@@ -320,10 +328,17 @@ def send_ntfy(
         headers["Click"] = click_url
     if tags:
         headers["Tags"] = ",".join(tags)
-    return requests.post(url, data=message.encode("utf-8"), headers=headers, timeout=10)
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(
+                url, data=message.encode("utf-8"), headers=headers, timeout=timeout
+            )
+    except (TimeoutError, aiohttp.ClientError):
+        return None
 
 
-def send_issue_as_ntfy(
+async def send_issue_as_ntfy(
     url,
     issues: list,
     issue_count: int = 1,
@@ -337,7 +352,7 @@ def send_issue_as_ntfy(
     lines = []
     click_url = None
     for issue in issues:
-        issue_tags = gather_issue_tags(issue, tags_to_add)
+        issue_tags = await gather_issue_tags(issue, tags_to_add)
         lines.append(f"**{issue}**")
         lines.append(f"Project: {issue.project.name}")
         if issue.culprit:
@@ -350,10 +365,10 @@ def send_issue_as_ntfy(
         lines.append("")
 
     message = "\n".join(lines).rstrip()
-    return send_ntfy(url, title, message, click_url=click_url, tags=["warning"])
+    return await send_ntfy(url, title, message, click_url=click_url, tags=["warning"])
 
 
-def send_teams_webhook(
+async def send_teams_webhook(
     url: str, card_body: list[dict], actions: list[dict] | None = None
 ):
     """Send an Adaptive Card to a Microsoft Teams Workflows webhook."""
@@ -373,10 +388,15 @@ def send_teams_webhook(
             }
         ],
     }
-    return requests.post(url, json=payload, timeout=10)
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(url, json=payload, timeout=timeout)
+    except (TimeoutError, aiohttp.ClientError):
+        return None
 
 
-def send_issue_as_teams_webhook(
+async def send_issue_as_teams_webhook(
     url,
     issues: list,
     issue_count: int = 1,
@@ -393,7 +413,7 @@ def send_issue_as_teams_webhook(
     actions: list[dict] = []
 
     for issue in issues:
-        tags = gather_issue_tags(issue, tags_to_add)
+        tags = await gather_issue_tags(issue, tags_to_add)
         facts = [{"title": "Project", "value": issue.project.name}]
         for tag in tags:
             facts.append({"title": tag.label, "value": tag.value})
@@ -418,17 +438,27 @@ def send_issue_as_teams_webhook(
             }
         )
 
-    return send_teams_webhook(url, body, actions)
+    return await send_teams_webhook(url, body, actions)
 
 
-def send_zulip_message(server_url, bot_email, api_key, channel, topic, content):
+async def send_zulip_message(server_url, bot_email, api_key, channel, topic, content):
     """Send a message to a Zulip channel via the native API."""
     url = f"{server_url.rstrip('/')}/api/v1/messages"
     data = {"type": "channel", "to": channel, "topic": topic, "content": content}
-    return requests.post(url, data=data, auth=(bot_email, api_key), timeout=10)
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            return await session.post(
+                url,
+                data=data,
+                auth=aiohttp.BasicAuth(bot_email, api_key),
+                timeout=timeout,
+            )
+    except (TimeoutError, aiohttp.ClientError):
+        return None
 
 
-def send_issue_as_zulip(
+async def send_issue_as_zulip(
     url,
     issues: list,
     issue_count: int = 1,
@@ -443,7 +473,7 @@ def send_issue_as_zulip(
 
     lines = [f"## {title}", ""]
     for issue in issues:
-        issue_tags = gather_issue_tags(issue, tags_to_add)
+        issue_tags = await gather_issue_tags(issue, tags_to_add)
         lines.append(f"**[{issue}]({issue.get_detail_url()})**")
         lines.append(f"Project: {issue.project.name}")
         if issue.culprit:
@@ -453,7 +483,7 @@ def send_issue_as_zulip(
         lines.append("")
 
     content = "\n".join(lines).rstrip()
-    return send_zulip_message(
+    return await send_zulip_message(
         server_url=url,
         bot_email=config.get("bot_email", ""),
         api_key=config.get("api_key", ""),
@@ -473,20 +503,22 @@ ISSUE_NOTIFICATION_HANDLERS = {
 }
 
 
-def send_test_notification(url, recipient_type, project, tags_to_add=None, config=None):
+async def send_test_notification(
+    url, recipient_type, project, tags_to_add=None, config=None
+):
     """Send a test notification to verify recipient configuration."""
     from apps.issue_events.models import Issue
 
-    issue = (
+    issue = await (
         Issue.objects.filter(project=project)
         .select_related("project__organization")
         .order_by("-id")
-        .first()
+        .afirst()
     )
 
     if issue:
         handler = ISSUE_NOTIFICATION_HANDLERS.get(recipient_type, send_issue_as_webhook)
-        return handler(url, [issue], 1, tags_to_add=tags_to_add, config=config)
+        return await handler(url, [issue], 1, tags_to_add=tags_to_add, config=config)
 
     # No issues yet — send a basic test via the low-level transport
     title = "GlitchTip Test Notification"
@@ -497,7 +529,7 @@ def send_test_notification(url, recipient_type, project, tags_to_add=None, confi
 
     if recipient_type == RecipientType.ZULIP:
         config = config or {}
-        return send_zulip_message(
+        return await send_zulip_message(
             server_url=url,
             bot_email=config.get("bot_email", ""),
             api_key=config.get("api_key", ""),
@@ -506,37 +538,42 @@ def send_test_notification(url, recipient_type, project, tags_to_add=None, confi
             content=f"## {title}\n\n{message}",
         )
     elif recipient_type == RecipientType.NTFY:
-        return send_ntfy(url, title, message, tags=["white_check_mark"])
+        return await send_ntfy(url, title, message, tags=["white_check_mark"])
     elif recipient_type == RecipientType.MICROSOFT_TEAMS:
         card_body = [
             {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": title},
             {"type": "TextBlock", "text": message, "wrap": True},
         ]
-        return send_teams_webhook(url, card_body)
+        return await send_teams_webhook(url, card_body)
     elif recipient_type == RecipientType.DISCORD:
         embed = DiscordEmbed(
             title=title, description=message, color=0x4B60B4, url="", fields=[]
         )
-        return send_discord_webhook(url, title, [embed])
+        return await send_discord_webhook(url, title, [embed])
     elif recipient_type == RecipientType.GOOGLE_CHAT:
         card = GoogleChatCard()
         card.header = dict(title=title, subtitle=project.name)
         card.sections = [dict(widgets=[dict(decoratedText=dict(text=message))])]
-        return send_googlechat_webhook(url, [card])
+        return await send_googlechat_webhook(url, [card])
     else:
         attachment = WebhookAttachment(title=title, title_link="", text=message)
-        return send_webhook(url, title, [attachment])
+        return await send_webhook(url, title, [attachment])
 
 
-def send_webhook_notification(
+async def send_webhook_notification(
     notification: "Notification",
     url: str,
     recipient_type: str,
     tags_to_add: list[str] | None = None,
     config: dict | None = None,
 ):
-    issue_count = notification.issues.count()
-    issues = notification.issues.all()[: settings.MAX_ISSUES_PER_ALERT]
+    issue_count = await notification.issues.acount()
+    issues = [
+        issue
+        async for issue in notification.issues.select_related(
+            "project__organization"
+        ).all()[: settings.MAX_ISSUES_PER_ALERT]
+    ]
 
     handler = ISSUE_NOTIFICATION_HANDLERS.get(recipient_type, send_issue_as_webhook)
-    handler(url, issues, issue_count, tags_to_add=tags_to_add, config=config)
+    await handler(url, issues, issue_count, tags_to_add=tags_to_add, config=config)
