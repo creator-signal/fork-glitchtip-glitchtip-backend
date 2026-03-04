@@ -1,7 +1,6 @@
 import logging
 from datetime import timedelta
 
-from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import IntegrityError, models
 from django.db.models.expressions import OuterRef, Subquery
@@ -16,7 +15,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .exceptions import StripeResourceNotFound
-from .utils import unix_to_datetime
+from .utils import compute_cycle, unix_to_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -250,18 +249,30 @@ class StripeSubscription(StripeModel):
             subscription.start_date = unix_to_datetime(fetched_sub.start_date)
             subscription.collection_method = fetched_sub.collection_method
 
-            # For annual plans, we want to anchor the cycle to one month
-            cycle_start = subscription.current_period_start
-            cycle_end = subscription.current_period_end
-            if subscription.price.interval == "year" or (
+            is_annual = subscription.price.interval == "year" or bool(
                 fetched_sub.items.data[0].price.recurring
                 and fetched_sub.items.data[0].price.recurring.get("interval") == "year"
-            ):
-                cycle_end = cycle_start + relativedelta(months=1)
-
-            subscription.subscription_cycle_start = cycle_start
-            subscription.subscription_cycle_end = cycle_end
-            await subscription.asave()
+            )
+            (
+                subscription.subscription_cycle_start,
+                subscription.subscription_cycle_end,
+            ) = compute_cycle(
+                subscription.current_period_start,
+                subscription.current_period_end,
+                is_annual,
+            )
+            await subscription.asave(
+                update_fields=[
+                    "status",
+                    "created",
+                    "current_period_start",
+                    "current_period_end",
+                    "start_date",
+                    "collection_method",
+                    "subscription_cycle_start",
+                    "subscription_cycle_end",
+                ]
+            )
 
     @classmethod
     async def remove_inactive_primary_subscriptions(cls):
@@ -342,28 +353,25 @@ class StripeSubscription(StripeModel):
                             )
                             continue
 
-                    # For annual plans, we want to anchor the cycle to one month
-                    cycle_start = unix_to_datetime(
+                    period_start = unix_to_datetime(
                         subscription.items.data[0].current_period_start
                     )
-                    cycle_end = unix_to_datetime(
+                    period_end = unix_to_datetime(
                         subscription.items.data[0].current_period_end
                     )
-                    # Check if the price interval is 'year'
-                    # We can use our local price object if we just synced it or fetch it
-                    # To be efficient we can look it up from DB once before bulk create
-                    # but for now let's use the price object from Stripe data
-                    if price.recurring and price.recurring.get("interval") == "year":
-                        cycle_end = cycle_start + relativedelta(months=1)
+                    is_annual = bool(
+                        price.recurring and price.recurring.get("interval") == "year"
+                    )
+                    cycle_start, cycle_end = compute_cycle(
+                        period_start, period_end, is_annual
+                    )
 
                     subscription_objects.append(
                         StripeSubscription(
                             stripe_id=subscription.id,
                             created=unix_to_datetime(subscription.created),
-                            current_period_start=cycle_start,
-                            current_period_end=unix_to_datetime(
-                                subscription.items.data[0].current_period_end
-                            ),
+                            current_period_start=period_start,
+                            current_period_end=period_end,
                             price_id=price_id,
                             organization_id=organization_id,
                             status=subscription.status,
