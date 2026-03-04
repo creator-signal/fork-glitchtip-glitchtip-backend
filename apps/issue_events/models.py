@@ -103,13 +103,6 @@ class Issue(SoftDeleteModel):
         on_delete=models.SET_NULL,
         related_name="+",
     )
-    repository = models.ForeignKey(
-        "sourcecode.Repository",
-        blank=True,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name="issues",
-    )
     first_seen = models.DateTimeField(default=timezone.now, db_index=True)
     last_seen = models.DateTimeField(default=timezone.now, db_index=True)
     count = models.PositiveIntegerField(default=1, editable=False)

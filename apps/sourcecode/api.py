@@ -1,3 +1,4 @@
+from django.db import IntegrityError
 from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import Router
@@ -50,16 +51,15 @@ async def create_repository(
     organization = await aget_object_or_404(
         Organization, slug=organization_slug, users=user_id
     )
-    if await Repository.objects.filter(
-        organization=organization, name=payload.name
-    ).aexists():
+    try:
+        repo = await Repository.objects.acreate(
+            organization=organization,
+            name=payload.name,
+            url=payload.url,
+            provider=payload.provider or {},
+        )
+    except IntegrityError:
         raise HttpError(409, "A repository with this name already exists.")
-    repo = await Repository.objects.acreate(
-        organization=organization,
-        name=payload.name,
-        url=payload.url,
-        provider=payload.provider or {},
-    )
     return 201, repo
 
 
