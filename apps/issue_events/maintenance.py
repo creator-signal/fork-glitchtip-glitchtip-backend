@@ -35,6 +35,7 @@ def cleanup_old_issue_events():
         column_types=ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         select_sql=ISSUE_EVENT_SELECT_SQL,
         retention_days=settings.GLITCHTIP_EVENT_RETENTION_DAYS,
+        db_alias=settings.MAINTENANCE_DATABASE_ALIAS,
     )
 
 
