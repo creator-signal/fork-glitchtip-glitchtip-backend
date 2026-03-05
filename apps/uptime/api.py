@@ -152,13 +152,22 @@ async def heartbeat_check(
         organization__slug=organization_slug,
         endpoint_id=endpoint_id,
     )
+    is_change = monitor.latest_is_up is not True or monitor.last_change is None
     monitor_check = await MonitorCheck.objects.acreate(
         monitor=monitor,
         organization=monitor.organization,
         is_up=True,
         reason=None,
-        is_change=monitor.latest_is_up is not True or monitor.last_change is None,
+        is_change=is_change,
     )
+
+    # Update cached fields on monitor
+    monitor.cached_is_up = True
+    monitor.cached_last_change = (
+        monitor_check.start_check if is_change else monitor.cached_last_change
+    )
+    await monitor.asave(update_fields=["cached_is_up", "cached_last_change"])
+
     if monitor.latest_is_up is False:
         last_change = monitor.last_change
         if last_change:

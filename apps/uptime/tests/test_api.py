@@ -42,6 +42,9 @@ class UptimeAPITestCase(GlitchTestCase):
             is_change=True,
             start_check="2021-09-19T15:40:31Z",
         )
+        monitor.cached_is_up = True
+        monitor.cached_last_change = parse_datetime("2021-09-19T15:40:31Z")
+        monitor.save(update_fields=["cached_is_up", "cached_last_change"])
         res = self.client.get(self.list_url)
         self.assertContains(res, monitor.name)
         data = res.json()
@@ -206,6 +209,9 @@ class UptimeAPITestCase(GlitchTestCase):
             is_change=True,
             start_check=now,
         )
+        monitor.cached_is_up = True
+        monitor.cached_last_change = now
+        monitor.save(update_fields=["cached_is_up", "cached_last_change"])
 
         url = reverse("api:get_monitor", args=[self.organization.slug, monitor.pk])
         res = self.client.get(url)
