@@ -657,16 +657,24 @@ def detach_partition(
     partition_name: str, parent_table: str, db_alias: str | None = None
 ) -> None:
     """
-    Detach a partition from its parent table.
+    Detach a partition from its parent table using CONCURRENTLY.
 
-    This is done before dropping the partition after archival.
+    CONCURRENTLY avoids the ACCESS EXCLUSIVE lock that blocks concurrent
+    INSERTs and can cause deadlocks during archival. It requires autocommit
+    mode (cannot run inside a transaction block).
+
     Safe to call if the partition is already detached or does not exist.
     """
     db_conn = connections[db_alias] if db_alias else connection
+    db_conn.ensure_connection()
+    raw_conn = db_conn.connection
+
+    old_autocommit = raw_conn.autocommit
     try:
-        with db_conn.cursor() as cursor:
+        raw_conn.autocommit = True
+        with raw_conn.cursor() as cursor:
             cursor.execute(
-                SQL("ALTER TABLE {} DETACH PARTITION {};").format(
+                SQL("ALTER TABLE {} DETACH PARTITION {} CONCURRENTLY;").format(
                     Identifier(parent_table), Identifier(partition_name)
                 )
             )
@@ -677,16 +685,26 @@ def detach_partition(
             partition_name,
             exc_info=True,
         )
+    finally:
+        raw_conn.autocommit = old_autocommit
 
 
 def drop_partition(partition_name: str, db_alias: str | None = None) -> None:
     """Drop a partition table after it has been archived."""
     db_conn = connections[db_alias] if db_alias else connection
-    with db_conn.cursor() as cursor:
-        cursor.execute(
-            SQL("DROP TABLE IF EXISTS {};").format(Identifier(partition_name))
-        )
-    logger.info(f"Dropped partition {partition_name}")
+    db_conn.ensure_connection()
+    raw_conn = db_conn.connection
+
+    old_autocommit = raw_conn.autocommit
+    try:
+        raw_conn.autocommit = True
+        with raw_conn.cursor() as cursor:
+            cursor.execute(
+                SQL("DROP TABLE IF EXISTS {};").format(Identifier(partition_name))
+            )
+        logger.info(f"Dropped partition {partition_name}")
+    finally:
+        raw_conn.autocommit = old_autocommit
 
 
 def archive_and_swap_partition(
