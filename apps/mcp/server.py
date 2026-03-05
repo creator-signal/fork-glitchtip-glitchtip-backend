@@ -176,7 +176,9 @@ async def get_latest_event(issue_id: int) -> str:
 
 
 @mcp.tool()
-async def get_event(event_id: str) -> str:
+async def get_event(
+    event_id: str, organization_slug: str | None = None
+) -> str:
     """Look up a specific event by its ID and return it with its parent issue.
 
     Accepts either format:
@@ -187,10 +189,11 @@ async def get_event(event_id: str) -> str:
 
     Args:
         event_id: Event UUID (either GlitchTip id or Sentry SDK event_id)
+        organization_slug: Optional org slug for faster lookup (recommended)
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
-        event = await data.get_event(user_id, event_id)
+        event = await data.get_event(user_id, event_id, organization_slug)
         if event is None:
             return _error("Event not found")
         result = serializers.serialize_event(event)
