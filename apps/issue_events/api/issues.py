@@ -28,7 +28,13 @@ from ..schema import (
     IssueTagSchema,
     StatsDetailSchema,
 )
-from ..services import IssueFilters, filter_issue_list, get_queryset, sort_options
+from ..services import (
+    IssueFilters,
+    filter_issue_list,
+    get_queryset,
+    is_uuid7,
+    sort_options,
+)
 from ..tasks import delete_issue_task, update_issues_task
 from . import router
 
@@ -183,14 +189,21 @@ async def list_issues(
         await get_queryset(request.auth.user_id, organization_slug=organization_slug)
     ).filter(is_deleted=False)
     event_id: UUID | None = None
+    organization_id: int | None = None
     if filters.query:
         try:
             event_id = UUID(filters.query)
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
+            if not is_uuid7(event_id):
+                org = await Organization.objects.filter(
+                    slug=organization_slug
+                ).only("id").afirst()
+                if org:
+                    organization_id = org.id
         except ValueError:
             pass
-    return filter_issue_list(qs, filters, sort, event_id)
+    return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 
 @router.delete(
@@ -304,14 +317,21 @@ async def list_project_issues(
         project_slug=project_slug,
     )
     event_id: UUID | None = None
+    organization_id: int | None = None
     if filters.query:
         try:
             event_id = UUID(filters.query)
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
+            if not is_uuid7(event_id):
+                org = await Organization.objects.filter(
+                    slug=organization_slug
+                ).only("id").afirst()
+                if org:
+                    organization_id = org.id
         except ValueError:
             pass
-    return filter_issue_list(qs, filters, sort, event_id)
+    return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 
 @router.get(

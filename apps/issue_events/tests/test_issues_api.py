@@ -216,8 +216,11 @@ class IssueAPITestCase(GlitchTestCase):
 
         # Search by client-provided sentry SDK event_id (UUIDv4)
         sentry_event_id = uuid.uuid4()
-        event2 = baker.make(
-            "issue_events.IssueEvent", issue=issue, event_id=sentry_event_id
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            event_id=sentry_event_id,
+            organization=self.organization,
         )
         res = self.client.get(self.list_url + "?query=" + sentry_event_id.hex)
         self.assertContains(res, issue.title)
