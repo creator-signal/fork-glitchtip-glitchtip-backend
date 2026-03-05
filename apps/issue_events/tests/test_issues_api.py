@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 from timeit import default_timer as timer
 
 from django.conf import settings
@@ -211,6 +212,20 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertNotContains(res, other_issue.title)
         self.assertContains(res, "matchingEventId")
         self.assertContains(res, event.id.hex)
+        self.assertEqual(res.headers.get("X-Sentry-Direct-Hit"), "1")
+
+        # Search by client-provided sentry SDK event_id (UUIDv4)
+        sentry_event_id = uuid.uuid4()
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            event_id=sentry_event_id,
+            organization=self.organization,
+        )
+        res = self.client.get(self.list_url + "?query=" + sentry_event_id.hex)
+        self.assertContains(res, issue.title)
+        self.assertNotContains(res, other_issue.title)
+        self.assertContains(res, "matchingEventId")
         self.assertEqual(res.headers.get("X-Sentry-Direct-Hit"), "1")
 
         event3 = baker.make(
