@@ -38,12 +38,9 @@ async def update_issues_task(
         qs = qs.exclude(status=event_status)
 
         chunk_size = 1000
-        while True:
-            # Fetch IDs to lock minimally
-            batch_ids = [i async for i in qs.values_list("id", flat=True)[:chunk_size]]
-            if not batch_ids:
-                break
-
+        while batch_ids := [
+            i async for i in qs.values_list("id", flat=True)[:chunk_size]
+        ]:
             await Issue.objects.filter(id__in=batch_ids).aupdate(status=event_status)
 
     if merge_id:
@@ -54,16 +51,12 @@ async def update_issues_task(
 
         updated_issue_count = 0
         chunk_size = 1000
-        while True:
-            batch_ids = [
-                i
-                async for i in qs.exclude(id=target_issue.id).values_list(
-                    "id", flat=True
-                )[:chunk_size]
+        while batch_ids := [
+            i
+            async for i in qs.exclude(id=target_issue.id).values_list("id", flat=True)[
+                :chunk_size
             ]
-            if not batch_ids:
-                break
-
+        ]:
             # Soft delete source issues
             await Issue.objects.filter(id__in=batch_ids).aupdate(is_deleted=True)
 

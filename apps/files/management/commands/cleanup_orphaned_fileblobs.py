@@ -33,11 +33,7 @@ class Command(BaseCommand):
             return
 
         deleted = 0
-        while True:
-            batch_ids = list(orphaned_qs.values_list("id", flat=True)[:BATCH_SIZE])
-            if not batch_ids:
-                break
-
+        while batch_ids := list(orphaned_qs.values_list("id", flat=True)[:BATCH_SIZE]):
             blobs = list(FileBlob.objects.filter(id__in=batch_ids))
             for blob in blobs:
                 try:

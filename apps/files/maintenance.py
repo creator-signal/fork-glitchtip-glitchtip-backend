@@ -28,10 +28,7 @@ def cleanup_old_files():
     )
 
     total_deleted = 0
-    while True:
-        file_blobs = list(queryset.only("id", "blob")[:1000])
-        if not file_blobs:
-            break
+    while file_blobs := list(queryset.only("id", "blob")[:1000]):
         ids = []
         for file_blob in file_blobs:
             ids.append(file_blob.id)
