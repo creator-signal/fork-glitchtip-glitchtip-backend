@@ -234,19 +234,23 @@ def _create_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     memory_limit = getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB")
-    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "")
-    if (
-        memory_limit
-        and temp_dir
-        and os.path.isdir(temp_dir)
-        and os.access(temp_dir, os.W_OK)
-    ):
+
+    # Always set memory limit to prevent OOM-killing the worker process.
+    # Without a temp directory DuckDB can't spill to disk, so queries
+    # exceeding the limit will fail — but that's better than an OOM kill
+    # that takes down the entire worker.
+    if memory_limit:
         conn.execute(f"SET memory_limit = '{memory_limit}'")
+
+    # Auto-detect a writable temp directory for DuckDB spill-to-disk.
+    # Explicit setting takes priority, then Python's tempfile default.
+    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "") or tempfile.gettempdir()
+    if os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
         conn.execute(f"SET temp_directory = '{temp_dir}'")
-    elif memory_limit and temp_dir:
+    else:
         logger.warning(
-            "DUCKDB_TEMP_DIRECTORY=%s is not writable, "
-            "running DuckDB without memory limit",
+            "No writable temp directory found (tried %s), "
+            "DuckDB cannot spill to disk",
             temp_dir,
         )
 
