@@ -1,5 +1,6 @@
 from unittest import mock
 
+import aiohttp
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -248,8 +249,13 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.status_code, 204)
         self.assertEqual(ProjectAlert.objects.count(), 0)
 
-    @mock.patch("requests.post")
-    def test_test_project_alert(self, mock_post):
+    @mock.patch("aiohttp.ClientSession")
+    def test_test_project_alert(self, MockSession):
+        from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
+
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
@@ -271,8 +277,13 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(data[0]["status"], "sent")
         mock_post.assert_called_once()
 
-    @mock.patch("requests.post")
-    def test_test_project_alert_skips_email(self, mock_post):
+    @mock.patch("aiohttp.ClientSession")
+    def test_test_project_alert_skips_email(self, MockSession):
+        from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
+
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
@@ -295,6 +306,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     @mock.patch(
         "apps.alerts.api.send_test_notification",
+        new_callable=mock.AsyncMock,
         side_effect=Exception("Connection refused"),
     )
     def test_test_project_alert_error(self, _mock_send):
@@ -399,9 +411,14 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         recipient = alert.alertrecipient_set.first()
         self.assertEqual(recipient.config["api_key"], "new-rotated-key")
 
-    @mock.patch("requests.post")
-    def test_test_project_alert_zulip(self, mock_post):
+    @mock.patch("aiohttp.ClientSession")
+    def test_test_project_alert_zulip(self, MockSession):
         """Test endpoint works with Zulip recipient, passing config."""
+        from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
+
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
@@ -429,4 +446,6 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(data[0]["status"], "sent")
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args.kwargs
-        self.assertEqual(call_kwargs["auth"], ("bot@zulip.example.com", "test-key"))
+        self.assertIsInstance(call_kwargs["auth"], aiohttp.BasicAuth)
+        self.assertEqual(call_kwargs["auth"].login, "bot@zulip.example.com")
+        self.assertEqual(call_kwargs["auth"].password, "test-key")

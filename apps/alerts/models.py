@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
@@ -40,11 +41,11 @@ class AlertRecipient(models.Model):
     class Meta:
         unique_together = ("alert", "recipient_type", "url")
 
-    def send(self, notification):
+    async def send(self, notification):
         if self.recipient_type == RecipientType.EMAIL:
-            send_email_notification(notification)
+            await sync_to_async(send_email_notification)(notification)
         else:
-            send_webhook_notification(
+            await send_webhook_notification(
                 notification,
                 self.url,
                 self.recipient_type,
@@ -58,11 +59,12 @@ class Notification(CreatedModel):
     is_sent = models.BooleanField(default=False)
     issues = models.ManyToManyField("issue_events.Issue")
 
-    def send_notifications(self):
-        for recipient in self.project_alert.alertrecipient_set.all():
-            recipient.send(self)
-        # Temp backwards compat hack - no recipients means not set up yet
-        if self.project_alert.alertrecipient_set.all().exists() is False:
-            send_email_notification(self)
+    async def send_notifications(self):
+        has_recipients = False
+        async for recipient in self.project_alert.alertrecipient_set.all():
+            has_recipients = True
+            await recipient.send(self)
+        if not has_recipients:
+            await sync_to_async(send_email_notification)(self)
         self.is_sent = True
-        self.save()
+        await self.asave()

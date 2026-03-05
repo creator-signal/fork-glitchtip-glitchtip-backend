@@ -18,7 +18,8 @@ from apps.alerts.webhooks import (
 from .models import MonitorCheck
 
 
-def _resolve_monitor_check(monitor_check_id):
+async def _resolve_monitor_check(monitor_check_id):
+    qs = MonitorCheck.objects.select_related("monitor__project__organization")
     if isinstance(monitor_check_id, (list, tuple)):
         mid = (
             UUID(monitor_check_id[0])
@@ -26,26 +27,26 @@ def _resolve_monitor_check(monitor_check_id):
             else monitor_check_id[0]
         )
         oid = int(monitor_check_id[1])
-        return MonitorCheck.objects.get(id=mid, organization_id=oid)
-    return MonitorCheck.objects.get(id=monitor_check_id)
+        return await qs.aget(id=mid, organization_id=oid)
+    return await qs.aget(id=monitor_check_id)
 
 
-def _send_uptime_generic(recipient, monitor, subject, message):
+async def _send_uptime_generic(recipient, monitor, subject, message):
     attachment = WebhookAttachment(monitor.name, monitor.get_detail_url(), message)
-    return send_webhook(recipient.url, subject, [attachment])
+    return await send_webhook(recipient.url, subject, [attachment])
 
 
-def _send_uptime_googlechat(recipient, monitor, subject, message):
+async def _send_uptime_googlechat(recipient, monitor, subject, message):
     card = GoogleChatCard().construct_uptime_card(
         title=subject,
         subtitle=monitor.name,
         text=message,
         url=monitor.get_detail_url(),
     )
-    return send_googlechat_webhook(recipient.url, [card])
+    return await send_googlechat_webhook(recipient.url, [card])
 
 
-def _send_uptime_discord(recipient, monitor, subject, message):
+async def _send_uptime_discord(recipient, monitor, subject, message):
     embed = DiscordEmbed(
         title=monitor.name,
         description=message,
@@ -53,11 +54,11 @@ def _send_uptime_discord(recipient, monitor, subject, message):
         fields=[],
         url=monitor.get_detail_url(),
     )
-    return send_discord_webhook(recipient.url, subject, [embed])
+    return await send_discord_webhook(recipient.url, subject, [embed])
 
 
-def _send_uptime_ntfy(recipient, monitor, subject, message):
-    return send_ntfy(
+async def _send_uptime_ntfy(recipient, monitor, subject, message):
+    return await send_ntfy(
         recipient.url,
         title=subject,
         message=f"**{monitor.name}**\n{message}",
@@ -66,7 +67,7 @@ def _send_uptime_ntfy(recipient, monitor, subject, message):
     )
 
 
-def _send_uptime_teams(recipient, monitor, subject, message):
+async def _send_uptime_teams(recipient, monitor, subject, message):
     body = [
         {"type": "TextBlock", "size": "Large", "weight": "Bolder", "text": subject},
         {"type": "TextBlock", "weight": "Bolder", "text": monitor.name},
@@ -79,13 +80,13 @@ def _send_uptime_teams(recipient, monitor, subject, message):
             "url": monitor.get_detail_url(),
         }
     ]
-    return send_teams_webhook(recipient.url, body, actions)
+    return await send_teams_webhook(recipient.url, body, actions)
 
 
-def _send_uptime_zulip(recipient, monitor, subject, message):
+async def _send_uptime_zulip(recipient, monitor, subject, message):
     config = recipient.config or {}
     content = f"## {subject}\n\n**{monitor.name}**\n{message}\n\n[View Monitor]({monitor.get_detail_url()})"
-    return send_zulip_message(
+    return await send_zulip_message(
         server_url=recipient.url,
         bot_email=config.get("bot_email", ""),
         api_key=config.get("api_key", ""),
@@ -105,7 +106,7 @@ UPTIME_NOTIFICATION_HANDLERS = {
 }
 
 
-def send_uptime_as_webhook(
+async def send_uptime_as_webhook(
     recipient: AlertRecipient,
     monitor_check_id: tuple | list | int,
     went_down: bool,
@@ -114,7 +115,7 @@ def send_uptime_as_webhook(
     """
     Notification about uptime event via webhook.
     """
-    monitor_check = _resolve_monitor_check(monitor_check_id)
+    monitor_check = await _resolve_monitor_check(monitor_check_id)
     monitor = monitor_check.monitor
 
     message = (
@@ -127,4 +128,4 @@ def send_uptime_as_webhook(
     handler = UPTIME_NOTIFICATION_HANDLERS.get(
         recipient.recipient_type, _send_uptime_generic
     )
-    return handler(recipient, monitor, subject, message)
+    return await handler(recipient, monitor, subject, message)
