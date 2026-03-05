@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, URLValidator
 from django.db import models
-from django.db.models import OuterRef, Subquery
+from django.db.models import F
 from django.urls import reverse
 from django.utils.timezone import now
 from django_extensions.db.fields import AutoSlugField
@@ -22,25 +22,12 @@ class MonitorManager(models.Manager):
         latest_is_up - Most recent check is_up result
         last_change - Most recent check where is_up state changed
         Example: Monitor state: { latest_is_up } since { last_change }
+
+        These are now denormalized onto the Monitor model and read via F().
         """
         return self.annotate(
-            latest_is_up=Subquery(
-                MonitorCheck.objects.filter(
-                    monitor_id=OuterRef("id"),
-                    organization_id=OuterRef("organization_id"),
-                )
-                .order_by("-start_check")
-                .values("is_up")[:1]
-            ),
-            last_change=Subquery(
-                MonitorCheck.objects.filter(
-                    monitor_id=OuterRef("id"),
-                    organization_id=OuterRef("organization_id"),
-                    is_change=True,
-                )
-                .order_by("-start_check")
-                .values("start_check")[:1]
-            ),
+            latest_is_up=F("cached_is_up"),
+            last_change=F("cached_last_change"),
         )
 
 
@@ -95,6 +82,8 @@ class Monitor(models.Model):
         max_length=2000, blank=True, validators=[OptionalSchemeURLValidator()]
     )
     expected_body = models.CharField(max_length=2000, blank=True)
+    cached_is_up = models.BooleanField(null=True, default=None)
+    cached_last_change = models.DateTimeField(null=True, default=None)
 
     objects = MonitorManager()
 
