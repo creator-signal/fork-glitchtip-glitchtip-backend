@@ -62,6 +62,8 @@ async def update_issues_task(
                 )[:chunk_size]
             ]
             if not batch_ids:
+                target_issue.count = F("count") + updated_issue_count
+                await target_issue.asave(update_fields=["count"])
                 break
 
             # Soft delete source issues
@@ -85,6 +87,3 @@ async def update_issues_task(
                     issue=target_issue
                 )
                 updated_issue_count += len(event_ids)
-
-        target_issue.count = F("count") + updated_issue_count
-        await target_issue.asave(update_fields=["count"])
