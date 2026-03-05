@@ -22,6 +22,11 @@ from .models import Issue
 RELATIVE_TIME_REGEX = re.compile(r"now\s*\-\s*\d+\s*(m|h|d)\s*$")
 
 
+def is_uuid7(u: UUID) -> bool:
+    """Check if a UUID has version 7 (RFC 9562) based on the version nibble."""
+    return u.version == 7
+
+
 def relative_to_datetime(v: Any) -> datetime:
     """
     Allow relative terms like now or now-1h. Only 0 or 1 subtraction operation is permitted.
@@ -105,6 +110,7 @@ def filter_issue_list(
     filters: IssueFilters,
     sort: sort_options | None = None,
     event_id: UUID | None = None,
+    organization_id: int | None = None,
 ) -> QuerySet[Issue]:
     # Handle both Pydantic model and dict
     if isinstance(filters, dict):
@@ -123,7 +129,17 @@ def filter_issue_list(
         qs = qs.filter(**qs_filters)
 
     if event_id:
-        qs = qs.filter(issueevent__id=event_id)
+        if is_uuid7(event_id):
+            # UUIDv7 id — prunes to a single time-range partition
+            qs = qs.filter(issueevent__id=event_id)
+        else:
+            # Client-provided sentry SDK event_id (typically UUIDv4).
+            # Must scan event_id index across all time partitions.
+            # Include organization_id to prune hash sub-partitions.
+            event_filter = Q(issueevent__event_id=event_id)
+            if organization_id:
+                event_filter &= Q(issueevent__organization_id=organization_id)
+            qs = qs.filter(event_filter)
     elif query:
         queries = shlex.split(query)
         # First look for structured queries
