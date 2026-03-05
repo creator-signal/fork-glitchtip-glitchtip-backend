@@ -42,6 +42,12 @@ COLD_STORAGE_PREFIX = "cold_storage"
 # The primary limit is byte-based, auto-derived from DUCKDB_MEMORY_LIMIT.
 ARCHIVE_CHUNK_ROWS = 50_000
 
+# SOH (Start of Heading) control character used as CSV quote/escape character.
+# Avoids ambiguity between JSON backslash-escaped quotes (\") and standard CSV
+# double-quote escaping (""), which causes DuckDB CSV parse errors on fields
+# containing serialized JSON (e.g. issue event data::text).
+CSV_QUOTE_CHAR = "\x01"
+
 
 def _parse_duckdb_memory_bytes(limit_str: str) -> int | None:
     """Parse a DuckDB memory limit string (e.g. '128MB') to bytes.
@@ -454,7 +460,8 @@ def _flush_csv_to_parquet(
         duck_conn.execute(
             f"COPY (SELECT * FROM read_csv("
             f"'{duckdb_quote_path(csv_path)}', "
-            f"columns={{{col_spec}}}, header=true)) "
+            f"columns={{{col_spec}}}, header=true, "
+            f"quote='{CSV_QUOTE_CHAR}', escape='{CSV_QUOTE_CHAR}')) "
             f"TO '{duckdb_quote_path(parquet_path)}' "
             f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {row_group_size});"
         )
@@ -574,10 +581,18 @@ def archive_partition_per_org(
                     # O(N) Postgres work, PgBouncer-safe (single statement),
                     # and ~90x faster than executemany for DuckDB writes.
                     # org_id is always an int from the database, safe to inline.
+                    #
+                    # Use SOH (\x01) as quote character instead of double-quote
+                    # to avoid ambiguity between JSON backslash-escaped quotes
+                    # (\") and CSV double-quote escaping (""), which causes
+                    # DuckDB CSV parse errors on fields like data::text.
                     query_sql = select_sql.format(
                         partition_name=partition_name
                     ).replace("%s", str(int(org_id)), 1)
-                    copy_sql = f"COPY ({query_sql}) TO STDOUT WITH (FORMAT CSV, HEADER)"
+                    copy_sql = (
+                        f"COPY ({query_sql}) TO STDOUT "
+                        f"WITH (FORMAT CSV, HEADER, QUOTE E'\\x01', FORCE_QUOTE *)"
+                    )
 
                     chunk_num = 0
                     total_rows = 0
@@ -658,37 +673,97 @@ def archive_partition_per_org(
 
 
 def detach_partition(
-    partition_name: str, parent_table: str, db_alias: str | None = None
+    partition_name: str,
+    parent_table: str,
+    db_alias: str | None = None,
+    max_retries: int = 3,
 ) -> None:
     """
     Detach a partition from its parent table using CONCURRENTLY.
 
     CONCURRENTLY avoids the ACCESS EXCLUSIVE lock that blocks concurrent
-    INSERTs and can cause deadlocks during archival. It requires autocommit
-    mode (cannot run inside a transaction block).
+    INSERTs. It requires autocommit mode (cannot run inside a transaction
+    block).
 
-    Safe to call if the partition is already detached or does not exist.
+    Retries on deadlock errors with exponential backoff. Falls back to
+    non-concurrent DETACH if all concurrent attempts fail. Safe to call if
+    the partition is already detached or does not exist.
     """
+    import time
+
     db_conn = connections[db_alias] if db_alias else connection
     db_conn.ensure_connection()
     raw_conn = db_conn.connection
 
     old_autocommit = raw_conn.autocommit
+    last_error = None
     try:
         raw_conn.autocommit = True
-        with raw_conn.cursor() as cursor:
-            cursor.execute(
-                SQL("ALTER TABLE {} DETACH PARTITION {} CONCURRENTLY;").format(
-                    Identifier(parent_table), Identifier(partition_name)
+        for attempt in range(max_retries):
+            try:
+                with raw_conn.cursor() as cursor:
+                    cursor.execute(
+                        SQL(
+                            "ALTER TABLE {} DETACH PARTITION {} CONCURRENTLY;"
+                        ).format(
+                            Identifier(parent_table), Identifier(partition_name)
+                        )
+                    )
+                logger.info(
+                    "Detached partition %s from %s", partition_name, parent_table
                 )
-            )
-        logger.info("Detached partition %s from %s", partition_name, parent_table)
-    except Exception:
+                return
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "does not exist" in err_msg or "is not a partition" in err_msg:
+                    logger.info(
+                        "Partition %s already detached or does not exist",
+                        partition_name,
+                    )
+                    return
+                if "deadlock" in err_msg and attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(
+                        "Deadlock detaching %s (attempt %d/%d), retrying in %ds",
+                        partition_name,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                    )
+                    time.sleep(wait)
+                    last_error = e
+                    continue
+                last_error = e
+                break
+
+        # All CONCURRENTLY attempts failed — try non-concurrent as fallback.
+        # Takes ACCESS EXCLUSIVE lock briefly but avoids deadlock.
         logger.warning(
-            "Partition %s already detached or does not exist, continuing",
+            "DETACH CONCURRENTLY failed for %s, falling back to non-concurrent",
             partition_name,
-            exc_info=True,
+            exc_info=last_error,
         )
+        try:
+            with raw_conn.cursor() as cursor:
+                cursor.execute(
+                    SQL("ALTER TABLE {} DETACH PARTITION {};").format(
+                        Identifier(parent_table), Identifier(partition_name)
+                    )
+                )
+            logger.info(
+                "Detached partition %s (non-concurrent) from %s",
+                partition_name,
+                parent_table,
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "does not exist" in err_msg or "is not a partition" in err_msg:
+                logger.info(
+                    "Partition %s already detached or does not exist",
+                    partition_name,
+                )
+            else:
+                raise
     finally:
         raw_conn.autocommit = old_autocommit
 
