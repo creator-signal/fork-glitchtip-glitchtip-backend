@@ -30,13 +30,10 @@ class Command(BaseCommand):
             return
 
         deleted = 0
-        while True:
-            batch = list(
-                orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
-            )
-            if not batch:
-                break
-
+        batch = list(
+            orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
+        )
+        while batch:
             for row in batch:
                 if row.blob:
                     try:
@@ -51,6 +48,9 @@ class Command(BaseCommand):
 
             deleted += len(batch)
             self.stdout.write(f"Deleted {deleted} orphaned FileBlobs so far...")
+            batch = list(
+                orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
+            )
 
         if deleted:
             self.stdout.write(
