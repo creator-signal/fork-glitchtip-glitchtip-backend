@@ -396,7 +396,7 @@ class DataLayerTest(TestCase):
     )
     @patch("apps.issue_events.cold_storage.query_cold_events")
     def test_get_latest_event_cold_storage_fallback(
-        self, mock_query_cold, mock_duckdb
+        self, mock_query_cold, _mock_duckdb
     ):
         """When Postgres has no events, fall back to cold storage."""
         issue = baker.make("issue_events.Issue", project=self.project)
@@ -417,7 +417,7 @@ class DataLayerTest(TestCase):
     @patch(
         "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
     )
-    def test_get_latest_event_no_duckdb(self, mock_duckdb):
+    def test_get_latest_event_no_duckdb(self, _mock_duckdb):
         """When DuckDB is not available, return None."""
         issue = baker.make("issue_events.Issue", project=self.project)
 
@@ -429,7 +429,7 @@ class DataLayerTest(TestCase):
     )
     @patch("apps.issue_events.cold_storage.get_event_from_cold")
     def test_get_event_cold_storage_uuid7_fallback(
-        self, mock_get_cold, mock_duckdb
+        self, mock_get_cold, _mock_duckdb
     ):
         """UUIDv7 cold fallback uses get_event_from_cold with extracted timestamp."""
         from glitchtip.partition_manager import UUID7Helper
@@ -456,7 +456,7 @@ class DataLayerTest(TestCase):
     )
     @patch("apps.issue_events.cold_storage.query_cold_events")
     def test_get_event_cold_storage_uuid4_fallback(
-        self, mock_query_cold, mock_duckdb
+        self, mock_query_cold, _mock_duckdb
     ):
         """UUIDv4 cold fallback scans recent cold storage by event_id."""
         import uuid as uuid_mod
@@ -486,7 +486,7 @@ class DataLayerTest(TestCase):
     )
     @patch("apps.issue_events.cold_storage.get_event_from_cold")
     def test_get_event_cold_storage_with_org_slug(
-        self, mock_get_cold, mock_duckdb
+        self, mock_get_cold, _mock_duckdb
     ):
         """Providing organization_slug scopes the cold storage search."""
         from glitchtip.partition_manager import UUID7Helper
@@ -512,7 +512,7 @@ class DataLayerTest(TestCase):
     @patch(
         "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
     )
-    def test_get_event_no_duckdb(self, mock_duckdb):
+    def test_get_event_no_duckdb(self, _mock_duckdb):
         """When DuckDB is not available, return None for missing events."""
         import uuid as uuid_mod
 
