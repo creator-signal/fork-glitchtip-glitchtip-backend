@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from unittest import mock
 
 from aioresponses import aioresponses
@@ -25,13 +27,11 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from datetime import datetime, timedelta, timezone
-
         from glitchtip.partition_manager import PartitionManager
 
         # Create partitions for 2020-01-01 to 2020-01-07 to cover test data
         manager = PartitionManager()
-        start_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        start_date = datetime(2020, 1, 1, tzinfo=dt_timezone.utc)
         end_date = start_date + timedelta(days=7)
         manager.create_partitions_for_date_range(
             parent_table="uptime_monitorcheck",
@@ -399,6 +399,108 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         baker.make(Monitor, monitor_type=MonitorType.HEARTBEAT, project=self.project)
         async_to_sync(dispatch_checks.func)()
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_cached_fields_updated_on_save_monitor_checks(self):
+        """cached_is_up and cached_last_change update after save_monitor_checks"""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor, url="https://example.com", monitor_type=MonitorType.GET
+            )
+        self.assertIsNone(mon.cached_is_up)
+        self.assertIsNone(mon.cached_last_change)
+
+        now = datetime(2020, 1, 1, 12, 0, tzinfo=dt_timezone.utc)
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": None,
+            "last_change": None,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-01"):
+            async_to_sync(save_monitor_checks)([result], now)
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)
+        self.assertEqual(mon.cached_last_change, now)
+
+    def test_cached_fields_updated_on_state_change(self):
+        """cached_last_change updates when is_up state changes"""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor, url="https://example.com", monitor_type=MonitorType.GET
+            )
+
+        first_now = datetime(2020, 1, 1, 12, 0, tzinfo=dt_timezone.utc)
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": None,
+            "last_change": None,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-01"):
+            async_to_sync(save_monitor_checks)([result], first_now)
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)
+        self.assertEqual(mon.cached_last_change, first_now)
+
+        # Now simulate going down
+        second_now = datetime(2020, 1, 2, 12, 0, tzinfo=dt_timezone.utc)
+        result2 = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": False,
+            "latest_is_up": True,
+            "last_change": first_now,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-02"):
+            async_to_sync(save_monitor_checks)([result2], second_now)
+
+        mon.refresh_from_db()
+        self.assertFalse(mon.cached_is_up)
+        self.assertEqual(mon.cached_last_change, second_now)
+
+    def test_cached_fields_preserved_when_no_change(self):
+        """cached_last_change is preserved when is_up state doesn't change"""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor, url="https://example.com", monitor_type=MonitorType.GET
+            )
+
+        first_now = datetime(2020, 1, 1, 12, 0, tzinfo=dt_timezone.utc)
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": None,
+            "last_change": None,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-01"):
+            async_to_sync(save_monitor_checks)([result], first_now)
+
+        # Same state, no change
+        second_now = datetime(2020, 1, 2, 12, 0, tzinfo=dt_timezone.utc)
+        result2 = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": True,
+            "last_change": first_now,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-02"):
+            async_to_sync(save_monitor_checks)([result2], second_now)
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)
+        # last_change should stay at first_now since no state change
+        self.assertEqual(mon.cached_last_change, first_now)
 
     @mock.patch("apps.uptime.utils.asyncio.open_connection")
     def test_port_monitor(self, mocked):

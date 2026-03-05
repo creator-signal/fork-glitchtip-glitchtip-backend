@@ -76,6 +76,22 @@ async def save_monitor_checks(results, now):
             for result in results
         ]
     )
+
+    # Bulk update cached fields on Monitor
+    monitors_to_update = []
+    for result in results:
+        is_change = result["latest_is_up"] != result["is_up"] or result["last_change"] is None
+        monitor = Monitor(
+            pk=result["id"],
+            cached_is_up=result["is_up"],
+            cached_last_change=now if is_change else result["last_change"],
+        )
+        monitors_to_update.append(monitor)
+    if monitors_to_update:
+        await Monitor.objects.abulk_update(
+            monitors_to_update, ["cached_is_up", "cached_last_change"]
+        )
+
     for i, result in enumerate(results):
         if result["latest_is_up"] != result["is_up"]:
             last_change = result["last_change"]

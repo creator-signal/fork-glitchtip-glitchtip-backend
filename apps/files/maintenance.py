@@ -31,6 +31,8 @@ def cleanup_old_files():
     while True:
         file_blobs = list(queryset.only("id", "blob")[:1000])
         if not file_blobs:
+            if total_deleted:
+                logger.info("Deleted %d old file blobs", total_deleted)
             break
         ids = []
         for file_blob in file_blobs:
@@ -38,6 +40,3 @@ def cleanup_old_files():
             file_blob.blob.delete()  # Delete from object storage
         count, _ = FileBlob.objects.filter(id__in=ids).delete()
         total_deleted += count
-
-    if total_deleted:
-        logger.info("Deleted %d old file blobs", total_deleted)
