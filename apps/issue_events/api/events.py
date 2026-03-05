@@ -6,12 +6,14 @@ from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
 from ninja.pagination import paginate
 
+from apps.organizations_ext.models import Organization
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 from glitchtip.partition_manager import UUID7Helper
 
-from ..models import IssueEvent, UserReport
+from ..models import Issue, IssueEvent, UserReport
 from ..schema import IssueEventDetailSchema, IssueEventJsonSchema, IssueEventSchema
+from ..services import is_uuid7
 from . import router
 
 
@@ -108,8 +110,6 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     if not is_duckdb_available():
         raise Http404()
 
-    from ..models import Issue
-
     issue = (
         await Issue.objects.filter(
             id=issue_id, project__organization__users=request.auth.user_id
@@ -154,14 +154,28 @@ async def get_issue_event(request: AuthHttpRequest, issue_id: int, event_id: uui
         ),
         next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
-    event = await qs.filter(id=event_id).afirst()
+
+    if is_uuid7(event_id):
+        event = await qs.filter(id=event_id).afirst()
+    else:
+        # Client-provided sentry SDK event_id (typically UUIDv4).
+        # Include organization_id to prune hash sub-partitions.
+        org_id = await (
+            Issue.objects.filter(
+                id=issue_id, project__organization__users=request.auth.user_id
+            )
+            .values_list("project__organization_id", flat=True)
+            .afirst()
+        )
+        if not org_id:
+            raise Http404()
+        event = await qs.filter(event_id=event_id, organization_id=org_id).afirst()
+
     if event:
         event.user_report = await get_user_report(event.id)
         return event
 
     # Fall back to cold storage
-    from ..models import Issue
-
     issue = (
         await Issue.objects.filter(
             id=issue_id, project__organization__users=request.auth.user_id
@@ -226,14 +240,28 @@ async def get_project_issue_event(
         ),
         next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
     )
-    event = await qs.filter(id=event_id).afirst()
+
+    if is_uuid7(event_id):
+        event = await qs.filter(id=event_id).afirst()
+    else:
+        # Client-provided sentry SDK event_id (typically UUIDv4).
+        # Include organization_id to prune hash sub-partitions.
+        org_id = await (
+            Organization.objects.filter(
+                slug=organization_slug, users=request.auth.user_id
+            )
+            .values_list("id", flat=True)
+            .afirst()
+        )
+        if not org_id:
+            raise Http404()
+        event = await qs.filter(event_id=event_id, organization_id=org_id).afirst()
+
     if event:
         event.user_report = await get_user_report(event.id)
         return event
 
     # Fall back to cold storage
-    from apps.organizations_ext.models import Organization
-
     org = await Organization.objects.filter(
         slug=organization_slug, users=request.auth.user_id
     ).afirst()
@@ -245,8 +273,6 @@ async def get_project_issue_event(
         raise Http404()
 
     # Attach issue for schema resolution
-    from ..models import Issue
-
     issue = (
         await Issue.objects.filter(id=cold_event.issue_id)
         .select_related("project")
@@ -270,13 +296,25 @@ async def get_event_json(
     request: AuthHttpRequest, organization_slug: str, issue_id: int, event_id: uuid.UUID
 ):
     qs = get_queryset(request, organization_slug=organization_slug, issue_id=issue_id)
-    obj = await qs.filter(id=event_id).afirst()
+
+    if is_uuid7(event_id):
+        obj = await qs.filter(id=event_id).afirst()
+    else:
+        org_id = await (
+            Organization.objects.filter(
+                slug=organization_slug, users=request.auth.user_id
+            )
+            .values_list("id", flat=True)
+            .afirst()
+        )
+        if not org_id:
+            raise Http404()
+        obj = await qs.filter(event_id=event_id, organization_id=org_id).afirst()
+
     if obj:
         return obj
 
     # Fall back to cold storage
-    from ..models import Issue
-
     issue = (
         await Issue.objects.filter(
             id=issue_id,
