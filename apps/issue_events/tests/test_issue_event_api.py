@@ -1,4 +1,5 @@
 import re
+import uuid
 
 from django.test import TestCase
 from django.urls import reverse
@@ -110,6 +111,27 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         event_details = res.json()
         self.assertEqual(event_details["id"], latest_event.id.hex)
         self.assertEqual(event_details["previousEventID"], previous_event.id.hex)
+
+    def test_retrieve_by_sentry_event_id(self):
+        """Lookup by client-provided sentry SDK event_id (UUIDv4) should work."""
+        issue = baker.make("issue_events.issue", project=self.project)
+        sentry_event_id = uuid.uuid4()
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            event_id=sentry_event_id,
+            organization=self.organization,
+        )
+        url = get_issue_event_url(issue.id, sentry_event_id)
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventID"], sentry_event_id.hex)
+
+        # Also test the JSON endpoint
+        url = get_event_json_url(self.organization.slug, issue.id, sentry_event_id)
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["event_id"], sentry_event_id.hex)
 
     def test_relative_event_ordering(self):
         issue = baker.make("issue_events.issue", project=self.project)
