@@ -196,9 +196,11 @@ async def list_issues(
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
             if not is_uuid7(event_id):
-                org = await Organization.objects.filter(
-                    slug=organization_slug
-                ).only("id").afirst()
+                org = (
+                    await Organization.objects.filter(slug=organization_slug)
+                    .only("id")
+                    .afirst()
+                )
                 if org:
                     organization_id = org.id
         except ValueError:
@@ -324,9 +326,11 @@ async def list_project_issues(
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
             if not is_uuid7(event_id):
-                org = await Organization.objects.filter(
-                    slug=organization_slug
-                ).only("id").afirst()
+                org = (
+                    await Organization.objects.filter(slug=organization_slug)
+                    .only("id")
+                    .afirst()
+                )
                 if org:
                     organization_id = org.id
         except ValueError:

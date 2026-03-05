@@ -141,7 +141,9 @@ def drop_partition_if_exists(partition_name: str, parent_table: str = "logs_loge
     """Safely drop a partition, ignoring errors if it doesn't exist."""
     with connection.cursor() as cursor:
         try:
-            cursor.execute(f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name}")
+            cursor.execute(
+                f"ALTER TABLE {parent_table} DETACH PARTITION {partition_name}"
+            )
         except Exception:
             connection.connection.rollback()
         try:
@@ -150,7 +152,9 @@ def drop_partition_if_exists(partition_name: str, parent_table: str = "logs_loge
             connection.connection.rollback()
 
 
-def bulk_insert_logs(date: datetime, count: int, org_id: int = None, project_id: int = None) -> list[UUID]:
+def bulk_insert_logs(
+    date: datetime, count: int, org_id: int = None, project_id: int = None
+) -> list[UUID]:
     """Batch-insert synthetic log events into Postgres. Returns list of IDs."""
     org = org_id or ORG_ID
     proj = project_id or PROJECT_ID
@@ -167,9 +171,14 @@ def bulk_insert_logs(date: datetime, count: int, org_id: int = None, project_id:
                 cursor.mogrify(
                     "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
-                        str(event_id), org, proj, 2, 9,
+                        str(event_id),
+                        org,
+                        proj,
+                        2,
+                        9,
                         f"Test log {i} for {date.strftime('%Y-%m-%d')}",
-                        "test-svc", json.dumps({"i": i}),
+                        "test-svc",
+                        json.dumps({"i": i}),
                         "test",
                     ],
                 )
@@ -179,7 +188,8 @@ def bulk_insert_logs(date: datetime, count: int, org_id: int = None, project_id:
                 cursor.execute(
                     "INSERT INTO logs_logevent "
                     "(id, organization_id, project_id, level, severity_number, "
-                    "body, service, data, environment) VALUES " + values
+                    "body, service, data, environment) VALUES "
+                    + values
                     + " ON CONFLICT DO NOTHING"
                 )
                 batch = []
@@ -188,13 +198,16 @@ def bulk_insert_logs(date: datetime, count: int, org_id: int = None, project_id:
             cursor.execute(
                 "INSERT INTO logs_logevent "
                 "(id, organization_id, project_id, level, severity_number, "
-                "body, service, data, environment) VALUES " + values
+                "body, service, data, environment) VALUES "
+                + values
                 + " ON CONFLICT DO NOTHING"
             )
     return ids
 
 
-def count_parquet_rows(org_id: int, date_str: str, table_name: str = "logs_logevent") -> int:
+def count_parquet_rows(
+    org_id: int, date_str: str, table_name: str = "logs_logevent"
+) -> int:
     """Count rows across all parquet files (flat + chunks) for an org+date."""
     storage = get_cold_storage_backend()
     if not storage:
@@ -218,7 +231,9 @@ def count_parquet_rows(org_id: int, date_str: str, table_name: str = "logs_logev
     return total
 
 
-def parquet_exists(org_id: int, date_str: str, table_name: str = "logs_logevent") -> bool:
+def parquet_exists(
+    org_id: int, date_str: str, table_name: str = "logs_logevent"
+) -> bool:
     storage = get_cold_storage_backend()
     if not storage:
         return False
@@ -226,13 +241,17 @@ def parquet_exists(org_id: int, date_str: str, table_name: str = "logs_logevent"
     return storage.exists(relative_path)
 
 
-def get_parquet_path(org_id: int, date_str: str, table_name: str = "logs_logevent") -> str:
+def get_parquet_path(
+    org_id: int, date_str: str, table_name: str = "logs_logevent"
+) -> str:
     storage = get_cold_storage_backend()
     relative_path = get_org_cold_storage_path(table_name, org_id, date_str)
     return get_duckdb_parquet_path(storage, relative_path)
 
 
-def write_parquet_directly(date: datetime, count: int, org_id: int = None, project_id: int = None):
+def write_parquet_directly(
+    date: datetime, count: int, org_id: int = None, project_id: int = None
+):
     """Write a parquet file directly (bypass PG) for speed. Used in memory tests."""
     org = org_id or ORG_ID
     proj = project_id or PROJECT_ID
@@ -249,11 +268,22 @@ def write_parquet_directly(date: datetime, count: int, org_id: int = None, proje
             offset_ms = int((i / max(count, 1)) * 86400 * 1000)
             event_time = date + timedelta(milliseconds=offset_ms)
             event_id = UUID7Helper.from_datetime(event_time)
-            rows.append([
-                str(event_id), None, org, proj, None,
-                2, 9, f"Synth event {i}", "synth-svc", "test",
-                "localhost", json.dumps({"day": date_str, "i": i}),
-            ])
+            rows.append(
+                [
+                    str(event_id),
+                    None,
+                    org,
+                    proj,
+                    None,
+                    2,
+                    9,
+                    f"Synth event {i}",
+                    "synth-svc",
+                    "test",
+                    "localhost",
+                    json.dumps({"day": date_str, "i": i}),
+                ]
+            )
 
         duck.executemany(
             f"INSERT INTO export_data VALUES ({', '.join(['?'] * len(LOG_COLUMN_TYPES))})",
@@ -263,7 +293,9 @@ def write_parquet_directly(date: datetime, count: int, org_id: int = None, proje
         relative_path = get_org_cold_storage_path("logs_logevent", org, date_str)
         parquet_path = get_duckdb_parquet_path(storage, relative_path)
         os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-        duck.execute(f"COPY export_data TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);")
+        duck.execute(
+            f"COPY export_data TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD);"
+        )
     finally:
         duck.close()
 
@@ -290,7 +322,11 @@ def test_migration_idempotency():
         select_sql=LOGS_SELECT_SQL,
     )
     count1 = count_parquet_rows(ORG_ID, date_str)
-    record("1a: First migration produces correct count", count1 == 100, f"Expected 100, got {count1}")
+    record(
+        "1a: First migration produces correct count",
+        count1 == 100,
+        f"Expected 100, got {count1}",
+    )
 
     # Re-run archive (should overwrite, not duplicate)
     archived2 = archive_partition_per_org(
@@ -301,23 +337,42 @@ def test_migration_idempotency():
         select_sql=LOGS_SELECT_SQL,
     )
     count2 = count_parquet_rows(ORG_ID, date_str)
-    record("1b: Re-run produces same count (no duplicates)", count2 == 100, f"Expected 100, got {count2}")
+    record(
+        "1b: Re-run produces same count (no duplicates)",
+        count2 == 100,
+        f"Expected 100, got {count2}",
+    )
 
     # PG data intact (we didn't detach yet)
     with connection.cursor() as cursor:
-        cursor.execute(f"SELECT COUNT(*) FROM {partition_name} WHERE organization_id = %s", [ORG_ID])
+        cursor.execute(
+            f"SELECT COUNT(*) FROM {partition_name} WHERE organization_id = %s",
+            [ORG_ID],
+        )
         pg_count = cursor.fetchone()[0]
-    record("1c: Postgres data intact after archive-only", pg_count == 100, f"PG count={pg_count}")
+    record(
+        "1c: Postgres data intact after archive-only",
+        pg_count == 100,
+        f"PG count={pg_count}",
+    )
 
     # Full swap (detach + drop)
-    ok = archive_and_swap_partition(partition_name, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
+    ok = archive_and_swap_partition(
+        partition_name, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+    )
     record("1d: archive_and_swap succeeds", ok, f"Returned {ok}")
 
     # Partition is gone
     with connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM pg_tables WHERE tablename = %s", [partition_name])
+        cursor.execute(
+            "SELECT COUNT(*) FROM pg_tables WHERE tablename = %s", [partition_name]
+        )
         still_exists = cursor.fetchone()[0] > 0
-    record("1e: Partition dropped after swap", not still_exists, f"still_exists={still_exists}")
+    record(
+        "1e: Partition dropped after swap",
+        not still_exists,
+        f"still_exists={still_exists}",
+    )
 
 
 # ── Test 2: Migration Edge Cases ────────────────────────────────────
@@ -331,12 +386,18 @@ def test_migration_edge_cases():
     empty_date = datetime(2025, 3, 1, tzinfo=timezone.utc)
     empty_part = create_log_partition(empty_date)
     archived = archive_partition_per_org(
-        partition_name=empty_part, date_str="20250301",
-        table_name="logs_logevent", column_types=LOG_COLUMN_TYPES, select_sql=LOGS_SELECT_SQL,
+        partition_name=empty_part,
+        date_str="20250301",
+        table_name="logs_logevent",
+        column_types=LOG_COLUMN_TYPES,
+        select_sql=LOGS_SELECT_SQL,
     )
     has_file = parquet_exists(ORG_ID, "20250301")
-    record("2a: Zero events — no parquet file", len(archived) == 0 and not has_file,
-           f"archived={len(archived)}, file_exists={has_file}")
+    record(
+        "2a: Zero events — no parquet file",
+        len(archived) == 0 and not has_file,
+        f"archived={len(archived)}, file_exists={has_file}",
+    )
     drop_partition_if_exists(empty_part)
 
     # 2b: Single event
@@ -344,8 +405,11 @@ def test_migration_edge_cases():
     single_part = create_log_partition(single_date)
     bulk_insert_logs(single_date, 1)
     archived = archive_partition_per_org(
-        partition_name=single_part, date_str="20250302",
-        table_name="logs_logevent", column_types=LOG_COLUMN_TYPES, select_sql=LOGS_SELECT_SQL,
+        partition_name=single_part,
+        date_str="20250302",
+        table_name="logs_logevent",
+        column_types=LOG_COLUMN_TYPES,
+        select_sql=LOGS_SELECT_SQL,
     )
     count = count_parquet_rows(ORG_ID, "20250302")
     record("2b: Single event migrated", count == 1, f"parquet_count={count}")
@@ -362,19 +426,28 @@ def test_migration_edge_cases():
 
     t0 = time.time()
     archived = archive_partition_per_org(
-        partition_name=large_part, date_str="20250303",
-        table_name="logs_logevent", column_types=LOG_COLUMN_TYPES, select_sql=LOGS_SELECT_SQL,
+        partition_name=large_part,
+        date_str="20250303",
+        table_name="logs_logevent",
+        column_types=LOG_COLUMN_TYPES,
+        select_sql=LOGS_SELECT_SQL,
     )
     archive_time = time.time() - t0
     pq_count = count_parquet_rows(ORG_ID, "20250303")
-    record(f"2c: {LARGE_COUNT} events migrated ({archive_time:.1f}s)",
-           pq_count == LARGE_COUNT, f"parquet_count={pq_count}")
+    record(
+        f"2c: {LARGE_COUNT} events migrated ({archive_time:.1f}s)",
+        pq_count == LARGE_COUNT,
+        f"parquet_count={pq_count}",
+    )
     drop_partition_if_exists(large_part)
 
     # 2d: No partitions to migrate
     partitions = get_partitions_older_than("logs_logevent", 99999)
-    record("2d: No partitions to migrate — empty list", len(partitions) == 0,
-           f"Got {len(partitions)}")
+    record(
+        "2d: No partitions to migrate — empty list",
+        len(partitions) == 0,
+        f"Got {len(partitions)}",
+    )
 
 
 # ── Test 3: Query Union Correctness ─────────────────────────────────
@@ -394,38 +467,67 @@ def test_query_union_correctness():
     hot_ids = bulk_insert_logs(hot_date, 50)
 
     # Archive cold partition
-    archive_and_swap_partition(cold_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
+    archive_and_swap_partition(
+        cold_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+    )
 
     full_start = cold_date
     full_end = hot_date + timedelta(days=1)
 
     # 3a: Full range
-    hot_results = query_hot_logs(organization_id=ORG_ID, start_dt=full_start, end_dt=full_end, limit=200)
-    cold_results = query_cold_logs(organization_id=ORG_ID, start_dt=full_start, end_dt=full_end, limit=200)
+    hot_results = query_hot_logs(
+        organization_id=ORG_ID, start_dt=full_start, end_dt=full_end, limit=200
+    )
+    cold_results = query_cold_logs(
+        organization_id=ORG_ID, start_dt=full_start, end_dt=full_end, limit=200
+    )
     total = len(hot_results) + len(cold_results)
-    record("3a: Full range union = correct count",
-           total == 100, f"hot={len(hot_results)}, cold={len(cold_results)}, total={total}")
+    record(
+        "3a: Full range union = correct count",
+        total == 100,
+        f"hot={len(hot_results)}, cold={len(cold_results)}, total={total}",
+    )
 
     # 3b: No duplicates
     all_ids = {r.id for r in hot_results} | {r.id for r in cold_results}
-    record("3b: No duplicate events", len(all_ids) == total, f"unique={len(all_ids)}, total={total}")
+    record(
+        "3b: No duplicate events",
+        len(all_ids) == total,
+        f"unique={len(all_ids)}, total={total}",
+    )
 
     # 3c: Hot-only range
-    hot_only = query_hot_logs(organization_id=ORG_ID, start_dt=hot_date, end_dt=hot_date + timedelta(days=1), limit=200)
+    hot_only = query_hot_logs(
+        organization_id=ORG_ID,
+        start_dt=hot_date,
+        end_dt=hot_date + timedelta(days=1),
+        limit=200,
+    )
     record("3c: Hot-only returns 50", len(hot_only) == 50, f"got {len(hot_only)}")
 
     # 3d: Cold-only range
-    cold_only = query_cold_logs(organization_id=ORG_ID, start_dt=cold_date, end_dt=cold_date + timedelta(days=1), limit=200)
+    cold_only = query_cold_logs(
+        organization_id=ORG_ID,
+        start_dt=cold_date,
+        end_dt=cold_date + timedelta(days=1),
+        limit=200,
+    )
     record("3d: Cold-only returns 50", len(cold_only) == 50, f"got {len(cold_only)}")
 
     # 3e: Boundary — events from both tiers
     boundary_start = cold_date + timedelta(hours=23)
     boundary_end = hot_date + timedelta(hours=1)
-    hot_b = query_hot_logs(organization_id=ORG_ID, start_dt=boundary_start, end_dt=boundary_end, limit=200)
-    cold_b = query_cold_logs(organization_id=ORG_ID, start_dt=boundary_start, end_dt=boundary_end, limit=200)
-    record("3e: Boundary has events from both tiers",
-           len(hot_b) > 0 and len(cold_b) > 0,
-           f"hot_boundary={len(hot_b)}, cold_boundary={len(cold_b)}")
+    hot_b = query_hot_logs(
+        organization_id=ORG_ID, start_dt=boundary_start, end_dt=boundary_end, limit=200
+    )
+    cold_b = query_cold_logs(
+        organization_id=ORG_ID, start_dt=boundary_start, end_dt=boundary_end, limit=200
+    )
+    record(
+        "3e: Boundary has events from both tiers",
+        len(hot_b) > 0 and len(cold_b) > 0,
+        f"hot_boundary={len(hot_b)}, cold_boundary={len(cold_b)}",
+    )
 
     drop_partition_if_exists(hot_part)
 
@@ -446,8 +548,12 @@ def test_query_degradation():
     bulk_insert_logs(day1, 30)
     bulk_insert_logs(day2, 30)
 
-    archive_and_swap_partition(part1, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
-    archive_and_swap_partition(part2, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
+    archive_and_swap_partition(
+        part1, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+    )
+    archive_and_swap_partition(
+        part2, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+    )
 
     c1 = count_parquet_rows(ORG_ID, "20250501")
     c2 = count_parquet_rows(ORG_ID, "20250502")
@@ -463,7 +569,9 @@ def test_query_degradation():
     error_raised = None
     results = None
     try:
-        results = query_cold_logs(organization_id=ORG_ID, start_dt=query_start, end_dt=query_end, limit=200)
+        results = query_cold_logs(
+            organization_id=ORG_ID, start_dt=query_start, end_dt=query_end, limit=200
+        )
     except Exception as e:
         error_raised = e
 
@@ -476,8 +584,11 @@ def test_query_degradation():
             "file poisons the entire query. Per-file error handling would fix this.",
         )
     else:
-        record("4b: Corrupt parquet — returns partial results",
-               results is not None, f"Got {len(results)} results")
+        record(
+            "4b: Corrupt parquet — returns partial results",
+            results is not None,
+            f"Got {len(results)} results",
+        )
 
     # Delete both files, query again
     for d in ("20250501", "20250502"):
@@ -488,17 +599,24 @@ def test_query_degradation():
     results_empty = None
     error_empty = None
     try:
-        results_empty = query_cold_logs(organization_id=ORG_ID, start_dt=query_start, end_dt=query_end, limit=200)
+        results_empty = query_cold_logs(
+            organization_id=ORG_ID, start_dt=query_start, end_dt=query_end, limit=200
+        )
     except Exception as e:
         error_empty = e
 
     if error_empty:
-        record("4c: All parquet deleted — exception (BUG)", False,
-               f"{type(error_empty).__name__}: {error_empty}")
+        record(
+            "4c: All parquet deleted — exception (BUG)",
+            False,
+            f"{type(error_empty).__name__}: {error_empty}",
+        )
     else:
-        record("4c: All parquet deleted — returns empty",
-               results_empty is not None and len(results_empty) == 0,
-               f"got {len(results_empty) if results_empty else 'None'}")
+        record(
+            "4c: All parquet deleted — returns empty",
+            results_empty is not None and len(results_empty) == 0,
+            f"got {len(results_empty) if results_empty else 'None'}",
+        )
 
 
 # ── Test 5: DuckDB Memory Pressure ─────────────────────────────────
@@ -520,6 +638,7 @@ def test_memory_pressure():
 
     def measure_query(label: str, days: int):
         import resource
+
         gc.collect()
         mem_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         t0 = time.time()
@@ -555,7 +674,9 @@ def test_concurrent_read_write():
     pre_date = datetime(2025, 6, 30, tzinfo=timezone.utc)
     pre_part = create_log_partition(pre_date)
     bulk_insert_logs(pre_date, 100)
-    archive_and_swap_partition(pre_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
+    archive_and_swap_partition(
+        pre_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+    )
 
     # Data to be migrated concurrently
     write_date = datetime(2025, 7, 1, tzinfo=timezone.utc)
@@ -580,7 +701,9 @@ def test_concurrent_read_write():
                 read_errors.append(f"{type(e).__name__}: {e}")
 
     def concurrent_writer():
-        archive_and_swap_partition(write_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL)
+        archive_and_swap_partition(
+            write_part, "logs_logevent", LOG_COLUMN_TYPES, LOGS_SELECT_SQL
+        )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         reader_future = pool.submit(concurrent_reader)
@@ -588,15 +711,20 @@ def test_concurrent_read_write():
         writer_future.result(timeout=120)
         reader_future.result(timeout=120)
 
-    record("6a: No exceptions during concurrent read/write",
-           len(read_errors) == 0,
-           f"errors={read_errors}" if read_errors else f"{len(read_results)} reads OK")
+    record(
+        "6a: No exceptions during concurrent read/write",
+        len(read_errors) == 0,
+        f"errors={read_errors}" if read_errors else f"{len(read_results)} reads OK",
+    )
 
     if read_results:
         # Each read should get either 100 (pre-migration) or 5100 (post), never partial
         valid = all(r in (100, 5100) for r in read_results)
-        record("6b: Reads are consistent (no partial data)", valid,
-               f"unique_counts={sorted(set(read_results))}")
+        record(
+            "6b: Reads are consistent (no partial data)",
+            valid,
+            f"unique_counts={sorted(set(read_results))}",
+        )
     else:
         record("6b: Reads are consistent", False, "No reads completed")
 
@@ -613,32 +741,50 @@ def test_missing_parquet():
 
     # 7a: Logs cold query
     try:
-        results = query_cold_logs(organization_id=ORG_ID, start_dt=start, end_dt=end, limit=100)
-        record("7a: Logs — missing parquet returns empty",
-               results is not None and len(results) == 0, f"got {len(results)}")
+        results = query_cold_logs(
+            organization_id=ORG_ID, start_dt=start, end_dt=end, limit=100
+        )
+        record(
+            "7a: Logs — missing parquet returns empty",
+            results is not None and len(results) == 0,
+            f"got {len(results)}",
+        )
     except Exception as e:
-        record("7a: Logs — missing parquet raises (BUG)", False,
-               f"{type(e).__name__}: {e}")
+        record(
+            "7a: Logs — missing parquet raises (BUG)", False, f"{type(e).__name__}: {e}"
+        )
 
     # 7b: Issue events cold query
     try:
         results = query_cold_events(organization_id=ORG_ID, start_dt=start, end_dt=end)
-        record("7b: Issue events — missing parquet returns empty",
-               results is not None and len(results) == 0, f"got {len(results)}")
+        record(
+            "7b: Issue events — missing parquet returns empty",
+            results is not None and len(results) == 0,
+            f"got {len(results)}",
+        )
     except Exception as e:
-        record("7b: Issue events — missing parquet raises (BUG)", False,
-               f"{type(e).__name__}: {e}")
+        record(
+            "7b: Issue events — missing parquet raises (BUG)",
+            False,
+            f"{type(e).__name__}: {e}",
+        )
 
     # 7c: Single event lookup
     fake_time = datetime(2020, 6, 15, tzinfo=timezone.utc)
     fake_id = UUID7Helper.from_datetime(fake_time)
     try:
         result = get_event_from_cold(ORG_ID, fake_id, fake_time)
-        record("7c: get_event_from_cold — missing file returns None",
-               result is None, f"got {result}")
+        record(
+            "7c: get_event_from_cold — missing file returns None",
+            result is None,
+            f"got {result}",
+        )
     except Exception as e:
-        record("7c: get_event_from_cold — missing file raises (BUG)", False,
-               f"{type(e).__name__}: {e}")
+        record(
+            "7c: get_event_from_cold — missing file raises (BUG)",
+            False,
+            f"{type(e).__name__}: {e}",
+        )
 
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -650,7 +796,9 @@ def main():
     logger.info("=" * 60)
 
     if not is_duckdb_available():
-        logger.error("DuckDB not available. Set GLITCHTIP_COLD_STORAGE_DIR=/tmp/cold_storage_test")
+        logger.error(
+            "DuckDB not available. Set GLITCHTIP_COLD_STORAGE_DIR=/tmp/cold_storage_test"
+        )
         sys.exit(1)
 
     storage = get_cold_storage_backend()

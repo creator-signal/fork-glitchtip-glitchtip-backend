@@ -10,6 +10,7 @@ Tests:
 6. Delete org cold storage
 7. Cleanup
 """
+
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -88,15 +89,22 @@ try:
 
     if is_s3:
         # Verify httpfs is loaded for S3
-        exts = duck.execute("SELECT extension_name, loaded FROM duckdb_extensions() WHERE loaded = true").fetchall()
+        exts = duck.execute(
+            "SELECT extension_name, loaded FROM duckdb_extensions() WHERE loaded = true"
+        ).fetchall()
         ext_names = [e[0] for e in exts]
         check("httpfs extension loaded (S3)", "httpfs" in ext_names)
     else:
         # Verify httpfs is NOT loaded for filesystem
-        exts = duck.execute("SELECT extension_name, loaded FROM duckdb_extensions() WHERE loaded = true").fetchall()
+        exts = duck.execute(
+            "SELECT extension_name, loaded FROM duckdb_extensions() WHERE loaded = true"
+        ).fetchall()
         ext_names = [e[0] for e in exts]
-        check("httpfs extension NOT loaded (filesystem)", "httpfs" not in ext_names,
-              f"loaded extensions: {ext_names}")
+        check(
+            "httpfs extension NOT loaded (filesystem)",
+            "httpfs" not in ext_names,
+            f"loaded extensions: {ext_names}",
+        )
 finally:
     duck.close()
 
@@ -112,11 +120,13 @@ proj2, _ = Project.objects.get_or_create(
     name="manual-proj2", slug="manual-proj2", organization=org
 )
 issue1, _ = Issue.objects.get_or_create(
-    project=proj1, title="Issue proj1",
+    project=proj1,
+    title="Issue proj1",
     defaults={"metadata": {"title": "Issue proj1"}, "type": 0, "level": 4},
 )
 issue2, _ = Issue.objects.get_or_create(
-    project=proj2, title="Issue proj2",
+    project=proj2,
+    title="Issue proj2",
     defaults={"metadata": {"title": "Issue proj2"}, "type": 0, "level": 4},
 )
 print(f"  org={org.id}, proj1={proj1.id}, proj2={proj2.id}")
@@ -151,35 +161,58 @@ for i in range(3):
     eid = UUID7Helper.from_datetime(t)
     ie_ids.append(eid)
     IssueEvent.objects.create(
-        id=eid, timestamp=t, issue=issue1, organization=org,
-        type=0, level=4, title=f"P1 event {i}",
+        id=eid,
+        timestamp=t,
+        issue=issue1,
+        organization=org,
+        type=0,
+        level=4,
+        title=f"P1 event {i}",
         transaction=f"/api/p1/{i}",
         data={"message": f"P1 msg {i}", "platform": "python"},
-        tags={"project": "proj1"}, hashes=[f"h1_{i}"],
+        tags={"project": "proj1"},
+        hashes=[f"h1_{i}"],
     )
 for i in range(3):
     t = target_date + timedelta(hours=i + 5, minutes=10)
     IssueEvent.objects.create(
-        id=UUID7Helper.from_datetime(t), timestamp=t,
-        issue=issue2, organization=org,
-        type=0, level=4, title=f"P2 event {i}",
+        id=UUID7Helper.from_datetime(t),
+        timestamp=t,
+        issue=issue2,
+        organization=org,
+        type=0,
+        level=4,
+        title=f"P2 event {i}",
         transaction=f"/api/p2/{i}",
         data={"message": f"P2 msg {i}", "platform": "python"},
-        tags={"project": "proj2"}, hashes=[f"h2_{i}"],
+        tags={"project": "proj2"},
+        hashes=[f"h2_{i}"],
     )
 
 # Logs: 3 per project
 for i in range(3):
     t = target_date + timedelta(hours=i, minutes=20)
     LogEvent.objects.create(
-        id=UUID7Helper.from_datetime(t), organization=org, project=proj1,
-        level=2, body=f"P1 log {i}", service="svc-p1", environment="test", data={},
+        id=UUID7Helper.from_datetime(t),
+        organization=org,
+        project=proj1,
+        level=2,
+        body=f"P1 log {i}",
+        service="svc-p1",
+        environment="test",
+        data={},
     )
 for i in range(3):
     t = target_date + timedelta(hours=i + 5, minutes=20)
     LogEvent.objects.create(
-        id=UUID7Helper.from_datetime(t), organization=org, project=proj2,
-        level=2, body=f"P2 log {i}", service="svc-p2", environment="test", data={},
+        id=UUID7Helper.from_datetime(t),
+        organization=org,
+        project=proj2,
+        level=2,
+        body=f"P2 log {i}",
+        service="svc-p2",
+        environment="test",
+        data={},
     )
 
 hot_ie = IssueEvent.objects.filter(organization=org).count()
@@ -193,14 +226,18 @@ ie_partition = f"issue_events_issueevent_{date_str}"
 log_partition = f"logs_logevent_{date_str}"
 
 ok_ie = archive_and_swap_partition(
-    ie_partition, "issue_events_issueevent",
-    ISSUE_EVENT_EXPORT_COLUMN_TYPES, ISSUE_EVENT_SELECT_SQL,
+    ie_partition,
+    "issue_events_issueevent",
+    ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+    ISSUE_EVENT_SELECT_SQL,
 )
 check("Issue events archived", ok_ie)
 
 ok_log = archive_and_swap_partition(
-    log_partition, "logs_logevent",
-    LOG_COLUMN_TYPES, LOGS_SELECT_SQL,
+    log_partition,
+    "logs_logevent",
+    LOG_COLUMN_TYPES,
+    LOGS_SELECT_SQL,
 )
 check("Logs archived", ok_log)
 
@@ -226,15 +263,23 @@ print(f"  Log parquet path: {log_parquet}")
 
 duck = get_duckdb_connection(storage)
 try:
-    ie_count = duck.execute(f"SELECT COUNT(*) FROM read_parquet('{ie_parquet}')").fetchone()[0]
-    log_count = duck.execute(f"SELECT COUNT(*) FROM read_parquet('{log_parquet}')").fetchone()[0]
+    ie_count = duck.execute(
+        f"SELECT COUNT(*) FROM read_parquet('{ie_parquet}')"
+    ).fetchone()[0]
+    log_count = duck.execute(
+        f"SELECT COUNT(*) FROM read_parquet('{log_parquet}')"
+    ).fetchone()[0]
     check("DuckDB reads 6 issue events from Parquet", ie_count == 6, f"got {ie_count}")
     check("DuckDB reads 6 logs from Parquet", log_count == 6, f"got {log_count}")
 
     # Show schema
-    ie_cols = duck.execute(f"DESCRIBE SELECT * FROM read_parquet('{ie_parquet}')").fetchall()
+    ie_cols = duck.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{ie_parquet}')"
+    ).fetchall()
     print(f"  IE Parquet columns: {[c[0] for c in ie_cols]}")
-    log_cols = duck.execute(f"DESCRIBE SELECT * FROM read_parquet('{log_parquet}')").fetchall()
+    log_cols = duck.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{log_parquet}')"
+    ).fetchall()
     print(f"  Log Parquet columns: {[c[0] for c in log_cols]}")
 finally:
     duck.close()
@@ -308,10 +353,17 @@ cold_after = query_cold_events(
     end_dt=next_date + timedelta(days=1),
     limit=100,
 )
-check("3 issue events remain after rewrite", len(cold_after) == 3, f"got {len(cold_after)}")
+check(
+    "3 issue events remain after rewrite",
+    len(cold_after) == 3,
+    f"got {len(cold_after)}",
+)
 for ce in cold_after:
-    check(f"  Event {ce.id} belongs to issue2", ce.issue_id == issue2.id,
-          f"issue_id={ce.issue_id}")
+    check(
+        f"  Event {ce.id} belongs to issue2",
+        ce.issue_id == issue2.id,
+        f"issue_id={ce.issue_id}",
+    )
 
 # Verify log Parquet only has proj2
 duck = get_duckdb_connection(storage)
@@ -322,8 +374,11 @@ try:
     ).fetchall()
     check("Log Parquet has 1 project", len(rows) == 1, f"got {len(rows)} projects")
     if rows:
-        check("Log Parquet project is proj2", rows[0][0] == proj2.id,
-              f"got project_id={rows[0][0]}")
+        check(
+            "Log Parquet project is proj2",
+            rows[0][0] == proj2.id,
+            f"got project_id={rows[0][0]}",
+        )
         check("Log Parquet has 3 rows", rows[0][1] == 3, f"got {rows[0][1]}")
 finally:
     duck.close()

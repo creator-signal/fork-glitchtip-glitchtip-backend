@@ -123,9 +123,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
     )
     current_period_end = unix_to_datetime(subscription.items.data[0].current_period_end)
     price = subscription.items.data[0].price
-    is_annual = bool(
-        price.recurring and price.recurring.get("interval") == "year"
-    )
+    is_annual = bool(price.recurring and price.recurring.get("interval") == "year")
     cycle_start, cycle_end = compute_cycle(
         current_period_start, current_period_end, is_annual
     )

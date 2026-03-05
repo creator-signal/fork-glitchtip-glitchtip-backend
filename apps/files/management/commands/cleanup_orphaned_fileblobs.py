@@ -43,7 +43,9 @@ class Command(BaseCommand):
                 try:
                     blob.blob.delete(save=False)
                 except Exception as e:
-                    self.stderr.write(f"Warning: failed to delete storage for FileBlob {blob.id}: {e}")
+                    self.stderr.write(
+                        f"Warning: failed to delete storage for FileBlob {blob.id}: {e}"
+                    )
             FileBlob.objects.filter(id__in=[b.id for b in blobs]).delete()
 
             deleted += len(batch_ids)

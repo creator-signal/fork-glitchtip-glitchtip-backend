@@ -640,9 +640,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             contexts={"os": {"name": "Android"}},
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Android event should only try proguard DIFs — neither the source
             # bundle nor the native DIF should cause a blob download.
@@ -684,9 +682,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             contexts={"os": {"name": "iOS"}, "device": {"arch": "arm64"}},
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Non-Android event should exclude proguard DIFs — no blob download.
             mock_concat.assert_not_called()
@@ -752,9 +748,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             },
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Should only try the matching DIF (1 call), not both
             self.assertEqual(mock_concat.call_count, 1)
