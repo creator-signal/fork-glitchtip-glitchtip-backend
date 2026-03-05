@@ -1,3 +1,19 @@
+# 6.0.9
+
+- Feat: Add Repository model with list/create API; link to Release and Issue models; add GET /issues/{id}/commits/ endpoint
+- Feat: Convert webhook alert notifications from synchronous to async for improved reliability
+- Feat: Add optional MAINTENANCE_DATABASE_URL for elevated DDL connections
+- Fix: Annual Stripe subscription billing cycle was reset to month 1 on every nightly sync
+- Fix: Annual billing cycle boundaries now anchored to period_start to prevent date drift on month-end subscription dates
+- Fix: Search issues and event detail endpoints now fall back to sentry SDK event_id
+- Fix: Use DETACH PARTITION CONCURRENTLY to avoid partition management deadlocks
+- Fix: Split performance V3 migration to avoid exceeding max_locks_per_transaction
+- Fix: Double slash in base href when BASE_PATH is set
+- Fix: Accept trailing slash on internal health endpoint
+- Fix: Resolve native debug symbols by address without requiring a function name match
+- Perf: Denormalize latest_is_up and last_change onto uptime Monitor to reduce query load
+- Improved stability for experimental features not yet enabled by default (cold storage, MCP server)
+
 # 6.0.8
 
 - Feat: Add minidump ingestion for native crash reporting
