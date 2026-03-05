@@ -391,6 +391,134 @@ class DataLayerTest(TestCase):
         result = async_to_sync(update_issue)(self.user.id, 999999, "resolved")
         self.assertIsNone(result)
 
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.query_cold_events")
+    def test_get_latest_event_cold_storage_fallback(
+        self, mock_query_cold, _mock_duckdb
+    ):
+        """When Postgres has no events, fall back to cold storage."""
+        issue = baker.make("issue_events.Issue", project=self.project)
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_query_cold.return_value = [cold_event]
+
+        result = async_to_sync(get_latest_event)(self.user.id, issue.id)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_query_cold.assert_called_once()
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
+    )
+    def test_get_latest_event_no_duckdb(self, _mock_duckdb):
+        """When DuckDB is not available, return None."""
+        issue = baker.make("issue_events.Issue", project=self.project)
+
+        result = async_to_sync(get_latest_event)(self.user.id, issue.id)
+        self.assertIsNone(result)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.get_event_from_cold")
+    def test_get_event_cold_storage_uuid7_fallback(
+        self, mock_get_cold, _mock_duckdb
+    ):
+        """UUIDv7 cold fallback uses get_event_from_cold with extracted timestamp."""
+        from glitchtip.partition_manager import UUID7Helper
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        event_uuid = UUID7Helper._uuid7_for_timestamp(timezone.now())
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            id=event_uuid,
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_get_cold.return_value = cold_event
+
+        result = async_to_sync(get_event)(self.user.id, str(event_uuid))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_get_cold.assert_called_once()
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.query_cold_events")
+    def test_get_event_cold_storage_uuid4_fallback(
+        self, mock_query_cold, _mock_duckdb
+    ):
+        """UUIDv4 cold fallback scans recent cold storage by event_id."""
+        import uuid as uuid_mod
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        sdk_event_id = uuid_mod.uuid4()
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=self.organization,
+            event_id=sdk_event_id,
+            data={},
+            tags={},
+        )
+        mock_query_cold.return_value = [cold_event]
+
+        result = async_to_sync(get_event)(self.user.id, str(sdk_event_id))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_query_cold.assert_called_once()
+        # Verify event_id was passed to cold storage query
+        call_kwargs = mock_query_cold.call_args[1]
+        self.assertEqual(call_kwargs["event_id"], sdk_event_id)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.get_event_from_cold")
+    def test_get_event_cold_storage_with_org_slug(
+        self, mock_get_cold, _mock_duckdb
+    ):
+        """Providing organization_slug scopes the cold storage search."""
+        from glitchtip.partition_manager import UUID7Helper
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        event_uuid = UUID7Helper._uuid7_for_timestamp(timezone.now())
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            id=event_uuid,
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_get_cold.return_value = cold_event
+
+        result = async_to_sync(get_event)(
+            self.user.id, str(event_uuid), self.organization.slug
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
+    )
+    def test_get_event_no_duckdb(self, _mock_duckdb):
+        """When DuckDB is not available, return None for missing events."""
+        import uuid as uuid_mod
+
+        result = async_to_sync(get_event)(self.user.id, str(uuid_mod.uuid4()))
+        self.assertIsNone(result)
+
 
 class SerializerTest(TestCase):
     def setUp(self):
