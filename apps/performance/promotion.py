@@ -213,7 +213,8 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
             duck_conn.execute(
                 f"COPY (SELECT * FROM read_csv("
                 f"'{duckdb_quote_path(csv_path)}', "
-                f"columns={{{col_spec}}}, header=true)) "
+                f"columns={{{col_spec}}}, header=true, "
+                f"quote='\"', escape='\"', strict_mode=false)) "
                 f"TO '{duckdb_quote_path(parquet_path)}' "
                 f"(FORMAT PARQUET, COMPRESSION ZSTD);"
             )
