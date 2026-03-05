@@ -179,6 +179,7 @@ def query_cold_events(
     start_dt: datetime,
     end_dt: datetime,
     issue_id: int | None = None,
+    event_id: UUID | None = None,
     limit: int = 100,
     cursor_position: UUID | None = None,
 ) -> list[IssueEventRow]:
@@ -206,6 +207,10 @@ def query_cold_events(
     if issue_id is not None:
         params.append(issue_id)
         where_parts.append(f"issue_id = ${len(params)}")
+
+    if event_id is not None:
+        params.append(str(event_id))
+        where_parts.append(f"event_id = ${len(params)}")
 
     if cursor_position:
         params.append(str(cursor_position))

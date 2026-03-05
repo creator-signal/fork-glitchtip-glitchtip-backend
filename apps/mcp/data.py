@@ -2,13 +2,13 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from asgiref.sync import sync_to_async
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 
 from apps.alerts.api import get_project_alert_queryset
 from apps.alerts.models import ProjectAlert
 from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent
-from apps.issue_events.services import filter_issue_list
+from apps.issue_events.services import filter_issue_list, is_uuid7
 from apps.issue_events.services import get_queryset as get_issues_qs
 from apps.logs.api import LogEventRow, query_logs_combined
 from apps.logs.constants import parse_level_filters
@@ -24,6 +24,7 @@ from apps.releases.models import Release
 from apps.uptime.api import get_monitor_queryset
 from apps.uptime.models import Monitor
 from glitchtip.api.pagination import AsyncLinkHeaderPagination
+from glitchtip.partition_manager import UUID7Helper
 
 
 def _apply_compliance_filter(qs: QuerySet) -> QuerySet:
@@ -73,7 +74,7 @@ async def get_issue(user_id: int, issue_id: int) -> Issue | None:
 async def get_latest_event(user_id: int, issue_id: int) -> IssueEvent | None:
     issue = await Issue.objects.filter(
         id=issue_id, project__organization__users=user_id
-    ).afirst()
+    ).select_related("project__organization").afirst()
     if not issue:
         return None
     qs = IssueEvent.objects.filter(
@@ -81,22 +82,121 @@ async def get_latest_event(user_id: int, issue_id: int) -> IssueEvent | None:
         organization__users=user_id,
     ).order_by("-id")
     qs = _apply_compliance_filter(qs)
-    return await qs.afirst()
+    event = await qs.afirst()
+    if event:
+        return event
+
+    # Fall back to cold storage
+    from apps.issue_events.cold_storage import is_duckdb_available, query_cold_events
+
+    if not is_duckdb_available():
+        return None
+
+    cold_events = await sync_to_async(query_cold_events)(
+        organization_id=issue.project.organization_id,
+        start_dt=datetime.min.replace(tzinfo=timezone.utc),
+        end_dt=datetime.now(timezone.utc),
+        issue_id=issue_id,
+        limit=1,
+    )
+    if not cold_events:
+        return None
+
+    event = cold_events[0]
+    event.issue = issue
+    return event
 
 
-async def get_event(user_id: int, event_id: str) -> IssueEvent | None:
+async def get_event(
+    user_id: int, event_id: str, organization_slug: str | None = None
+) -> IssueEvent | None:
     """Look up an event by UUID. Accepts either the server-generated UUIDv7 id
     or the client-provided Sentry SDK event_id (UUIDv4).
-    Includes related issue and project for full context."""
+    Includes related issue and project for full context.
+
+    When organization_slug is provided, queries are scoped to that org for
+    better partition pruning in both Postgres and cold storage.
+    """
     try:
         uuid_val = UUID(event_id)
     except ValueError:
         return None
+
     qs = IssueEvent.objects.filter(
         organization__users=user_id,
     ).select_related("issue", "issue__project")
+    if organization_slug:
+        qs = qs.filter(organization__slug=organization_slug)
     qs = _apply_compliance_filter(qs)
-    return await qs.filter(Q(id=uuid_val) | Q(event_id=uuid_val)).afirst()
+
+    uuid7 = is_uuid7(uuid_val)
+    if uuid7:
+        event = await qs.filter(id=uuid_val).afirst()
+    else:
+        event = await qs.filter(event_id=uuid_val).afirst()
+    if event:
+        return event
+
+    # Fall back to cold storage
+    from apps.issue_events.cold_storage import (
+        get_event_from_cold,
+        is_duckdb_available,
+        query_cold_events,
+    )
+
+    if not is_duckdb_available():
+        return None
+
+    # Resolve org_ids to search
+    org_qs = Organization.objects.filter(users=user_id)
+    if organization_slug:
+        org_qs = org_qs.filter(slug=organization_slug)
+    org_ids = [oid async for oid in org_qs.values_list("id", flat=True)]
+
+    if uuid7:
+        # UUIDv7: extract timestamp to target the exact parquet file
+        try:
+            event_time = UUID7Helper.extract_datetime(uuid_val)
+        except ValueError:
+            return None
+        for org_id in org_ids:
+            cold_event = await sync_to_async(get_event_from_cold)(
+                org_id, uuid_val, event_time
+            )
+            if cold_event:
+                return await _attach_issue(cold_event, user_id)
+    else:
+        # UUIDv4 (sentry SDK event_id): scan recent cold storage with time bound
+        now = datetime.now(timezone.utc)
+        start_dt = now - timedelta(days=90)
+        for org_id in org_ids:
+            cold_events = await sync_to_async(query_cold_events)(
+                organization_id=org_id,
+                start_dt=start_dt,
+                end_dt=now,
+                event_id=uuid_val,
+                limit=1,
+            )
+            if cold_events:
+                return await _attach_issue(cold_events[0], user_id)
+
+    return None
+
+
+async def _attach_issue(cold_event, user_id: int):
+    """Attach the issue relation to a cold storage event, verifying access."""
+    issue = (
+        await Issue.objects.filter(
+            id=cold_event.issue_id,
+            project__organization__users=user_id,
+        )
+        .select_related("project")
+        .afirst()
+    )
+    if not issue:
+        return None
+    cold_event.issue = issue
+    return cold_event
 
 
 async def get_alerts(
