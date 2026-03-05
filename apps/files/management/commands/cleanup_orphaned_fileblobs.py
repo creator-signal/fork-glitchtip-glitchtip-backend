@@ -1,3 +1,4 @@
+from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 from django.db.models import Exists, OuterRef
 
@@ -23,31 +24,37 @@ class Command(BaseCommand):
             ~Exists(File.objects.filter(blob=OuterRef("pk")))
         )
 
-        total = orphaned_qs.count()
-        if total == 0:
-            self.stdout.write("No orphaned FileBlobs found.")
-            return
-
         if dry_run:
+            total = orphaned_qs.count()
             self.stdout.write(f"[DRY RUN] Would delete {total} orphaned FileBlobs.")
             return
 
         deleted = 0
         while True:
-            batch_ids = list(orphaned_qs.values_list("id", flat=True)[:BATCH_SIZE])
-            if not batch_ids:
-                self.stdout.write(
-                    self.style.SUCCESS(f"Done. Deleted {deleted} orphaned FileBlobs.")
-                )
+            batch = list(
+                orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
+            )
+            if not batch:
                 break
 
-            blobs = list(FileBlob.objects.filter(id__in=batch_ids))
-            for blob in blobs:
-                try:
-                    blob.blob.delete(save=False)
-                except Exception as e:
-                    self.stderr.write(f"Warning: failed to delete storage for FileBlob {blob.id}: {e}")
-            FileBlob.objects.filter(id__in=[b.id for b in blobs]).delete()
+            for row in batch:
+                if row.blob:
+                    try:
+                        default_storage.delete(row.blob)
+                    except Exception as e:
+                        self.stderr.write(
+                            f"Warning: failed to delete storage for FileBlob {row.id}: {e}"
+                        )
+            FileBlob.objects.filter(
+                id__in=[row.id for row in batch]
+            ).delete()
 
-            deleted += len(batch_ids)
-            self.stdout.write(f"Deleted {deleted}/{total} orphaned FileBlobs...")
+            deleted += len(batch)
+            self.stdout.write(f"Deleted {deleted} orphaned FileBlobs so far...")
+
+        if deleted:
+            self.stdout.write(
+                self.style.SUCCESS(f"Done. Deleted {deleted} orphaned FileBlobs.")
+            )
+        else:
+            self.stdout.write("No orphaned FileBlobs found.")
