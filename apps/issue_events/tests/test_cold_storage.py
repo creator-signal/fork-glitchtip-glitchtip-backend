@@ -439,6 +439,85 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
     )
+    def test_archive_events_with_json_quotes(self):
+        """Events with JSON containing embedded quotes archive correctly.
+
+        Reproduces CSV parse errors seen in prod where data::text contains
+        backslash-escaped quotes that conflict with standard CSV quoting.
+        """
+        import json
+
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        from ..models import Issue
+
+        issue = Issue.objects.create(
+            project=self.project,
+            title='Error: ("Connection broken")',
+            metadata={"title": 'Error: ("Connection broken")'},
+            type=0,
+            level=40,
+        )
+
+        event_time = self.archive_date + timedelta(seconds=1)
+        event_id = UUID7Helper.from_datetime(event_time)
+        # JSON data with nested quotes — the pattern that broke CSV parsing
+        data = json.dumps(
+            {
+                "sdk": {"name": "sentry.python", "version": "1.5.4"},
+                "message": 'ChunkedEncodingError: ("Connection broken: '
+                "InvalidChunkLength(got length b'', 0 bytes read)\", "
+                "InvalidChunkLength(got length b'', 0 bytes read))",
+                "extra": {"sys.argv": ["scripts/report.py"]},
+            }
+        )
+        tags = json.dumps({"browser": 'Chrome "Dev"', "os": "Linux"})
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO issue_events_issueevent "
+                "(id, timestamp, issue_id, organization_id, type, level, "
+                "title, transaction, data, tags, hashes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    str(event_id),
+                    event_time,
+                    issue.id,
+                    self.organization.id,
+                    0,
+                    4,
+                    'Error: ("Connection broken")',
+                    "/api/test",
+                    data,
+                    tags,
+                    "{}",
+                ],
+            )
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            archive_and_swap_partition(
+                self.partition_name,
+                TABLE_NAME,
+                ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+                ISSUE_EVENT_SELECT_SQL,
+            )
+
+            target_time = UUID7Helper.extract_datetime(event_id)
+            result = get_event_from_cold(
+                self.organization.id, event_id, target_time
+            )
+
+            self.assertIsNotNone(result)
+            self.assertEqual(result.id, event_id)
+            self.assertIn("ChunkedEncodingError", result.data["message"])
+            self.assertEqual(result.tags["browser"], 'Chrome "Dev"')
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
     def test_get_single_event_from_cold(self):
         """get_event_from_cold retrieves a specific event by ID."""
         from glitchtip.cold_storage import archive_and_swap_partition
