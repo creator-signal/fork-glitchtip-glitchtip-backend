@@ -48,7 +48,7 @@ ARCHIVE_CHUNK_ROWS = 50_000
 
 # SOH (Start of Heading) control character used as CSV quote/escape character.
 # Avoids ambiguity between JSON backslash-escaped quotes (\") and standard CSV
-# double-quote escaping (""), which causes DuckDB CSV parse errors on fields
+# double-quote escaping (""), which causes CSV parse errors on fields
 # containing serialized JSON (e.g. issue event data::text).
 CSV_QUOTE_CHAR = "\x01"
 
@@ -536,12 +536,18 @@ def _flush_csv_to_parquet(
     }
 
     if _is_s3_storage(storage):
-        # Write to in-memory buffer, then upload via django-storages
+        # Write to in-memory buffer, then upload via django-storages.
+        # Delete first to prevent save() from appending random suffixes
+        # to avoid collisions (e.g. "file_kJsULkE.parquet").
         buf = io.BytesIO()
         aio.write_parquet(reader, buf, **write_kwargs)
         buf.seek(0)
         from django.core.files.base import ContentFile
 
+        try:
+            storage.delete(out_path)
+        except Exception:
+            pass
         storage.save(out_path, ContentFile(buf.read()))
     else:
         parquet_path = storage.path(out_path)
@@ -566,8 +572,7 @@ def archive_partition_per_org(
     Each organization's data is exported to a separate file:
     cold_storage/{table}/org_{id}/{date}.parquet
 
-    Reads from PostgreSQL via Django's connection, writes Parquet via
-    standalone DuckDB.
+    Reads from PostgreSQL via Django's connection, writes Parquet via arro3.
 
     Args:
         partition_name: Name of the partition to archive
