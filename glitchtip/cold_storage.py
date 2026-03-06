@@ -416,8 +416,8 @@ def get_parquet_paths_for_date(
 def _duckdb_type_to_arrow(column_types: dict[str, str]):
     """Convert DuckDB type names to arro3 DataType objects.
 
-    Lazily imports arro3 so module-level import doesn't fail when
-    arro3 is not installed (DuckDB-only read deployments).
+    Lazily imports arro3 to avoid module-level import cost on
+    code paths that only read (not write) Parquet files.
     """
     import arro3.core as ac
 
@@ -547,7 +547,7 @@ def _flush_csv_to_parquet(
         try:
             storage.delete(out_path)
         except Exception:
-            pass
+            logger.debug("Could not delete %s before save (may not exist)", out_path)
         storage.save(out_path, ContentFile(buf.read()))
     else:
         parquet_path = storage.path(out_path)

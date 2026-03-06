@@ -194,9 +194,10 @@ def _default_duckdb_memory_limit() -> str:
         return "128MB"
 
 
-# DuckDB memory limit — controls peak RAM for both reads and writes.
-# Defaults to 25% of container/system memory.  Archival automatically derives
-# its chunk size from this value so COPY TO Parquet stays within budget.
+# DuckDB memory limit — controls peak RAM for analytical reads.
+# Also used as a proxy for the deployment's memory budget to size
+# arro3 write batches during archival.
+# Defaults to 25% of container/system memory.
 # Set to empty string to disable (unbounded memory).
 DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", _default_duckdb_memory_limit())
 # Writable directory for DuckDB spill-to-disk. Set to empty string to disable
