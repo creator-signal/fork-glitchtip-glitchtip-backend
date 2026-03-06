@@ -37,6 +37,10 @@ LOGS_SELECT_SQL = """
 
 TABLE_NAME = "logs_logevent"
 
+# Low-cardinality string columns that benefit from dictionary encoding.
+# All other VARCHAR columns use DELTA_BYTE_ARRAY for better compression.
+DICTIONARY_COLUMNS = {"service", "environment", "host"}
+
 
 def archive_partition_per_org(
     partition_name: str,
@@ -50,6 +54,7 @@ def archive_partition_per_org(
         table_name,
         EXPORT_COLUMN_TYPES,
         LOGS_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 
@@ -59,5 +64,9 @@ def archive_and_swap_partition(
 ) -> bool:
     """Full archival workflow for log partitions."""
     return _archive_and_swap_partition(
-        partition_name, table_name, EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
+        partition_name,
+        table_name,
+        EXPORT_COLUMN_TYPES,
+        LOGS_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )

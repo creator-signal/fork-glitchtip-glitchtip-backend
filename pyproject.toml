@@ -45,6 +45,8 @@ dependencies = [
     "mcp[cli]>=1.9",
     "duckdb>=1.2.0",
     "minidump>=0.0.24",
+    "arro3-core~=0.8",
+    "arro3-io~=0.8",
 ]
 
 [dependency-groups]

@@ -148,6 +148,9 @@ def _row_to_issue_event(row: tuple) -> IssueEventRow:
     )
 
 
+DICTIONARY_COLUMNS: set[str] = set()
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -159,6 +162,7 @@ def archive_partition_per_org(
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 
@@ -171,6 +175,7 @@ def archive_and_swap_partition(
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 

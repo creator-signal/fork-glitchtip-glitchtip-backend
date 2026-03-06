@@ -26,7 +26,11 @@ def cleanup_old_issue_events():
     """
     from glitchtip.cold_storage import archive_and_cleanup_partitions
 
-    from .cold_storage import ISSUE_EVENT_EXPORT_COLUMN_TYPES, ISSUE_EVENT_SELECT_SQL
+    from .cold_storage import (
+        DICTIONARY_COLUMNS,
+        ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+        ISSUE_EVENT_SELECT_SQL,
+    )
 
     hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
     archive_and_cleanup_partitions(
@@ -36,6 +40,7 @@ def cleanup_old_issue_events():
         select_sql=ISSUE_EVENT_SELECT_SQL,
         retention_days=settings.GLITCHTIP_EVENT_RETENTION_DAYS,
         db_alias=settings.MAINTENANCE_DATABASE_ALIAS,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 
