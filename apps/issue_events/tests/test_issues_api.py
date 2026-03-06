@@ -242,6 +242,14 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
         self.assertContains(res, event.issue.title)
 
+    def test_search_unmatched_quote(self):
+        """Queries with unmatched quotes should not raise ValueError"""
+        baker.make("issue_events.Issue", project=self.project)
+        res = self.client.get(
+            self.list_url + "?query=SMTPAuthenticationError: (534, b'5.7.8"
+        )
+        self.assertEqual(res.status_code, 200)
+
     def test_search_wildcard(self):
         issue_str = "The foo want to the bar"
         issue = baker.make(
