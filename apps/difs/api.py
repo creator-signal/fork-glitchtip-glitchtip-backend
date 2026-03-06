@@ -8,11 +8,13 @@ from hashlib import sha1
 
 from asgiref.sync import sync_to_async
 from django.core.files import File as DjangoFile
+from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
 from ninja import File as NinjaFile
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
+from ninja.pagination import paginate
 from symbolic import ProguardMapper, normalize_debug_id
 
 from apps.files.models import File, FileBlob
@@ -23,7 +25,7 @@ from glitchtip.api.decorators import optional_slash
 from glitchtip.api.permissions import has_permission
 
 from .models import DebugInformationFile
-from .schema import AssemblePayload
+from .schema import AssemblePayload, DebugFileSchema
 from .tasks import DIF_STATE_CREATED, DIF_STATE_NOT_FOUND, DIF_STATE_OK, difs_assemble
 
 MAX_UPLOAD_BLOB_SIZE = 32 * 1024 * 1024  # 32MB
@@ -195,6 +197,31 @@ async def create_dif_from_read_only_file(proguard_file, project, proguard_id, fi
         }
 
         return result
+
+
+@optional_slash(
+    router,
+    "get",
+    "projects/{slug:organization_slug}/{slug:project_slug}/files/dsyms/",
+    response=list[DebugFileSchema],
+    by_alias=True,
+)
+@paginate
+@has_permission(["project:read", "project:write", "project:admin"])
+async def list_dsyms(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    project_slug: str,
+    response: HttpResponse,
+):
+    organization = await aget_object_or_404(
+        Organization, slug=organization_slug.lower(), users=request.auth.user_id
+    )
+    project = await aget_object_or_404(
+        Project, slug=project_slug.lower(), organization=organization
+    )
+
+    return DebugInformationFile.objects.filter(project=project).select_related("file")
 
 
 @optional_slash(
