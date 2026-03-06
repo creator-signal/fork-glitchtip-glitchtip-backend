@@ -1421,8 +1421,8 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = "~=3.7" },
     { name = "anonymizeip", specifier = "~=1.0" },
-    { name = "arro3-core", specifier = ">=0.8" },
-    { name = "arro3-io", specifier = ">=0.8" },
+    { name = "arro3-core", specifier = "~=0.8" },
+    { name = "arro3-io", specifier = "~=0.8" },
     { name = "boto3", specifier = "~=1.34" },
     { name = "brotli", specifier = ">=1.2.0" },
     { name = "cxxfilt", specifier = "~=0.3.0" },
