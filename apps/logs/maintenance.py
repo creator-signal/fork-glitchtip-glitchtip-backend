@@ -16,7 +16,7 @@ from glitchtip.cold_storage import (
     is_duckdb_available,
 )
 
-from .cold_storage import EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
+from .cold_storage import DICTIONARY_COLUMNS, EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ def cleanup_old_logs():
             select_sql=LOGS_SELECT_SQL,
             retention_days=retention_days,
             db_alias=db_alias,
+            dictionary_columns=DICTIONARY_COLUMNS,
         )
     else:
         # No cold storage available - delete partitions at total retention
