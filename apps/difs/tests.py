@@ -213,6 +213,42 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         self.assertEqual(response.json(), expected_response)
         self.assertEqual(response.status_code, 400)
 
+    def test_get(self):
+        """
+        It should return a list of debug information files
+        """
+        fileobj = baker.make("files.File", checksum=self.checksum, size=1234)
+        dif = baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            file=fileobj,
+            name="mapping.txt",
+            data={
+                "debug_id": self.uuid,
+                "symbol_type": "proguard",
+                "arch": "any",
+                "features": ["mapping"],
+            },
+        )
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+
+        res_data = response.json()
+        self.assertEqual(len(res_data), 1)
+        self.assertEqual(res_data[0]["id"], str(dif.id))
+        self.assertEqual(res_data[0]["uuid"], self.uuid)
+        self.assertEqual(res_data[0]["debugId"], self.uuid)
+        self.assertEqual(res_data[0]["cpuName"], "any")
+        self.assertEqual(res_data[0]["objectName"], "mapping.txt")
+        self.assertEqual(res_data[0]["symbolType"], "proguard")
+        self.assertEqual(res_data[0]["size"], 1234)
+        self.assertEqual(res_data[0]["sha1"], self.checksum)
+        self.assertEqual(res_data[0]["data"], {"features": ["mapping"]})
+        self.assertEqual(res_data[0]["headers"], {})
+        # Verify it's a valid ISO date
+        self.assertTrue(res_data[0]["dateCreated"].endswith("Z"))
+
 
 class DifsTasksTestCase(GlitchTestCase):
     @classmethod
@@ -640,9 +676,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             contexts={"os": {"name": "Android"}},
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Android event should only try proguard DIFs — neither the source
             # bundle nor the native DIF should cause a blob download.
@@ -684,9 +718,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             contexts={"os": {"name": "iOS"}, "device": {"arch": "arm64"}},
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Non-Android event should exclude proguard DIFs — no blob download.
             mock_concat.assert_not_called()
@@ -752,9 +784,7 @@ class DifTypeFilteringTestCase(GlitchTestCase):
             },
         )
 
-        with patch(
-            "apps.difs.tasks.difs_concat_file_blobs_to_disk"
-        ) as mock_concat:
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Should only try the matching DIF (1 call), not both
             self.assertEqual(mock_concat.call_count, 1)
