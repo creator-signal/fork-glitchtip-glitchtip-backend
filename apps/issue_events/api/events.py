@@ -91,8 +91,21 @@ async def list_issue_event(
 )
 @has_permission(["event:read", "event:write", "event:admin"])
 async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
-    # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
-    qs = get_queryset(request, issue_id).order_by("-id")
+    # Resolve issue first to get organization_id for hash partition pruning
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id, project__organization__users=request.auth.user_id
+        )
+        .select_related("project__organization")
+        .afirst()
+    )
+    if not issue:
+        raise Http404()
+
+    # Filter by organization_id to enable hash sub-partition pruning
+    qs = get_queryset(request, issue_id).filter(
+        organization_id=issue.project.organization_id
+    ).order_by("-id")
     qs = qs.annotate(
         previous=Subquery(
             qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
@@ -108,16 +121,6 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     from ..cold_storage import is_duckdb_available
 
     if not is_duckdb_available():
-        raise Http404()
-
-    issue = (
-        await Issue.objects.filter(
-            id=issue_id, project__organization__users=request.auth.user_id
-        )
-        .select_related("project__organization")
-        .afirst()
-    )
-    if not issue:
         raise Http404()
 
     cold_event = await asyncio.to_thread(
