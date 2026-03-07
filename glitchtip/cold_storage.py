@@ -597,7 +597,19 @@ def archive_partition_per_org(
 
     try:
         with connection.cursor() as cursor:
-            # Find all orgs with data in this partition
+            # Find all orgs with data in this partition.
+            # Check existence first to avoid aborting the transaction
+            # (a failed query in psycopg3 puts the connection in error state).
+            cursor.execute(
+                "SELECT 1 FROM pg_tables WHERE tablename = %s", [partition_name]
+            )
+            if not cursor.fetchone():
+                logger.info(
+                    "Partition %s already dropped, skipping archival",
+                    partition_name,
+                )
+                return []
+
             cursor.execute(
                 SQL(
                     "SELECT DISTINCT organization_id FROM {} ORDER BY organization_id;"
