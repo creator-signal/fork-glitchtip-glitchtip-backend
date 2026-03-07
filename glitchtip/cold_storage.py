@@ -598,11 +598,20 @@ def archive_partition_per_org(
     try:
         with connection.cursor() as cursor:
             # Find all orgs with data in this partition
-            cursor.execute(
-                SQL(
-                    "SELECT DISTINCT organization_id FROM {} ORDER BY organization_id;"
-                ).format(Identifier(partition_name))
-            )
+            try:
+                cursor.execute(
+                    SQL(
+                        "SELECT DISTINCT organization_id FROM {} ORDER BY organization_id;"
+                    ).format(Identifier(partition_name))
+                )
+            except Exception as e:
+                if "does not exist" in str(e):
+                    logger.info(
+                        "Partition %s already dropped, skipping archival",
+                        partition_name,
+                    )
+                    return []
+                raise
             org_ids = [row[0] for row in cursor.fetchall()]
 
             if not org_ids:
