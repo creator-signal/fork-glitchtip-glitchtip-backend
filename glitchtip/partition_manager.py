@@ -149,7 +149,8 @@ class UUID7Helper:
             dt = dt.replace(tzinfo=timezone.utc)
 
         # Convert datetime to milliseconds since Unix epoch
-        timestamp_ms = int(dt.timestamp() * 1000)
+        # UUIDv7 uses a 48-bit unsigned timestamp, so clamp to [0, 2^48 - 1]
+        timestamp_ms = max(0, min(int(dt.timestamp() * 1000), (1 << 48) - 1))
 
         # Set random bits to either all 0s or all 1s for deterministic bounds
         if min_random:
