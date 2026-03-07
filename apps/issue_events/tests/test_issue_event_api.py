@@ -95,9 +95,16 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     def test_retrieve(self):
         issue = baker.make("issue_events.issue", project=self.project)
-        baker.make("issue_events.IssueEvent", issue=issue, _quantity=10)
-        previous_event = baker.make("issue_events.IssueEvent", issue=issue)
-        latest_event = baker.make("issue_events.IssueEvent", issue=issue)
+        org = self.project.organization
+        baker.make(
+            "issue_events.IssueEvent", issue=issue, organization=org, _quantity=10
+        )
+        previous_event = baker.make(
+            "issue_events.IssueEvent", issue=issue, organization=org
+        )
+        latest_event = baker.make(
+            "issue_events.IssueEvent", issue=issue, organization=org
+        )
         url = get_issue_event_url(issue.id, "a" * 32)
         res = self.client.get(url)
         self.assertEqual(res.status_code, 404)
@@ -161,7 +168,11 @@ class IssueEventAPIPermissionTestCase(APIPermissionTestCase):
         self.team.members.add(self.org_user)
         self.project = baker.make("projects.Project", organization=self.organization)
         self.project.teams.add(self.team)
-        self.event = baker.make("issue_events.IssueEvent", issue__project=self.project)
+        self.event = baker.make(
+            "issue_events.IssueEvent",
+            issue__project=self.project,
+            organization=self.organization,
+        )
 
         self.list_url = get_list_issue_event_url(self.event.issue_id)
         self.project_list_url = reverse(
