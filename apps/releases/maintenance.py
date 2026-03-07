@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.utils.timezone import now
 
 from .models import Deploy, Release, ReleaseProject
@@ -33,7 +34,14 @@ def cleanup_old_releases():
         # Delete CASCADE'd FKs explicitly via _raw_delete to avoid collector overhead
         Deploy.objects.filter(release_id__in=batch_ids)._raw_delete(queryset.db)
         ReleaseProject.objects.filter(release_id__in=batch_ids)._raw_delete(queryset.db)
-        count = Release.objects.filter(id__in=batch_ids)._raw_delete(queryset.db)
+        # A concurrent ingest task may re-create a ReleaseProject between
+        # the delete above and this delete (TOCTOU race). Skip and retry
+        # on the next maintenance run.
+        try:
+            count = Release.objects.filter(id__in=batch_ids)._raw_delete(queryset.db)
+        except IntegrityError:
+            logger.info("Skipped release batch due to concurrent FK insert")
+            continue
         total_deleted += count
 
     if total_deleted:
