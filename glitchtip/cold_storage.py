@@ -1414,7 +1414,7 @@ def rewrite_parquet_excluding_project(
 
     for relative_path in parquet_paths:
         parquet_path = get_duckdb_parquet_path(storage, relative_path)
-        duck_conn = get_duckdb_connection(storage)
+        duck_conn = get_duckdb_read_connection(storage)
         try:
             quoted = duckdb_quote_path(parquet_path)
 
@@ -1439,7 +1439,11 @@ def rewrite_parquet_excluding_project(
                 # No data from this project in this file, skip
                 continue
 
-            # Rewrite to a temp file then replace for crash safety
+            # Rewrite to a temp file then replace for crash safety.
+            # DuckDB handles both read+filter and write here — this is a
+            # rare operation (project deletion only) so we accept DuckDB
+            # for the write rather than adding a pyarrow dependency just
+            # to bridge DuckDB→arro3.
             is_s3 = parquet_path.startswith("s3://")
             write_path = parquet_path if is_s3 else parquet_path + ".tmp"
             duck_conn.execute(f"""
@@ -1454,10 +1458,10 @@ def rewrite_parquet_excluding_project(
             logger.debug("Rewrote cold file %s", relative_path)
         except Exception as e:
             if is_missing_file_error(e):
+                close_duckdb_read_connection()
+                duck_conn = get_duckdb_read_connection(storage)
                 continue
             logger.warning("Error rewriting cold file %s: %s", relative_path, e)
-        finally:
-            duck_conn.close()
 
     if rewritten_count:
         logger.info(
