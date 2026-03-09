@@ -189,7 +189,7 @@ def _default_duckdb_memory_limit() -> str:
     """
     try:
         total = None
-        # cgroup v2
+        # cgroup v2 (Docker/Kubernetes)
         try:
             with open("/sys/fs/cgroup/memory.max") as f:
                 val = f.read().strip()
@@ -197,16 +197,6 @@ def _default_duckdb_memory_limit() -> str:
                     total = int(val)
         except (FileNotFoundError, PermissionError):
             pass
-        # cgroup v1 fallback
-        if total is None:
-            try:
-                with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
-                    val = int(f.read().strip())
-                    # cgroup v1 reports a huge number when unlimited
-                    if val < 2**62:
-                        total = val
-            except (FileNotFoundError, PermissionError):
-                pass
         # Host memory fallback
         if total is None:
             total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
