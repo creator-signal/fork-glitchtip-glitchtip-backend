@@ -345,6 +345,8 @@ if SENTRY_DSN:
     else:
         _default_service = "glitchtip-web"
 
+    SENTRY_SERVICE_NAME = env.str("SENTRY_SERVICE_NAME", _default_service)
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         transport=InternalTransport if _is_self_referencing else None,
@@ -352,7 +354,6 @@ if SENTRY_DSN:
         before_send=before_send,
         release=release,
         environment=ENVIRONMENT,
-        server_name=env.str("SENTRY_SERVICE_NAME", _default_service),
         auto_session_tracking=False,
         send_client_reports=False,
         sample_rate=SENTRY_SAMPLE_RATE,
@@ -363,7 +364,7 @@ if SENTRY_DSN:
         enable_logs=SENTRY_ENABLE_LOGS,
     )
     sentry_sdk.get_global_scope().set_attribute(
-        "service.name", env.str("SENTRY_SERVICE_NAME", _default_service)
+        "service.name", SENTRY_SERVICE_NAME
     )
 
 
