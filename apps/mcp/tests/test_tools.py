@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
@@ -27,7 +28,7 @@ from apps.mcp.serializers import (
     serialize_organization,
     serialize_project,
 )
-from apps.mcp.server import _check_scopes
+from apps.mcp.server import _check_scopes, _parse_datetime
 
 
 class ValidateTokenTest(TestCase):
@@ -600,3 +601,129 @@ class SerializerTest(TestCase):
         self.assertEqual(result["name"], "Uptime Check")
         self.assertEqual(result["url"], "https://example.com")
         self.assertEqual(result["interval"], 60)
+
+
+class ParseDatetimeTest(TestCase):
+    def test_none_returns_none(self):
+        self.assertIsNone(_parse_datetime(None))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_parse_datetime(""))
+
+    def test_iso8601(self):
+        result = _parse_datetime("2025-01-15T10:00:00Z")
+        self.assertEqual(result.year, 2025)
+        self.assertEqual(result.month, 1)
+        self.assertEqual(result.day, 15)
+
+    def test_iso8601_naive_gets_utc(self):
+        result = _parse_datetime("2025-01-15T10:00:00")
+        self.assertIsNotNone(result.tzinfo)
+
+    def test_relative_now(self):
+        before = timezone.now()
+        result = _parse_datetime("now")
+        after = timezone.now()
+        self.assertGreaterEqual(result, before)
+        self.assertLessEqual(result, after)
+
+    def test_relative_now_minus_10m(self):
+        result = _parse_datetime("now-10m")
+        expected = timezone.now() - timedelta(minutes=10)
+        self.assertAlmostEqual(
+            result.timestamp(), expected.timestamp(), delta=2
+        )
+
+    def test_relative_now_minus_1h(self):
+        result = _parse_datetime("now-1h")
+        expected = timezone.now() - timedelta(hours=1)
+        self.assertAlmostEqual(
+            result.timestamp(), expected.timestamp(), delta=2
+        )
+
+    def test_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            _parse_datetime("not-a-date")
+
+
+class IssueFilterTest(TestCase):
+    def setUp(self):
+        self.user = baker.make("users.user")
+        self.project = baker.make("projects.Project")
+        self.organization = self.project.organization
+        self.org_user = self.organization.add_user(self.user)
+        self.team = baker.make("teams.Team", organization=self.organization)
+        self.team.members.add(self.org_user)
+        self.project.teams.add(self.team)
+
+    def test_filter_by_start(self):
+        now = timezone.now()
+        old_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=2),
+        )
+        new_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(minutes=5),
+        )
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            start=now - timedelta(minutes=10),
+        )
+        issue_ids = [i.id for i in issues]
+        self.assertIn(new_issue.id, issue_ids)
+        self.assertNotIn(old_issue.id, issue_ids)
+
+    def test_filter_by_start_and_end(self):
+        now = timezone.now()
+        baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=5),
+        )
+        target_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=2),
+        )
+        baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(minutes=5),
+        )
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            start=now - timedelta(hours=3),
+            end=now - timedelta(hours=1),
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].id, target_issue.id)
+
+    def test_filter_by_environment(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+        )
+        tag_key = baker.make("issue_events.TagKey", key="environment")
+        tag_value = baker.make("issue_events.TagValue", value="production")
+        baker.make(
+            "issue_events.IssueTag",
+            issue=issue,
+            tag_key=tag_key,
+            tag_value=tag_value,
+        )
+        baker.make("issue_events.Issue", project=self.project)
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            environment="production",
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].id, issue.id)
