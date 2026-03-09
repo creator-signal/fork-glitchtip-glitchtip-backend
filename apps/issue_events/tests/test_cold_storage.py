@@ -36,54 +36,47 @@ class DuckDBAvailabilityTestCase(TestCase):
     """Test DuckDB availability check."""
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
     )
     def test_enabled_via_override(self):
         self.assertTrue(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_enabled_but_no_storage_backend(self):
-        """ENABLE_DUCKDB=true without a storage backend returns False."""
+        """Explicit true without a storage backend returns False."""
         self.assertFalse(is_duckdb_available())
 
-    @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="false")
     def test_disabled_via_override(self):
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="false",
+        GLITCHTIP_ENABLE_COLD_STORAGE="false",
         GLITCHTIP_COLD_STORAGE_BUCKET="my-bucket",
     )
     def test_explicit_false_with_bucket(self):
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET="cold-bucket",
-    )
-    def test_disabled_without_explicit_opt_in(self):
-        """Bucket alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
-    def test_disabled_without_any_config(self):
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
     )
-    def test_disabled_with_dir_but_no_opt_in(self):
-        """Directory alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
+    def test_auto_detect_with_dir(self):
+        """Auto-detect: directory configured → enabled."""
+        self.assertTrue(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
+    )
+    def test_auto_detect_no_backend(self):
+        """Auto-detect: no storage backend → disabled."""
         self.assertFalse(is_duckdb_available())
 
 
@@ -230,7 +223,7 @@ class MaintenanceTestCase(TestCase):
         # Should not raise
         cleanup_old_issue_events()
 
-    @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="false")
     def test_cleanup_skips_when_disabled(self):
         from ..maintenance import cleanup_old_issue_events
 
@@ -242,14 +235,14 @@ class MaintainPartitionsSkipTestCase(TestCase):
     """Test that maintain_partitions skips issue_events when DuckDB is available."""
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
     )
     def test_skip_issue_events_when_duckdb_available(self):
         """When DuckDB is available, issue_events should be skipped from standard drop."""
         self.assertTrue(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
@@ -274,7 +267,7 @@ class MissingParquetTestCase(TestCase):
     """
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
     )
@@ -290,7 +283,7 @@ class MissingParquetTestCase(TestCase):
                 self.assertEqual(results, [])
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
     )
@@ -398,7 +391,7 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         return event_ids
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -434,7 +427,7 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertEqual(set(result_ids), set(event_ids))
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -513,7 +506,7 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertEqual(result.tags["browser"], 'Chrome "Dev"')
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,

@@ -214,10 +214,14 @@ GLITCHTIP_COLD_STORAGE_BUCKET = env.str(
 # Local directory for cold storage (alternative to S3 for simple deployments)
 GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
 
-# Set to "true" to enable DuckDB cold storage archival.
+# Enable cold storage archival (Parquet via arro3, queryable via DuckDB).
+# "true" = force on, "false" = force off, None = auto-detect from storage backend.
 # Requires a storage backend (GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR,
 # or a "cold" STORAGES alias).
-GLITCHTIP_ENABLE_DUCKDB = env.str("GLITCHTIP_ENABLE_DUCKDB", None)
+GLITCHTIP_ENABLE_COLD_STORAGE = env.str(
+    "GLITCHTIP_ENABLE_COLD_STORAGE",
+    default=env.str("GLITCHTIP_ENABLE_DUCKDB", None),  # legacy fallback
+)
 
 # Cold storage cleanup: True = GT deletes old files, False = use S3 lifecycle policies
 # High-scale deployments should disable this and configure lifecycle policies on the bucket
@@ -712,7 +716,7 @@ VTASKS_SCHEDULE = {
     },
 }
 
-if str(GLITCHTIP_ENABLE_DUCKDB or "").lower() == "true":
+if str(GLITCHTIP_ENABLE_COLD_STORAGE or "").lower() != "false":
     VTASKS_SCHEDULE["promote-spans"] = {
         "task": "apps.performance.tasks.promote_spans",
         "schedule": 300,

@@ -30,26 +30,26 @@ class DuckDBAvailabilityTestCase(TestCase):
     """Test DuckDB availability check."""
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
     )
     def test_enabled_via_override(self):
         self.assertTrue(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_enabled_but_no_storage_backend(self):
-        """ENABLE_DUCKDB=true without a storage backend returns False."""
+        """Explicit true without a storage backend returns False."""
         self.assertFalse(is_duckdb_available())
 
-    @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="false")
     def test_disabled_via_override(self):
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="false",
+        GLITCHTIP_ENABLE_COLD_STORAGE="false",
         GLITCHTIP_COLD_STORAGE_BUCKET="my-bucket",
     )
     def test_explicit_false_with_bucket(self):
@@ -57,29 +57,21 @@ class DuckDBAvailabilityTestCase(TestCase):
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET="cold-bucket",
-    )
-    def test_disabled_without_explicit_opt_in(self):
-        """Bucket alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
-    def test_disabled_without_any_config(self):
-        """No override and no bucket = no cold storage."""
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
     )
-    def test_disabled_with_dir_but_no_opt_in(self):
-        """Directory alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
+    def test_auto_detect_with_dir(self):
+        """Auto-detect: directory configured → enabled."""
+        self.assertTrue(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        GLITCHTIP_COLD_STORAGE_DIR=None,
+    )
+    def test_auto_detect_no_backend(self):
+        """Auto-detect: no storage backend → disabled."""
         self.assertFalse(is_duckdb_available())
 
 
@@ -144,7 +136,7 @@ class ColdStorageQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         if not get_cold_storage_backend():
             self.skipTest("No cold storage backend configured")
 
-    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="true")
     def test_query_empty_cold_storage(self):
         """Test querying cold storage when no files exist."""
         self._skip_if_no_backend()
@@ -237,7 +229,7 @@ class NoDuckDBTestCase(TestCase):
     """Tests that verify graceful behavior when DuckDB cold storage is disabled."""
 
     def test_cold_storage_returns_empty_when_disabled(self):
-        """Test that cold storage returns empty when GLITCHTIP_ENABLE_DUCKDB is not set."""
+        """Test that cold storage returns empty when GLITCHTIP_ENABLE_COLD_STORAGE is not set."""
         from ..api import query_cold_storage
 
         now = datetime.now(dt_timezone.utc)
@@ -357,7 +349,7 @@ class ColdStorageQueryUnionTestCase(GlitchTipTestCaseMixin, TransactionTestCase)
         )
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -393,7 +385,7 @@ class ColdStorageQueryUnionTestCase(GlitchTipTestCaseMixin, TransactionTestCase)
             self.assertEqual(len(all_ids), 100)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -414,7 +406,7 @@ class ColdStorageQueryUnionTestCase(GlitchTipTestCaseMixin, TransactionTestCase)
             self.assertEqual(len(results), 50)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -435,7 +427,7 @@ class ColdStorageQueryUnionTestCase(GlitchTipTestCaseMixin, TransactionTestCase)
             self.assertEqual(len(results), 50)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -474,7 +466,7 @@ class MissingParquetTestCase(TestCase):
     """
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
     )
@@ -493,7 +485,7 @@ class MissingParquetTestCase(TestCase):
                 self.assertEqual(results, [])
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
     )
@@ -532,7 +524,7 @@ class CorruptParquetTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         shutil.rmtree(self.cold_dir, ignore_errors=True)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -737,7 +729,7 @@ class CombinedQueryBothTiersTestCase(GlitchTipTestCaseMixin, TransactionTestCase
 
     @freeze_time("2025-04-12 12:00:00")
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -774,7 +766,7 @@ class CombinedQueryBothTiersTestCase(GlitchTipTestCaseMixin, TransactionTestCase
 
     @freeze_time("2025-04-12 12:00:00")
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -836,7 +828,7 @@ class CountStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         shutil.rmtree(self.cold_dir, ignore_errors=True)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
@@ -869,7 +861,7 @@ class CountStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertEqual(count_full, 50)
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_ENABLE_COLD_STORAGE="true",
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         AWS_STORAGE_BUCKET_NAME=None,
         BILLING_ENABLED=False,
