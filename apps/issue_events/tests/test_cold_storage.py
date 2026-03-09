@@ -35,20 +35,9 @@ from ..cold_storage import (
 class DuckDBAvailabilityTestCase(TestCase):
     """Test DuckDB availability check."""
 
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
-    )
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="true")
     def test_enabled_via_override(self):
         self.assertTrue(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true",
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
-    def test_enabled_but_no_storage_backend(self):
-        """Explicit true without a storage backend returns False."""
-        self.assertFalse(is_duckdb_available())
 
     @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="false")
     def test_disabled_via_override(self):
@@ -59,6 +48,7 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_COLD_STORAGE_BUCKET="my-bucket",
     )
     def test_explicit_false_with_bucket(self):
+        """Explicit false wins even if a backend is configured."""
         self.assertFalse(is_duckdb_available())
 
     @override_settings(
@@ -75,15 +65,6 @@ class DuckDBAvailabilityTestCase(TestCase):
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
     def test_disabled_without_any_config(self):
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
-    )
-    def test_disabled_with_dir_but_no_opt_in(self):
-        """Directory alone is not enough — requires GLITCHTIP_ENABLE_COLD_STORAGE=true."""
         self.assertFalse(is_duckdb_available())
 
 
@@ -241,18 +222,12 @@ class MaintenanceTestCase(TestCase):
 class MaintainPartitionsSkipTestCase(TestCase):
     """Test that maintain_partitions skips issue_events when DuckDB is available."""
 
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
-    )
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="true")
     def test_skip_issue_events_when_duckdb_available(self):
         """When DuckDB is available, issue_events should be skipped from standard drop."""
         self.assertTrue(is_duckdb_available())
 
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE=None)
     def test_no_skip_without_duckdb(self):
         """When DuckDB is not available, standard drop should proceed."""
         self.assertFalse(is_duckdb_available())

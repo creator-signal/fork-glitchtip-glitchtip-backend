@@ -29,20 +29,9 @@ from ..models import LogEvent
 class DuckDBAvailabilityTestCase(TestCase):
     """Test DuckDB availability check."""
 
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
-    )
+    @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="true")
     def test_enabled_via_override(self):
         self.assertTrue(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true",
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
-    def test_enabled_but_no_storage_backend(self):
-        """Explicit true without a storage backend returns False."""
-        self.assertFalse(is_duckdb_available())
 
     @override_settings(GLITCHTIP_ENABLE_COLD_STORAGE="false")
     def test_disabled_via_override(self):
@@ -71,15 +60,6 @@ class DuckDBAvailabilityTestCase(TestCase):
     )
     def test_disabled_without_any_config(self):
         """No override and no bucket = no cold storage."""
-        self.assertFalse(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
-    )
-    def test_disabled_with_dir_but_no_opt_in(self):
-        """Directory alone is not enough — requires GLITCHTIP_ENABLE_COLD_STORAGE=true."""
         self.assertFalse(is_duckdb_available())
 
 

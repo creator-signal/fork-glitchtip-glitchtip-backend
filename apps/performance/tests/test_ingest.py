@@ -183,7 +183,7 @@ class TransactionIngestTestCase(TestCase):
         self.assertEqual(TransactionGroup.objects.count(), 2)
 
     @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_COLD_STORAGE="true"
     )
     def test_spans_written_to_staging(self):
         """Spans from the transaction are written to SpanStaging."""
@@ -225,7 +225,7 @@ class TransactionIngestTestCase(TestCase):
         self.assertIn("%s", db_span.description)
 
     @override_settings(
-        GLITCHTIP_ENABLE_COLD_STORAGE="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_COLD_STORAGE="true"
     )
     def test_span_description_parameterized(self):
         """SQL literals in span descriptions are replaced with %s."""

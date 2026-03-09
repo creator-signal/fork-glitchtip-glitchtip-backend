@@ -215,8 +215,10 @@ GLITCHTIP_COLD_STORAGE_BUCKET = env.str(
 GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
 
 # Enable cold storage archival (Parquet via arro3, queryable via DuckDB).
-# Set to "true" to enable. Requires a storage backend
-# (GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
+# Set to "true" to enable. Storage backend is auto-detected: S3 bucket first,
+# then local dir (defaults to /code/uploads/cold_storage).
+# Override with GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR,
+# or a "cold" STORAGES alias.
 GLITCHTIP_ENABLE_COLD_STORAGE = env.str(
     "GLITCHTIP_ENABLE_COLD_STORAGE",
     default=env.str("GLITCHTIP_ENABLE_DUCKDB", None),  # legacy fallback

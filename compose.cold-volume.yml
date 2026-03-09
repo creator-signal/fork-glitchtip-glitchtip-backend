@@ -1,8 +1,4 @@
 services:
   web:
     environment:
-      GLITCHTIP_COLD_STORAGE_DIR: /cold_storage
-    volumes:
-      - cold-data:/cold_storage
-volumes:
-  cold-data:
+      GLITCHTIP_ENABLE_COLD_STORAGE: "true"
