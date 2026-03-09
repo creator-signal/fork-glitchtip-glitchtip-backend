@@ -215,9 +215,8 @@ GLITCHTIP_COLD_STORAGE_BUCKET = env.str(
 GLITCHTIP_COLD_STORAGE_DIR = env.str("GLITCHTIP_COLD_STORAGE_DIR", None)
 
 # Enable cold storage archival (Parquet via arro3, queryable via DuckDB).
-# "true" = force on, "false" = force off, None = auto-detect from storage backend.
-# Requires a storage backend (GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR,
-# or a "cold" STORAGES alias).
+# Set to "true" to enable. Requires a storage backend
+# (GLITCHTIP_COLD_STORAGE_BUCKET, GLITCHTIP_COLD_STORAGE_DIR, or a "cold" STORAGES alias).
 GLITCHTIP_ENABLE_COLD_STORAGE = env.str(
     "GLITCHTIP_ENABLE_COLD_STORAGE",
     default=env.str("GLITCHTIP_ENABLE_DUCKDB", None),  # legacy fallback
@@ -716,7 +715,7 @@ VTASKS_SCHEDULE = {
     },
 }
 
-if str(GLITCHTIP_ENABLE_COLD_STORAGE or "").lower() != "false":
+if str(GLITCHTIP_ENABLE_COLD_STORAGE or "").lower() == "true":
     VTASKS_SCHEDULE["promote-spans"] = {
         "task": "apps.performance.tasks.promote_spans",
         "schedule": 300,

@@ -1,8 +1,7 @@
 """
 Shared cold storage infrastructure for archiving partitions to Parquet.
 
-Enabled automatically when a storage backend is configured, or force on/off
-via GLITCHTIP_ENABLE_COLD_STORAGE=true/false.
+Requires explicit opt-in via GLITCHTIP_ENABLE_COLD_STORAGE=true.
 Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
 
 Write path: arro3 (Rust Arrow/Parquet via PyO3) — streams CSV→Parquet with
@@ -141,10 +140,8 @@ def is_duckdb_available() -> bool:
     """
     Check if cold storage is enabled and a storage backend exists.
 
-    - GLITCHTIP_ENABLE_COLD_STORAGE=true  → force on (requires backend)
-    - GLITCHTIP_ENABLE_COLD_STORAGE=false → force off
-    - Not set (None)                      → auto-detect from storage backend
-
+    Requires explicit opt-in via GLITCHTIP_ENABLE_COLD_STORAGE=true AND a
+    configured storage backend (S3 bucket, local dir, or STORAGES["cold"]).
     Result is cached at module level since neither setting changes at runtime.
     The cache is automatically cleared by Django's setting_changed signal
     (fired by @override_settings in tests).
@@ -154,12 +151,9 @@ def is_duckdb_available() -> bool:
         return _duckdb_available
 
     override = getattr(settings, "GLITCHTIP_ENABLE_COLD_STORAGE", None)
-    val = str(override).lower() if override is not None else None
-
-    if val == "false":
+    if override is None or str(override).lower() != "true":
         _duckdb_available = False
     else:
-        # "true" or None (auto-detect): enabled if a backend exists
         _duckdb_available = get_cold_storage_backend() is not None
     return _duckdb_available
 

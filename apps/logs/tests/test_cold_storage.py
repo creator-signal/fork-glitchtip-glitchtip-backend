@@ -58,20 +58,28 @@ class DuckDBAvailabilityTestCase(TestCase):
 
     @override_settings(
         GLITCHTIP_ENABLE_COLD_STORAGE=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
+        GLITCHTIP_COLD_STORAGE_BUCKET="cold-bucket",
     )
-    def test_auto_detect_with_dir(self):
-        """Auto-detect: directory configured → enabled."""
-        self.assertTrue(is_duckdb_available())
+    def test_disabled_without_explicit_opt_in(self):
+        """Bucket alone is not enough — requires GLITCHTIP_ENABLE_COLD_STORAGE=true."""
+        self.assertFalse(is_duckdb_available())
 
     @override_settings(
         GLITCHTIP_ENABLE_COLD_STORAGE=None,
         GLITCHTIP_COLD_STORAGE_BUCKET=None,
         GLITCHTIP_COLD_STORAGE_DIR=None,
     )
-    def test_auto_detect_no_backend(self):
-        """Auto-detect: no storage backend → disabled."""
+    def test_disabled_without_any_config(self):
+        """No override and no bucket = no cold storage."""
+        self.assertFalse(is_duckdb_available())
+
+    @override_settings(
+        GLITCHTIP_ENABLE_COLD_STORAGE=None,
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
+    )
+    def test_disabled_with_dir_but_no_opt_in(self):
+        """Directory alone is not enough — requires GLITCHTIP_ENABLE_COLD_STORAGE=true."""
         self.assertFalse(is_duckdb_available())
 
 

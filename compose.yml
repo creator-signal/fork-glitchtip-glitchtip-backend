@@ -13,6 +13,8 @@ x-environment: &default-environment
   GLITCHTIP_ENABLE_MCP: "true"
   GLITCHTIP_BOOTSTRAP_DEV: "true"
   GLITCHTIP_ENABLE_LOGS: "true"
+  GLITCHTIP_ENABLE_COLD_STORAGE: "true"
+  GLITCHTIP_COLD_STORAGE_DIR: /cold_storage
 
 x-depends_on: &default-depends_on
   - postgres
