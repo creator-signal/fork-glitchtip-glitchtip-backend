@@ -878,15 +878,15 @@ wheels = [
 
 [[package]]
 name = "django-organizations"
-version = "2.5.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "django-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/bc/f920d2c12f85824da8014254c3351dbbbd1f248322f4198f04eeb489edb0/django_organizations-2.5.0.tar.gz", hash = "sha256:8cc8cd617dabf68e9118f4f5c7c2dddf89549e18f5696f70a419da3ccecfc17f", size = 75645, upload-time = "2024-10-28T18:54:11.995Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/1b/7d1d676a3f949bd53e72d58dc68e5658eb271c970c3951e3825865ae4696/django_organizations-2.6.0.tar.gz", hash = "sha256:ce3e64e5f6406b7af557a35bfd1f1081d68f0f64ce4c87326b77e4a66e7b39a9", size = 75999, upload-time = "2026-03-08T16:51:45.94Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/05/e3d2adc72f449af2187d8d2070eb7a5ddc9e0bfb8c2ab7c9473439338c5e/django_organizations-2.5.0-py3-none-any.whl", hash = "sha256:bb07e31a34a3c973e736499c3386f6d62f8af3128c182073a7fc6063b4700427", size = 55036, upload-time = "2024-10-28T18:54:13.382Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/54/f484a7331872f5a337dc8e4b056c444235ad79ec54fb73735c5adb70f78a/django_organizations-2.6.0-py3-none-any.whl", hash = "sha256:6f1b17e010ae25674cfd4c6fed34ee14ea0c3d6449dfbaafb5da226a8362155f", size = 54938, upload-time = "2026-03-08T16:51:46.791Z" },
 ]
 
 [[package]]
