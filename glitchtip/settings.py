@@ -182,14 +182,27 @@ DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
 
 
 def _default_duckdb_memory_limit() -> str:
-    """Auto-detect 25% of container/system memory for DuckDB."""
-    try:
-        import os
+    """Auto-detect 25% of container/system memory for DuckDB.
 
-        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    Reads the cgroup memory limit first (works in Docker/Kubernetes),
+    then falls back to total system memory via os.sysconf.
+    """
+    try:
+        total = None
+        # cgroup v2 (Docker/Kubernetes)
+        try:
+            with open("/sys/fs/cgroup/memory.max") as f:
+                val = f.read().strip()
+                if val != "max":
+                    total = int(val)
+        except (FileNotFoundError, PermissionError):
+            pass
+        # Host memory fallback
+        if total is None:
+            total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         quarter = total // 4
         mb = quarter // (1024 * 1024)
-        return f"{mb}MB"
+        return f"{min(mb, 1024)}MB"
     except (ValueError, OSError, AttributeError):
         return "128MB"
 
