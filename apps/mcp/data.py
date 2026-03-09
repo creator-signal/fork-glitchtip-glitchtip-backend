@@ -51,12 +51,21 @@ async def get_issues(
     project_slug: str | None = None,
     query: str | None = None,
     sort: str | None = None,
+    environment: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
     limit: int = 25,
 ) -> list[Issue]:
     qs = await get_issues_qs(user_id, organization_slug, project_slug)
-    filters = {}
+    filters: dict = {}
     if query:
         filters["query"] = query
+    if environment:
+        filters["environment"] = [environment]
+    if start:
+        filters["first_seen__gte"] = start
+    if end:
+        filters["first_seen__lte"] = end
     qs = filter_issue_list(qs, filters, sort=sort)
     qs = _apply_compliance_filter(qs)
     limit = min(limit, AsyncLinkHeaderPagination.max_page_size)
@@ -240,15 +249,19 @@ async def get_logs(
     level: str | None = None,
     service: str | None = None,
     environment: str | None = None,
+    host: str | None = None,
     query: str | None = None,
     trace_id: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
     limit: int = 50,
 ) -> list[LogEventRow]:
     """Query logs from hot+cold storage via the existing combined query."""
     org_id = await _get_org_id(user_id, organization_slug)
 
     now = datetime.now(timezone.utc)
-    start_dt = now - timedelta(days=7)
+    start_dt = start or (now - timedelta(days=7))
+    end_dt = end or now
 
     level_values = parse_level_filters([level] if level else None)
 
@@ -257,11 +270,12 @@ async def get_logs(
     return await query_logs_combined(
         organization_id=org_id,
         start_dt=start_dt,
-        end_dt=now,
+        end_dt=end_dt,
         project_ids=project_ids,
         level_values=level_values,
         service=service,
         environment=environment,
+        host=host,
         trace_id=trace_id,
         query=query,
         limit=min(limit, 100),
