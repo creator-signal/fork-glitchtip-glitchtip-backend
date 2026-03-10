@@ -31,15 +31,20 @@ class MCPDjangoDispatcher:
     """Route MCP and OAuth requests to the MCP Starlette app, everything else to Django.
 
     The MCP SDK creates OAuth routes (/authorize, /token, /register, /revoke)
-    and discovery routes (/.well-known/oauth-*) at root level alongside the
-    main /mcp endpoint. All of these must be forwarded to the MCP Starlette app.
+    internally at root level. We set issuer_url to include /mcp so the
+    well-known metadata advertises them as /mcp/authorize, /mcp/register, etc.
+    This avoids conflicts with Django routes (e.g. /register for the SPA).
+
+    Clients discover all OAuth endpoints via /.well-known/oauth-authorization-server
+    metadata, so the prefixed paths work transparently.
 
     Handles ASGI lifespan by forwarding startup/shutdown to both apps so
     the MCP Starlette app can initialise its session-manager task group.
     """
 
-    # OAuth endpoints the MCP SDK creates at root level
-    _OAUTH_PATHS = frozenset({"/authorize", "/token", "/register", "/revoke"})
+    # OAuth endpoints the MCP SDK creates (under /mcp prefix externally,
+    # but the Starlette app expects them at root level internally)
+    _OAUTH_SUFFIXES = frozenset({"/authorize", "/token", "/register", "/revoke"})
 
     def __init__(self, django_app, mcp_app, mcp_prefix="/mcp", django_lifespan=False):
         self.django_app = django_app
@@ -47,24 +52,41 @@ class MCPDjangoDispatcher:
         self.mcp_prefix = mcp_prefix
         self._django_lifespan = django_lifespan
 
+    # Well-known prefixes that should be routed to the MCP Starlette app
+    _WELL_KNOWN_PREFIXES = (
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
+    )
+
     def _is_mcp_path(self, path: str) -> bool:
-        return (
-            path.startswith(self.mcp_prefix)
-            or path in self._OAUTH_PATHS
-            or path.startswith("/.well-known/oauth-")
-            or path.startswith("/.well-known/openid-configuration")
+        return path.startswith(self.mcp_prefix) or any(
+            path.startswith(p) for p in self._WELL_KNOWN_PREFIXES
         )
+
+    def _rewrite_path(self, path: str) -> str:
+        """Rewrite external paths to internal paths the MCP SDK expects.
+
+        - /mcp/authorize → /authorize (OAuth endpoints)
+        - /.well-known/oauth-authorization-server/mcp → /.well-known/oauth-authorization-server
+          (RFC 8414: issuer with path gets suffix on well-known, but SDK registers without it)
+        """
+        # Strip /mcp prefix from OAuth sub-paths
+        if path.startswith(self.mcp_prefix):
+            suffix = path[len(self.mcp_prefix) :]
+            if suffix in self._OAUTH_SUFFIXES:
+                return suffix
+        # Strip /mcp suffix from well-known paths (RFC 8414 path-aware discovery)
+        for prefix in self._WELL_KNOWN_PREFIXES:
+            if path == f"{prefix}{self.mcp_prefix}":
+                return prefix
+        return path
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
             await self._handle_lifespan(scope, receive, send)
         elif scope["type"] == "http" and self._is_mcp_path(scope["path"]):
-            # Rewrite OpenID Connect discovery to OAuth AS metadata.
-            # Some MCP clients try /.well-known/openid-configuration[/mcp]
-            # but the MCP SDK only serves /.well-known/oauth-authorization-server.
-            if scope["path"].startswith("/.well-known/openid-configuration"):
-                scope = dict(scope, path="/.well-known/oauth-authorization-server")
-            await self.mcp_app(scope, receive, send)
+            path = self._rewrite_path(scope["path"])
+            await self.mcp_app(dict(scope, path=path), receive, send)
         else:
             await self.django_app(scope, receive, send)
 
