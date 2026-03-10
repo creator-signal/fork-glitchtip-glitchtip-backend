@@ -281,6 +281,7 @@ if SENTRY_DSN:
     import sentry_sdk
     from django.http import UnreadablePostError
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.modules import ModulesIntegration
 
     from glitchtip.internal_transport import InternalTransport
 
@@ -347,10 +348,30 @@ if SENTRY_DSN:
 
     SENTRY_SERVICE_NAME = env.str("SENTRY_SERVICE_NAME", _default_service)
 
+    # Disable auto-discovered integrations that add overhead without value:
+    # - ModulesIntegration: serializes all ~2600 sys.modules on every error event
+    # - Flask/Starlette: auto-detected but GlitchTip uses Django, not these frameworks
+    # - AioHttp: instruments aiohttp server; we only use aiohttp as an HTTP client
+    # - MCP: instruments MCP server calls; minimal value vs overhead
+    _disabled_integrations = [ModulesIntegration()]
+    _optional_disable = [
+        ("sentry_sdk.integrations.flask", "FlaskIntegration"),
+        ("sentry_sdk.integrations.starlette", "StarletteIntegration"),
+        ("sentry_sdk.integrations.aiohttp", "AioHttpIntegration"),
+        ("sentry_sdk.integrations.mcp", "MCPIntegration"),
+    ]
+    for _mod_path, _cls_name in _optional_disable:
+        try:
+            _mod = __import__(_mod_path, fromlist=[_cls_name])
+            _disabled_integrations.append(getattr(_mod, _cls_name)())
+        except (ImportError, AttributeError):
+            pass
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         transport=InternalTransport if _is_self_referencing else None,
         integrations=[DjangoIntegration()],
+        disabled_integrations=_disabled_integrations,
         before_send=before_send,
         release=release,
         environment=ENVIRONMENT,
@@ -360,12 +381,10 @@ if SENTRY_DSN:
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         traces_sampler=traces_sampler,
         max_value_length=2048,
-        max_breadcrumbs=50,
+        max_breadcrumbs=20,
         enable_logs=SENTRY_ENABLE_LOGS,
     )
-    sentry_sdk.get_global_scope().set_attribute(
-        "service.name", SENTRY_SERVICE_NAME
-    )
+    sentry_sdk.get_global_scope().set_attribute("service.name", SENTRY_SERVICE_NAME)
 
 
 def show_toolbar(request):
