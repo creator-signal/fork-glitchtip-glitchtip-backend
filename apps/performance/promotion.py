@@ -6,9 +6,9 @@ chunk files into daily files for efficient analytical queries.
 """
 
 import csv
+import io
 import logging
 import os
-import tempfile
 import time
 from datetime import timedelta
 
@@ -17,6 +17,10 @@ from django.utils import timezone
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
+    CSV_QUOTE_CHAR,
+    _duckdb_type_to_arrow,
+    _is_s3_storage,
+    _parquet_encoding_opts,
     duckdb_quote_path,
     get_cold_storage_backend,
     get_duckdb_connection,
@@ -169,62 +173,75 @@ def promote_spans() -> tuple[int, bool]:
 
 
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
-    """Write a chunk Parquet file for a single org+date group via CSV."""
+    """Write a chunk Parquet file for a single org+date group via arro3.
+
+    Builds CSV in memory, then streams through arro3 (Rust Arrow/Parquet).
+    No temp files, no DuckDB dependency for writes.
+    """
+    import arro3.io as aio
+
     chunk_ts = f"{time.time_ns()}_{os.getpid()}"
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
-    parquet_path = get_duckdb_parquet_path(storage, relative_path)
 
-    # Ensure directory exists for filesystem storage
-    parquet_dir = os.path.dirname(parquet_path)
-    if not parquet_path.startswith("s3://"):
-        os.makedirs(parquet_dir, exist_ok=True)
-
-    # Write rows to CSV — skip the staging id (index 0)
+    # Build CSV bytes in memory using SOH quote char (matches cold_storage convention)
     columns = list(SPAN_PARQUET_COLUMN_TYPES.keys())
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".csv", delete=False, newline=""
-    ) as f:
-        csv_path = f.name
-        writer = csv.writer(f)
-        writer.writerow(columns)
-        for row in rows:
-            ts = row[9]
-            writer.writerow(
-                [
-                    row[1],
-                    row[2],
-                    row[3],
-                    row[4],
-                    row[5],
-                    row[6],
-                    row[7],
-                    row[8],
-                    ts.isoformat() if ts else "",
-                ]
-            )
-
-    try:
-        col_spec = ", ".join(
-            f"'{c}': '{SPAN_PARQUET_COLUMN_TYPES[c]}'" for c in columns
+    csv_buf = io.BytesIO()
+    text_wrapper = io.TextIOWrapper(csv_buf, encoding="utf-8", newline="")
+    writer = csv.writer(text_wrapper, quotechar=CSV_QUOTE_CHAR, quoting=csv.QUOTE_ALL)
+    writer.writerow(columns)
+    for row in rows:
+        ts = row[9]
+        writer.writerow(
+            [
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[7],
+                row[8],
+                ts.isoformat() if ts else "",
+            ]
         )
-        duck_conn = get_duckdb_connection(storage)
+    text_wrapper.flush()
+    text_wrapper.detach()  # Detach so BytesIO isn't closed
+    csv_buf.seek(0)
+
+    schema = _duckdb_type_to_arrow(SPAN_PARQUET_COLUMN_TYPES)
+    encoding_opts = _parquet_encoding_opts(SPAN_PARQUET_COLUMN_TYPES)
+    row_group_size = min(len(rows), 100_000)
+
+    reader = aio.read_csv(
+        csv_buf,
+        schema,
+        has_header=True,
+        quote=CSV_QUOTE_CHAR,
+        escape=CSV_QUOTE_CHAR,
+    )
+
+    write_kwargs = {
+        "compression": "zstd(3)",
+        "max_row_group_size": row_group_size,
+        **encoding_opts,
+    }
+
+    if _is_s3_storage(storage):
+        buf = io.BytesIO()
+        aio.write_parquet(reader, buf, **write_kwargs)
+        buf.seek(0)
+        from django.core.files.base import ContentFile
+
         try:
-            duck_conn.execute(
-                f"COPY (SELECT * FROM read_csv("
-                f"'{duckdb_quote_path(csv_path)}', "
-                f"columns={{{col_spec}}}, header=true, "
-                f"quote='\"', escape='\"', strict_mode=false)) "
-                f"TO '{duckdb_quote_path(parquet_path)}' "
-                f"(FORMAT PARQUET, COMPRESSION ZSTD);"
-            )
-        finally:
-            duck_conn.close()
-    finally:
-        try:
-            os.unlink(csv_path)
-        except OSError:
+            storage.delete(relative_path)
+        except Exception:
             pass
+        storage.save(relative_path, ContentFile(buf.read()))
+    else:
+        parquet_path = storage.path(relative_path)
+        os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+        aio.write_parquet(reader, parquet_path, **write_kwargs)
 
     return relative_path
 
