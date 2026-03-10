@@ -5,7 +5,6 @@ Promotes span_staging rows to per-org Parquet files, then compacts
 chunk files into daily files for efficient analytical queries.
 """
 
-import csv
 import io
 import logging
 import os
@@ -17,8 +16,6 @@ from django.utils import timezone
 
 from glitchtip.cold_storage import (
     COLD_STORAGE_PREFIX,
-    CSV_QUOTE_CHAR,
-    _duckdb_type_to_arrow,
     _is_s3_storage,
     _parquet_encoding_opts,
     duckdb_quote_path,
@@ -175,61 +172,49 @@ def promote_spans() -> tuple[int, bool]:
 def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
     """Write a chunk Parquet file for a single org+date group via arro3.
 
-    Builds CSV in memory, then streams through arro3 (Rust Arrow/Parquet).
-    No temp files, no DuckDB dependency for writes.
+    Builds Arrow arrays directly from Python tuples — no CSV serialization,
+    no temp files, no DuckDB dependency for writes.
     """
+    import arro3.core as ac
     import arro3.io as aio
 
     chunk_ts = f"{time.time_ns()}_{os.getpid()}"
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
 
-    # Build CSV bytes in memory using SOH quote char (matches cold_storage convention)
-    columns = list(SPAN_PARQUET_COLUMN_TYPES.keys())
-    csv_buf = io.BytesIO()
-    text_wrapper = io.TextIOWrapper(csv_buf, encoding="utf-8", newline="")
-    writer = csv.writer(text_wrapper, quotechar=CSV_QUOTE_CHAR, quoting=csv.QUOTE_ALL)
-    writer.writerow(columns)
-    for row in rows:
-        ts = row[9]
-        writer.writerow(
-            [
-                row[1],
-                row[2],
-                row[3],
-                row[4],
-                row[5],
-                row[6],
-                row[7],
-                row[8],
-                ts.isoformat() if ts else "",
-            ]
-        )
-    text_wrapper.flush()
-    text_wrapper.detach()  # Detach so BytesIO isn't closed
-    csv_buf.seek(0)
-
-    schema = _duckdb_type_to_arrow(SPAN_PARQUET_COLUMN_TYPES)
-    encoding_opts = _parquet_encoding_opts(SPAN_PARQUET_COLUMN_TYPES)
-    row_group_size = min(len(rows), 100_000)
-
-    reader = aio.read_csv(
-        csv_buf,
-        schema,
-        has_header=True,
-        quote=CSV_QUOTE_CHAR,
-        escape=CSV_QUOTE_CHAR,
+    # Build Arrow arrays directly from row tuples.
+    # Row layout: (id, org_id, project_id, txn_name, span_id, txn_id,
+    #              op, description, duration, timestamp)
+    batch = ac.RecordBatch.from_arrays(
+        [
+            ac.Array([r[1] for r in rows], type=ac.DataType.int32()),
+            ac.Array([r[2] for r in rows], type=ac.DataType.int32()),
+            ac.Array([r[3] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[4] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[5] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[6] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[7] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[8] for r in rows], type=ac.DataType.float64()),
+            # arro3 doesn't yet support timestamp from Python lists;
+            # build as int64 microseconds then cast.
+            ac.Array(
+                [int(r[9].timestamp() * 1_000_000) if r[9] else 0 for r in rows],
+                type=ac.DataType.int64(),
+            ).cast(ac.DataType.timestamp("us")),
+        ],
+        names=list(SPAN_PARQUET_COLUMN_TYPES.keys()),
     )
 
+    encoding_opts = _parquet_encoding_opts(SPAN_PARQUET_COLUMN_TYPES)
     write_kwargs = {
         "compression": "zstd(3)",
-        "max_row_group_size": row_group_size,
+        "max_row_group_size": min(len(rows), 100_000),
         **encoding_opts,
     }
 
     if _is_s3_storage(storage):
         buf = io.BytesIO()
-        aio.write_parquet(reader, buf, **write_kwargs)
+        aio.write_parquet(batch, buf, **write_kwargs)
         buf.seek(0)
         from django.core.files.base import ContentFile
 
@@ -241,7 +226,7 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
     else:
         parquet_path = storage.path(relative_path)
         os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-        aio.write_parquet(reader, parquet_path, **write_kwargs)
+        aio.write_parquet(batch, parquet_path, **write_kwargs)
 
     return relative_path
 
