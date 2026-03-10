@@ -14,7 +14,7 @@ from mcp.server.auth.settings import (
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from apps.oauth.provider import DEFAULT_SCOPES, VALID_SCOPES, GlitchTipOAuthProvider
+from apps.oauth.provider import GlitchTipOAuthProvider
 from apps.shared.schema.fields import parse_relative_datetime
 
 from . import data, serializers
@@ -28,12 +28,12 @@ mcp = FastMCP(
     stateless_http=True,
     auth_server_provider=GlitchTipOAuthProvider(),
     auth=AuthSettings(
-        issuer_url=_base_url,
+        issuer_url=f"{_base_url}/mcp",
         resource_server_url=f"{_base_url}/mcp",
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
-            valid_scopes=VALID_SCOPES,
-            default_scopes=DEFAULT_SCOPES,
+            valid_scopes=["org:read", "project:read", "event:read", "event:write"],
+            default_scopes=["org:read", "project:read", "event:read", "event:write"],
         ),
         revocation_options=RevocationOptions(enabled=True),
     ),
