@@ -423,9 +423,12 @@ def _duckdb_type_to_arrow(column_types: dict[str, str]):
 
     _map = {
         "VARCHAR": ac.DataType.utf8,
+        "INTEGER": ac.DataType.int32,
         "BIGINT": ac.DataType.int64,
         "SMALLINT": ac.DataType.int16,
+        "DOUBLE": ac.DataType.float64,
         "TIMESTAMP": ac.DataType.timestamp,
+        "TIMESTAMP WITH TIME ZONE": ac.DataType.timestamp,
     }
 
     fields = []
@@ -433,7 +436,7 @@ def _duckdb_type_to_arrow(column_types: dict[str, str]):
         arrow_type = _map.get(dtype)
         if arrow_type is None:
             raise ValueError(f"Unsupported DuckDB type for arro3 mapping: {dtype}")
-        if dtype == "TIMESTAMP":
+        if dtype in ("TIMESTAMP", "TIMESTAMP WITH TIME ZONE"):
             fields.append(ac.Field(col, arrow_type("us")))
         else:
             fields.append(ac.Field(col, arrow_type()))
