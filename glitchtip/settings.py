@@ -350,12 +350,11 @@ if SENTRY_DSN:
 
     # Disable auto-discovered integrations that add overhead without value:
     # - ModulesIntegration: serializes all ~2600 sys.modules on every error event
-    # - Flask/Starlette: auto-detected but GlitchTip uses Django, not these frameworks
+    # - Starlette: auto-detected but GlitchTip uses Django, not Starlette
     # - AioHttp: instruments aiohttp server; we only use aiohttp as an HTTP client
     # - MCP: instruments MCP server calls; minimal value vs overhead
     _disabled_integrations = [ModulesIntegration()]
     _optional_disable = [
-        ("sentry_sdk.integrations.flask", "FlaskIntegration"),
         ("sentry_sdk.integrations.starlette", "StarletteIntegration"),
         ("sentry_sdk.integrations.aiohttp", "AioHttpIntegration"),
         ("sentry_sdk.integrations.mcp", "MCPIntegration"),
@@ -364,7 +363,7 @@ if SENTRY_DSN:
         try:
             _mod = __import__(_mod_path, fromlist=[_cls_name])
             _disabled_integrations.append(getattr(_mod, _cls_name)())
-        except (ImportError, AttributeError):
+        except Exception:
             pass
 
     sentry_sdk.init(
