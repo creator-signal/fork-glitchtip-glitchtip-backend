@@ -22,9 +22,14 @@ def cleanup_old_files():
     Batches deletes to limit memory and transaction size.
     """
     days_ago = now() - timedelta(days=settings.GLITCHTIP_FILE_RETENTION_DAYS)
+    db_alias = settings.MAINTENANCE_DATABASE_ALIAS
 
-    queryset = FileBlob.objects.filter(created__lt=days_ago).exclude(
-        Exists(File.objects.filter(blob_id=OuterRef("id"), created__gte=days_ago))
+    queryset = (
+        FileBlob.objects.using(db_alias)
+        .filter(created__lt=days_ago)
+        .exclude(
+            Exists(File.objects.filter(blob_id=OuterRef("id"), created__gte=days_ago))
+        )
     )
 
     total_deleted = 0
@@ -38,5 +43,5 @@ def cleanup_old_files():
         for file_blob in file_blobs:
             ids.append(file_blob.id)
             file_blob.blob.delete()  # Delete from object storage
-        count, _ = FileBlob.objects.filter(id__in=ids).delete()
+        count, _ = FileBlob.objects.using(db_alias).filter(id__in=ids).delete()
         total_deleted += count
