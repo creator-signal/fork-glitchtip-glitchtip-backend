@@ -20,7 +20,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import unix_to_datetime
+from .utils import compute_previous_cycle, unix_to_datetime
 
 router = Router()
 
@@ -119,6 +119,10 @@ class EventsCountSchema(CamelSchema):
     uptime_check_event_count: int
     log_event_count: int
     file_size_mb: int
+
+
+class PreviousPeriodEventsCountSchema(EventsCountSchema):
+    total: int
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -258,6 +262,64 @@ async def subscription_events_count(request: AuthHttpRequest, organization_slug:
         users=request.auth.user_id,
     )
     return {
+        "event_count": org.issue_event_count,
+        "transaction_event_count": org.transaction_count,
+        "uptime_check_event_count": org.uptime_check_event_count,
+        "log_event_count": org.log_count,
+        "file_size_mb": org.file_size,
+    }
+
+
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/previous_period/",
+    response=PreviousPeriodEventsCountSchema,
+    by_alias=True,
+)
+async def subscription_events_count_previous_period(
+    request: AuthHttpRequest, organization_slug: str
+):
+    subscription = await (
+        StripeSubscription.objects.filter(
+            organization__users=request.auth.user_id,
+            organization__slug=organization_slug,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+        )
+        .select_related("price")
+        .order_by("-created")
+        .afirst()
+    )
+
+    zero_response = {
+        "total": 0,
+        "event_count": 0,
+        "transaction_event_count": 0,
+        "uptime_check_event_count": 0,
+        "log_event_count": 0,
+        "file_size_mb": 0,
+    }
+
+    if subscription is None:
+        return zero_response
+
+    prev = compute_previous_cycle(
+        subscription.current_period_start,
+        subscription.current_period_end,
+        subscription.subscription_cycle_start,
+        subscription.subscription_cycle_end,
+    )
+    if prev is None:
+        return zero_response
+
+    prev_start, prev_end = prev
+    org = await aget_object_or_404(
+        Organization.objects.with_event_counts(
+            current_period=False, start=prev_start, end=prev_end
+        ),
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+    return {
+        "total": org.total_event_count,
         "event_count": org.issue_event_count,
         "transaction_event_count": org.transaction_count,
         "uptime_check_event_count": org.uptime_check_event_count,
