@@ -143,8 +143,9 @@ class JvmDebugImage(BaseModel):
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class NativeDebugImage(BaseModel):
-    type: Literal["macho", "elf", "pe", "wasm"]
+    type: Literal["macho", "elf", "pe", "pe_dotnet", "wasm"]
     debug_id: uuid.UUID | None = None
+    debug_checksum: str | None = None
     image_addr: str | None = None
     image_size: int | None = None
     code_file: str | None = None
