@@ -58,3 +58,31 @@ def compute_cycle(period_start: datetime, period_end: datetime, is_annual: bool)
             period_start,
         )
     return cycle_start, cycle_end
+
+
+def compute_previous_cycle(
+    current_period_start: datetime,
+    current_period_end: datetime,
+    subscription_cycle_start: datetime | None,
+    subscription_cycle_end: datetime | None,
+) -> tuple[datetime, datetime] | None:
+    """Return (prev_start, prev_end) for the billing cycle before the current one.
+
+    Returns None if there is no previous cycle (e.g. subscription just started).
+
+    Monthly plans: previous period is the month before current_period_start.
+    Annual plans with virtual monthly cycles: go back one month from the
+    current cycle, but only if the result doesn't precede period_start.
+    """
+    if subscription_cycle_start and subscription_cycle_end:
+        # Annual plan with virtual monthly cycles
+        prev_end = subscription_cycle_start
+        prev_start = subscription_cycle_start - relativedelta(months=1)
+        if prev_start < current_period_start:
+            return None
+        return prev_start, prev_end
+    else:
+        # Monthly plan
+        prev_end = current_period_start
+        prev_start = current_period_start - relativedelta(months=1)
+        return prev_start, prev_end
