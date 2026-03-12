@@ -568,6 +568,7 @@ def archive_partition_per_org(
     column_types: dict[str, str],
     select_sql: str,
     dictionary_columns: set[str] | None = None,
+    db_alias: str | None = None,
 ) -> list[tuple[int, str]]:
     """
     Archive a partition to cold storage as per-org Parquet files.
@@ -597,9 +598,10 @@ def archive_partition_per_org(
         return []
 
     archived_files = []
+    db_conn = connections[db_alias] if db_alias else connection
 
     try:
-        with connection.cursor() as cursor:
+        with db_conn.cursor() as cursor:
             # Find all orgs with data in this partition.
             # Check existence first to avoid aborting the transaction
             # (a failed query in psycopg3 puts the connection in error state).
@@ -916,6 +918,7 @@ def archive_and_swap_partition(
         column_types,
         select_sql,
         dictionary_columns=dictionary_columns,
+        db_alias=db_alias,
     )
     if not archived_files:
         logger.info(f"No data archived from {partition_name}")
@@ -934,7 +937,10 @@ def archive_and_swap_partition(
 
 
 def get_partitions_older_than(
-    table_name: str, days: int, partition_suffix: str = ""
+    table_name: str,
+    days: int,
+    partition_suffix: str = "",
+    db_alias: str | None = None,
 ) -> list[tuple[str, datetime]]:
     """
     Get list of partitions older than the specified number of days.
@@ -943,6 +949,7 @@ def get_partitions_older_than(
         table_name: Base table name (e.g., "logs_logevent")
         days: Number of days - partitions older than this are returned
         partition_suffix: Optional suffix to match
+        db_alias: Database alias to use (default: Django's default connection)
 
     Returns list of (partition_name, partition_date) tuples.
     """
@@ -958,7 +965,8 @@ def get_partitions_older_than(
         source_table = "pg_tables"
         name_column = "tablename"
 
-    with connection.cursor() as cursor:
+    db_conn = connections[db_alias] if db_alias else connection
+    with db_conn.cursor() as cursor:
         col = Identifier(name_column)
         cursor.execute(
             SQL("SELECT {} FROM {} WHERE {} LIKE %s AND {} ~ %s ORDER BY {};").format(
@@ -1264,7 +1272,7 @@ def archive_and_cleanup_partitions(
     # Archive hot -> cold
     archived = 0
     failed = 0
-    partitions = get_partitions_older_than(table_name, hot_days)
+    partitions = get_partitions_older_than(table_name, hot_days, db_alias=db_alias)
 
     if partitions:
         logger.info(

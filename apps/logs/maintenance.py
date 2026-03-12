@@ -53,7 +53,7 @@ def cleanup_old_logs():
 
 def delete_old_hot_partitions(days: int, db_alias: str | None = None):
     """Delete hot partitions older than `days` when cold storage unavailable."""
-    partitions = get_partitions_older_than("logs_logevent", days)
+    partitions = get_partitions_older_than("logs_logevent", days, db_alias=db_alias)
 
     if not partitions:
         return
