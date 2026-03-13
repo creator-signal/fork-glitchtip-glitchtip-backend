@@ -20,18 +20,21 @@ def cleanup_old_transaction_events():
     Cold storage Parquet files older than retention are also cleaned.
     """
     cutoff = now() - timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS)
+    db_alias = settings.MAINTENANCE_DATABASE_ALIAS
 
     # Delete old groups in batches
-    queryset = TransactionGroup.objects.filter(last_seen__lt=cutoff).order_by("id")
+    queryset = (
+        TransactionGroup.objects.using(db_alias)
+        .filter(last_seen__lt=cutoff)
+        .order_by("id")
+    )
 
     total_deleted = 0
     while True:
         batch_ids = list(queryset.values_list("id", flat=True)[:500])
         if not batch_ids:
             break
-        count = TransactionGroup.objects.filter(id__in=batch_ids)._raw_delete(
-            queryset.db
-        )
+        count = TransactionGroup.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
         total_deleted += count
 
     if total_deleted:

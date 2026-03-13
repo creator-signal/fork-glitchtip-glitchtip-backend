@@ -7,6 +7,7 @@ from urllib.parse import ParseResult, urlparse
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
+from django.core.cache import caches
 from django.db import connection, transaction
 from django.db.models import (
     Exists,
@@ -18,7 +19,6 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.db.utils import IntegrityError
 from django.utils import timezone
-from django_valkey import get_valkey_connection
 from ninja import Schema
 from user_agents import parse
 
@@ -949,17 +949,20 @@ def process_issue_events(
 
     if settings.CACHE_IS_VALKEY:
         # Add set of issue_ids for alerts to process later
-        with get_valkey_connection("default") as con:
-            if (
-                con.sadd(
-                    ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
-                )
-                > 0
-            ):
-                # Set a long expiration time when a key is added
-                # We want all keys to have a long "sanity check" TTL to avoid valkey out
-                # of memory errors (we can't ensure end users use all keys lru eviction)
-                con.expire(ISSUE_IDS_KEY, 3600)
+        # Lua script: atomically SADD + EXPIRE in a single round-trip
+        driver = caches["default"].get_raw_client()
+        issue_ids_bytes = [
+            str(event.issue_id).encode() for event in processing_events
+        ]
+        driver.eval_sync(
+            "local added = redis.call('SADD', KEYS[1], unpack(ARGV))\n"
+            "if added > 0 then\n"
+            "  redis.call('EXPIRE', KEYS[1], 3600)\n"
+            "end\n"
+            "return added",
+            [ISSUE_IDS_KEY],
+            issue_ids_bytes,
+        )
 
     if issues_to_reopen:
         Issue.objects.filter(id__in=issues_to_reopen).update(
