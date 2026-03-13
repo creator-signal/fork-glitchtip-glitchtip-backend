@@ -1,10 +1,10 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.cache import caches
 from django.db.models import Count
 from django.tasks import task
 from django.utils import timezone
-from django_valkey import get_valkey_connection
 
 from apps.issue_events.models import Issue
 from glitchtip.partition_manager import UUID7Helper
@@ -35,9 +35,9 @@ def process_event_alerts():
     # Support not having valkey, in theory
     if settings.CACHE_IS_VALKEY:
         # Note all recent issue_ids at ingest time. Then we can filter by them here.
+        driver = caches["default"].get_raw_client()
         issue_ids = [
-            int(x)
-            for x in get_valkey_connection("default").eval(LUA_SCRIPT, 1, ISSUE_IDS_KEY)
+            int(x) for x in driver.eval_sync(LUA_SCRIPT, [ISSUE_IDS_KEY], [])
         ]
 
     project_alerts = ProjectAlert.objects.filter(
