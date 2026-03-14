@@ -174,6 +174,32 @@ class MCPDjangoDispatcher:
 from django.conf import settings  # noqa: E402
 
 if settings.GLITCHTIP_ENABLE_MCP:
+    # Workaround: MCP SDK's AuthContextMiddleware raises ValueError when
+    # resetting a ContextVar token in granian's per-request task context.
+    # Patch reset to ignore cross-context resets (the var is request-scoped
+    # anyway, so skipping reset is harmless).
+    from mcp.server.auth.middleware.auth_context import (
+        AuthContextMiddleware,
+        auth_context_var,
+    )
+    from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+    async def _patched_call(self, scope, receive, send):
+        user = scope.get("user")
+        if isinstance(user, AuthenticatedUser):
+            token = auth_context_var.set(user)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                try:
+                    auth_context_var.reset(token)
+                except ValueError:
+                    pass
+        else:
+            await self.app(scope, receive, send)
+
+    AuthContextMiddleware.__call__ = _patched_call
+
     from apps.mcp.server import mcp as _mcp_server
 
     _mcp_app = _mcp_server.streamable_http_app()
