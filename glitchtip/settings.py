@@ -719,12 +719,6 @@ if VALKEY_HOST:
         VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
 else:
     VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
-VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
-VALKEY_MAX_CONNECTIONS = env.int(
-    "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
-)
-VALKEY_SOCKET_CONNECT_TIMEOUT = env.int("VALKEY_SOCKET_CONNECT_TIMEOUT", 5)
-VALKEY_CONNECTION_POOL_TIMEOUT = env.int("VALKEY_CONNECTION_POOL_TIMEOUT", 5)
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
 IS_LOAD_TEST = env("IS_LOAD_TEST")
@@ -791,17 +785,6 @@ except ImportError:
 # Default to True for now, but if running under uWSGI or Granian WSGI, we might need to switch
 USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
 
-_use_valkey_wsgi_default = False
-if not USE_ASYNC_SERVER:
-    _use_valkey_wsgi_default = True
-elif "USE_ASYNC_SERVER" not in os.environ and HAS_UWSGI:
-    _use_valkey_wsgi_default = True
-
-USE_VALKEY_WSGI_CACHE = env.bool("USE_VALKEY_WSGI_CACHE", _use_valkey_wsgi_default)
-
-if IS_WORKER:
-    USE_VALKEY_WSGI_CACHE = False
-
 if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
@@ -809,20 +792,10 @@ if os.environ.get("CACHE_URL"):
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
 elif VALKEY_URL:
-    valkey_backend = "django_vcache.backend.ValkeyCache"
-    if USE_VALKEY_WSGI_CACHE:
-        valkey_backend = "django_vcache.wsgi.ValkeyWSGICache"
-
     CACHES = {
         "default": {
-            "BACKEND": valkey_backend,
+            "BACKEND": "django_vcache.backend.ValkeyCache",
             "LOCATION": VALKEY_URL,
-            "OPTIONS": {
-                "max_connections": VALKEY_MAX_CONNECTIONS,
-                "retry_on_timeout": VALKEY_RETRY,
-                "socket_connect_timeout": VALKEY_SOCKET_CONNECT_TIMEOUT,
-                "connection_pool_timeout": VALKEY_CONNECTION_POOL_TIMEOUT,
-            },
         }
     }
     TASKS = {
@@ -842,23 +815,14 @@ else:  # Fallback to database cache
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
 if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
-    try:
-        # splits "host1:port,host2:port" into [("host1", port), ("host2", port)]
-        SENTINELS = [
-            (host, int(port))
-            for host, port in (
-                hostport.split(":", 1) for hostport in cache_sentinel_url.split(",")
-            )
-        ]
-    except ValueError as err:
-        raise ImproperlyConfigured(
-            "Invalid cache redis sentinel url, format is host:port,host2:port2,..."
-        ) from err
-    CACHES["default"]["OPTIONS"]["sentinels"] = SENTINELS
-if cache_sentinel_password := env.str("CACHE_SENTINEL_PASSWORD", None):
-    CACHES["default"]["OPTIONS"]["sentinel_kwargs"] = {
-        "password": cache_sentinel_password
-    }
+    # Build a sentinel:// URL for django-vcache v2's Rust driver.
+    # CACHE_SENTINEL_URL format: "host1:port,host2:port"
+    # Becomes: sentinel://host1:port,host2:port/service_name/db
+    cache_sentinel_service = env.str("CACHE_SENTINEL_SERVICE_NAME", "mymaster")
+    cache_sentinel_db = env.int("CACHE_SENTINEL_DB", 0)
+    CACHES["default"]["LOCATION"] = (
+        f"sentinel://{cache_sentinel_url}/{cache_sentinel_service}/{cache_sentinel_db}"
+    )
 if "vcache" in CACHES["default"]["BACKEND"]:
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
