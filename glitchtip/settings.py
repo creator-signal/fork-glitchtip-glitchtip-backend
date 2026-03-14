@@ -719,12 +719,6 @@ if VALKEY_HOST:
         VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
 else:
     VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
-VALKEY_RETRY = env.bool("VALKEY_RETRY", True)
-VALKEY_MAX_CONNECTIONS = env.int(
-    "VALKEY_MAX_CONNECTIONS", env.int("REDIS_MAX_CONNECTIONS", 100)
-)
-VALKEY_SOCKET_CONNECT_TIMEOUT = env.int("VALKEY_SOCKET_CONNECT_TIMEOUT", 5)
-VALKEY_CONNECTION_POOL_TIMEOUT = env.int("VALKEY_CONNECTION_POOL_TIMEOUT", 5)
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
 IS_LOAD_TEST = env("IS_LOAD_TEST")
@@ -791,17 +785,6 @@ except ImportError:
 # Default to True for now, but if running under uWSGI or Granian WSGI, we might need to switch
 USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
 
-_use_valkey_wsgi_default = False
-if not USE_ASYNC_SERVER:
-    _use_valkey_wsgi_default = True
-elif "USE_ASYNC_SERVER" not in os.environ and HAS_UWSGI:
-    _use_valkey_wsgi_default = True
-
-USE_VALKEY_WSGI_CACHE = env.bool("USE_VALKEY_WSGI_CACHE", _use_valkey_wsgi_default)
-
-if IS_WORKER:
-    USE_VALKEY_WSGI_CACHE = False
-
 if os.environ.get("CACHE_URL"):
     CACHES = {
         "default": env.cache(),
@@ -809,20 +792,10 @@ if os.environ.get("CACHE_URL"):
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
 elif VALKEY_URL:
-    valkey_backend = "django_vcache.backend.ValkeyCache"
-    if USE_VALKEY_WSGI_CACHE:
-        valkey_backend = "django_vcache.wsgi.ValkeyWSGICache"
-
     CACHES = {
         "default": {
-            "BACKEND": valkey_backend,
+            "BACKEND": "django_vcache.backend.ValkeyCache",
             "LOCATION": VALKEY_URL,
-            "OPTIONS": {
-                "max_connections": VALKEY_MAX_CONNECTIONS,
-                "retry_on_timeout": VALKEY_RETRY,
-                "socket_connect_timeout": VALKEY_SOCKET_CONNECT_TIMEOUT,
-                "connection_pool_timeout": VALKEY_CONNECTION_POOL_TIMEOUT,
-            },
         }
     }
     TASKS = {
