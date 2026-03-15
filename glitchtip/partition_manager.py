@@ -16,7 +16,7 @@ from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
-from django.db import connection, connections
+from django.db import connection, connections, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -471,7 +471,12 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         partition_column: str = "date",
     ) -> int:
         """
-        Generate and execute SQL to create partitions.
+        Generate and execute SQL to create only missing partitions.
+
+        Checks existence before executing DDL to avoid unnecessary
+        AccessExclusiveLock on the root table and all siblings — even
+        ``CREATE TABLE IF NOT EXISTS … PARTITION OF`` acquires those locks
+        before checking existence, which deadlocks with concurrent INSERTs.
 
         Args:
             Same as create_time_partition()
@@ -479,6 +484,18 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         Returns:
             Number of SQL statements executed
         """
+        if hash_buckets is None:
+            hash_buckets = settings.PARTITION_HASH_BUCKETS
+
+        # Check what already exists to avoid unnecessary heavy locks.
+        range_exists = self.table_exists(partition_name)
+        if range_exists and hash_buckets > 0:
+            existing_children = {
+                p["partition_name"] for p in self.list_partitions(partition_name)
+            }
+        else:
+            existing_children = set()
+
         sqls = self.create_time_partition(
             parent_table=parent_table,
             partition_name=partition_name,
@@ -490,17 +507,39 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             partition_column=partition_column,
         )
 
-        with self.db_connection.cursor() as cursor:
-            for sql in sqls:
-                logger.debug(f"Executing partition SQL: {sql[:100]}...")
-                cursor.execute(sql)
+        # Filter out DDL for tables that already exist.
+        if not range_exists:
+            sqls_to_execute = sqls
+        elif hash_buckets > 0:
+            # Range partition exists — only create missing hash children.
+            # sqls[0] is the range partition, sqls[1:] are h0..hN in order.
+            sqls_to_execute = [
+                sql
+                for i, sql in enumerate(sqls[1:])
+                if f"{partition_name}_h{i}" not in existing_children
+            ]
+        else:
+            sqls_to_execute = []
+
+        if not sqls_to_execute:
+            logger.debug(
+                f"Partition {partition_name} with {hash_buckets} hash buckets "
+                f"already up to date"
+            )
+            return 0
+
+        with transaction.atomic(using=self.db_connection.alias):
+            with self.db_connection.cursor() as cursor:
+                for sql in sqls_to_execute:
+                    logger.debug(f"Executing partition SQL: {sql[:100]}...")
+                    cursor.execute(sql)
 
         logger.debug(
             f"Verified partition {partition_name} with {hash_buckets} hash buckets "
             f"for date range {start_date.date()} to {end_date.date()}"
         )
 
-        return len(sqls)
+        return len(sqls_to_execute)
 
     def create_partitions_for_date_range(
         self,
@@ -553,11 +592,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             date_suffix = current_date.strftime("%Y%m%d")
             partition_name = f"{parent_table}_{date_suffix}"
 
-            # Check existence first to report accurate "Created" stats
-            exists = self.table_exists(partition_name)
-
-            # Always execute SQL to ensure sub-partitions (hash buckets) exist
-            self.execute_partition_creation(
+            executed = self.execute_partition_creation(
                 parent_table=parent_table,
                 partition_name=partition_name,
                 start_date=current_date,
@@ -568,7 +603,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
                 partition_column=partition_column,
             )
 
-            if not exists:
+            if executed:
                 new_partitions_count += 1
 
             current_date = next_date
