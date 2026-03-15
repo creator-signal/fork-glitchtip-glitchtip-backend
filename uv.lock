@@ -1053,27 +1053,27 @@ wheels = [
 
 [[package]]
 name = "django-vcache"
-version = "2.0.9"
+version = "2.0.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "ormsgpack" },
     { name = "pyzstd", marker = "python_full_version < '3.14'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/d2/7a8fdfb2147d3b970298ae104946ae2bce15cce53479a73f1ae2f50ba9e2/django_vcache-2.0.9.tar.gz", hash = "sha256:21b38c0fe47c0e9a8b98f75f05d4b48f89a78683c79f82301f88d0cf0ee124a5", size = 98896, upload-time = "2026-03-14T21:58:17.688Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/62/3967bc8fd3c65b2653cc72947fb2bedbc350734e462e5ccbc71acb9bcb2f/django_vcache-2.0.10.tar.gz", hash = "sha256:a93eed8f9147dae40c6e819d651f5e48c280badd9faaf6c8cff056f7eb3f1047", size = 99440, upload-time = "2026-03-15T15:13:24.703Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/09/5e98e586384ffe0e9ca00d51a87d82e0eedcffde90d95449540c00d3c425/django_vcache-2.0.9-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8d8231969683fc841e3540d25f26402eefa664dc5dbdfe6281fa090f6b3f499d", size = 2124381, upload-time = "2026-03-14T21:58:08.597Z" },
-    { url = "https://files.pythonhosted.org/packages/88/73/809560c3267dcd1075d07665554c1556ef42d9e4d7394917b94f5f015235/django_vcache-2.0.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:db6cd5f71fa9bb3d382c135f55301f3327376535464ab49e77117bf1f369bb74", size = 2246285, upload-time = "2026-03-14T21:58:10.048Z" },
-    { url = "https://files.pythonhosted.org/packages/df/45/28d6dfb2e0be73cbfaf6c8fa0bbbba55e3a799314bcbd9cdc7d976dcc8b6/django_vcache-2.0.9-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:3a3332a8c93dc69743cc15064f3691a134edc436650dfa295d9a075745363aca", size = 2129346, upload-time = "2026-03-14T21:58:07.093Z" },
-    { url = "https://files.pythonhosted.org/packages/02/bb/164db626fce75a0a7f88e7334dd5b5fec26d4846fde497fef9bf88010775/django_vcache-2.0.9-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:0822dbef4885055c82875f6a6a8018c0fe713b3e9a41b5c2864fabc6b2929108", size = 2248023, upload-time = "2026-03-14T21:58:20.125Z" },
-    { url = "https://files.pythonhosted.org/packages/33/d6/90493ed1b6b4866f5f9c859dbe1523a75effbf4f13dd3143ba8a92501c24/django_vcache-2.0.9-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:bae1c8013016e76ed10f2740a864d9755b3e5fb786a99e1185ef9303f7df174f", size = 2124222, upload-time = "2026-03-14T21:58:11.238Z" },
-    { url = "https://files.pythonhosted.org/packages/bf/a3/10771ee0bd79bad6529ae71d1d6822022c64e487c4032d4bfe474211212c/django_vcache-2.0.9-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3effc2244ed26149c27f5c171ee9ce103e22973b4650d36afe209b292116db7e", size = 2246230, upload-time = "2026-03-14T21:58:23.122Z" },
-    { url = "https://files.pythonhosted.org/packages/79/55/6a3f56b2243df57866b4f6656ce63986c4ddead464f4c706d673384ad2e6/django_vcache-2.0.9-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:53bb71bfc242868d700ff0aad79a3d2e8c18fd44c07944788d41ee3b92f39ccd", size = 2128891, upload-time = "2026-03-14T21:58:25.09Z" },
-    { url = "https://files.pythonhosted.org/packages/1e/48/90b54beaab334c76719e0f62a2be46b8d60dc40eaf13b9eb2938cab08fd9/django_vcache-2.0.9-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:f325bb81e59063891dd9da851d5fedcf0bc9b42776f37bd32cc3967230ef204b", size = 2248032, upload-time = "2026-03-14T21:58:12.977Z" },
-    { url = "https://files.pythonhosted.org/packages/c4/29/28c5f7c5790468a4b798b2b692d4e0b01ec0f74b1cab4486aee61813f148/django_vcache-2.0.9-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7bfd0675ff1155fc0b59dece776db936a771572296a68c784d301c9dab145e8f", size = 2120294, upload-time = "2026-03-14T21:58:19.005Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/48/4e67c9250af31395376c81151c3a9352f9fdcef02a29d4b9a02a2736f10c/django_vcache-2.0.9-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9009b7474e5bf26a80ff8febd7cc53bb5fb23ba6e0b31489ebe3417a3cce878d", size = 2253435, upload-time = "2026-03-14T21:58:14.331Z" },
-    { url = "https://files.pythonhosted.org/packages/35/95/dbd8ec1a9bc40f96566a7a0a8cf4ae09fd79379ebcf98eabca7e9b78f488/django_vcache-2.0.9-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:290ebc2ea9affad8ae115486a295e39c7d38dca137ed8f5260b13af45a2ce4ae", size = 2124111, upload-time = "2026-03-14T21:58:21.637Z" },
-    { url = "https://files.pythonhosted.org/packages/05/6c/4446e49d9dbea7771d28f62bcd4447563669934ea42722d6edf2417dbdf1/django_vcache-2.0.9-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:40f1117840333b0da58da0e7935ce71f3dc1939f3ccc5120bef50be0e5ed9e8d", size = 2253116, upload-time = "2026-03-14T21:58:16.008Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/3a/d09b90529e25e2b9f94d1cda36db663795c247c7ce8d386ddb4b33385e99/django_vcache-2.0.10-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0af9009162f04934020506515a5738101bc4fadb66ebb9a9b681fb7075e9842a", size = 2124054, upload-time = "2026-03-15T15:13:16.11Z" },
+    { url = "https://files.pythonhosted.org/packages/81/e7/43983edc0f0905c87c5ad9d330bd896e84923bf4cc18008db5e21825a0b8/django_vcache-2.0.10-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:299c1c0dfd4db030df3b33a187e1cfdf08d8616140567342dd0a1b032c488533", size = 2246795, upload-time = "2026-03-15T15:13:25.555Z" },
+    { url = "https://files.pythonhosted.org/packages/78/be/e906725fbe54a00b887ee4b5dec88725eed71b106ff866a1cecba3c44769/django_vcache-2.0.10-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:18bc86bb5402b3bc54be4658c1f4acd8958c3a75c653a48a5dbfeca906b7d45d", size = 2128952, upload-time = "2026-03-15T15:13:12.947Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/2e/ec9aacad37fddcae94611a6199fe8db9c0e9ea38afe8404a076d0f5b47c0/django_vcache-2.0.10-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a1a2b58f90c60f6d85f2377649e65d7c6c41dd511e681b5ab2e4ca01a2a54952", size = 2250159, upload-time = "2026-03-15T15:13:29.599Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/89/808c6756b9a306d7104ebfcd94a7fc4572bc299c2069202732f487cbee9e/django_vcache-2.0.10-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4056a91f584d991f6e39e86abe397d467fecce46472edb9dc6d0b600423dc39f", size = 2124027, upload-time = "2026-03-15T15:13:14.618Z" },
+    { url = "https://files.pythonhosted.org/packages/18/87/b261993d0b03e499f72bbc133493119e79a50f0ec9fe4981aa7303c98ce5/django_vcache-2.0.10-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:37076a3603c110a6ce428b45c9aa01cbf34f7acb46e03a6a74b7e1acdcaac712", size = 2246450, upload-time = "2026-03-15T15:13:18.965Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/83/e00c8fc37078d1873a0e3485bde454fa53acf23512e7591f900dfeb1d4b9/django_vcache-2.0.10-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:205314e245b830fbbfee42b129eecbb3e097e66caa002f44fee43527effa773d", size = 2128846, upload-time = "2026-03-15T15:13:26.965Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/2f/f9440ec569551d10bb704ef1c1af19325490a34c4b141b7cf73286028de9/django_vcache-2.0.10-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:df7061cbc0bbb06f6c3c7d5a7524ab66a2500f2e61951214871d3ac26e47f31d", size = 2249906, upload-time = "2026-03-15T15:13:20.736Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/d2/0428c62a2014cee610f681e698fcf9b9e124fc02f48a9c897555ef828568/django_vcache-2.0.10-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3e46d0b0b7e20e38e0be701d5a5d18be0b2662b05869b51d360cd05a593e1463", size = 2123278, upload-time = "2026-03-15T15:13:17.761Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/9a/b62cacdfbbacae43bfeb43e968834f90f710869e1fad757275f5ec40a5a9/django_vcache-2.0.10-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a8e794333499b89fa010e9b54f423bf094a128f99d980d1c8b684ea145b3766e", size = 2244450, upload-time = "2026-03-15T15:13:23.45Z" },
+    { url = "https://files.pythonhosted.org/packages/76/d8/74cb7d1fa956901970c0acebb30e7a8f3ad389b825d2f1568ffd894cef22/django_vcache-2.0.10-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:05d2ddd8d8833eb04b4c364924591a7c182430b7d77d633d1ff68fdabdb6c10c", size = 2127754, upload-time = "2026-03-15T15:13:22.3Z" },
+    { url = "https://files.pythonhosted.org/packages/33/02/479522cd2d0d1a3c5b559bc7138526b3e3cebfdd363ef3e012cdf43406ee/django_vcache-2.0.10-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:e7988db125cfcaa95b9d96f92b7c6f51080d25d34d448a76fde228eb8c467376", size = 2247655, upload-time = "2026-03-15T15:13:28.136Z" },
 ]
 
 [[package]]
@@ -1495,7 +1495,7 @@ requires-dist = [
     { name = "django-postgres-partition", specifier = ">=0.1.4" },
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
-    { name = "django-vcache", specifier = "~=2.0" },
+    { name = "django-vcache", specifier = ">=2.0.10" },
     { name = "django-vtasks", extras = ["valkey"], specifier = "~=2.0" },
     { name = "duckdb", specifier = ">=1.2.0" },
     { name = "google-cloud-logging", specifier = "~=3.0" },
