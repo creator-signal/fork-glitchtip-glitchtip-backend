@@ -1,9 +1,20 @@
+import logging
 from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 
 from ninja import Field, Schema
-from pydantic import BeforeValidator, ConfigDict, model_serializer
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    GetJsonSchemaHandler,
+    TypeAdapter,
+    model_serializer,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import PydanticUndefined
 
 from .base import LaxIngestSchema
+
+logger = logging.getLogger(__name__)
 
 
 class ExcludeNoneSchema(Schema):
@@ -22,6 +33,47 @@ class ExcludeNoneSchema(Schema):
                 if getattr(self, model_field) is not None
             }
         return wrap(self)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: Any,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Preserve field definitions in OpenAPI spec.
+
+        Without this override the @model_serializer collapses the schema to
+        a bare ``{type: object, additionalProperties: true}``.
+        """
+        json_schema = handler(core_schema)
+        # If the serializer collapsed it to a bare object, rebuild from fields
+        if "properties" not in json_schema and hasattr(cls, "model_fields"):
+            field_props = {}
+            required = []
+            for field_name, field_info in cls.model_fields.items():
+                try:
+                    ta = TypeAdapter(field_info.annotation)
+                    field_schema = ta.json_schema()
+                    if (
+                        field_info.default is not PydanticUndefined
+                        and field_info.default is not None
+                    ):
+                        field_schema["default"] = field_info.default
+                    elif field_info.default is PydanticUndefined:
+                        required.append(field_name)
+                    field_props[field_name] = field_schema
+                except Exception:
+                    logger.warning(
+                        "Could not generate JSON schema for %s.%s",
+                        cls.__name__,
+                        field_name,
+                    )
+                    field_props[field_name] = {}
+            json_schema["properties"] = field_props
+            if required:
+                json_schema["required"] = required
+            json_schema.pop("additionalProperties", None)
+        return json_schema
 
 
 class DeviceContext(LaxIngestSchema, ExcludeNoneSchema):

@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from django.conf import settings
@@ -22,9 +23,19 @@ from ..shared.schema.event import (
     ListKeyValue,
 )
 from ..shared.schema.user import EventUser
-from .constants import EventStatus
+from .constants import EventStatus, IssueEventType, LogLevel
 from .models import Comment, Issue, IssueEvent, UserReport
 from .utils import get_entries, to_camel_with_lower_id
+
+EventStatusDisplay = StrEnum(
+    "EventStatusDisplay", {s.label.upper(): s.label for s in EventStatus}
+)
+LogLevelDisplay = StrEnum(
+    "LogLevelDisplay", {s.label.upper(): s.label for s in LogLevel}
+)
+IssueEventTypeDisplay = StrEnum(
+    "IssueEventTypeDisplay", {s.label.upper(): s.label for s in IssueEventType}
+)
 
 
 class ProjectReference(CamelSchema, ModelSchema):
@@ -54,19 +65,24 @@ class IssueReleaseSchema(CamelSchema, ModelSchema):
 class IssueSchema(ModelSchema):
     id: str
     count: str
-    type: str = Field(validation_alias="get_type_display")
-    level: str = Field(validation_alias="get_level_display")
-    status: str = Field(validation_alias="get_status_display")
+    type: IssueEventTypeDisplay = Field(validation_alias="get_type_display")
+    level: LogLevelDisplay = Field(validation_alias="get_level_display")
+    status: EventStatusDisplay = Field(validation_alias="get_status_display")
+    metadata: dict[str, Any]
     project: ProjectReference = Field(validation_alias="project")
     shortId: str = Field(validation_alias="short_id_display")
     numComments: int = Field(validation_alias="num_comments")
     stats: dict[str, list[list[float]]] | None = {"24h": []}
-    share_id: int | None = None
+    share_id: int | None = Field(default=None, serialization_alias="shareId")
     logger: str | None = None
     permalink: str | None = "Not implemented"
-    status_details: dict[str, str] | None = Field(default_factory=dict)
-    subscription_details: str | None = None
-    user_count: int | None = 0
+    status_details: dict[str, str] | None = Field(
+        default_factory=dict, serialization_alias="statusDetails"
+    )
+    subscription_details: str | None = Field(
+        default=None, serialization_alias="subscriptionDetails"
+    )
+    user_count: int | None = Field(default=0, serialization_alias="userCount")
     matching_event_id: str | None = Field(
         default=None, serialization_alias="matchingEventId"
     )
@@ -110,7 +126,6 @@ class IssueSchema(ModelSchema):
         model = Issue
         fields = [
             "title",
-            "metadata",
             "culprit",
         ]
 
@@ -337,9 +352,11 @@ class IssueEventJsonSchema(ModelSchema, BaseIssueEvent):
     extra: dict[str, Any] | None = Field(validation_alias="data.extra", default=None)
     user: EventUser | None = Field(validation_alias="data.user", default=None)
 
+    hashes: list[str] = []
+
     class Meta:
         model = IssueEvent
-        fields = ["title", "transaction", "tags", "hashes"]
+        fields = ["title", "transaction", "tags"]
 
     @staticmethod
     def resolve_event_id(obj: IssueEvent):
