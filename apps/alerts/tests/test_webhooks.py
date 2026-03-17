@@ -45,8 +45,11 @@ def _mock_aiohttp_session():
     """Create a mock aiohttp.ClientSession that captures call args."""
     mock_response = mock.AsyncMock()
     mock_response.status = 200
+    # Support async context manager protocol (async with session.post(...) as resp:)
+    mock_response.__aenter__ = mock.AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = mock.AsyncMock(return_value=False)
 
-    mock_post = mock.AsyncMock(return_value=mock_response)
+    mock_post = mock.MagicMock(return_value=mock_response)
 
     mock_session = mock.AsyncMock()
     mock_session.post = mock_post
