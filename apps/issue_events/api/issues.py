@@ -92,6 +92,7 @@ async def list_issue_commits(request: AuthHttpRequest, issue_id: int):
 @router.put(
     "/issues/{int:issue_id}/",
     response=IssueDetailSchema,
+    by_alias=True,
 )
 @has_permission(["event:write", "event:admin"])
 async def update_issue(
@@ -117,6 +118,7 @@ async def delete_issue(request: AuthHttpRequest, issue_id: int):
 @router.put(
     "organizations/{slug:organization_slug}/issues/{int:issue_id}/",
     response=IssueDetailSchema,
+    by_alias=True,
 )
 @has_permission(["event:write", "event:admin"])
 async def update_organization_issue(
