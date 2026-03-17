@@ -3,7 +3,7 @@ from typing import Optional
 from django.db.models import Count, Exists, OuterRef, Prefetch
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
@@ -138,7 +138,7 @@ async def delete_team(request: AuthHttpRequest, organization_slug: str, team_slu
     )
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -245,9 +245,9 @@ async def modify_member_for_team(
 async def add_member_to_team(
     request: AuthHttpRequest, organization_slug: str, member_id: MeID, team_slug: str
 ):
-    return 201, await modify_member_for_team(
+    return Status(201, await modify_member_for_team(
         organization_slug, member_id, team_slug, request.auth.user_id, True
-    )
+    ))
 
 
 @router.delete(
@@ -314,7 +314,7 @@ async def add_team_to_project(
         .prefetch_related("teams")
         .aget(id=project.id)
     )
-    return 201, project
+    return Status(201, project)
 
 
 @router.delete(
