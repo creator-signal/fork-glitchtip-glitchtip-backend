@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError
+from django.db.models import QuerySet
 from django.utils.timezone import now
 
 from apps.alerts.models import Notification
@@ -10,6 +11,78 @@ from apps.alerts.models import Notification
 from .models import Comment, Issue, IssueHash, UserReport
 
 logger = logging.getLogger(__name__)
+
+
+def delete_events_in_batches(
+    queryset: QuerySet, batch_size: int = 1000, db_alias: str = "default"
+) -> int:
+    """
+    Bulk-delete rows from a partitioned event table (IssueEvent, LogEvent, etc.)
+    in fixed-size batches to avoid statement timeouts.
+
+    The caller should pre-filter the queryset with organization_id for
+    partition pruning.
+
+    Returns the total number of rows deleted.
+    """
+    ordered_qs = queryset.using(db_alias).order_by("id")
+    model = queryset.model
+
+    total_deleted = 0
+    while True:
+        batch_ids = list(ordered_qs.values_list("id", flat=True)[:batch_size])
+        if not batch_ids:
+            break
+        count = model.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
+        total_deleted += count
+
+    return total_deleted
+
+
+def delete_issues_in_batches(
+    queryset: QuerySet[Issue], batch_size: int = 1000, db_alias: str = "default"
+) -> int:
+    """
+    Bulk-delete Issues and their non-partitioned FK dependents.
+
+    Uses _raw_delete() to bypass Django's collector, which would run
+    unindexed queries against every sub-partition of partitioned tables.
+
+    Non-partitioned FK tables (IssueHash, Comment, UserReport,
+    Notification.issues M2M) are explicitly deleted per batch — Django
+    does not set ON DELETE CASCADE at the DB level.
+
+    If a new FK from a *non-partitioned* table is added to Issue, add it
+    here. The test_cleanup_old_issues test will catch the omission.
+
+    Returns the total number of Issues deleted.
+    """
+    ordered_qs = queryset.using(db_alias).order_by("id")
+
+    total_deleted = 0
+    while True:
+        batch_ids = list(ordered_qs.values_list("id", flat=True)[:batch_size])
+        if not batch_ids:
+            break
+        # Delete from non-partitioned FK tables first
+        Notification.issues.through.objects.filter(
+            issue_id__in=batch_ids
+        )._raw_delete(db_alias)
+        IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
+        Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
+        UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
+        # A new event may arrive between the SELECT above and this DELETE
+        # (TOCTOU race). Catch and skip — the caller can retry later.
+        try:
+            count = Issue.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
+        except IntegrityError:
+            logger.info(
+                "Skipped batch due to concurrent FK insert, will retry later"
+            )
+            continue
+        total_deleted += count
+
+    return total_deleted
 
 
 def cleanup_old_issue_events():
@@ -53,14 +126,6 @@ def cleanup_old_issues():
     partition, we rely on maintain_partitions having already dropped
     old partitions and add a 7-day buffer beyond retention to ensure
     weekly partitions (IssueAggregate/IssueTag) are fully dropped.
-
-    Uses _raw_delete() instead of .delete() to bypass Django's collector,
-    which would run unindexed queries against every sub-partition.
-    Non-partitioned FK tables (IssueHash, Comment, UserReport) are explicitly
-    deleted per batch — Django does not set ON DELETE CASCADE at the DB level.
-
-    If a new FK from a *non-partitioned* table is added, add it to the
-    explicit delete step. The test will catch the omission.
     """
     days = settings.GLITCHTIP_EVENT_RETENTION_DAYS
     # 7-day buffer ensures weekly partitions (IssueAggregate, IssueTag)
@@ -68,33 +133,10 @@ def cleanup_old_issues():
     buffer_days = 7
     db_alias = settings.MAINTENANCE_DATABASE_ALIAS
 
-    queryset = (
-        Issue.objects.using(db_alias)
-        .filter(last_seen__lt=now() - timedelta(days=days + buffer_days))
-        .order_by("id")
+    queryset = Issue.objects.filter(
+        last_seen__lt=now() - timedelta(days=days + buffer_days)
     )
 
-    total_deleted = 0
-    while True:
-        batch_ids = list(queryset.values_list("id", flat=True)[:1000])
-        if not batch_ids:
-            break
-        # Delete from non-partitioned FK tables first (small tables)
-        Notification.issues.through.objects.filter(
-            issue_id__in=batch_ids
-        )._raw_delete(db_alias)
-        IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
-        Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
-        UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
-        # Delete the issues. A new event may arrive between the SELECT above
-        # and this DELETE (TOCTOU race). Catch and skip — the issue will
-        # be re-evaluated on the next maintenance run.
-        try:
-            count = Issue.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
-        except IntegrityError:
-            logger.info("Skipped batch due to concurrent FK insert, will retry later")
-            continue
-        total_deleted += count
-
+    total_deleted = delete_issues_in_batches(queryset, db_alias=db_alias)
     if total_deleted:
         logger.info("Deleted %d empty issues", total_deleted)
