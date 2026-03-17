@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.db.utils import IntegrityError
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
@@ -89,7 +89,7 @@ async def delete_user(request: AuthHttpRequest, user_id: MeID):
         organizations_ext_organizationuser__organizationowner__isnull=True
     ).adelete()
     if result:
-        return 204, None
+        return Status(204, None)
     if await queryset.aexists():
         raise HttpError(
             400,
@@ -155,7 +155,7 @@ async def create_email(
             "Email already exists",
         )
     await sync_to_async(email_address.send_confirmation)(request, signup=False)
-    return 201, email_address
+    return Status(201, email_address)
 
 
 @router.put("/users/{slug:user_id}/emails/", response=EmailAddressSchema, by_alias=True)
@@ -187,7 +187,7 @@ async def delete_email(
     queryset = get_email_queryset(user_id)
     result, _ = await queryset.filter(email=payload.email, primary=False).adelete()
     if result:
-        return 204, None
+        return Status(204, None)
     raise Http404
 
 
@@ -200,7 +200,7 @@ async def send_confirm_email(
         get_email_queryset(user_id, verified=False), email=payload.email
     )
     await sync_to_async(email_address.send_confirmation)(request)
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -264,5 +264,5 @@ async def set_recovery_codes(request: AuthHttpRequest, payload: RecoveryCodeSche
                 type=Authenticator.Type.RECOVERY_CODES, user_id=user_id
             ).adelete()
             await authenticator.asave()
-            return 204, None
+            return Status(204, None)
     raise HttpError(400, "Invalid code")
