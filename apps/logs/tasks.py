@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
+from asgiref.sync import sync_to_async
 from django_vtasks import task
 
 from .process_logs import process_log_events
@@ -20,7 +21,7 @@ class LogTaskMessage:
 
 
 @task(queue_name="ingest")
-def ingest_logs(tasks: list):
+async def ingest_logs(tasks: list):
     """Process batched log ingestion tasks."""
     logger.info(f"Processing {len(tasks)} log batch requests")
 
@@ -36,4 +37,4 @@ def ingest_logs(tasks: list):
             )
         )
 
-    process_log_events(messages)
+    await sync_to_async(process_log_events)(messages)

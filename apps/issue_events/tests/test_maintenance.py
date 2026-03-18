@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.db import models
 from django.test import TestCase
@@ -13,6 +14,8 @@ from ..models import Issue, IssueEvent
 # cleanup_old_issues adds a 7-day buffer beyond retention
 _BUFFER_DAYS = 7
 
+_cleanup_old_issues_sync = async_to_sync(cleanup_old_issues)
+
 
 class MaintenanceTestCase(TestCase):
     def test_cleanup_old_issues(self):
@@ -20,7 +23,7 @@ class MaintenanceTestCase(TestCase):
             "issue_events.IssueEvent", _quantity=5, _fill_optional=["issue"]
         )
         baker.make("issue_events.IssueEvent", issue=events[0].issue, _quantity=5)
-        cleanup_old_issues()
+        _cleanup_old_issues_sync()
         self.assertEqual(Issue.objects.count(), 5)
 
         IssueEvent.objects.all().delete()
@@ -30,7 +33,7 @@ class MaintenanceTestCase(TestCase):
                 days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS + 1
             )
         ):
-            cleanup_old_issues()
+            _cleanup_old_issues_sync()
             self.assertEqual(Issue.objects.count(), 0)
 
     def test_cleanup_within_buffer_keeps_issues(self):
@@ -42,7 +45,7 @@ class MaintenanceTestCase(TestCase):
                 days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS - 1
             )
         ):
-            cleanup_old_issues()
+            _cleanup_old_issues_sync()
             self.assertEqual(Issue.objects.count(), 1)
 
     def test_cleanup_handles_all_nonpartitioned_fk_relations(self):
@@ -79,7 +82,7 @@ class MaintenanceTestCase(TestCase):
                         + 1
                     )
                 ):
-                    cleanup_old_issues()
+                    _cleanup_old_issues_sync()
 
                 # Non-partitioned tables must be explicitly deleted so the
                 # issue delete succeeds. Partitioned tables may cause

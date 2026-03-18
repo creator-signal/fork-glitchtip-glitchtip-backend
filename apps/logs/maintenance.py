@@ -6,6 +6,7 @@ Called from glitchtip.tasks.perform_maintenance nightly.
 
 import logging
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 
 from glitchtip.cold_storage import (
@@ -21,7 +22,7 @@ from .cold_storage import DICTIONARY_COLUMNS, EXPORT_COLUMN_TYPES, LOGS_SELECT_S
 logger = logging.getLogger(__name__)
 
 
-def cleanup_old_logs():
+async def cleanup_old_logs():
     """
     Archive old log partitions to cold storage and delete expired cold data.
 
@@ -37,7 +38,7 @@ def cleanup_old_logs():
 
     db_alias = settings.MAINTENANCE_DATABASE_ALIAS
     if is_duckdb_available():
-        archive_and_cleanup_partitions(
+        await sync_to_async(archive_and_cleanup_partitions)(
             table_name="logs_logevent",
             hot_days=hot_days,
             column_types=EXPORT_COLUMN_TYPES,
@@ -47,13 +48,14 @@ def cleanup_old_logs():
             dictionary_columns=DICTIONARY_COLUMNS,
         )
     else:
-        # No cold storage available - delete partitions at total retention
-        delete_old_hot_partitions(retention_days, db_alias=db_alias)
+        await delete_old_hot_partitions(retention_days, db_alias=db_alias)
 
 
-def delete_old_hot_partitions(days: int, db_alias: str | None = None):
+async def delete_old_hot_partitions(days: int, db_alias: str | None = None):
     """Delete hot partitions older than `days` when cold storage unavailable."""
-    partitions = get_partitions_older_than("logs_logevent", days, db_alias=db_alias)
+    partitions = await sync_to_async(get_partitions_older_than)(
+        "logs_logevent", days, db_alias=db_alias
+    )
 
     if not partitions:
         return
@@ -64,8 +66,10 @@ def delete_old_hot_partitions(days: int, db_alias: str | None = None):
 
     for name, date in partitions:
         try:
-            detach_partition(name, "logs_logevent", db_alias=db_alias)
-            drop_partition(name, db_alias=db_alias)
+            await sync_to_async(detach_partition)(
+                name, "logs_logevent", db_alias=db_alias
+            )
+            await sync_to_async(drop_partition)(name, db_alias=db_alias)
             logger.info(f"Deleted log partition {name}")
         except Exception as e:
             logger.error(f"Error deleting log partition {name}: {e}")
