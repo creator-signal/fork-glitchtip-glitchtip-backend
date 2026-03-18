@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from django.db import connection
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
@@ -226,7 +226,7 @@ async def create_monitor(
     monitor = await Monitor.objects.acreate(organization=organization, **data)
     monitor = await get_monitor_queryset(user_id, organization_slug).aget(id=monitor.id)
     await attach_checks_to_monitors([monitor])
-    return 201, monitor
+    return Status(201, monitor)
 
 
 @router.put(
@@ -319,9 +319,9 @@ async def create_status_page(
     )
     data = payload.dict()
     status_page = await StatusPage.objects.acreate(organization=organization, **data)
-    return 201, await StatusPage.objects.prefetch_related("monitors").aget(
+    return Status(201, await StatusPage.objects.prefetch_related("monitors").aget(
         id=status_page.id
-    )
+    ))
 
 
 @router.delete(
@@ -337,5 +337,5 @@ async def delete_monitor(
         .adelete()
     )
     if result:
-        return 204, None
+        return Status(204, None)
     raise Http404

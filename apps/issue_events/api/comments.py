@@ -1,7 +1,7 @@
 from typing import List, Literal
 
 from django.http import HttpResponse
-from ninja import Schema
+from ninja import Schema, Status
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
@@ -62,7 +62,7 @@ async def add_comment(
         user_id=user_id,
     )
 
-    return 201, await Comment.objects.select_related("user").aget(id=comment.id)
+    return Status(201, await Comment.objects.select_related("user").aget(id=comment.id))
 
 
 @router.put(
@@ -105,4 +105,4 @@ async def delete_comment(
         raise HttpError(400, "Comment does not exist")
     await comment.adelete()
 
-    return 204, None
+    return Status(204, None)
