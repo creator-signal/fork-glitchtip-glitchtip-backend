@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -e
 
+. "$(dirname "$0")/tune-malloc.sh"
+
 # Workers: support both Heroku-style WEB_CONCURRENCY and GRANIAN_WORKERS
 # GRANIAN_WORKERS takes precedence if set
 WORKERS=${GRANIAN_WORKERS:-${WEB_CONCURRENCY:-1}}
