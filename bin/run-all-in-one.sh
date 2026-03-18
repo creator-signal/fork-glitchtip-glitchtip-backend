@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -e
 
+. "$(dirname "$0")/tune-malloc.sh"
+
 # Run initialization commands unless SKIP_INIT is set
 # Set SKIP_INIT=true when running migrations as a pre-deploy hook
 if [ "${SKIP_INIT}" != "True" ] && [ "${SKIP_INIT}" != "true" ] && [ "${SKIP_INIT}" != "1" ]; then
