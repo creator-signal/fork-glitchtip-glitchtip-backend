@@ -225,17 +225,21 @@ class MaintenanceTestCase(TestCase):
 
     def test_cleanup_noop_without_duckdb(self):
         """cleanup_old_issue_events should be a no-op when DuckDB is unavailable."""
+        from asgiref.sync import async_to_sync
+
         from ..maintenance import cleanup_old_issue_events
 
         # Should not raise
-        cleanup_old_issue_events()
+        async_to_sync(cleanup_old_issue_events)()
 
     @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
     def test_cleanup_skips_when_disabled(self):
+        from asgiref.sync import async_to_sync
+
         from ..maintenance import cleanup_old_issue_events
 
         # Should not raise
-        cleanup_old_issue_events()
+        async_to_sync(cleanup_old_issue_events)()
 
 
 class MaintainPartitionsSkipTestCase(TestCase):

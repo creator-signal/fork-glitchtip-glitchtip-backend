@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db.models import Exists, OuterRef
 from django.utils.timezone import now
@@ -10,7 +11,7 @@ from .models import File, FileBlob
 logger = logging.getLogger(__name__)
 
 
-def cleanup_old_files():
+async def cleanup_old_files():
     """
     Delete old FileBlobs and their storage files.
 
@@ -34,7 +35,7 @@ def cleanup_old_files():
 
     total_deleted = 0
     while True:
-        file_blobs = list(queryset.only("id", "blob")[:1000])
+        file_blobs = await sync_to_async(list)(queryset.only("id", "blob")[:1000])
         if not file_blobs:
             if total_deleted:
                 logger.info("Deleted %d old file blobs", total_deleted)
@@ -42,6 +43,6 @@ def cleanup_old_files():
         ids = []
         for file_blob in file_blobs:
             ids.append(file_blob.id)
-            file_blob.blob.delete()  # Delete from object storage
-        count, _ = FileBlob.objects.using(db_alias).filter(id__in=ids).delete()
+            await sync_to_async(file_blob.blob.delete)()
+        count, _ = await FileBlob.objects.using(db_alias).filter(id__in=ids).adelete()
         total_deleted += count
