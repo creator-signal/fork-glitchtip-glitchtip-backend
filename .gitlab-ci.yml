@@ -133,7 +133,7 @@ e2e:
       - COMPOSE_FILES: "-f compose.e2e.yml -f compose.e2e.web-worker.yml"
 
 lint:
-  image: python:3.13-slim
+  image: python:3.14-slim
   script:
     - pip install ruff vulture
     - ruff check glitchtip/ apps/
