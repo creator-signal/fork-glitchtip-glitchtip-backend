@@ -4,6 +4,7 @@ End-to-end tests for transaction ingest → TransactionGroup stats + SpanStaging
 
 from datetime import datetime, timedelta
 
+from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
@@ -11,6 +12,8 @@ from model_bakery import baker
 from apps.event_ingest.process_event import process_transaction_events
 from apps.event_ingest.schema import InterchangeTransactionEvent, TransactionEventSchema
 from apps.performance.models import SpanStaging, TransactionGroup
+
+_process_transaction_events = async_to_sync(process_transaction_events)
 
 
 def _make_transaction_payload(
@@ -86,7 +89,7 @@ class TransactionIngestTestCase(TestCase):
             _make_interchange_event(self.project.id, self.organization.id, p)
             for p in payloads
         ]
-        process_transaction_events(events)
+        _process_transaction_events(events)
 
     def test_single_transaction_creates_group(self):
         """A single transaction creates a TransactionGroup with correct stats."""

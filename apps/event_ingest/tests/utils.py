@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Union
 
+from asgiref.sync import async_to_sync
 from django.test import TestCase
 from django.utils import timezone
 from model_bakery import baker
@@ -166,5 +167,5 @@ class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
             )
             for dat in data
         ]
-        process_issue_events(events)
+        async_to_sync(process_issue_events)(events)
         return events
