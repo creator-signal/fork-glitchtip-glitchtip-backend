@@ -29,6 +29,33 @@ class StatusPageTestCase(GlitchTestCase):
         res = self.client.get(url)
         self.assertContains(res, status_page.name)
 
+    def test_status_page_with_monitors(self):
+        """Monitors should be cached and displayed on the status page.
+
+        Regression test: caching Monitor model instances directly fails
+        with msgpack-based cache backends (vcache). The view must cache
+        serializable dicts instead.
+        """
+        status_page = baker.make(
+            "uptime.StatusPage",
+            organization=self.organization,
+            is_public=True,
+        )
+        monitor = baker.make(
+            "uptime.Monitor",
+            organization=self.organization,
+            name="Test Monitor",
+        )
+        status_page.monitors.add(monitor)
+
+        url = status_page.get_absolute_url()
+        res = self.client.get(url)
+        self.assertContains(res, "Test Monitor")
+
+        # Second request should serve from cache
+        res = self.client.get(url)
+        self.assertContains(res, "Test Monitor")
+
     def test_status_page_api(self):
         status_page = baker.make("uptime.StatusPage", organization=self.organization)
         other_status_page = baker.make("uptime.StatusPage")
