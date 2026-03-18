@@ -1,5 +1,8 @@
 #!/usr/bin/env sh
 set -e
+
+. "$(dirname "$0")/tune-malloc.sh"
+
 export USE_ASYNC_SERVER=false
 
 if echo "$PORT" | grep -qF :; then
