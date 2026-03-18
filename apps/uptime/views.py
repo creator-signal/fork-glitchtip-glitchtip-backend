@@ -1,42 +1,41 @@
 from django.core.cache import cache
 from django.db.models import Q
-from django.utils.decorators import method_decorator
+from django.http import Http404
+from django.shortcuts import render
 from django.views.decorators.cache import cache_control
-from django.views.generic import DetailView
 
 from .models import Monitor, StatusPage
 
 
-class StatusPageDetailView(DetailView):
-    model = StatusPage
+@cache_control(public=True, max_age=60)
+async def status_page_detail(request, organization, slug):
+    qs = StatusPage.objects.filter(
+        organization__slug=organization,
+        slug=slug,
+    )
+    user = await request.auser()
+    if user.is_authenticated:
+        qs = qs.filter(Q(is_public=True) | Q(organization__users=user))
+    else:
+        qs = qs.filter(is_public=True)
 
-    @method_decorator(cache_control(public=True, max_age=60))
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    status_page = await qs.distinct().afirst()
+    if status_page is None:
+        raise Http404
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        if self.request.user.is_authenticated:
-            queryset = queryset.filter(
-                Q(is_public=True) | Q(organization__users=self.request.user)
-            )
-        else:
-            queryset = queryset.filter(is_public=True)
+    cache_key = f"status_page_monitors:{status_page.pk}"
+    monitors = await cache.aget(cache_key)
+    if monitors is None:
+        monitors = [
+            m
+            async for m in Monitor.objects.with_check_annotations()
+            .filter(statuspage=status_page)
+            .values("name", "latest_is_up", "last_change")
+        ]
+        await cache.aset(cache_key, monitors, 60)
 
-        return queryset.filter(
-            organization__slug=self.kwargs.get("organization")
-        ).distinct()
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        cache_key = f"status_page_monitors:{self.object.pk}"
-        monitors = cache.get(cache_key)
-        if monitors is None:
-            monitors = list(
-                Monitor.objects.with_check_annotations().filter(
-                    statuspage=self.object
-                )
-            )
-            cache.set(cache_key, monitors, 60)
-        context["monitors"] = monitors
-        return context
+    return render(
+        request,
+        "uptime/statuspage_detail.html",
+        {"object": status_page, "statuspage": status_page, "monitors": monitors},
+    )
