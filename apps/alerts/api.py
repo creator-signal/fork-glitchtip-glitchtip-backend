@@ -1,7 +1,7 @@
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.pagination import paginate
 
 from apps.organizations_ext.constants import OrganizationUserRole
@@ -165,7 +165,7 @@ async def delete_project_alert(
         .adelete()
     )
     if result:
-        return 204, None
+        return Status(204, None)
     raise Http404
 
 
