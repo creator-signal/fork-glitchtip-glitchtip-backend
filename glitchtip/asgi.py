@@ -20,6 +20,11 @@ application = get_asgi_application()
 # Print startup banner
 print_startup_banner()
 
+# Route ingest paths to a lightweight handler with minimal middleware
+from glitchtip.ingest_asgi import IngestDispatcher  # noqa: E402
+
+application = IngestDispatcher(application)
+
 _embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
 if _embed_worker:
     from django_vtasks.asgi import get_worker_application
