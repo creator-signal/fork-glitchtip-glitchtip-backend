@@ -478,6 +478,9 @@ INSTALLED_APPS += [
     "import_export",  # Contains import management command, keep under apps.importer
 ]
 
+if env.bool("GLITCHTIP_ASYNC_DB_BACKEND", False):
+    INSTALLED_APPS.append("django_async_backend")
+
 IS_WORKER = env.bool("IS_WORKER", False)
 if not IS_WORKER:
     INSTALLED_APPS = WEB_INSTALLED_APPS + INSTALLED_APPS
@@ -702,6 +705,15 @@ for db_config in DATABASES.values():
             "max_size": env.int("DATABASE_POOL_MAX_SIZE", 20),
             "timeout": env.int("DATABASE_POOL_TIMEOUT", 30),
         }
+
+# Experimental: use django-async-backend for true async ORM operations.
+# Eliminates sync_to_async threads for database reads, reducing memory
+# fragmentation from glibc malloc arenas. Only safe for ASGI servers.
+# WSGI users should not enable this (connection pool issues).
+if env.bool("GLITCHTIP_ASYNC_DB_BACKEND", False):
+    if os.environ.get("USE_ASYNC_SERVER") != "false":
+        for db_config in DATABASES.values():
+            db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
