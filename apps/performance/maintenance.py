@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils.timezone import now
 
@@ -12,7 +13,7 @@ from .models import TransactionGroup
 logger = logging.getLogger(__name__)
 
 
-def cleanup_old_transaction_events():
+async def cleanup_old_transaction_events():
     """
     Delete old TransactionGroups and clean up cold storage.
 
@@ -31,17 +32,21 @@ def cleanup_old_transaction_events():
 
     total_deleted = 0
     while True:
-        batch_ids = list(queryset.values_list("id", flat=True)[:500])
+        batch_ids = await sync_to_async(list)(
+            queryset.values_list("id", flat=True)[:500]
+        )
         if not batch_ids:
             break
-        count = TransactionGroup.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
+        count = await sync_to_async(
+            TransactionGroup.objects.filter(id__in=batch_ids)._raw_delete
+        )(db_alias)
         total_deleted += count
 
     if total_deleted:
         logger.info("Deleted %d old transaction groups", total_deleted)
 
     # Clean up cold storage files
-    cleanup_all_cold_storage(
+    await sync_to_async(cleanup_all_cold_storage)(
         retention_days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS,
         table_name=TABLE_NAME,
     )

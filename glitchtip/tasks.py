@@ -1,8 +1,8 @@
-import asyncio
 import ctypes
 import gc
 import logging
 
+from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.tasks import task
 
@@ -31,10 +31,10 @@ def _malloc_trim():
         pass
 
 
-def _run_step(name: str, func, *args):
-    """Run a maintenance step with error isolation and memory cleanup."""
+async def _run_step(name: str, coro, *args):
+    """Run an async maintenance step with error isolation and memory cleanup."""
     try:
-        func(*args)
+        await coro(*args)
     except Exception:
         logger.error("Maintenance step '%s' failed", name, exc_info=True)
     gc.collect()
@@ -42,7 +42,7 @@ def _run_step(name: str, func, *args):
 
 
 @task
-def perform_maintenance():
+async def perform_maintenance():
     """
     Update postgres partitions and delete old data.
 
@@ -52,13 +52,23 @@ def perform_maintenance():
     """
     gc.collect()
     _malloc_trim()
-    _run_step("maintain_partitions", call_command, "maintain_partitions")
-    _run_step("cleanup_old_transaction_events", cleanup_old_transaction_events)
-    _run_step("cleanup_old_files", cleanup_old_files)
-    _run_step("cleanup_old_issue_events", cleanup_old_issue_events)
-    _run_step("cleanup_old_issues", cleanup_old_issues)
-    _run_step("cleanup_old_debug_symbol_bundles", cleanup_old_debug_symbol_bundles)
-    _run_step("cleanup_old_releases", cleanup_old_releases)
-    _run_step("cleanup_old_logs", cleanup_old_logs)
-    _run_step("sync_stripe_models", asyncio.run, sync_stripe_models())
-    _run_step("update_subscription_cycles", asyncio.run, update_subscription_cycles())
+    await _run_step(
+        "maintain_partitions", sync_to_async(call_command), "maintain_partitions"
+    )
+    await _run_step(
+        "cleanup_old_transaction_events",
+        cleanup_old_transaction_events,
+    )
+    await _run_step("cleanup_old_files", cleanup_old_files)
+    await _run_step(
+        "cleanup_old_issue_events", cleanup_old_issue_events
+    )
+    await _run_step("cleanup_old_issues", cleanup_old_issues)
+    await _run_step(
+        "cleanup_old_debug_symbol_bundles",
+        cleanup_old_debug_symbol_bundles,
+    )
+    await _run_step("cleanup_old_releases", cleanup_old_releases)
+    await _run_step("cleanup_old_logs", cleanup_old_logs)
+    await _run_step("sync_stripe_models", sync_stripe_models)
+    await _run_step("update_subscription_cycles", update_subscription_cycles)
