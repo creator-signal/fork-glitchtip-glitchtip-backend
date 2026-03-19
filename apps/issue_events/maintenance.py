@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import IntegrityError
 from django.db.models import QuerySet
@@ -13,7 +14,7 @@ from .models import Comment, Issue, IssueHash, UserReport
 logger = logging.getLogger(__name__)
 
 
-def delete_events_in_batches(
+async def delete_events_in_batches(
     queryset: QuerySet, batch_size: int = 1000, db_alias: str = "default"
 ) -> int:
     """
@@ -30,16 +31,20 @@ def delete_events_in_batches(
 
     total_deleted = 0
     while True:
-        batch_ids = list(ordered_qs.values_list("id", flat=True)[:batch_size])
+        batch_ids = await sync_to_async(list)(
+            ordered_qs.values_list("id", flat=True)[:batch_size]
+        )
         if not batch_ids:
             break
-        count = model.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
+        count = await sync_to_async(
+            model.objects.filter(id__in=batch_ids)._raw_delete
+        )(db_alias)
         total_deleted += count
 
     return total_deleted
 
 
-def delete_issues_in_batches(
+async def delete_issues_in_batches(
     queryset: QuerySet[Issue], batch_size: int = 1000, db_alias: str = "default"
 ) -> int:
     """
@@ -61,20 +66,32 @@ def delete_issues_in_batches(
 
     total_deleted = 0
     while True:
-        batch_ids = list(ordered_qs.values_list("id", flat=True)[:batch_size])
+        batch_ids = await sync_to_async(list)(
+            ordered_qs.values_list("id", flat=True)[:batch_size]
+        )
         if not batch_ids:
             break
         # Delete from non-partitioned FK tables first
-        Notification.issues.through.objects.filter(
-            issue_id__in=batch_ids
-        )._raw_delete(db_alias)
-        IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
-        Comment.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
-        UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete(db_alias)
+        await sync_to_async(
+            Notification.issues.through.objects.filter(
+                issue_id__in=batch_ids
+            )._raw_delete
+        )(db_alias)
+        await sync_to_async(
+            IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete
+        )(db_alias)
+        await sync_to_async(
+            Comment.objects.filter(issue_id__in=batch_ids)._raw_delete
+        )(db_alias)
+        await sync_to_async(
+            UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete
+        )(db_alias)
         # A new event may arrive between the SELECT above and this DELETE
         # (TOCTOU race). Catch and skip — the caller can retry later.
         try:
-            count = Issue.objects.filter(id__in=batch_ids)._raw_delete(db_alias)
+            count = await sync_to_async(
+                Issue.objects.filter(id__in=batch_ids)._raw_delete
+            )(db_alias)
         except IntegrityError:
             logger.info(
                 "Skipped batch due to concurrent FK insert, will retry later"
@@ -85,7 +102,7 @@ def delete_issues_in_batches(
     return total_deleted
 
 
-def cleanup_old_issue_events():
+async def cleanup_old_issue_events():
     """
     Archive old issue event partitions to cold storage and delete expired cold data.
 
@@ -105,7 +122,7 @@ def cleanup_old_issue_events():
     )
 
     hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
-    archive_and_cleanup_partitions(
+    await sync_to_async(archive_and_cleanup_partitions)(
         table_name="issue_events_issueevent",
         hot_days=hot_days,
         column_types=ISSUE_EVENT_EXPORT_COLUMN_TYPES,
@@ -116,7 +133,7 @@ def cleanup_old_issue_events():
     )
 
 
-def cleanup_old_issues():
+async def cleanup_old_issues():
     """
     Delete Issues whose partitioned data has been dropped.
 
@@ -137,6 +154,6 @@ def cleanup_old_issues():
         last_seen__lt=now() - timedelta(days=days + buffer_days)
     )
 
-    total_deleted = delete_issues_in_batches(queryset, db_alias=db_alias)
+    total_deleted = await delete_issues_in_batches(queryset, db_alias=db_alias)
     if total_deleted:
         logger.info("Deleted %d empty issues", total_deleted)

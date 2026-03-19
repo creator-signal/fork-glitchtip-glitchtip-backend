@@ -17,7 +17,7 @@ SIGNED_DATA_MAX_AGE = 600  # 10 minutes
 
 @login_required
 @require_http_methods(["GET", "POST"])
-def oauth_consent(request):
+async def oauth_consent(request):
     try:
         data = signing.loads(request.GET.get("data", ""), max_age=SIGNED_DATA_MAX_AGE)
     except (signing.BadSignature, signing.SignatureExpired):
@@ -35,12 +35,13 @@ def oauth_consent(request):
         )
 
     # POST — user approved
+    user = await request.auser()
     code = generate_token()
     now = int(time.time())
     grant_data = json.dumps(
         {
             "client_id": data["client_id"],
-            "user_id": request.user.id,
+            "user_id": user.id,
             "scopes": data.get("scopes") or [],
             "expires_at": now + AUTH_CODE_LIFETIME,
             "code_challenge": data["code_challenge"],
@@ -51,7 +52,7 @@ def oauth_consent(request):
             "resource": data.get("resource"),
         }
     )
-    cache.set(_grant_cache_key(code), grant_data, AUTH_CODE_LIFETIME)
+    await cache.aset(_grant_cache_key(code), grant_data, AUTH_CODE_LIFETIME)
 
     redirect_uri = data["redirect_uri"]
     separator = "&" if "?" in redirect_uri else "?"

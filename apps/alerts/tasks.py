@@ -20,14 +20,16 @@ return members
 """
 
 
-def process_alert(project_alert_id: int, issue_ids: list[int]):
-    notification = Notification.objects.create(project_alert_id=project_alert_id)
-    notification.issues.add(*issue_ids)
-    send_notification.enqueue(notification.pk)
+async def process_alert(project_alert_id: int, issue_ids: list[int]):
+    notification = await Notification.objects.acreate(
+        project_alert_id=project_alert_id
+    )
+    await notification.issues.aset(issue_ids)
+    await send_notification.aenqueue(notification.pk)
 
 
 @task
-def process_event_alerts():
+async def process_event_alerts():
     """Inspect alerts and determine if new notifications need sent"""
     now = timezone.now()
 
@@ -36,9 +38,7 @@ def process_event_alerts():
     if settings.CACHE_IS_VALKEY:
         # Note all recent issue_ids at ingest time. Then we can filter by them here.
         driver = caches["default"].get_raw_client()
-        issue_ids = [
-            int(x) for x in driver.eval_sync(LUA_SCRIPT, [ISSUE_IDS_KEY], [])
-        ]
+        issue_ids = [int(x) for x in await driver.eval(LUA_SCRIPT, [ISSUE_IDS_KEY], [])]
 
     project_alerts = ProjectAlert.objects.filter(
         quantity__isnull=False, timespan_minutes__isnull=False
@@ -51,7 +51,7 @@ def process_event_alerts():
             project__issues__id__in=issue_ids
         ).distinct()
 
-    for alert in project_alerts:
+    async for alert in project_alerts:
         start_time = now - timedelta(minutes=alert.timespan_minutes)
         # Pruning partition optimization
         start_uuid = UUID7Helper._uuid7_for_timestamp(start_time, min_random=True)
@@ -70,10 +70,11 @@ def process_event_alerts():
         )
         if issue_ids:
             issues = issues.filter(id__in=issue_ids)
-        if issues:
-            notification = alert.notification_set.create()
-            notification.issues.add(*issues)
-            send_notification.enqueue(notification.pk)
+        issue_id_list = [i async for i in issues]
+        if issue_id_list:
+            notification = await alert.notification_set.acreate()
+            await notification.issues.aset(issue_id_list)
+            await send_notification.aenqueue(notification.pk)
 
 
 @task

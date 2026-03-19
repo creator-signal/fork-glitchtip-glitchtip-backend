@@ -1,13 +1,16 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.utils import timezone
 from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTestCase
 
-from ..maintenance import cleanup_old_releases
+from ..maintenance import cleanup_old_releases as _cleanup_old_releases
 from ..models import Deploy, Release
+
+cleanup_old_releases = async_to_sync(_cleanup_old_releases)
 
 
 class ReleaseMaintenanceTestCase(GlitchTestCase):

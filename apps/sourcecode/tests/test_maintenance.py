@@ -1,14 +1,19 @@
 from datetime import timedelta
 from uuid import uuid4
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.utils import timezone
 from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTestCase
 
-from ..maintenance import cleanup_old_debug_symbol_bundles
+from ..maintenance import (
+    cleanup_old_debug_symbol_bundles as _cleanup_old_debug_symbol_bundles,
+)
 from ..models import DebugSymbolBundle
+
+cleanup_old_debug_symbol_bundles = async_to_sync(_cleanup_old_debug_symbol_bundles)
 
 
 class SourceCodeMaintenanceTestCase(GlitchTestCase):
