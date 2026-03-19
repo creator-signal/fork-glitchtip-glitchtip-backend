@@ -3,6 +3,7 @@ import logging
 import tempfile
 from hashlib import sha1
 
+from asgiref.sync import sync_to_async
 from django.tasks import task
 from symbolic import Archive, normalize_debug_id
 
@@ -36,15 +37,17 @@ DIF_STATE_NOT_FOUND = "not_found"
 
 
 @task
-def difs_assemble(project_id, name, checksum, chunks, debug_id):
+async def difs_assemble(project_id, name, checksum, chunks, debug_id):
     try:
-        project = Project.objects.get(id=project_id)
+        project = await Project.objects.aget(id=project_id)
 
-        file = difs_get_file_from_chunks(checksum, chunks)
+        file = await sync_to_async(difs_get_file_from_chunks)(checksum, chunks)
         if file is None:
-            file = difs_create_file_from_chunks(name, checksum, chunks)
+            file = await sync_to_async(difs_create_file_from_chunks)(
+                name, checksum, chunks
+            )
 
-        difs_create_difs(project, name, file)
+        await sync_to_async(difs_create_difs)(project, name, file)
 
     except ChecksumMismatched:
         getLogger().error("difs_assemble: Checksum mismatched: %s", name)

@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.utils import timezone
 from freezegun import freeze_time
@@ -7,6 +8,8 @@ from freezegun import freeze_time
 from apps.performance.maintenance import cleanup_old_transaction_events
 from apps.performance.models import TransactionGroup
 from glitchtip.test_utils.test_case import GlitchTipTestCase
+
+_cleanup_old_transaction_events_sync = async_to_sync(cleanup_old_transaction_events)
 
 
 class TasksTestCase(GlitchTipTestCase):
@@ -36,7 +39,7 @@ class TasksTestCase(GlitchTipTestCase):
         )
 
         with freeze_time(frozen_now):
-            cleanup_old_transaction_events()
+            _cleanup_old_transaction_events_sync()
 
         # Recent group should survive, old group should be deleted
         self.assertFalse(TransactionGroup.objects.filter(id=old_group.id).exists())
@@ -44,5 +47,5 @@ class TasksTestCase(GlitchTipTestCase):
 
     def test_cleanup_no_groups(self):
         """Cleanup runs without error when there are no groups."""
-        cleanup_old_transaction_events()
+        _cleanup_old_transaction_events_sync()
         self.assertEqual(TransactionGroup.objects.count(), 0)
