@@ -1,7 +1,7 @@
 """
 Shared cold storage infrastructure for archiving partitions to Parquet.
 
-Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
+Requires explicit opt-in via GLITCHTIP_ENABLE_COLD_STORAGE=true (default off).
 Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
 
 Write path: arro3 (Rust Arrow/Parquet via PyO3) — streams CSV→Parquet with
@@ -89,14 +89,19 @@ def _get_archive_chunk_bytes() -> int:
     return max(mem_bytes // 4, 1024 * 1024)
 
 
+_COLD_STORAGE_DEFAULT_DIR = "/code/uploads/cold_storage"
+
+
 def get_cold_storage_backend():
     """
     Get the django-storages backend for cold storage.
 
     Priority:
     1. "cold" alias in STORAGES setting (most flexible)
-    2. S3 storage via GLITCHTIP_COLD_STORAGE_BUCKET
+    2. S3 storage via GLITCHTIP_COLD_STORAGE_BUCKET (or AWS_STORAGE_BUCKET_NAME)
     3. Local filesystem via GLITCHTIP_COLD_STORAGE_DIR
+    4. Default local directory (/code/uploads/cold_storage) — just works
+       for Docker/PaaS deployments using the standard uploads volume.
 
     Returns None if no suitable storage backend is available.
     """
@@ -114,13 +119,14 @@ def get_cold_storage_backend():
         except ImportError:
             pass
 
-    # 3. Local directory configured
-    if settings.GLITCHTIP_COLD_STORAGE_DIR:
-        from django.core.files.storage import FileSystemStorage
+    # 3. Explicit local directory
+    cold_dir = settings.GLITCHTIP_COLD_STORAGE_DIR
+    if not cold_dir:
+        # 4. Default directory — use it if it exists or can be created
+        cold_dir = _COLD_STORAGE_DEFAULT_DIR
+    from django.core.files.storage import FileSystemStorage
 
-        return FileSystemStorage(location=settings.GLITCHTIP_COLD_STORAGE_DIR)
-
-    return None
+    return FileSystemStorage(location=cold_dir)
 
 
 def _is_s3_storage(storage) -> bool:
@@ -138,23 +144,22 @@ _duckdb_available: bool | None = None
 
 def is_duckdb_available() -> bool:
     """
-    Check if DuckDB cold storage is enabled and a storage backend exists.
+    Check if cold storage is enabled.
 
-    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true AND a
-    configured storage backend (S3 bucket, local dir, or STORAGES["cold"]).
-    Result is cached at module level since neither setting changes at runtime.
-    The cache is automatically cleared by Django's setting_changed signal
-    (fired by @override_settings in tests).
+    Requires explicit opt-in via GLITCHTIP_ENABLE_COLD_STORAGE=true.
+    When explicitly enabled, trusts the deployment and skips backend
+    inspection — the backend is resolved lazily on first use.
+
+    Result is cached at module level since the setting doesn't change at
+    runtime. The cache is automatically cleared by Django's setting_changed
+    signal (fired by @override_settings in tests).
     """
     global _duckdb_available
     if _duckdb_available is not None:
         return _duckdb_available
 
-    override = settings.GLITCHTIP_ENABLE_DUCKDB
-    if override is None or str(override).lower() != "true":
-        _duckdb_available = False
-    else:
-        _duckdb_available = get_cold_storage_backend() is not None
+    override = getattr(settings, "GLITCHTIP_ENABLE_COLD_STORAGE", None)
+    _duckdb_available = override is not None and str(override).lower() == "true"
     return _duckdb_available
 
 

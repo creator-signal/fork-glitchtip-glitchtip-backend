@@ -10,14 +10,14 @@ for both projects, archives them to cold storage, then:
 Run with minio + postgres up:
   docker compose -f compose.yml -f compose.minio.yml up -d
   docker compose -f compose.yml -f compose.minio.yml run --rm \
-    -e GLITCHTIP_ENABLE_DUCKDB=true \
+    -e GLITCHTIP_ENABLE_COLD_STORAGE=true \
     -e GLITCHTIP_EVENTS_HOT_DAYS=0 \
     web python manage.py shell < scripts/test_org_delete_cold_storage.py
 
 Or with filesystem cold storage:
   docker compose -f compose.yml -f compose.cold-volume.yml up -d
   docker compose -f compose.yml -f compose.cold-volume.yml run --rm \
-    -e GLITCHTIP_ENABLE_DUCKDB=true \
+    -e GLITCHTIP_ENABLE_COLD_STORAGE=true \
     -e GLITCHTIP_EVENTS_HOT_DAYS=0 \
     web python manage.py shell < scripts/test_org_delete_cold_storage.py
 """
@@ -54,7 +54,7 @@ print("Org/Project Deletion Cold Storage E2E Test")
 print("=" * 70)
 
 # ── 0. Pre-checks ────────────────────────────────────────────────────
-assert is_duckdb_available(), "DuckDB not available — set GLITCHTIP_ENABLE_DUCKDB=true"
+assert is_duckdb_available(), "DuckDB not available — set GLITCHTIP_ENABLE_COLD_STORAGE=true"
 storage = get_cold_storage_backend()
 assert storage, "No storage backend"
 print(f"[OK] DuckDB available, storage backend={type(storage).__name__}")
