@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import logging
+import time
 from dataclasses import asdict
 
 from asgiref.sync import sync_to_async
@@ -11,6 +12,12 @@ logger = logging.getLogger(__name__)
 # Equivalent to old Sentry's NOOP_HUB — suppresses SDK capture during
 # internal event processing to prevent synchronous recursion.
 _processing_internal = contextvars.ContextVar("_processing_internal", default=False)
+
+# Rate limit for self-reported error events to prevent queue amplification
+# when ingest is broadly broken. Generous enough to never drop real errors;
+# tight enough to prevent OOM/resource exhaustion from runaway loops.
+_INTERNAL_EVENT_MAX = 50  # max events per window
+_INTERNAL_EVENT_WINDOW = 60  # seconds
 
 
 class InternalTransport(Transport):
@@ -28,6 +35,7 @@ class InternalTransport(Transport):
     def __init__(self, options=None):
         super().__init__(options)
         self._project_key = None
+        self._error_timestamps: list[float] = []
 
     @property
     def project_key(self):
@@ -44,7 +52,25 @@ class InternalTransport(Transport):
                     logger.warning("InternalTransport: project key not found for DSN")
         return self._project_key
 
+    def _is_rate_limited(self) -> bool:
+        """Sliding window rate limit to prevent queue amplification loops.
+
+        Not strictly thread-safe (compound read-filter-append can race),
+        but the limit is a coarse safety net — being off by a few events
+        out of 50 is fine. A lock is not worth the overhead here.
+        """
+        now = time.monotonic()
+        cutoff = now - _INTERNAL_EVENT_WINDOW
+        self._error_timestamps = [t for t in self._error_timestamps if t > cutoff]
+        if len(self._error_timestamps) >= _INTERNAL_EVENT_MAX:
+            return True
+        self._error_timestamps.append(now)
+        return False
+
     def capture_envelope(self, envelope):
+        if self._is_rate_limited():
+            return
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -120,8 +146,6 @@ class InternalTransport(Transport):
                 self._process_log_item(item, key, now())
 
     def _process_log_item(self, item, key, received):
-        from dataclasses import asdict
-
         from django.conf import settings
 
         if not settings.GLITCHTIP_ENABLE_LOGS:
