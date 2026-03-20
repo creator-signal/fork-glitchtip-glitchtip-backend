@@ -98,6 +98,35 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.project, self.project)
         mocked.enqueue.assert_called_once()
 
+    def test_create_heartbeat_monitor_with_weekly_interval(self):
+        data = {
+            "monitorType": "Heartbeat",
+            "name": "Weekly Heartbeat",
+            "url": "",
+            "expectedStatus": None,
+            "expectedBody": "",
+            "interval": 604800,
+            "timeout": None,
+        }
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        monitor = Monitor.objects.get()
+        self.assertEqual(monitor.monitor_type, "Heartbeat")
+        self.assertEqual(monitor.interval, data["interval"])
+
+    def test_create_monitor_interval_above_week_invalid(self):
+        data = {
+            "monitorType": "Heartbeat",
+            "name": "Too Long",
+            "url": "",
+            "expectedStatus": None,
+            "expectedBody": "",
+            "interval": 604801,
+            "timeout": None,
+        }
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_port_monitor(self, mocked):
         """Port monitor URLs should be converted to domain:port format, with protocol removed"""
