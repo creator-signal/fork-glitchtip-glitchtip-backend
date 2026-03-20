@@ -197,3 +197,74 @@ class StripeAPITestCase(TestCase):
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["total"], 0)
+
+    def test_events_count_daily(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        period_start = timezone.make_aware(datetime(2020, 1, 1))
+        period_end = timezone.make_aware(datetime(2020, 2, 1))
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        # Create stats on two different days
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 5, 10)),
+            count=15,
+        )
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 5, 14)),
+            count=5,
+        )
+        baker.make(
+            "projects.TransactionEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 10, 8)),
+            count=30,
+        )
+
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 1, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()["data"]
+        # Should have entries from Jan 1 through Jan 15 (today)
+        self.assertEqual(len(data), 15)
+        # Jan 5 should have 20 issue events (15 + 5 from two hourly rows)
+        jan5 = next(d for d in data if d["date"] == "2020-01-05")
+        self.assertEqual(jan5["eventCount"], 20)
+        self.assertEqual(jan5["transactionEventCount"], 0)
+        # Jan 10 should have 30 transaction events
+        jan10 = next(d for d in data if d["date"] == "2020-01-10")
+        self.assertEqual(jan10["eventCount"], 0)
+        self.assertEqual(jan10["transactionEventCount"], 30)
+        # Jan 1 should be all zeros
+        jan1 = data[0]
+        self.assertEqual(jan1["date"], "2020-01-01")
+        self.assertEqual(jan1["eventCount"], 0)
+        self.assertEqual(jan1["transactionEventCount"], 0)
+        self.assertEqual(jan1["uptimeCheckEventCount"], 0)
+
+    def test_events_count_daily_no_subscription(self):
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["data"], [])
