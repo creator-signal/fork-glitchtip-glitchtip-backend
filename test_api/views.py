@@ -4,6 +4,7 @@ from django.core.management import call_command
 from django.http import Http404, HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from apps.issue_events.models import Issue
 from apps.organizations_ext.models import Organization
 from apps.projects.models import Project
 from apps.teams.models import Team
@@ -85,5 +86,9 @@ def seed_data(request: HttpRequest):
                 events_quantity_per=1,
                 over_days=0,  # Use today to ensure partition exists
             )
+            first_issue = Issue.objects.filter(project=project3).order_by("first_seen").first()
+            if first_issue:
+                project3.first_event = first_issue.first_seen
+                project3.save(update_fields=["first_event"])
 
     return HttpResponse()
