@@ -1,10 +1,21 @@
+from datetime import date, timedelta
+
+from asgiref.sync import sync_to_async
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce, TruncDate
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
+from django.utils import timezone
 from ninja import ModelSchema, Router
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.uptime.models import MonitorCheck
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
@@ -123,6 +134,17 @@ class EventsCountSchema(CamelSchema):
 
 class PreviousPeriodEventsCountSchema(EventsCountSchema):
     total: int
+
+
+class DailyEventCountEntry(CamelSchema):
+    date: date
+    event_count: int
+    transaction_event_count: int
+    uptime_check_event_count: int
+
+
+class DailyEventsCountSchema(CamelSchema):
+    data: list[DailyEventCountEntry]
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -326,3 +348,98 @@ async def subscription_events_count_previous_period(
         "log_event_count": org.log_count,
         "file_size_mb": org.file_size,
     }
+
+
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/daily/",
+    response=DailyEventsCountSchema,
+    by_alias=True,
+)
+async def subscription_events_count_daily(
+    request: AuthHttpRequest, organization_slug: str
+):
+    # Verify org exists and user has access (matches peer endpoints)
+    await aget_object_or_404(
+        Organization,
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+
+    subscription = await (
+        StripeSubscription.objects.filter(
+            organization__users=request.auth.user_id,
+            organization__slug=organization_slug,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+        )
+        .order_by("-created")
+        .afirst()
+    )
+
+    if subscription is None:
+        return {"data": []}
+
+    cycle_start = (
+        subscription.subscription_cycle_start or subscription.current_period_start
+    )
+    cycle_end = subscription.subscription_cycle_end or subscription.current_period_end
+
+    today = timezone.now().date()
+    period_start_date = cycle_start.date()
+    period_end_date = min(cycle_end.date(), today)
+
+    org_filter = Q(
+        project__organization__slug=organization_slug,
+        project__organization__users=request.auth.user_id,
+    )
+    date_filter = Q(date__gte=cycle_start, date__lt=cycle_end)
+
+    # Use sync_to_async(list)() to avoid server-side cursors (PgBouncer compat)
+    issue_rows = await sync_to_async(list)(
+        IssueEventProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        .annotate(day=TruncDate("date"))
+        .values("day")
+        .annotate(total=Coalesce(Sum("count"), 0))
+        .order_by("day")
+    )
+    issue_daily = {row["day"]: row["total"] for row in issue_rows}
+
+    txn_rows = await sync_to_async(list)(
+        TransactionEventProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        .annotate(day=TruncDate("date"))
+        .values("day")
+        .annotate(total=Coalesce(Sum("count"), 0))
+        .order_by("day")
+    )
+    txn_daily = {row["day"]: row["total"] for row in txn_rows}
+
+    uptime_filter = Q(
+        monitor__organization__slug=organization_slug,
+        monitor__organization__users=request.auth.user_id,
+    )
+    uptime_date_filter = Q(
+        start_check__gte=cycle_start, start_check__lt=cycle_end
+    )
+    uptime_rows = await sync_to_async(list)(
+        MonitorCheck.objects.filter(uptime_filter, uptime_date_filter)
+        .annotate(day=TruncDate("start_check"))
+        .values("day")
+        .annotate(total=Count("pk"))
+        .order_by("day")
+    )
+    uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
+
+    # Build response with one entry per day, filling gaps with zeros
+    data = []
+    current = period_start_date
+    while current <= period_end_date:
+        data.append(
+            {
+                "date": current,
+                "event_count": issue_daily.get(current, 0),
+                "transaction_event_count": txn_daily.get(current, 0),
+                "uptime_check_event_count": uptime_daily.get(current, 0),
+            }
+        )
+        current += timedelta(days=1)
+
+    return {"data": data}
