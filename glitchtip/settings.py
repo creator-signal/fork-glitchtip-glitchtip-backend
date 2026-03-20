@@ -290,10 +290,6 @@ if SENTRY_DSN:
         _is_self_referencing_dsn(SENTRY_DSN, GLITCHTIP_URL),
     )
 
-    # Equivalent to old Sentry's UNSAFE_FILES — catches async recursion
-    # in worker tasks where the contextvar doesn't propagate.
-    _UNSAFE_MODULES = ("apps.event_ingest", "apps.logs.process")
-
     def before_send(event, hint):
         """Don't log useless, inactionable errors in Sentry."""
         if "log_record" in hint:
@@ -305,23 +301,14 @@ if SENTRY_DSN:
                 return None
 
         # --- Self-referencing loop protection ---
+        # Synchronous recursion guard: drops events generated while
+        # InternalTransport is processing an envelope. Async queue loops
+        # are handled by the transport's rate limiter instead.
         if _is_self_referencing:
             from glitchtip.internal_transport import _processing_internal
 
-            # Synchronous recursion guard (equivalent to NOOP_HUB)
             if _processing_internal.get():
                 return None
-            # Logger-originated events from ingest modules
-            if "log_record" in hint:
-                if hint["log_record"].name.startswith(
-                    ("apps.event_ingest", "apps.logs")
-                ):
-                    return None
-            # Worker path: stackframes from ingest modules (equivalent to UNSAFE_FILES)
-            for exc_val in event.get("exception", {}).get("values", []):
-                for frame in exc_val.get("stacktrace", {}).get("frames", []):
-                    if frame.get("module", "").startswith(_UNSAFE_MODULES):
-                        return None
 
         return event
 

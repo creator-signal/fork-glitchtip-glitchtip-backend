@@ -100,7 +100,12 @@ class Command(BaseCommand):
             )
 
             # Cleanup old weekly partitions
+            # partition_interval_days=7 ensures a partition isn't dropped until
+            # its entire range is older than retention_days. With short retention
+            # (e.g. 3 days), actual data lifetime is 7-10 days (best effort).
             self.stdout.write(f"Cleaning up old weekly partitions for {table}...")
-            manager.drop_old_partitions(table, retention_days)
+            manager.drop_old_partitions(
+                table, retention_days, partition_interval_days=7
+            )
 
         self.stdout.write(self.style.SUCCESS("Partition maintenance complete."))

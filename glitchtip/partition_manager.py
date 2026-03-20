@@ -346,14 +346,22 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    def drop_old_partitions(self, parent_table: str, max_days: int) -> int:
+    def drop_old_partitions(
+        self, parent_table: str, max_days: int, partition_interval_days: int = 1
+    ) -> int:
         """
         Identify and drop partitions older than max_days.
         Assumes partition naming convention: parent_table_YYYYMMDD
 
+        A partition is only dropped when its entire range is older than
+        max_days — i.e. when (partition_start + interval) < threshold.
+        This prevents weekly partitions from being dropped mid-week when
+        retention is shorter than 7 days.
+
         Args:
             parent_table: Parent table name
             max_days: Maximum age of partitions in days
+            partition_interval_days: Size of each partition in days (7 for weekly)
 
         Returns:
             Number of partitions dropped
@@ -364,6 +372,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         partitions = self.list_partitions(parent_table)
         threshold_date = datetime.now(timezone.utc).date() - timedelta(days=max_days)
         dropped_count = 0
+        interval = timedelta(days=partition_interval_days)
 
         # Pattern for YYYYMMDD suffix
         pattern = re.compile(r".*_(\d{8})$")
@@ -374,8 +383,9 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             if match:
                 try:
                     date_str = match.group(1)
-                    partition_date = datetime.strptime(date_str, "%Y%m%d").date()
-                    if partition_date < threshold_date:
+                    partition_start = datetime.strptime(date_str, "%Y%m%d").date()
+                    partition_end = partition_start + interval
+                    if partition_end < threshold_date:
                         logger.info(f"Dropping old partition {name}...")
                         sql = self.drop_partition(name)
                         with self.db_connection.cursor() as cursor:
