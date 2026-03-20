@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             field=models.PositiveIntegerField(
                 default=60,
                 validators=[
-                    django.core.validators.MaxValueValidator(604800),
+                    django.core.validators.MaxValueValidator(2147483647),
                     django.core.validators.MinValueValidator(1),
                 ],
             ),

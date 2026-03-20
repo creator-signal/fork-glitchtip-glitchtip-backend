@@ -98,14 +98,14 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.project, self.project)
         mocked.enqueue.assert_called_once()
 
-    def test_create_heartbeat_monitor_with_weekly_interval(self):
+    def test_create_heartbeat_monitor_with_max_interval(self):
         data = {
             "monitorType": "Heartbeat",
-            "name": "Weekly Heartbeat",
+            "name": "Max Interval Heartbeat",
             "url": "",
             "expectedStatus": None,
             "expectedBody": "",
-            "interval": 604800,
+            "interval": 2147483647,
             "timeout": None,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")
@@ -114,14 +114,14 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.monitor_type, "Heartbeat")
         self.assertEqual(monitor.interval, data["interval"])
 
-    def test_create_monitor_interval_above_week_invalid(self):
+    def test_create_monitor_interval_above_int_max_invalid(self):
         data = {
             "monitorType": "Heartbeat",
             "name": "Too Long",
             "url": "",
             "expectedStatus": None,
             "expectedBody": "",
-            "interval": 604801,
+            "interval": 2147483648,
             "timeout": None,
         }
         res = self.client.post(self.list_url, data, content_type="application/json")

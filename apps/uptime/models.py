@@ -57,7 +57,7 @@ class Monitor(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     interval = models.PositiveIntegerField(
         default=60,
-        validators=[MaxValueValidator(604800), MinValueValidator(1)],
+        validators=[MaxValueValidator(2147483647), MinValueValidator(1)],
     )
     timeout = models.PositiveSmallIntegerField(
         blank=True,
