@@ -1,7 +1,7 @@
 import logging
 import typing
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
 
@@ -422,7 +422,9 @@ class TransactionEventSchema(LaxIngestSchema):
     @field_validator("start_timestamp")
     @classmethod
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
-        """Validator to ensure the datetime is recent"""
+        """Validator to ensure the datetime is recent and timezone-aware."""
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
         minimum_date = now() - timedelta(
             days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
         )
