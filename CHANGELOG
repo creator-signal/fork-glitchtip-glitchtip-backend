@@ -1,3 +1,13 @@
+# 6.1.0
+
+- Feat: Enable logs ingestion by default (set `GLITCHTIP_ENABLE_LOGS=false` to disable)
+- Fix: Serialize status page monitors as dicts for cache compatibility
+- Fix: Improve OpenAPI spec correctness for TypeScript type generation
+- Perf: Skip unnecessary middleware for ingest endpoints
+- Perf: Cap glibc malloc arenas based on cgroup CPU limit
+- Refactor: Convert all tasks from sync to async
+- Refactor: Resolve cold storage backend lazily instead of at availability check
+
 # 6.0.11
 
 - Fix: Resolve maintenance statement timeouts by routing all cleanup functions through maintenance DB alias

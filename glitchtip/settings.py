@@ -153,7 +153,7 @@ SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
 GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 
 # Enable/disable logs feature. When False, log events are rejected at ingest.
-GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", False)
+GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", True)
 
 # Enable/disable uptime monitoring. When False, uptime checks are not dispatched
 # and uptime API endpoints are not registered.
