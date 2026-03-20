@@ -1009,9 +1009,14 @@ LOGGING = {
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
 PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 
-# See https://liberapay.com/GlitchTip/donate - suggested self-host donation is $5/month/user.
-# Support plans available. Email info@burkesoftware.com for more info.
-I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
+# Support license key — typically a Stripe subscription ID.
+# Hides the "Support GlitchTip" banner and enables future support features.
+GLITCHTIP_LICENSE_KEY = env.str("GLITCHTIP_LICENSE_KEY", None)
+
+# Legacy setting — still accepted. New deployments should use GLITCHTIP_LICENSE_KEY.
+I_PAID_FOR_GLITCHTIP = env.bool(
+    "I_PAID_FOR_GLITCHTIP", bool(GLITCHTIP_LICENSE_KEY)
+)
 
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
