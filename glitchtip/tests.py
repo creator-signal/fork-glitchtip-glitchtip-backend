@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from unittest import mock
@@ -413,6 +414,23 @@ class PartitionManagerTestCase(TestCase):
         for i in range(4):
             expected_name = f"issue_events_issueaggregate_20250115_h{i}"
             self.assertIn(expected_name, sqls[i + 1])
+
+
+class DecompressBodyMiddlewareCancelledErrorTestCase(TestCase):
+    """CancelledError from client disconnect should return 499, not propagate."""
+
+    def test_cancelled_error_returns_499(self):
+        from django.test import RequestFactory
+
+        from glitchtip.middleware import DecompressBodyMiddleware
+
+        def raise_cancelled(request):
+            raise asyncio.CancelledError
+
+        middleware = DecompressBodyMiddleware(raise_cancelled)
+        request = RequestFactory().get("/")
+        response = middleware(request)
+        self.assertEqual(response.status_code, 499)
 
 
 class DatabaseSettingsTestCase(TestCase):
