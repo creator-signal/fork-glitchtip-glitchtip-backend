@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import io
 import logging
 import zlib
@@ -329,6 +330,9 @@ class DecompressBodyMiddleware(object):
         try:
             response = self.get_response(request)
             return response
+        except asyncio.CancelledError:
+            # Client disconnected mid-request; suppress silently.
+            return HttpResponseForbidden(status=499)
         except RequestDataTooBig as e:
             logger.warning("RequestDataTooBig caught in middleware: %s", e)
             return HttpResponseForbidden(f"{e}", status=413)
