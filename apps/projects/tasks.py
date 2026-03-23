@@ -3,6 +3,13 @@ import logging
 from asgiref.sync import sync_to_async
 from django.tasks import task
 
+from apps.issue_events.maintenance import (
+    delete_issues_in_batches,
+    raw_delete_in_batches,
+)
+from apps.issue_events.models import IssueEvent
+from apps.logs.models import LogEvent
+
 from .models import Project
 
 logger = logging.getLogger(__name__)
@@ -16,6 +23,16 @@ async def delete_project(project_id: int):
     # Rewrite cold storage Parquet files to exclude this project's data
     await sync_to_async(_rewrite_cold_storage_for_project)(project)
 
+    # Batch-delete from partitioned tables to keep lock counts low.
+    await raw_delete_in_batches(
+        IssueEvent.objects.filter(organization_id=org_id, issue__project=project)
+    )
+    await raw_delete_in_batches(
+        LogEvent.objects.filter(organization_id=org_id, project=project)
+    )
+    await delete_issues_in_batches(project.issues.all())
+
+    # Remaining relations are non-partitioned — safe for Django cascade.
     await sync_to_async(project.force_delete)()
     logger.info(
         "Project %s (id=%s, org=%s) fully deleted", project.name, project_id, org_id
