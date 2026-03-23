@@ -7,6 +7,19 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
+from apps.issue_events.maintenance import (
+    delete_events_in_batches,
+    delete_issues_in_batches,
+)
+from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueTag
+from apps.logs.models import LogEvent
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.uptime.models import MonitorCheck
+
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
@@ -148,19 +161,6 @@ async def delete_organization(organization_id: int):
     Batch-deletes rows from partitioned tables first to avoid exhausting
     the PostgreSQL shared lock table (each partition + index = one lock).
     """
-    from apps.issue_events.maintenance import (
-        delete_events_in_batches,
-        delete_issues_in_batches,
-    )
-    from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueTag
-    from apps.logs.models import LogEvent
-    from apps.projects.models import (
-        IssueEventProjectHourlyStatistic,
-        LogProjectHourlyStatistic,
-        TransactionEventProjectHourlyStatistic,
-    )
-    from apps.uptime.models import MonitorCheck
-
     org = await Organization.objects.aget(id=organization_id)
 
     # Delete cold storage files before removing DB rows

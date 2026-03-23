@@ -3,6 +3,13 @@ import logging
 from asgiref.sync import sync_to_async
 from django.tasks import task
 
+from apps.issue_events.maintenance import (
+    delete_events_in_batches,
+    delete_issues_in_batches,
+)
+from apps.issue_events.models import IssueEvent
+from apps.logs.models import LogEvent
+
 from .models import Project
 
 logger = logging.getLogger(__name__)
@@ -10,13 +17,6 @@ logger = logging.getLogger(__name__)
 
 @task
 async def delete_project(project_id: int):
-    from apps.issue_events.maintenance import (
-        delete_events_in_batches,
-        delete_issues_in_batches,
-    )
-    from apps.issue_events.models import IssueEvent
-    from apps.logs.models import LogEvent
-
     project = await Project.objects.select_related("organization").aget(id=project_id)
     org_id = project.organization_id
 
