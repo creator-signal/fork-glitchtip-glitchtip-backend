@@ -188,6 +188,8 @@ class StacktraceProcessor:
             score = 0
             resolved_frames = copy.copy(frames)
             for index, frame in enumerate(frames):
+                if frame is None:
+                    continue
                 frame = copy.copy(frame)
                 module = frame.get("module")
                 function = frame.get("function")
@@ -231,6 +233,9 @@ class StacktraceProcessor:
             score = 0
             resolved_frames = []
             for frame in frames:
+                if frame is None:
+                    resolved_frames.append(frame)
+                    continue
                 frame = copy.copy(frame)
 
                 image_addr = parse_addr(frame.get("image_addr"))
