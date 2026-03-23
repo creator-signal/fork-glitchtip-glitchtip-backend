@@ -1,3 +1,10 @@
+# 6.1.1
+
+- Fix: Batch-delete partitioned tables before org/project/issue cascade delete to avoid exhausting PostgreSQL shared lock table
+- Fix: Break infinite loop in release cleanup when concurrent FK insert causes repeated IntegrityError
+- Fix: Break infinite loop in issue cleanup on IntegrityError (same pattern as release cleanup)
+- Fix: Project deletion now correctly awaits async batch-delete functions (previously created coroutines that were never awaited)
+
 # 6.1.0
 
 - Feat: Enable logs ingestion by default (set `GLITCHTIP_ENABLE_LOGS=false` to disable)
