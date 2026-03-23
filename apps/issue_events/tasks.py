@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.db.models import F
 from django.tasks import task
 
@@ -9,9 +8,11 @@ from .services import IssueFilters, filter_issue_list, get_queryset
 
 @task
 async def delete_issue_task(ids: list[int]):
-    for id in ids:
-        issue = await Issue.objects.aget(id=id)
-        await sync_to_async(issue.force_delete)()
+    from .maintenance import delete_issues_in_batches
+
+    # delete_issues_in_batches handles partitioned FK tables (IssueEvent,
+    # IssueAggregate, IssueTag) and non-partitioned dependents per batch.
+    await delete_issues_in_batches(Issue.objects.filter(id__in=ids))
 
 
 @task

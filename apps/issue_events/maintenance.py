@@ -48,20 +48,26 @@ async def delete_issues_in_batches(
     queryset: QuerySet[Issue], batch_size: int = 1000, db_alias: str = "default"
 ) -> int:
     """
-    Bulk-delete Issues and their non-partitioned FK dependents.
+    Bulk-delete Issues and their FK dependents.
 
     Uses _raw_delete() to bypass Django's collector, which would run
     unindexed queries against every sub-partition of partitioned tables.
 
+    Partitioned FK tables (IssueEvent, IssueAggregate, IssueTag) have
+    DB-level ON DELETE CASCADE, but that cascade acquires locks across
+    all partitions.  We pre-delete them per batch so the Issue _raw_delete
+    triggers no cascading locks.
+
     Non-partitioned FK tables (IssueHash, Comment, UserReport,
-    Notification.issues M2M) are explicitly deleted per batch — Django
-    does not set ON DELETE CASCADE at the DB level.
+    Notification.issues M2M) are also explicitly deleted per batch.
 
     If a new FK from a *non-partitioned* table is added to Issue, add it
     here. The test_cleanup_old_issues test will catch the omission.
 
     Returns the total number of Issues deleted.
     """
+    from .models import IssueAggregate, IssueEvent, IssueTag
+
     ordered_qs = queryset.using(db_alias).order_by("id")
 
     total_deleted = 0
@@ -71,7 +77,16 @@ async def delete_issues_in_batches(
         )
         if not batch_ids:
             break
-        # Delete from non-partitioned FK tables first
+        # Delete from partitioned FK tables first — these have DB-level
+        # CASCADE which would lock every partition when the Issue is deleted.
+        await delete_events_in_batches(
+            IssueEvent.objects.filter(issue_id__in=batch_ids), db_alias=db_alias
+        )
+        for model in [IssueAggregate, IssueTag]:
+            await sync_to_async(
+                model.objects.filter(issue_id__in=batch_ids)._raw_delete
+            )(db_alias)
+        # Delete from non-partitioned FK tables
         await sync_to_async(
             Notification.issues.through.objects.filter(
                 issue_id__in=batch_ids

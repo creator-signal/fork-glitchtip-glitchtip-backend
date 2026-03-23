@@ -10,12 +10,29 @@ logger = logging.getLogger(__name__)
 
 @task
 async def delete_project(project_id: int):
+    from apps.issue_events.maintenance import (
+        delete_events_in_batches,
+        delete_issues_in_batches,
+    )
+    from apps.issue_events.models import IssueEvent
+    from apps.logs.models import LogEvent
+
     project = await Project.objects.select_related("organization").aget(id=project_id)
     org_id = project.organization_id
 
     # Rewrite cold storage Parquet files to exclude this project's data
     await sync_to_async(_rewrite_cold_storage_for_project)(project)
 
+    # Batch-delete from partitioned tables to keep lock counts low.
+    await delete_events_in_batches(
+        IssueEvent.objects.filter(organization_id=org_id, issue__project=project)
+    )
+    await delete_events_in_batches(
+        LogEvent.objects.filter(organization_id=org_id, project=project)
+    )
+    await delete_issues_in_batches(project.issues.all())
+
+    # Remaining relations are non-partitioned — safe for Django cascade.
     await sync_to_async(project.force_delete)()
     logger.info(
         "Project %s (id=%s, org=%s) fully deleted", project.name, project_id, org_id
