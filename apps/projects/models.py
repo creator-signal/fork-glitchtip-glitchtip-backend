@@ -9,8 +9,6 @@ from django.db.models.functions import Cast
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
-from apps.issue_events.models import IssueEvent
-from apps.logs.models import LogEvent
 from apps.observability.utils import clear_metrics_cache
 from glitchtip.base_models import (
     AggregationModel,
@@ -92,30 +90,12 @@ class Project(CreatedModel, SoftDeleteModel):
         delete_project.enqueue(self.pk)
 
     def force_delete(self, *args, **kwargs):
-        """Really delete the project and all related data."""
-        from apps.issue_events.maintenance import (
-            delete_events_in_batches,
-            delete_issues_in_batches,
-        )
+        """Delete the project from the database.
 
-        org_id = self.organization_id
-
-        # bulk delete issue events in batches (partition-aware via organization_id)
-        delete_events_in_batches(
-            IssueEvent.objects.filter(
-                organization_id=org_id, issue__project=self
-            )
-        )
-
-        # bulk delete log events in batches (partition-aware via organization_id)
-        delete_events_in_batches(
-            LogEvent.objects.filter(organization_id=org_id, project=self)
-        )
-
-        # bulk delete issues and their non-partitioned FK dependents
-        delete_issues_in_batches(self.issues.all())
-
-        # lastly delete the project itself
+        Callers must batch-delete partitioned tables (IssueEvent, LogEvent,
+        Issues) *before* calling this to avoid exhausting PostgreSQL's shared
+        lock table.  The delete_project task handles this.
+        """
         super().force_delete(*args, **kwargs)
         clear_metrics_cache()
 
