@@ -25,6 +25,72 @@ def list_to_envelope(data: list[dict]) -> str:
     return "\n".join([json.dumps(item) for item in data])
 
 
+class OtelLogConversionTestCase(TestCase):
+    """Test OTel log record to LogItemSchema conversion."""
+
+    def test_basic_conversion(self):
+        from apps.event_ingest.schema import otel_log_to_log_item
+
+        now_ns = str(int(time.time() * 1e9))
+        otel_record = {
+            "severity_text": "error",
+            "severity_number": 17,
+            "body": {"string_value": "Disk space low"},
+            "time_unix_nano": now_ns,
+            "trace_id": "edec519707974fc8bfccb5a017e17394",
+            "span_id": "b01c6992ac861a7d",
+        }
+        result = otel_log_to_log_item(otel_record)
+        self.assertEqual(result["level"], "error")
+        self.assertEqual(result["body"], "Disk space low")
+        self.assertAlmostEqual(result["timestamp"], int(now_ns) / 1e9, places=2)
+        self.assertEqual(result["trace_id"], "edec519707974fc8bfccb5a017e17394")
+        self.assertEqual(result["span_id"], "b01c6992ac861a7d")
+        self.assertEqual(result["severity_number"], 17)
+
+    def test_camel_case_fields(self):
+        """OTel JSON uses camelCase field names."""
+        from apps.event_ingest.schema import otel_log_to_log_item
+
+        now_ns = str(int(time.time() * 1e9))
+        otel_record = {
+            "severityText": "debug",
+            "severityNumber": 5,
+            "body": {"string_value": "Startup"},
+            "timeUnixNano": now_ns,
+            "traceId": "aaaa519707974fc8bfccb5a017e17394",
+            "spanId": "0123456789abcdef",
+        }
+        result = otel_log_to_log_item(otel_record)
+        self.assertEqual(result["level"], "debug")
+        self.assertEqual(result["trace_id"], "aaaa519707974fc8bfccb5a017e17394")
+        self.assertEqual(result["span_id"], "0123456789abcdef")
+
+    def test_list_attributes(self):
+        from apps.event_ingest.schema import otel_log_to_log_item
+
+        otel_record = {
+            "severity_number": 9,
+            "body": {"string_value": "test"},
+            "time_unix_nano": str(int(time.time() * 1e9)),
+            "attributes": [
+                {"key": "service.name", "value": {"string_value": "web"}},
+                {"key": "count", "value": {"int_value": 42}},
+            ],
+        }
+        result = otel_log_to_log_item(otel_record)
+        # service.name maps to the service field via LogItemSchema
+        self.assertEqual(result["attributes"]["service.name"]["value"], "web")
+        self.assertEqual(result["attributes"]["count"]["value"], 42)
+
+    def test_missing_body(self):
+        from apps.event_ingest.schema import otel_log_to_log_item
+
+        result = otel_log_to_log_item({"time_unix_nano": str(int(time.time() * 1e9))})
+        self.assertEqual(result["body"], "")
+        self.assertEqual(result["level"], "info")
+
+
 class LogIngestProcessingTestCase(TestCase):
     """Test log processing function"""
 
@@ -338,6 +404,165 @@ class LogEnvelopeAPITestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(LogEvent.objects.count(), 1)
         log = LogEvent.objects.first()
         self.assertEqual(log.data["custom.user_id"], "u-42")
+
+    def test_otel_log_envelope_accepted(self):
+        """Test that otel_log envelope items are accepted and converted."""
+        envelope_data = [
+            {
+                "event_id": "550e8400e29b41d4a716446655440010",
+                "sent_at": "2024-01-01T00:00:00Z",
+            },
+            {"type": "otel_log"},
+            # OTel log data model: https://opentelemetry.io/docs/specs/otel/logs/data-model/
+            {
+                "severity_text": "info",
+                "severity_number": 9,
+                "body": {"string_value": "Application started successfully"},
+                "time_unix_nano": str(int(time.time() * 1e9)),
+                "trace_id": "edec519707974fc8bfccb5a017e17394",
+            },
+        ]
+
+        res = self.client.post(
+            self.url,
+            list_to_envelope(envelope_data),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+
+        backend = task_backends["default"]
+        backend.flush_batches()
+        backend.flush_batches()
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(LogEvent.objects.count(), 1, "No LogEvent created")
+        log = LogEvent.objects.first()
+        self.assertEqual(log.body, "Application started successfully")
+        self.assertEqual(log.level, LogLevel.INFO)
+        self.assertEqual(log.severity_number, 9)
+        self.assertEqual(
+            str(log.trace_id).replace("-", ""), "edec519707974fc8bfccb5a017e17394"
+        )
+
+    def test_otel_log_severity_mapping(self):
+        """Test OTel severity_number to level mapping per OTel spec."""
+        test_cases = [
+            (1, "trace"),
+            (4, "trace"),
+            (5, "debug"),
+            (8, "debug"),
+            (9, "info"),
+            (12, "info"),
+            (13, "warn"),
+            (16, "warn"),
+            (17, "error"),
+            (20, "error"),
+            (21, "fatal"),
+            (24, "fatal"),
+        ]
+        for severity_number, expected_level in test_cases:
+            LogEvent.objects.all().delete()
+            envelope_data = [
+                {
+                    "event_id": "550e8400e29b41d4a716446655440011",
+                    "sent_at": "2024-01-01T00:00:00Z",
+                },
+                {"type": "otel_log"},
+                {
+                    "severity_number": severity_number,
+                    "body": {"string_value": f"Test level {severity_number}"},
+                    "time_unix_nano": str(int(time.time() * 1e9)),
+                },
+            ]
+            res = self.client.post(
+                self.url,
+                list_to_envelope(envelope_data),
+                content_type="application/json",
+            )
+            task_backends["default"].flush_batches()
+            self.assertEqual(res.status_code, 200)
+            log = LogEvent.objects.first()
+            self.assertEqual(
+                log.level,
+                getattr(LogLevel, expected_level.upper()),
+                f"severity_number={severity_number} should map to {expected_level}",
+            )
+
+    def test_otel_log_with_attributes(self):
+        """Test OTel log with list-of-dicts attributes format."""
+        envelope_data = [
+            {
+                "event_id": "550e8400e29b41d4a716446655440012",
+                "sent_at": "2024-01-01T00:00:00Z",
+            },
+            {"type": "otel_log"},
+            {
+                "severity_text": "warn",
+                "severity_number": 13,
+                "body": {"string_value": "Connection pool exhausted"},
+                "time_unix_nano": str(int(time.time() * 1e9)),
+                "attributes": [
+                    {
+                        "key": "service.name",
+                        "value": {"string_value": "api-gateway"},
+                    },
+                    {
+                        "key": "deployment.environment.name",
+                        "value": {"string_value": "staging"},
+                    },
+                    {
+                        "key": "pool.size",
+                        "value": {"int_value": 10},
+                    },
+                ],
+            },
+        ]
+
+        res = self.client.post(
+            self.url,
+            list_to_envelope(envelope_data),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(LogEvent.objects.count(), 1)
+        log = LogEvent.objects.first()
+        self.assertEqual(log.body, "Connection pool exhausted")
+        self.assertEqual(log.level, LogLevel.WARN)
+        self.assertEqual(log.service, "api-gateway")
+        self.assertEqual(log.environment, "staging")
+        self.assertEqual(log.data["pool.size"], 10)
+
+    def test_otel_log_multiple_items_in_envelope(self):
+        """Test multiple otel_log items in a single envelope."""
+        envelope_data = [
+            {
+                "event_id": "550e8400e29b41d4a716446655440013",
+                "sent_at": "2024-01-01T00:00:00Z",
+            },
+            {"type": "otel_log"},
+            {
+                "severity_number": 9,
+                "body": {"string_value": "Log one"},
+                "time_unix_nano": str(int(time.time() * 1e9)),
+            },
+            {"type": "otel_log"},
+            {
+                "severity_number": 17,
+                "body": {"string_value": "Log two"},
+                "time_unix_nano": str(int(time.time() * 1e9)),
+            },
+        ]
+
+        res = self.client.post(
+            self.url,
+            list_to_envelope(envelope_data),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(LogEvent.objects.count(), 2)
 
     def test_log_envelope_normalizes_sdk_attributes(self):
         """Test that SDK attributes dict is normalized into top-level fields."""
