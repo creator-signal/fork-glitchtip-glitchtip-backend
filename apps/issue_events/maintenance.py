@@ -71,12 +71,10 @@ async def delete_issues_in_batches(
     ordered_qs = queryset.using(db_alias).order_by("id")
 
     total_deleted = 0
-    while True:
-        batch_ids = await sync_to_async(list)(
-            ordered_qs.values_list("id", flat=True)[:batch_size]
-        )
-        if not batch_ids:
-            break
+    batch_ids = await sync_to_async(list)(
+        ordered_qs.values_list("id", flat=True)[:batch_size]
+    )
+    while batch_ids:
         # Delete from partitioned FK tables first — these have DB-level
         # CASCADE which would lock every partition when the Issue is deleted.
         await delete_events_in_batches(
@@ -111,8 +109,14 @@ async def delete_issues_in_batches(
             logger.info(
                 "Skipped batch due to concurrent FK insert, will retry later"
             )
+            batch_ids = await sync_to_async(list)(
+                ordered_qs.values_list("id", flat=True)[:batch_size]
+            )
             continue
         total_deleted += count
+        batch_ids = await sync_to_async(list)(
+            ordered_qs.values_list("id", flat=True)[:batch_size]
+        )
 
     return total_deleted
 
