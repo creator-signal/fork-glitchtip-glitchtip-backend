@@ -8,8 +8,8 @@ from django.tasks import task
 from django.utils import timezone
 
 from apps.issue_events.maintenance import (
-    delete_events_in_batches,
     delete_issues_in_batches,
+    raw_delete_in_batches,
 )
 from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueTag
 from apps.logs.models import LogEvent
@@ -173,7 +173,7 @@ async def delete_organization(organization_id: int):
         LogEvent.objects.filter(organization_id=org.id),
         MonitorCheck.objects.filter(organization_id=org.id),
     ]:
-        await delete_events_in_batches(qs)
+        await raw_delete_in_batches(qs)
 
     # Partitioned tables with composite PKs (no id field) — delete directly.
     # Filtered by organization_id so Postgres prunes to the org's hash bucket.

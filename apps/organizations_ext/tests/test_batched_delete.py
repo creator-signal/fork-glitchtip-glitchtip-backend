@@ -37,7 +37,7 @@ from ..tasks import delete_organization
 
 _delete_organization_sync = async_to_sync(delete_organization.func)
 
-# Must exceed the 1000-row batch_size in delete_events_in_batches
+# Must exceed the 1000-row batch_size in raw_delete_in_batches
 EVENT_COUNT = 2500
 LOG_COUNT = 1500
 CHECK_COUNT = 1500
