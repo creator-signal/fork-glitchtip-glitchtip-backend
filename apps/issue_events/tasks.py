@@ -2,14 +2,13 @@ from django.db.models import F
 from django.tasks import task
 
 from .constants import EventStatus
+from .maintenance import delete_issues_in_batches
 from .models import Issue, IssueEvent, IssueHash
 from .services import IssueFilters, filter_issue_list, get_queryset
 
 
 @task
 async def delete_issue_task(ids: list[int]):
-    from .maintenance import delete_issues_in_batches
-
     # delete_issues_in_batches handles partitioned FK tables (IssueEvent,
     # IssueAggregate, IssueTag) and non-partitioned dependents per batch.
     await delete_issues_in_batches(Issue.objects.filter(id__in=ids))
