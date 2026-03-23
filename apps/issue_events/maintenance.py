@@ -14,15 +14,15 @@ from .models import Comment, Issue, IssueHash, UserReport
 logger = logging.getLogger(__name__)
 
 
-async def delete_events_in_batches(
+async def raw_delete_in_batches(
     queryset: QuerySet, batch_size: int = 1000, db_alias: str = "default"
 ) -> int:
     """
-    Bulk-delete rows from a partitioned event table (IssueEvent, LogEvent, etc.)
-    in fixed-size batches to avoid statement timeouts.
+    Bulk-delete rows from a partitioned table in fixed-size batches to
+    avoid exhausting the PostgreSQL shared lock table.
 
-    The caller should pre-filter the queryset with organization_id for
-    partition pruning.
+    The queryset must be for a model with an ``id`` field.  Pre-filter
+    with organization_id when possible for partition pruning.
 
     Returns the total number of rows deleted.
     """
@@ -77,7 +77,7 @@ async def delete_issues_in_batches(
     while batch_ids:
         # Delete from partitioned FK tables first — these have DB-level
         # CASCADE which would lock every partition when the Issue is deleted.
-        await delete_events_in_batches(
+        await raw_delete_in_batches(
             IssueEvent.objects.filter(issue_id__in=batch_ids), db_alias=db_alias
         )
         for model in [IssueAggregate, IssueTag]:
