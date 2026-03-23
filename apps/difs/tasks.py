@@ -158,7 +158,7 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
 def update_frames(event: ErrorIssueEventSchema, frames):
     # This should be rewritten
     try:
-        new_frames = [StackTraceFrame(**frame) for frame in frames]
+        new_frames = [StackTraceFrame(**frame) for frame in frames if frame is not None]
         event.exception.values[0].stacktrace.frames = new_frames
     except Exception as e:
         getLogger().error(f"StacktraceProcessor: Unexpected error: {e}")
