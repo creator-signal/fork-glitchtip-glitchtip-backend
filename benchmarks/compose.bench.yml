@@ -1,0 +1,53 @@
+x-environment: &bench-environment
+  DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+  VALKEY_URL: redis://valkey:6379
+  SECRET_KEY: change_me
+  ENABLE_ORGANIZATION_CREATION: "true"
+  ENABLE_TEST_API: "true"
+  DEBUG: "false"
+  EMAIL_BACKEND: "django.core.mail.backends.console.EmailBackend"
+  ENABLE_OBSERVABILITY_API: "true"
+  VTASKS_CONCURRENCY: 4
+  LOG_LEVEL: WARNING
+  GLITCHTIP_ENABLE_LOGS: "true"
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+  valkey:
+    image: valkey/valkey:9
+  web:
+    build: ..
+    user: root
+    cap_add:
+      - NET_ADMIN
+    command: >
+      bash -c "
+        python manage.py migrate --no-input --skip-checks &&
+        python manage.py maintain_partitions &&
+        DEBUG=true python manage.py bootstrap_dev &&
+        export GLITCHTIP_EMBED_WORKER=true &&
+        exec granian --interface asgi glitchtip.asgi:application --host 0.0.0.0 --port 8000 --workers 1 --log-level warning --no-ws
+      "
+    depends_on:
+      - postgres
+      - valkey
+    volumes:
+      - ..:/code
+    ports:
+      - "8001:8000"
+    environment: *bench-environment
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+  bench:
+    build: ..
+    user: root
+    depends_on:
+      - web
+    volumes:
+      - ..:/code
+    entrypoint: ["sleep", "infinity"]
