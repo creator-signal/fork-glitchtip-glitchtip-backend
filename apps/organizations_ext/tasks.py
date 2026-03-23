@@ -7,6 +7,19 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
+from apps.issue_events.maintenance import (
+    delete_issues_in_batches,
+    raw_delete_in_batches,
+)
+from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueTag
+from apps.logs.models import LogEvent
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.uptime.models import MonitorCheck
+
 from .email import InvitationEmail, ThrottleNoticeEmail
 from .models import Organization
 
@@ -143,12 +156,45 @@ async def send_email_invite(org_user_id: int, token: str):
 
 @task
 async def delete_organization(organization_id: int):
-    """Delete cold storage files for an org, then hard-delete from DB."""
+    """Delete cold storage files for an org, then hard-delete from DB.
+
+    Batch-deletes rows from partitioned tables first to avoid exhausting
+    the PostgreSQL shared lock table (each partition + index = one lock).
+    """
     org = await Organization.objects.aget(id=organization_id)
 
     # Delete cold storage files before removing DB rows
     await sync_to_async(_delete_org_cold_storage)(org.id)
 
+    # Batch-delete from partitioned tables to keep lock counts low.
+    # Django's cascade collector would lock every partition + index at once.
+    for qs in [
+        IssueEvent.objects.filter(organization_id=org.id),
+        LogEvent.objects.filter(organization_id=org.id),
+        MonitorCheck.objects.filter(organization_id=org.id),
+    ]:
+        await raw_delete_in_batches(qs)
+
+    # Partitioned tables with composite PKs (no id field) — delete directly.
+    # Filtered by organization_id so Postgres prunes to the org's hash bucket.
+    # IssueAggregate/IssueTag have DB-level CASCADE from Issue, so must be
+    # deleted before Issues to avoid lock escalation across their partitions.
+    for model in [
+        IssueAggregate,
+        IssueTag,
+        IssueEventProjectHourlyStatistic,
+        TransactionEventProjectHourlyStatistic,
+        LogProjectHourlyStatistic,
+    ]:
+        await sync_to_async(
+            model.objects.filter(organization_id=org.id)._raw_delete
+        )("default")
+
+    # Issues have non-partitioned FK dependents (IssueHash, Comment, etc.)
+    # that need explicit cleanup — use the issue-aware batch helper.
+    await delete_issues_in_batches(Issue.objects.filter(project__organization=org))
+
+    # Remaining relations are non-partitioned — safe for Django cascade.
     await sync_to_async(org.force_delete)()
     logger.info("Organization %s (id=%s) fully deleted", org.slug, org.id)
 
