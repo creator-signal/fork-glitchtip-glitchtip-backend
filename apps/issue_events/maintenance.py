@@ -100,19 +100,17 @@ async def delete_issues_in_batches(
             UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete
         )(db_alias)
         # A new event may arrive between the SELECT above and this DELETE
-        # (TOCTOU race). Catch and skip — the caller can retry later.
+        # (TOCTOU race). Stop and let the next maintenance run retry —
+        # continuing would re-select the same undeletable batch forever.
         try:
             count = await sync_to_async(
                 Issue.objects.filter(id__in=batch_ids)._raw_delete
             )(db_alias)
         except IntegrityError:
             logger.info(
-                "Skipped batch due to concurrent FK insert, will retry later"
+                "Skipped issue batch due to concurrent FK insert, will retry later"
             )
-            batch_ids = await sync_to_async(list)(
-                ordered_qs.values_list("id", flat=True)[:batch_size]
-            )
-            continue
+            break
         total_deleted += count
         batch_ids = await sync_to_async(list)(
             ordered_qs.values_list("id", flat=True)[:batch_size]
