@@ -36,10 +36,10 @@ CREATE TABLE IF NOT EXISTS issue_events_issueevent (
 ) PARTITION BY RANGE (id);
 
 -- Foreign key constraints
-ALTER TABLE issue_events_issueevent
-    ADD CONSTRAINT issue_events_issueevent_issue_id_fkey
-    FOREIGN KEY (issue_id) REFERENCES issue_events_issue(id)
-    ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+-- issue_id FK intentionally omitted (db_constraint=False) — the partitioned
+-- table has too many sub-partitions for Postgres CASCADE/RESTRICT triggers
+-- to complete within statement_timeout.  Application code in
+-- delete_issues_in_batches() handles the delete ordering.
 
 ALTER TABLE issue_events_issueevent
     ADD CONSTRAINT issue_events_issueevent_organization_id_fkey
