@@ -30,10 +30,12 @@ from .schema import (
     FeedbackPayload,
     ItemHeaderSchema,
     LogEnvelopePayload,
+    LogItemSchema,
     TransactionEventSchema,
     UserReportPayload,
     UserReportTaskMessage,
     WebIngestIssueEvent,
+    otel_log_to_log_item,
 )
 from .tasks import ingest_event, ingest_transaction, ingest_user_report
 from .utils import serialize_for_vtasks
@@ -249,7 +251,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         serialize_for_vtasks(msg.model_dump())
                     )
 
-                elif item_header.type == "log":
+                elif item_header.type in ("log", "otel_log"):
                     # Check if logs feature is enabled
                     from django.conf import settings
 
@@ -257,13 +259,23 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         # Silently ignore logs when feature is disabled
                         continue
 
-                    # Log envelope payload contains multiple log items
-                    log_payload = LogEnvelopePayload.model_validate_json(payload_bytes)
+                    if item_header.type == "otel_log":
+                        # OTel log: single record per item, OTel data model format
+                        otel_record = orjson.loads(payload_bytes)
+                        converted = otel_log_to_log_item(otel_record)
+                        log_items = [LogItemSchema(**converted)]
+                    else:
+                        # sentry-sdk log: multiple items in {"items": [...]} wrapper
+                        log_payload = LogEnvelopePayload.model_validate_json(
+                            payload_bytes
+                        )
+                        log_items = log_payload.items
+
                     log_message = LogIngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,
                         received=timezone.now(),
-                        logs=[log_item.dict() for log_item in log_payload.items],
+                        logs=[log_item.dict() for log_item in log_items],
                     )
                     await ingest_logs.aenqueue(
                         serialize_for_vtasks(asdict(log_message))
@@ -293,7 +305,6 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                 continue
 
         else:
-            # Check for minidump attachment (sent by sentry-rust-minidump SDK)
             if (
                 item_header.type == "attachment"
                 and item_header.attachment_type == "event.minidump"
