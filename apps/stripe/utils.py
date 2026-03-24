@@ -58,3 +58,55 @@ def compute_cycle(period_start: datetime, period_end: datetime, is_annual: bool)
             period_start,
         )
     return cycle_start, cycle_end
+
+
+def compute_cycle_n_ago(
+    current_period_start: datetime,
+    current_period_end: datetime,
+    subscription_cycle_start: datetime | None,
+    subscription_cycle_end: datetime | None,
+    periods_ago: int,
+) -> tuple[datetime, datetime] | None:
+    """Return (start, end) for a billing cycle N periods before the current one.
+
+    periods_ago=0 is not handled here (use with_event_counts current_period=True).
+    periods_ago=1 is equivalent to the old compute_previous_cycle behavior.
+
+    Returns None if the requested period precedes the subscription start
+    (annual plans only — monthly plans always have a valid prior period).
+
+    Monthly plans: go back periods_ago months from current_period_start.
+    Annual plans with virtual monthly cycles: go back periods_ago months from
+    subscription_cycle_start, but only if the result doesn't precede period_start.
+    """
+    if subscription_cycle_start and subscription_cycle_end:
+        # Annual plan with virtual monthly cycles
+        cycle_start = subscription_cycle_start - relativedelta(months=periods_ago)
+        cycle_end = subscription_cycle_start - relativedelta(months=periods_ago - 1)
+        if cycle_start < current_period_start:
+            return None
+        return cycle_start, cycle_end
+    else:
+        # Monthly plan
+        period_end = current_period_start - relativedelta(months=periods_ago - 1)
+        period_start = current_period_start - relativedelta(months=periods_ago)
+        return period_start, period_end
+
+
+def compute_previous_cycle(
+    current_period_start: datetime,
+    current_period_end: datetime,
+    subscription_cycle_start: datetime | None,
+    subscription_cycle_end: datetime | None,
+) -> tuple[datetime, datetime] | None:
+    """Return (prev_start, prev_end) for the billing cycle before the current one.
+
+    Deprecated: use compute_cycle_n_ago with periods_ago=1 instead.
+    """
+    return compute_cycle_n_ago(
+        current_period_start,
+        current_period_end,
+        subscription_cycle_start,
+        subscription_cycle_end,
+        periods_ago=1,
+    )
