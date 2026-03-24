@@ -48,6 +48,7 @@ class IngestDispatcher:
                 @classmethod
                 def _get_middleware_setting(cls):
                     return [
+                        "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
                         "glitchtip.middleware.DecompressBodyMiddleware",
