@@ -265,7 +265,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         converted = otel_log_to_log_item(otel_record)
                         log_items = [LogItemSchema(**converted)]
                     else:
-                        # Sentry log: multiple items in {"items": [...]} wrapper
+                        # sentry-sdk log: multiple items in {"items": [...]} wrapper
                         log_payload = LogEnvelopePayload.model_validate_json(
                             payload_bytes
                         )
@@ -305,7 +305,6 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                 continue
 
         else:
-            # Check for minidump attachment (sent by sentry-rust-minidump SDK)
             if (
                 item_header.type == "attachment"
                 and item_header.attachment_type == "event.minidump"
