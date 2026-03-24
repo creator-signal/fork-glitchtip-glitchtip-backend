@@ -150,3 +150,126 @@ class StripeAPITestCase(TestCase):
         url = reverse("api:subscription_events_count", args=[self.organization.slug])
         res = self.client.get(url)
         self.assertEqual(sum(res.json().values()), 0)
+
+    def test_events_count_previous_period(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
+            current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        # Create stats in the previous period (January)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 15, 10)),
+            count=50,
+        )
+        baker.make(
+            "projects.TransactionEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 20, 14)),
+            count=100,
+        )
+        url = reverse(
+            "api:subscription_events_count_previous_period",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["eventCount"], 50)
+        self.assertEqual(data["transactionEventCount"], 100)
+        self.assertEqual(data["total"], 150)
+
+    def test_events_count_previous_period_no_subscription(self):
+        url = reverse(
+            "api:subscription_events_count_previous_period",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["total"], 0)
+
+    def test_subscription_events_count_for_period_current(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
+            current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 2, 15, 10)),
+            count=10,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url)  # periods_ago=0 default
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["eventCount"], 10)
+        self.assertIn("total", data)
+
+    def test_subscription_events_count_for_period_previous(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
+            current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 15, 10)),
+            count=25,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["eventCount"], 25)
+        self.assertEqual(data["total"], 25)
+
+    def test_subscription_events_count_for_period_retention_limit(self):
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        # periods_ago=3 → 90 days, not < 90 (default retention)
+        res = self.client.get(url, {"periods_ago": 3})
+        self.assertEqual(res.status_code, 400)
+
+    def test_subscription_events_count_for_period_no_subscription(self):
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["total"], 0)
