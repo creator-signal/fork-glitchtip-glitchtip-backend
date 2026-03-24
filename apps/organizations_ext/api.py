@@ -4,7 +4,7 @@ from django.contrib.auth import aget_user
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import HttpError, Throttled, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
@@ -100,9 +100,9 @@ async def create_organization(request: AuthHttpRequest, payload: OrganizationInS
     )
     user_added.send(sender=organization, user=user)
 
-    return 201, await get_organizations_queryset(user.id, add_details=True).aget(
+    return Status(201, await get_organizations_queryset(user.id, add_details=True).aget(
         id=organization.id
-    )
+    ))
 
 
 @router.put(
@@ -147,7 +147,7 @@ async def delete_organization(request: AuthHttpRequest, organization_slug: str):
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
     await organization.adelete()
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -271,7 +271,7 @@ async def create_organization_member(
     member = await get_organization_users_queryset(user.id, organization_slug).aget(
         id=member.id
     )
-    return 201, member
+    return Status(201, member)
 
 
 @router.delete(
@@ -301,7 +301,7 @@ async def delete_organization_member(
         raise HttpError(403, "Forbidden")
     await org_user.adelete()
 
-    return 204, None
+    return Status(204, None)
 
 
 @router.put(

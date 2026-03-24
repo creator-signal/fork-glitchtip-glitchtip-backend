@@ -1,8 +1,12 @@
 """
-Shared cold storage infrastructure for archiving partitions to Parquet via standalone DuckDB.
+Shared cold storage infrastructure for archiving partitions to Parquet.
 
 Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
 Old partitions are archived to Parquet files and queryable via DuckDB's in-process engine.
+
+Write path: arro3 (Rust Arrow/Parquet via PyO3) — streams CSV→Parquet with
+bounded memory and no temp files.
+Read path: standalone DuckDB — analytical queries over Parquet files.
 
 Uses standalone DuckDB (not pg_duckdb extension) so cold storage works with
 any PostgreSQL provider including RDS, Aurora, Cloud SQL, etc. No Postgres
@@ -42,6 +46,12 @@ COLD_STORAGE_PREFIX = "cold_storage"
 # The primary limit is byte-based, auto-derived from DUCKDB_MEMORY_LIMIT.
 ARCHIVE_CHUNK_ROWS = 50_000
 
+# SOH (Start of Heading) control character used as CSV quote/escape character.
+# Avoids ambiguity between JSON backslash-escaped quotes (\") and standard CSV
+# double-quote escaping (""), which causes CSV parse errors on fields
+# containing serialized JSON (e.g. issue event data::text).
+CSV_QUOTE_CHAR = "\x01"
+
 
 def _parse_duckdb_memory_bytes(limit_str: str) -> int | None:
     """Parse a DuckDB memory limit string (e.g. '128MB') to bytes.
@@ -62,12 +72,11 @@ def _parse_duckdb_memory_bytes(limit_str: str) -> int | None:
 
 
 def _get_archive_chunk_bytes() -> int:
-    """Derive the max CSV chunk size from the DuckDB memory limit.
+    """Derive the max CSV chunk size for archival batches.
 
-    DuckDB's COPY TO Parquet cannot spill to disk — it must hold the entire
-    chunk in columnar form in memory.  The columnar representation is roughly
-    2x the CSV byte size, plus DuckDB needs internal overhead.  Using 1/4 of
-    the memory limit keeps us well within budget.
+    Bounds the Python-side bytearray buffer to prevent runaway memory growth
+    when streaming large orgs. Uses DUCKDB_MEMORY_LIMIT as a proxy for the
+    deployment's memory budget (since DuckDB is still used for reads).
 
     The 1 MB floor prevents degenerate cases with very low memory limits.
     """
@@ -129,23 +138,22 @@ _duckdb_available: bool | None = None
 
 def is_duckdb_available() -> bool:
     """
-    Check if DuckDB cold storage is enabled and a storage backend exists.
+    Check if cold storage is enabled.
 
-    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true AND a
-    configured storage backend (S3 bucket, local dir, or STORAGES["cold"]).
-    Result is cached at module level since neither setting changes at runtime.
-    The cache is automatically cleared by Django's setting_changed signal
-    (fired by @override_settings in tests).
+    Requires explicit opt-in via GLITCHTIP_ENABLE_DUCKDB=true.
+    When explicitly enabled, trusts the deployment and skips backend
+    inspection — the backend is resolved lazily on first use.
+
+    Result is cached at module level since the setting doesn't change at
+    runtime. The cache is automatically cleared by Django's setting_changed
+    signal (fired by @override_settings in tests).
     """
     global _duckdb_available
     if _duckdb_available is not None:
         return _duckdb_available
 
     override = settings.GLITCHTIP_ENABLE_DUCKDB
-    if override is None or str(override).lower() != "true":
-        _duckdb_available = False
-    else:
-        _duckdb_available = get_cold_storage_backend() is not None
+    _duckdb_available = override is not None and str(override).lower() == "true"
     return _duckdb_available
 
 
@@ -234,19 +242,22 @@ def _create_duckdb_connection(storage=None):
     conn = duckdb.connect(config=config)
 
     memory_limit = getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB")
-    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "")
-    if (
-        memory_limit
-        and temp_dir
-        and os.path.isdir(temp_dir)
-        and os.access(temp_dir, os.W_OK)
-    ):
+
+    # Always set memory limit to prevent OOM-killing the worker process.
+    # Without a temp directory DuckDB can't spill to disk, so queries
+    # exceeding the limit will fail — but that's better than an OOM kill
+    # that takes down the entire worker.
+    if memory_limit:
         conn.execute(f"SET memory_limit = '{memory_limit}'")
+
+    # Auto-detect a writable temp directory for DuckDB spill-to-disk.
+    # Explicit setting takes priority, then Python's tempfile default.
+    temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "") or tempfile.gettempdir()
+    if os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
         conn.execute(f"SET temp_directory = '{temp_dir}'")
-    elif memory_limit and temp_dir:
+    else:
         logger.warning(
-            "DUCKDB_TEMP_DIRECTORY=%s is not writable, "
-            "running DuckDB without memory limit",
+            "No writable temp directory found (tried %s), DuckDB cannot spill to disk",
             temp_dir,
         )
 
@@ -401,8 +412,76 @@ def get_parquet_paths_for_date(
     )
 
 
+def _duckdb_type_to_arrow(column_types: dict[str, str]):
+    """Convert DuckDB type names to arro3 DataType objects.
+
+    Lazily imports arro3 to avoid module-level import cost on
+    code paths that only read (not write) Parquet files.
+    """
+    import arro3.core as ac
+
+    _map = {
+        "VARCHAR": ac.DataType.utf8,
+        "INTEGER": ac.DataType.int32,
+        "BIGINT": ac.DataType.int64,
+        "SMALLINT": ac.DataType.int16,
+        "DOUBLE": ac.DataType.float64,
+        "TIMESTAMP": ac.DataType.timestamp,
+        "TIMESTAMP WITH TIME ZONE": ac.DataType.timestamp,
+    }
+
+    fields = []
+    for col, dtype in column_types.items():
+        arrow_type = _map.get(dtype)
+        if arrow_type is None:
+            raise ValueError(f"Unsupported DuckDB type for arro3 mapping: {dtype}")
+        if dtype in ("TIMESTAMP", "TIMESTAMP WITH TIME ZONE"):
+            fields.append(ac.Field(col, arrow_type("us")))
+        else:
+            fields.append(ac.Field(col, arrow_type()))
+    return ac.Schema(fields)
+
+
+def _parquet_encoding_opts(
+    column_types: dict[str, str],
+    dictionary_columns: set[str] | None = None,
+) -> dict:
+    """Build arro3 write_parquet encoding kwargs for optimal file size.
+
+    High-cardinality string columns (IDs, body, JSON data) use
+    DELTA_BYTE_ARRAY encoding — stores only byte-level differences between
+    consecutive values, then ZSTD compresses the deltas. This typically
+    produces files ~35% smaller than DuckDB's default.
+
+    Low-cardinality columns (service, environment, host, numeric types)
+    use dictionary encoding — stores each unique value once with integer
+    indices.  ``dictionary_columns`` explicitly opts VARCHAR columns into
+    dictionary encoding; numeric types always use it.
+    """
+    if dictionary_columns is None:
+        dictionary_columns = set()
+
+    col_dict_enabled: dict[str, bool] = {}
+    col_encoding: dict[str, str] = {}
+
+    for col, dtype in column_types.items():
+        if dtype == "VARCHAR":
+            if col in dictionary_columns:
+                col_dict_enabled[col] = True
+            else:
+                col_dict_enabled[col] = False
+                col_encoding[col] = "DELTA_BYTE_ARRAY"
+        else:
+            # Numeric types — dictionary works well (few unique values)
+            col_dict_enabled[col] = True
+
+    return {
+        "column_dictionary_enabled": col_dict_enabled,
+        "column_encoding": col_encoding,
+    }
+
+
 def _flush_csv_to_parquet(
-    duck_conn,
     storage,
     csv_data: bytes | bytearray,
     column_types: dict[str, str],
@@ -415,52 +494,69 @@ def _flush_csv_to_parquet(
     row_count: int,
     *,
     is_final_flush: bool = False,
+    dictionary_columns: set[str] | None = None,
 ) -> tuple[int, int]:
     """
-    Write CSV data to a Parquet file via DuckDB's native CSV reader.
+    Write CSV data to a Parquet file via arro3 (Rust Arrow/Parquet).
 
-    ~90x faster than executemany — DuckDB reads CSV in C++ without
-    per-row Python overhead.
+    Streams CSV→Arrow→Parquet without temp files. For filesystem backends,
+    writes directly to the target path. For S3, writes to an in-memory
+    buffer then uploads via django-storages.
 
     Returns updated (chunk_num, total_rows).
     Small orgs (first and only chunk) get a flat file.
     """
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False) as f:
-        csv_path = f.name
-        f.write(csv_data)
+    import io
 
-    try:
-        # First-and-only chunk → flat file; otherwise chunk dir
-        if chunk_num == 0 and is_final_flush:
-            out_path = flat_path
-        else:
-            out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
-            chunk_num += 1
+    import arro3.io as aio
 
-        parquet_path = get_duckdb_parquet_path(storage, out_path)
-        if not _is_s3_storage(storage):
-            os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+    schema = _duckdb_type_to_arrow(column_types)
+    encoding_opts = _parquet_encoding_opts(column_types, dictionary_columns)
 
-        columns = list(column_types.keys())
-        col_spec = ", ".join(f"'{c}': '{column_types[c]}'" for c in columns)
+    # First-and-only chunk → flat file; otherwise chunk dir
+    if chunk_num == 0 and is_final_flush:
+        out_path = flat_path
+    else:
+        out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
+        chunk_num += 1
 
-        # Match ROW_GROUP_SIZE to actual rows so DuckDB doesn't over-allocate.
-        row_group_size = min(row_count, 100_000)
+    # Match max_row_group_size to actual rows to avoid over-allocation.
+    row_group_size = min(row_count, 100_000)
 
-        duck_conn.execute(
-            f"COPY (SELECT * FROM read_csv("
-            f"'{duckdb_quote_path(csv_path)}', "
-            f"columns={{{col_spec}}}, header=true)) "
-            f"TO '{duckdb_quote_path(parquet_path)}' "
-            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {row_group_size});"
-        )
-        total_rows += row_count
-    finally:
+    reader = aio.read_csv(
+        io.BytesIO(csv_data),
+        schema,
+        has_header=True,
+        quote=CSV_QUOTE_CHAR,
+        escape=CSV_QUOTE_CHAR,
+    )
+
+    write_kwargs = {
+        "compression": "zstd(3)",
+        "max_row_group_size": row_group_size,
+        **encoding_opts,
+    }
+
+    if _is_s3_storage(storage):
+        # Write to in-memory buffer, then upload via django-storages.
+        # Delete first to prevent save() from appending random suffixes
+        # to avoid collisions (e.g. "file_kJsULkE.parquet").
+        buf = io.BytesIO()
+        aio.write_parquet(reader, buf, **write_kwargs)
+        buf.seek(0)
+        from django.core.files.base import ContentFile
+
         try:
-            os.unlink(csv_path)
-        except OSError:
-            pass
+            storage.delete(out_path)
+        except Exception:
+            logger.debug("Could not delete %s before save (may not exist)", out_path)
+        storage.save(out_path, ContentFile(buf.read()))
+    else:
+        parquet_path = storage.path(out_path)
+        os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+        aio.write_parquet(reader, parquet_path, **write_kwargs)
 
+    total_rows += row_count
     return chunk_num, total_rows
 
 
@@ -470,6 +566,8 @@ def archive_partition_per_org(
     table_name: str,
     column_types: dict[str, str],
     select_sql: str,
+    dictionary_columns: set[str] | None = None,
+    db_alias: str | None = None,
 ) -> list[tuple[int, str]]:
     """
     Archive a partition to cold storage as per-org Parquet files.
@@ -477,8 +575,7 @@ def archive_partition_per_org(
     Each organization's data is exported to a separate file:
     cold_storage/{table}/org_{id}/{date}.parquet
 
-    Reads from PostgreSQL via Django's connection, writes Parquet via
-    standalone DuckDB.
+    Reads from PostgreSQL via Django's connection, writes Parquet via arro3.
 
     Args:
         partition_name: Name of the partition to archive
@@ -500,10 +597,23 @@ def archive_partition_per_org(
         return []
 
     archived_files = []
+    db_conn = connections[db_alias] if db_alias else connection
 
     try:
-        with connection.cursor() as cursor:
-            # Find all orgs with data in this partition
+        with db_conn.cursor() as cursor:
+            # Find all orgs with data in this partition.
+            # Check existence first to avoid aborting the transaction
+            # (a failed query in psycopg3 puts the connection in error state).
+            cursor.execute(
+                "SELECT 1 FROM pg_tables WHERE tablename = %s", [partition_name]
+            )
+            if not cursor.fetchone():
+                logger.info(
+                    "Partition %s already dropped, skipping archival",
+                    partition_name,
+                )
+                return []
+
             cursor.execute(
                 SQL(
                     "SELECT DISTINCT organization_id FROM {} ORDER BY organization_id;"
@@ -533,115 +643,113 @@ def archive_partition_per_org(
 
             logger.info(f"Archiving {partition_name} for {len(org_ids)} orgs")
 
-            # Reuse a single DuckDB connection across all orgs to avoid
-            # repeated startup overhead (extension loading, S3 config).
-            duck_conn = get_duckdb_connection(storage)
-            try:
-                # Export each org's data to separate Parquet files.
-                # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
-                # to bound DuckDB memory and temp-disk usage.
-                for org_id in org_ids:
-                    flat_path = get_org_cold_storage_path(table_name, org_id, date_str)
-                    chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
+            # Export each org's data to separate Parquet files via arro3.
+            # Large orgs are split into chunks of ARCHIVE_CHUNK_ROWS
+            # to bound memory usage.
+            for org_id in org_ids:
+                flat_path = get_org_cold_storage_path(table_name, org_id, date_str)
+                chunk_dir = _get_chunk_dir(table_name, org_id, date_str)
 
-                    # Skip orgs already archived (flat file is atomic/complete)
-                    if storage.exists(flat_path):
-                        archived_files.append(
-                            (org_id, get_duckdb_parquet_path(storage, flat_path))
-                        )
-                        logger.debug(
-                            "Parquet already exists for org %d, skipping", org_id
-                        )
-                        continue
+                # Skip orgs already archived (flat file is atomic/complete)
+                if storage.exists(flat_path):
+                    archived_files.append(
+                        (org_id, get_duckdb_parquet_path(storage, flat_path))
+                    )
+                    logger.debug("Parquet already exists for org %d, skipping", org_id)
+                    continue
 
-                    # Delete any partial chunks from a previous crashed run
-                    # so we re-archive cleanly from Postgres.
-                    try:
-                        _, existing_chunks = storage.listdir(chunk_dir)
-                        for f in existing_chunks:
-                            try:
-                                storage.delete(f"{chunk_dir}/{f}")
-                            except Exception:
-                                pass
-                    except (OSError, NotImplementedError):
-                        pass
+                # Delete any partial chunks from a previous crashed run
+                # so we re-archive cleanly from Postgres.
+                try:
+                    _, existing_chunks = storage.listdir(chunk_dir)
+                    for f in existing_chunks:
+                        try:
+                            storage.delete(f"{chunk_dir}/{f}")
+                        except Exception:
+                            pass
+                except (OSError, NotImplementedError):
+                    pass
 
-                    # Stream CSV via COPY TO STDOUT — constant Python memory,
-                    # O(N) Postgres work, PgBouncer-safe (single statement),
-                    # and ~90x faster than executemany for DuckDB writes.
-                    # org_id is always an int from the database, safe to inline.
-                    query_sql = select_sql.format(
-                        partition_name=partition_name
-                    ).replace("%s", str(int(org_id)), 1)
-                    copy_sql = f"COPY ({query_sql}) TO STDOUT WITH (FORMAT CSV, HEADER)"
+                # Stream CSV via COPY TO STDOUT — constant Python memory,
+                # O(N) Postgres work, PgBouncer-safe (single statement).
+                # org_id is always an int from the database, safe to inline.
+                #
+                # Use SOH (\x01) as quote character instead of double-quote
+                # to avoid ambiguity between JSON backslash-escaped quotes
+                # (\") and CSV double-quote escaping ("").
+                query_sql = select_sql.format(partition_name=partition_name).replace(
+                    "%s", str(int(org_id)), 1
+                )
+                copy_sql = (
+                    f"COPY ({query_sql}) TO STDOUT "
+                    f"WITH (FORMAT CSV, HEADER, QUOTE E'\\x01', FORCE_QUOTE *)"
+                )
 
-                    chunk_num = 0
-                    total_rows = 0
-                    chunk_bytes_limit = _get_archive_chunk_bytes()
-                    header = None
-                    csv_buf = bytearray()
-                    buf_rows = 0
+                chunk_num = 0
+                total_rows = 0
+                chunk_bytes_limit = _get_archive_chunk_bytes()
+                header = None
+                csv_buf = bytearray()
+                buf_rows = 0
 
-                    raw_conn = cursor.connection
-                    with raw_conn.cursor() as copy_cur:
-                        with copy_cur.copy(copy_sql) as copy_op:
-                            for line in copy_op:
-                                if header is None:
-                                    header = bytes(line)
-                                    csv_buf = bytearray(header)
-                                    continue
+                raw_conn = cursor.connection
+                with raw_conn.cursor() as copy_cur:
+                    with copy_cur.copy(copy_sql) as copy_op:
+                        for line in copy_op:
+                            if header is None:
+                                header = bytes(line)
+                                csv_buf = bytearray(header)
+                                continue
 
-                                csv_buf.extend(line)
-                                buf_rows += 1
+                            csv_buf.extend(line)
+                            buf_rows += 1
 
-                                if (
-                                    len(csv_buf) >= chunk_bytes_limit
-                                    or buf_rows >= ARCHIVE_CHUNK_ROWS
-                                ):
-                                    chunk_num, total_rows = _flush_csv_to_parquet(
-                                        duck_conn,
-                                        storage,
-                                        csv_buf,
-                                        column_types,
-                                        table_name,
-                                        org_id,
-                                        date_str,
-                                        flat_path,
-                                        chunk_num,
-                                        total_rows,
-                                        buf_rows,
-                                    )
-                                    csv_buf = bytearray(header)
-                                    buf_rows = 0
+                            if (
+                                len(csv_buf) >= chunk_bytes_limit
+                                or buf_rows >= ARCHIVE_CHUNK_ROWS
+                            ):
+                                chunk_num, total_rows = _flush_csv_to_parquet(
+                                    storage,
+                                    csv_buf,
+                                    column_types,
+                                    table_name,
+                                    org_id,
+                                    date_str,
+                                    flat_path,
+                                    chunk_num,
+                                    total_rows,
+                                    buf_rows,
+                                    dictionary_columns=dictionary_columns,
+                                )
+                                csv_buf = bytearray(header)
+                                buf_rows = 0
 
-                    # Flush remaining rows
-                    if buf_rows > 0:
-                        chunk_num, total_rows = _flush_csv_to_parquet(
-                            duck_conn,
-                            storage,
-                            csv_buf,
-                            column_types,
-                            table_name,
-                            org_id,
-                            date_str,
-                            flat_path,
-                            chunk_num,
-                            total_rows,
-                            buf_rows,
-                            is_final_flush=True,
-                        )
-                    del csv_buf
+                # Flush remaining rows
+                if buf_rows > 0:
+                    chunk_num, total_rows = _flush_csv_to_parquet(
+                        storage,
+                        csv_buf,
+                        column_types,
+                        table_name,
+                        org_id,
+                        date_str,
+                        flat_path,
+                        chunk_num,
+                        total_rows,
+                        buf_rows,
+                        is_final_flush=True,
+                        dictionary_columns=dictionary_columns,
+                    )
+                del csv_buf
 
-                    if total_rows > 0:
-                        archived_files.append((org_id, flat_path))
-                        logger.debug(
-                            "Archived org %d: %d rows in %d file(s)",
-                            org_id,
-                            total_rows,
-                            max(chunk_num, 1),
-                        )
-            finally:
-                duck_conn.close()
+                if total_rows > 0:
+                    archived_files.append((org_id, flat_path))
+                    logger.debug(
+                        "Archived org %d: %d rows in %d file(s)",
+                        org_id,
+                        total_rows,
+                        max(chunk_num, 1),
+                    )
 
         logger.info(
             f"Archived {partition_name}: {len(archived_files)} org files created"
@@ -654,37 +762,95 @@ def archive_partition_per_org(
 
 
 def detach_partition(
-    partition_name: str, parent_table: str, db_alias: str | None = None
+    partition_name: str,
+    parent_table: str,
+    db_alias: str | None = None,
+    max_retries: int = 3,
 ) -> None:
     """
     Detach a partition from its parent table using CONCURRENTLY.
 
     CONCURRENTLY avoids the ACCESS EXCLUSIVE lock that blocks concurrent
-    INSERTs and can cause deadlocks during archival. It requires autocommit
-    mode (cannot run inside a transaction block).
+    INSERTs. It requires autocommit mode (cannot run inside a transaction
+    block).
 
-    Safe to call if the partition is already detached or does not exist.
+    Retries on deadlock errors with exponential backoff. Falls back to
+    non-concurrent DETACH if all concurrent attempts fail. Safe to call if
+    the partition is already detached or does not exist.
     """
+    import time
+
     db_conn = connections[db_alias] if db_alias else connection
     db_conn.ensure_connection()
     raw_conn = db_conn.connection
 
     old_autocommit = raw_conn.autocommit
+    last_error = None
     try:
         raw_conn.autocommit = True
-        with raw_conn.cursor() as cursor:
-            cursor.execute(
-                SQL("ALTER TABLE {} DETACH PARTITION {} CONCURRENTLY;").format(
-                    Identifier(parent_table), Identifier(partition_name)
+        for attempt in range(max_retries):
+            try:
+                with raw_conn.cursor() as cursor:
+                    cursor.execute(
+                        SQL("ALTER TABLE {} DETACH PARTITION {} CONCURRENTLY;").format(
+                            Identifier(parent_table), Identifier(partition_name)
+                        )
+                    )
+                logger.info(
+                    "Detached partition %s from %s", partition_name, parent_table
                 )
-            )
-        logger.info("Detached partition %s from %s", partition_name, parent_table)
-    except Exception:
+                return
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "does not exist" in err_msg or "is not a partition" in err_msg:
+                    logger.info(
+                        "Partition %s already detached or does not exist",
+                        partition_name,
+                    )
+                    return
+                if "deadlock" in err_msg and attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(
+                        "Deadlock detaching %s (attempt %d/%d), retrying in %ds",
+                        partition_name,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                    )
+                    time.sleep(wait)
+                    last_error = e
+                    continue
+                last_error = e
+                break
+
+        # All CONCURRENTLY attempts failed — try non-concurrent as fallback.
+        # Takes ACCESS EXCLUSIVE lock briefly but avoids deadlock.
         logger.warning(
-            "Partition %s already detached or does not exist, continuing",
+            "DETACH CONCURRENTLY failed for %s, falling back to non-concurrent",
             partition_name,
-            exc_info=True,
+            exc_info=last_error,
         )
+        try:
+            with raw_conn.cursor() as cursor:
+                cursor.execute(
+                    SQL("ALTER TABLE {} DETACH PARTITION {};").format(
+                        Identifier(parent_table), Identifier(partition_name)
+                    )
+                )
+            logger.info(
+                "Detached partition %s (non-concurrent) from %s",
+                partition_name,
+                parent_table,
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "does not exist" in err_msg or "is not a partition" in err_msg:
+                logger.info(
+                    "Partition %s already detached or does not exist",
+                    partition_name,
+                )
+            else:
+                raise
     finally:
         raw_conn.autocommit = old_autocommit
 
@@ -713,6 +879,7 @@ def archive_and_swap_partition(
     column_types: dict[str, str],
     select_sql: str,
     db_alias: str | None = None,
+    dictionary_columns: set[str] | None = None,
 ) -> bool:
     """
     Full archival workflow: Export per-org files -> Detach -> Drop partition.
@@ -744,7 +911,13 @@ def archive_and_swap_partition(
 
     # Step 1: Export per-org files to cold storage
     archived_files = archive_partition_per_org(
-        partition_name, date_str, table_name, column_types, select_sql
+        partition_name,
+        date_str,
+        table_name,
+        column_types,
+        select_sql,
+        dictionary_columns=dictionary_columns,
+        db_alias=db_alias,
     )
     if not archived_files:
         logger.info(f"No data archived from {partition_name}")
@@ -763,7 +936,10 @@ def archive_and_swap_partition(
 
 
 def get_partitions_older_than(
-    table_name: str, days: int, partition_suffix: str = ""
+    table_name: str,
+    days: int,
+    partition_suffix: str = "",
+    db_alias: str | None = None,
 ) -> list[tuple[str, datetime]]:
     """
     Get list of partitions older than the specified number of days.
@@ -772,6 +948,7 @@ def get_partitions_older_than(
         table_name: Base table name (e.g., "logs_logevent")
         days: Number of days - partitions older than this are returned
         partition_suffix: Optional suffix to match
+        db_alias: Database alias to use (default: Django's default connection)
 
     Returns list of (partition_name, partition_date) tuples.
     """
@@ -787,7 +964,8 @@ def get_partitions_older_than(
         source_table = "pg_tables"
         name_column = "tablename"
 
-    with connection.cursor() as cursor:
+    db_conn = connections[db_alias] if db_alias else connection
+    with db_conn.cursor() as cursor:
         col = Identifier(name_column)
         cursor.execute(
             SQL("SELECT {} FROM {} WHERE {} LIKE %s AND {} ~ %s ORDER BY {};").format(
@@ -1065,6 +1243,7 @@ def archive_and_cleanup_partitions(
     select_sql: str,
     retention_days: int | None = None,
     db_alias: str | None = None,
+    dictionary_columns: set[str] | None = None,
 ) -> tuple[int, int, int]:
     """
     Archive old hot partitions to cold storage and clean up expired cold files.
@@ -1092,7 +1271,7 @@ def archive_and_cleanup_partitions(
     # Archive hot -> cold
     archived = 0
     failed = 0
-    partitions = get_partitions_older_than(table_name, hot_days)
+    partitions = get_partitions_older_than(table_name, hot_days, db_alias=db_alias)
 
     if partitions:
         logger.info(
@@ -1101,7 +1280,12 @@ def archive_and_cleanup_partitions(
         for name, date in partitions:
             try:
                 if archive_and_swap_partition(
-                    name, table_name, column_types, select_sql, db_alias=db_alias
+                    name,
+                    table_name,
+                    column_types,
+                    select_sql,
+                    db_alias=db_alias,
+                    dictionary_columns=dictionary_columns,
                 ):
                     archived += 1
                     logger.info(f"Archived partition {name}")
@@ -1252,7 +1436,7 @@ def rewrite_parquet_excluding_project(
 
     for relative_path in parquet_paths:
         parquet_path = get_duckdb_parquet_path(storage, relative_path)
-        duck_conn = get_duckdb_connection(storage)
+        duck_conn = get_duckdb_read_connection(storage)
         try:
             quoted = duckdb_quote_path(parquet_path)
 
@@ -1277,7 +1461,11 @@ def rewrite_parquet_excluding_project(
                 # No data from this project in this file, skip
                 continue
 
-            # Rewrite to a temp file then replace for crash safety
+            # Rewrite to a temp file then replace for crash safety.
+            # DuckDB handles both read+filter and write here — this is a
+            # rare operation (project deletion only) so we accept DuckDB
+            # for the write rather than adding a pyarrow dependency just
+            # to bridge DuckDB→arro3.
             is_s3 = parquet_path.startswith("s3://")
             write_path = parquet_path if is_s3 else parquet_path + ".tmp"
             duck_conn.execute(f"""
@@ -1292,10 +1480,10 @@ def rewrite_parquet_excluding_project(
             logger.debug("Rewrote cold file %s", relative_path)
         except Exception as e:
             if is_missing_file_error(e):
+                close_duckdb_read_connection()
+                duck_conn = get_duckdb_read_connection(storage)
                 continue
             logger.warning("Error rewriting cold file %s: %s", relative_path, e)
-        finally:
-            duck_conn.close()
 
     if rewritten_count:
         logger.info(

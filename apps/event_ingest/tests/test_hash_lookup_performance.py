@@ -11,6 +11,7 @@ replication lag.
 import uuid
 from unittest.mock import patch
 
+from asgiref.sync import async_to_sync
 from django.db import connection, connections
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -21,6 +22,8 @@ from apps.issue_events.models import Issue, IssueEvent, IssueHash
 from ..process_event import process_issue_events
 from ..schema import IssueEventSchema, IssueTaskMessage
 from .utils import EventIngestTestCase, generate_event
+
+_process_issue_events = async_to_sync(process_issue_events)
 
 
 class HashLookupBatchTestCase(EventIngestTestCase):
@@ -141,7 +144,7 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
             patch.object(type(connections), "__getitem__", mock_getitem),
             patch.object(IssueHash.objects, "using", mock_ih_using),
         ):
-            process_issue_events(events, read_only_db="read_only")
+            _process_issue_events(events, read_only_db="read_only")
         return events
 
     def test_fallback_finds_existing_issue(self):

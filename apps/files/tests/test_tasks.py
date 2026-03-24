@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.urls import reverse
 from django.utils.timezone import now
@@ -8,9 +9,11 @@ from model_bakery import baker
 
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
-from ..maintenance import cleanup_old_files
+from ..maintenance import cleanup_old_files as _cleanup_old_files
 from ..models import File, FileBlob
 from .test_api import generate_file
+
+cleanup_old_files = async_to_sync(_cleanup_old_files)
 
 
 class TasksTestCase(GlitchTipTestCase):

@@ -1,7 +1,7 @@
 from django.db.models import F
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import ValidationError
 from ninja.pagination import paginate
 
@@ -206,7 +206,7 @@ async def delete_organization_release(
     ).adelete()
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -266,7 +266,7 @@ async def delete_organization_release_file(
     ).adelete()
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -349,7 +349,7 @@ async def delete_project_release(
     ).adelete()
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -395,7 +395,7 @@ async def delete_project_release_file(
     ).adelete()
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -450,7 +450,7 @@ async def create_deploy(
     await Release.objects.filter(id=release.id).aupdate(
         deploy_count=F("deploy_count") + 1
     )
-    return 201, deploy
+    return Status(201, deploy)
 
 
 @optional_slash(

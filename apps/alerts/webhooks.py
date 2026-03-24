@@ -86,7 +86,10 @@ async def send_webhook(
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(url, json=asdict(data), timeout=timeout)
+            async with session.post(
+                url, json=asdict(data), timeout=timeout
+            ) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 
@@ -212,7 +215,10 @@ async def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(url, json=asdict(payload), timeout=timeout)
+            async with session.post(
+                url, json=asdict(payload), timeout=timeout
+            ) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 
@@ -288,7 +294,10 @@ async def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(url, json=asdict(payload), timeout=timeout)
+            async with session.post(
+                url, json=asdict(payload), timeout=timeout
+            ) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 
@@ -331,9 +340,10 @@ async def send_ntfy(
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(
+            async with session.post(
                 url, data=message.encode("utf-8"), headers=headers, timeout=timeout
-            )
+            ) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 
@@ -391,7 +401,8 @@ async def send_teams_webhook(
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(url, json=payload, timeout=timeout)
+            async with session.post(url, json=payload, timeout=timeout) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 
@@ -448,12 +459,13 @@ async def send_zulip_message(server_url, bot_email, api_key, channel, topic, con
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            return await session.post(
+            async with session.post(
                 url,
                 data=data,
                 auth=aiohttp.BasicAuth(bot_email, api_key),
                 timeout=timeout,
-            )
+            ) as resp:
+                return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
 

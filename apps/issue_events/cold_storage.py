@@ -148,6 +148,9 @@ def _row_to_issue_event(row: tuple) -> IssueEventRow:
     )
 
 
+DICTIONARY_COLUMNS: set[str] = set()
+
+
 def archive_partition_per_org(
     partition_name: str,
     date_str: str,
@@ -159,6 +162,7 @@ def archive_partition_per_org(
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 
@@ -171,6 +175,7 @@ def archive_and_swap_partition(
         TABLE_NAME,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
+        dictionary_columns=DICTIONARY_COLUMNS,
     )
 
 
@@ -179,6 +184,7 @@ def query_cold_events(
     start_dt: datetime,
     end_dt: datetime,
     issue_id: int | None = None,
+    event_id: UUID | None = None,
     limit: int = 100,
     cursor_position: UUID | None = None,
 ) -> list[IssueEventRow]:
@@ -206,6 +212,10 @@ def query_cold_events(
     if issue_id is not None:
         params.append(issue_id)
         where_parts.append(f"issue_id = ${len(params)}")
+
+    if event_id is not None:
+        params.append(str(event_id))
+        where_parts.append(f"event_id = ${len(params)}")
 
     if cursor_position:
         params.append(str(cursor_position))

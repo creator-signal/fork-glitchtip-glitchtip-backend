@@ -9,7 +9,7 @@ from django.db.models.functions import Cast
 from django.utils.text import slugify
 from django_extensions.db.fields import AutoSlugField
 
-from apps.issue_events.models import Issue, IssueEvent
+from apps.issue_events.models import IssueEvent
 from apps.logs.models import LogEvent
 from apps.observability.utils import clear_metrics_cache
 from glitchtip.base_models import (
@@ -93,26 +93,27 @@ class Project(CreatedModel, SoftDeleteModel):
 
     def force_delete(self, *args, **kwargs):
         """Really delete the project and all related data."""
-        # bulk delete all issue events
-        events_qs = IssueEvent.objects.filter(issue__project=self)
-        events_qs._raw_delete(events_qs.db)
+        from apps.issue_events.maintenance import (
+            delete_events_in_batches,
+            delete_issues_in_batches,
+        )
 
-        # bulk delete all log events (avoids slow CASCADE on partitioned table)
-        logs_qs = LogEvent.objects.filter(project=self)
-        logs_qs._raw_delete(logs_qs.db)
+        org_id = self.organization_id
 
-        # bulk delete all issues in batches of 1k
-        issues_qs = self.issues.order_by("id")
-        while True:
-            try:
-                issue_delimiter = issues_qs.values_list("id", flat=True)[
-                    1000:1001
-                ].get()
-                issues_qs.filter(id__lte=issue_delimiter).delete()
-            except Issue.DoesNotExist:
-                break
+        # bulk delete issue events in batches (partition-aware via organization_id)
+        delete_events_in_batches(
+            IssueEvent.objects.filter(
+                organization_id=org_id, issue__project=self
+            )
+        )
 
-        issues_qs.delete()
+        # bulk delete log events in batches (partition-aware via organization_id)
+        delete_events_in_batches(
+            LogEvent.objects.filter(organization_id=org_id, project=self)
+        )
+
+        # bulk delete issues and their non-partitioned FK dependents
+        delete_issues_in_batches(self.issues.all())
 
         # lastly delete the project itself
         super().force_delete(*args, **kwargs)

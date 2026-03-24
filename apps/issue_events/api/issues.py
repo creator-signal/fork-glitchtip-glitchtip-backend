@@ -10,7 +10,7 @@ from django.db.models.query import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
-from ninja import Field, Query, Schema
+from ninja import Field, Query, Schema, Status
 from ninja.pagination import paginate
 
 from apps.organizations_ext.models import Organization
@@ -92,6 +92,7 @@ async def list_issue_commits(request: AuthHttpRequest, issue_id: int):
 @router.put(
     "/issues/{int:issue_id}/",
     response=IssueDetailSchema,
+    by_alias=True,
 )
 @has_permission(["event:write", "event:admin"])
 async def update_issue(
@@ -111,12 +112,13 @@ async def delete_issue(request: AuthHttpRequest, issue_id: int):
     if not result:
         raise Http404()
     await delete_issue_task.aenqueue([issue_id])
-    return 204, None
+    return Status(204, None)
 
 
 @router.put(
     "organizations/{slug:organization_slug}/issues/{int:issue_id}/",
     response=IssueDetailSchema,
+    by_alias=True,
 )
 @has_permission(["event:write", "event:admin"])
 async def update_organization_issue(

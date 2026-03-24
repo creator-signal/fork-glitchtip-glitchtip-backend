@@ -16,7 +16,7 @@ from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
-from django.db import connection, connections
+from django.db import connection, connections, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,8 @@ class UUID7Helper:
             dt = dt.replace(tzinfo=timezone.utc)
 
         # Convert datetime to milliseconds since Unix epoch
-        timestamp_ms = int(dt.timestamp() * 1000)
+        # UUIDv7 uses a 48-bit unsigned timestamp, so clamp to [0, 2^48 - 1]
+        timestamp_ms = max(0, min(int(dt.timestamp() * 1000), (1 << 48) - 1))
 
         # Set random bits to either all 0s or all 1s for deterministic bounds
         if min_random:
@@ -345,14 +346,22 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    def drop_old_partitions(self, parent_table: str, max_days: int) -> int:
+    def drop_old_partitions(
+        self, parent_table: str, max_days: int, partition_interval_days: int = 1
+    ) -> int:
         """
         Identify and drop partitions older than max_days.
         Assumes partition naming convention: parent_table_YYYYMMDD
 
+        A partition is only dropped when its entire range is older than
+        max_days — i.e. when (partition_start + interval) < threshold.
+        This prevents weekly partitions from being dropped mid-week when
+        retention is shorter than 7 days.
+
         Args:
             parent_table: Parent table name
             max_days: Maximum age of partitions in days
+            partition_interval_days: Size of each partition in days (7 for weekly)
 
         Returns:
             Number of partitions dropped
@@ -363,6 +372,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         partitions = self.list_partitions(parent_table)
         threshold_date = datetime.now(timezone.utc).date() - timedelta(days=max_days)
         dropped_count = 0
+        interval = timedelta(days=partition_interval_days)
 
         # Pattern for YYYYMMDD suffix
         pattern = re.compile(r".*_(\d{8})$")
@@ -373,8 +383,9 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             if match:
                 try:
                     date_str = match.group(1)
-                    partition_date = datetime.strptime(date_str, "%Y%m%d").date()
-                    if partition_date < threshold_date:
+                    partition_start = datetime.strptime(date_str, "%Y%m%d").date()
+                    partition_end = partition_start + interval
+                    if partition_end < threshold_date:
                         logger.info(f"Dropping old partition {name}...")
                         sql = self.drop_partition(name)
                         with self.db_connection.cursor() as cursor:
@@ -470,7 +481,12 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         partition_column: str = "date",
     ) -> int:
         """
-        Generate and execute SQL to create partitions.
+        Generate and execute SQL to create only missing partitions.
+
+        Checks existence before executing DDL to avoid unnecessary
+        AccessExclusiveLock on the root table and all siblings — even
+        ``CREATE TABLE IF NOT EXISTS … PARTITION OF`` acquires those locks
+        before checking existence, which deadlocks with concurrent INSERTs.
 
         Args:
             Same as create_time_partition()
@@ -478,6 +494,18 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         Returns:
             Number of SQL statements executed
         """
+        if hash_buckets is None:
+            hash_buckets = settings.PARTITION_HASH_BUCKETS
+
+        # Check what already exists to avoid unnecessary heavy locks.
+        range_exists = self.table_exists(partition_name)
+        if range_exists and hash_buckets > 0:
+            existing_children = {
+                p["partition_name"] for p in self.list_partitions(partition_name)
+            }
+        else:
+            existing_children = set()
+
         sqls = self.create_time_partition(
             parent_table=parent_table,
             partition_name=partition_name,
@@ -489,17 +517,39 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             partition_column=partition_column,
         )
 
-        with self.db_connection.cursor() as cursor:
-            for sql in sqls:
-                logger.debug(f"Executing partition SQL: {sql[:100]}...")
-                cursor.execute(sql)
+        # Filter out DDL for tables that already exist.
+        if not range_exists:
+            sqls_to_execute = sqls
+        elif hash_buckets > 0:
+            # Range partition exists — only create missing hash children.
+            # sqls[0] is the range partition, sqls[1:] are h0..hN in order.
+            sqls_to_execute = [
+                sql
+                for i, sql in enumerate(sqls[1:])
+                if f"{partition_name}_h{i}" not in existing_children
+            ]
+        else:
+            sqls_to_execute = []
+
+        if not sqls_to_execute:
+            logger.debug(
+                f"Partition {partition_name} with {hash_buckets} hash buckets "
+                f"already up to date"
+            )
+            return 0
+
+        with transaction.atomic(using=self.db_connection.alias):
+            with self.db_connection.cursor() as cursor:
+                for sql in sqls_to_execute:
+                    logger.debug(f"Executing partition SQL: {sql[:100]}...")
+                    cursor.execute(sql)
 
         logger.debug(
             f"Verified partition {partition_name} with {hash_buckets} hash buckets "
             f"for date range {start_date.date()} to {end_date.date()}"
         )
 
-        return len(sqls)
+        return len(sqls_to_execute)
 
     def create_partitions_for_date_range(
         self,
@@ -552,11 +602,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             date_suffix = current_date.strftime("%Y%m%d")
             partition_name = f"{parent_table}_{date_suffix}"
 
-            # Check existence first to report accurate "Created" stats
-            exists = self.table_exists(partition_name)
-
-            # Always execute SQL to ensure sub-partitions (hash buckets) exist
-            self.execute_partition_creation(
+            executed = self.execute_partition_creation(
                 parent_table=parent_table,
                 partition_name=partition_name,
                 start_date=current_date,
@@ -567,7 +613,7 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
                 partition_column=partition_column,
             )
 
-            if not exists:
+            if executed:
                 new_partitions_count += 1
 
             current_date = next_date

@@ -35,20 +35,9 @@ from ..cold_storage import (
 class DuckDBAvailabilityTestCase(TestCase):
     """Test DuckDB availability check."""
 
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
-    )
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_enabled_via_override(self):
         self.assertTrue(is_duckdb_available())
-
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true",
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR=None,
-    )
-    def test_enabled_but_no_storage_backend(self):
-        """ENABLE_DUCKDB=true without a storage backend returns False."""
-        self.assertFalse(is_duckdb_available())
 
     @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
     def test_disabled_via_override(self):
@@ -77,14 +66,6 @@ class DuckDBAvailabilityTestCase(TestCase):
     def test_disabled_without_any_config(self):
         self.assertFalse(is_duckdb_available())
 
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB=None,
-        GLITCHTIP_COLD_STORAGE_BUCKET=None,
-        GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold",
-    )
-    def test_disabled_with_dir_but_no_opt_in(self):
-        """Directory alone is not enough — requires GLITCHTIP_ENABLE_DUCKDB=true."""
-        self.assertFalse(is_duckdb_available())
 
 
 class ColdStoragePathTestCase(TestCase):
@@ -225,24 +206,28 @@ class MaintenanceTestCase(TestCase):
 
     def test_cleanup_noop_without_duckdb(self):
         """cleanup_old_issue_events should be a no-op when DuckDB is unavailable."""
+        from asgiref.sync import async_to_sync
+
         from ..maintenance import cleanup_old_issue_events
 
         # Should not raise
-        cleanup_old_issue_events()
+        async_to_sync(cleanup_old_issue_events)()
 
     @override_settings(GLITCHTIP_ENABLE_DUCKDB="false")
     def test_cleanup_skips_when_disabled(self):
+        from asgiref.sync import async_to_sync
+
         from ..maintenance import cleanup_old_issue_events
 
         # Should not raise
-        cleanup_old_issue_events()
+        async_to_sync(cleanup_old_issue_events)()
 
 
 class MaintainPartitionsSkipTestCase(TestCase):
     """Test that maintain_partitions skips issue_events when DuckDB is available."""
 
     @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true", GLITCHTIP_COLD_STORAGE_DIR="/tmp/cold"
+        GLITCHTIP_ENABLE_DUCKDB="true"
     )
     def test_skip_issue_events_when_duckdb_available(self):
         """When DuckDB is available, issue_events should be skipped from standard drop."""
@@ -432,6 +417,85 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
 
             # All original IDs should be present
             self.assertEqual(set(result_ids), set(event_ids))
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_archive_events_with_json_quotes(self):
+        """Events with JSON containing embedded quotes archive correctly.
+
+        Reproduces CSV parse errors seen in prod where data::text contains
+        backslash-escaped quotes that conflict with standard CSV quoting.
+        """
+        import json
+
+        from glitchtip.cold_storage import archive_and_swap_partition
+
+        from ..models import Issue
+
+        issue = Issue.objects.create(
+            project=self.project,
+            title='Error: ("Connection broken")',
+            metadata={"title": 'Error: ("Connection broken")'},
+            type=0,
+            level=40,
+        )
+
+        event_time = self.archive_date + timedelta(seconds=1)
+        event_id = UUID7Helper.from_datetime(event_time)
+        # JSON data with nested quotes — the pattern that broke CSV parsing
+        data = json.dumps(
+            {
+                "sdk": {"name": "sentry.python", "version": "1.5.4"},
+                "message": 'ChunkedEncodingError: ("Connection broken: '
+                "InvalidChunkLength(got length b'', 0 bytes read)\", "
+                "InvalidChunkLength(got length b'', 0 bytes read))",
+                "extra": {"sys.argv": ["scripts/report.py"]},
+            }
+        )
+        tags = json.dumps({"browser": 'Chrome "Dev"', "os": "Linux"})
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO issue_events_issueevent "
+                "(id, timestamp, issue_id, organization_id, type, level, "
+                "title, transaction, data, tags, hashes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    str(event_id),
+                    event_time,
+                    issue.id,
+                    self.organization.id,
+                    0,
+                    4,
+                    'Error: ("Connection broken")',
+                    "/api/test",
+                    data,
+                    tags,
+                    "{}",
+                ],
+            )
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            archive_and_swap_partition(
+                self.partition_name,
+                TABLE_NAME,
+                ISSUE_EVENT_EXPORT_COLUMN_TYPES,
+                ISSUE_EVENT_SELECT_SQL,
+            )
+
+            target_time = UUID7Helper.extract_datetime(event_id)
+            result = get_event_from_cold(
+                self.organization.id, event_id, target_time
+            )
+
+            self.assertIsNotNone(result)
+            self.assertEqual(result.id, event_id)
+            self.assertIn("ChunkedEncodingError", result.data["message"])
+            self.assertEqual(result.tags["browser"], 'Chrome "Dev"')
 
     @override_settings(
         GLITCHTIP_ENABLE_DUCKDB="true",

@@ -1,7 +1,7 @@
 from django.db import IntegrityError
 from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
@@ -60,7 +60,7 @@ async def create_repository(
         )
     except IntegrityError:
         raise HttpError(409, "A repository with this name already exists.")
-    return 201, repo
+    return Status(201, repo)
 
 
 @optional_slash(

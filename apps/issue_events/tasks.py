@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.db.models import F
 from django.tasks import task
 
@@ -7,9 +8,10 @@ from .services import IssueFilters, filter_issue_list, get_queryset
 
 
 @task
-def delete_issue_task(ids: list[int]):
+async def delete_issue_task(ids: list[int]):
     for id in ids:
-        Issue.objects.get(id=id).force_delete()
+        issue = await Issue.objects.aget(id=id)
+        await sync_to_async(issue.force_delete)()
 
 
 @task

@@ -9,7 +9,7 @@ dependencies = [
     "Brotli>=1.2.0",
     "zstandard>=0.23.0; python_version < '3.14'",
     "django~=6.0",
-    "django-vtasks[valkey]",
+    "django-vtasks[valkey]~=2.0",
     "django-allauth[mfa,socialaccount]~=65.0",
     "django-cors-headers~=4.0",
     "django-environ~=0.11",
@@ -38,13 +38,14 @@ dependencies = [
     "django-ninja-cursor-pagination>=0.1.0",
     "django-postgres-partition>=0.1.4",
     "pyyaml>=6.0.2", # allauth openapi spec
-    "django-valkey[libvalkey,lz4]>=0.3.2",
     "granian[reload,uvloop]>=2.6.0",
-    "django-vcache>=0.1.1",
+    "django-vcache>=2.0.10",
     "uuid6>=2024.1.12",
     "mcp[cli]>=1.9",
     "duckdb>=1.2.0",
     "minidump>=0.0.24",
+    "arro3-core~=0.8",
+    "arro3-io~=0.8",
 ]
 
 [dependency-groups]
@@ -53,10 +54,9 @@ dev = [
     "freezegun~=1.1",
     "model_bakery~=1.1",
     "django-debug-toolbar~=6.0",
-    "django-stubs[compatible-mypy]~=5.0",
+    "django-stubs[compatible-mypy]~=6.0",
     "django-sslserver~=0.22",
     "aioresponses~=0.7",
-    "requests-mock~=1.9",
     "memray~=1.9",
     "ruff~=0.6",
     "tblib~=3.0",                         # Needed for test --parallel
