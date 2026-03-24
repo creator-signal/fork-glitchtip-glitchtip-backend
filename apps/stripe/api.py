@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
 from ninja import ModelSchema, Router
@@ -20,7 +21,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import unix_to_datetime
+from .utils import compute_cycle_n_ago, compute_previous_cycle, unix_to_datetime
 
 router = Router()
 
@@ -119,6 +120,14 @@ class EventsCountSchema(CamelSchema):
     uptime_check_event_count: int
     log_event_count: int
     file_size_mb: int
+
+
+class PreviousPeriodEventsCountSchema(EventsCountSchema):
+    total: int
+
+
+class SubscriptionUsageSchema(EventsCountSchema):
+    total: int
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -258,6 +267,149 @@ async def subscription_events_count(request: AuthHttpRequest, organization_slug:
         users=request.auth.user_id,
     )
     return {
+        "event_count": org.issue_event_count,
+        "transaction_event_count": org.transaction_count,
+        "uptime_check_event_count": org.uptime_check_event_count,
+        "log_event_count": org.log_count,
+        "file_size_mb": org.file_size,
+    }
+
+
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/period/",
+    response=SubscriptionUsageSchema,
+    by_alias=True,
+)
+async def subscription_events_count_for_period(
+    request: AuthHttpRequest,
+    organization_slug: str,
+    periods_ago: int = 0,
+):
+    retention_days = getattr(settings, "GLITCHTIP_RETENTION_DAYS", 90)
+    if periods_ago * 30 >= retention_days:
+        return JsonResponse(
+            {
+                "detail": f"periods_ago exceeds data retention limit ({retention_days} days)"
+            },
+            status=400,
+        )
+
+    if periods_ago == 0:
+        org = await aget_object_or_404(
+            Organization.objects.with_event_counts(),
+            slug=organization_slug,
+            users=request.auth.user_id,
+        )
+        return {
+            "total": org.total_event_count,
+            "event_count": org.issue_event_count,
+            "transaction_event_count": org.transaction_count,
+            "uptime_check_event_count": org.uptime_check_event_count,
+            "log_event_count": org.log_count,
+            "file_size_mb": org.file_size,
+        }
+
+    subscription = await (
+        StripeSubscription.objects.filter(
+            organization__users=request.auth.user_id,
+            organization__slug=organization_slug,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+        )
+        .select_related("price")
+        .order_by("-created")
+        .afirst()
+    )
+
+    zero_response = {
+        "total": 0,
+        "event_count": 0,
+        "transaction_event_count": 0,
+        "uptime_check_event_count": 0,
+        "log_event_count": 0,
+        "file_size_mb": 0,
+    }
+
+    if subscription is None:
+        return zero_response
+
+    period = compute_cycle_n_ago(
+        subscription.current_period_start,
+        subscription.current_period_end,
+        subscription.subscription_cycle_start,
+        subscription.subscription_cycle_end,
+        periods_ago=periods_ago,
+    )
+    if period is None:
+        return zero_response
+
+    period_start, period_end = period
+    org = await aget_object_or_404(
+        Organization.objects.with_event_counts(
+            current_period=False, start=period_start, end=period_end
+        ),
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+    return {
+        "total": org.total_event_count,
+        "event_count": org.issue_event_count,
+        "transaction_event_count": org.transaction_count,
+        "uptime_check_event_count": org.uptime_check_event_count,
+        "log_event_count": org.log_count,
+        "file_size_mb": org.file_size,
+    }
+
+
+@router.get(
+    "subscriptions/{slug:organization_slug}/events_count/previous_period/",
+    response=PreviousPeriodEventsCountSchema,
+    by_alias=True,
+)
+async def subscription_events_count_previous_period(
+    request: AuthHttpRequest, organization_slug: str
+):
+    subscription = await (
+        StripeSubscription.objects.filter(
+            organization__users=request.auth.user_id,
+            organization__slug=organization_slug,
+            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+        )
+        .select_related("price")
+        .order_by("-created")
+        .afirst()
+    )
+
+    zero_response = {
+        "total": 0,
+        "event_count": 0,
+        "transaction_event_count": 0,
+        "uptime_check_event_count": 0,
+        "log_event_count": 0,
+        "file_size_mb": 0,
+    }
+
+    if subscription is None:
+        return zero_response
+
+    prev = compute_previous_cycle(
+        subscription.current_period_start,
+        subscription.current_period_end,
+        subscription.subscription_cycle_start,
+        subscription.subscription_cycle_end,
+    )
+    if prev is None:
+        return zero_response
+
+    prev_start, prev_end = prev
+    org = await aget_object_or_404(
+        Organization.objects.with_event_counts(
+            current_period=False, start=prev_start, end=prev_end
+        ),
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+    return {
+        "total": org.total_event_count,
         "event_count": org.issue_event_count,
         "transaction_event_count": org.transaction_count,
         "uptime_check_event_count": org.uptime_check_event_count,
