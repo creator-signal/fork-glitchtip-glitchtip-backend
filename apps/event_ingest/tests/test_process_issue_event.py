@@ -6,6 +6,7 @@ import uuid
 import zipfile
 from hashlib import sha1
 
+from asgiref.sync import async_to_sync
 from django.core.files import File as DjangoFile
 from django.tasks import task_backends
 from django.test import override_settings
@@ -29,6 +30,8 @@ from ..schema import (
     SecuritySchema,
 )
 from .utils import EventIngestTestCase
+
+_process_issue_events = async_to_sync(process_issue_events)
 
 COMPAT_TEST_DATA_DIR = "events/test_data"
 
@@ -363,7 +366,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             )
         )
 
-        process_issue_events(event_list)
+        _process_issue_events(event_list)
 
         self.assertTrue(self.project.environment_set.filter(name="dev").exists())
         self.assertEqual(self.project.environment_set.count(), 2)
@@ -407,7 +410,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             )
         )
 
-        process_issue_events(event_list)
+        _process_issue_events(event_list)
 
         self.assertTrue(self.organization.release_set.filter(version="v2.0").exists())
         self.assertEqual(self.organization.release_set.count(), 2)
@@ -552,7 +555,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             payload=ErrorIssueEventSchema(**event_data),
             received=timezone.now(),
         )
-        process_issue_events([event])
+        _process_issue_events([event])
         file_name = event_data["exception"]["values"][0]["stacktrace"]["frames"][0][
             "filename"
         ]
@@ -583,7 +586,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
         data = SecuritySchema(**payload)
         event = CSPIssueEventSchema(csp=data.csp_report.dict(by_alias=True))
-        process_issue_events(
+        _process_issue_events(
             [
                 IssueTaskMessage(
                     project_id=self.project.id,
@@ -917,7 +920,7 @@ struct ContentView: View {
             payload=ErrorIssueEventSchema(**payload),
             received=timezone.now(),
         )
-        process_issue_events([event])
+        _process_issue_events([event])
 
         # Verify source context was persisted on the stored event
         issue_event = IssueEvent.objects.get_event(event.payload.event_id)
@@ -1027,7 +1030,7 @@ class SentryCompatTestCase(EventIngestTestCase):
             payload=event_class(**event_data),
             received=timezone.now(),
         )
-        process_issue_events([event])
+        _process_issue_events([event])
         return IssueEvent.objects.get_event(event.payload.event_id)
 
     def upgrade_data(self, data):

@@ -1,3 +1,43 @@
+# 6.1.0
+
+- Feat: Enable logs ingestion by default (set `GLITCHTIP_ENABLE_LOGS=false` to disable)
+- Fix: Serialize status page monitors as dicts for cache compatibility
+- Fix: Improve OpenAPI spec correctness for TypeScript type generation
+- Perf: Skip unnecessary middleware for ingest endpoints
+- Perf: Cap glibc malloc arenas based on cgroup CPU limit
+- Refactor: Convert all tasks from sync to async
+- Refactor: Resolve cold storage backend lazily instead of at availability check
+
+# 6.0.11
+
+- Fix: Resolve maintenance statement timeouts by routing all cleanup functions through maintenance DB alias
+- Fix: Replace django_valkey imports with django-vcache raw client
+- Fix: Reduce sentry SDK memory overhead by disabling unused integrations
+- Fix: Move MCP OAuth endpoints under /mcp prefix to avoid SPA route conflicts
+- Fix: Migrate span promotion writes from DuckDB to arro3
+- Fix: Detect container memory limit for DuckDB default
+- Feat: Add time/host/environment filters to MCP tools for post-deploy observability
+- Refactor: Remove requests-mock dependency, remove cgroup v1 fallback from DuckDB memory detection
+- Deps: Update django-vcache to v2.0.0 (Rust-based driver, replaces valkey-py)
+
+# 6.0.10
+
+- Feat: Implement Debug Files list endpoint (GET /projects/{org}/{project}/files/dsyms/)
+- Feat: Use arro3 for all Parquet writes, keep DuckDB for reads only
+- Feat: Add org_slug filter and uuid4 cold fallback to MCP get_event
+- Fix: Handle concurrent FK insert during release cleanup
+- Fix: Replace cache_page with selective caching on status page
+- Fix: Clamp UUIDv7 timestamp to valid 48-bit range
+- Fix: Handle unmatched quotes in issue search query
+- Fix: Delete existing S3 file before save to prevent filename collision
+- Fix: Use SOH quote char for CSV archival and retry deadlocked detach
+- Fix: Always set DuckDB memory limit and auto-detect temp directory
+- Fix: Check partition existence via pg_tables instead of catching exception
+- Fix: Add organization_id pruning to latest event query, handle missing partitions
+- Fix: Use cached read connection for parquet rewrites, add malloc_trim
+- Fix: Reduce overhead in cleanup_orphaned_fileblobs
+- Perf: Cold storage robustness improvements
+
 # 6.0.9
 
 - Feat: Add Repository model with list/create API; link to Release and Issue models; add GET /issues/{id}/commits/ endpoint

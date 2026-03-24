@@ -1,7 +1,7 @@
 import logging
 import typing
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
 
@@ -143,8 +143,9 @@ class JvmDebugImage(BaseModel):
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class NativeDebugImage(BaseModel):
-    type: Literal["macho", "elf", "pe", "wasm"]
+    type: Literal["macho", "elf", "pe", "pe_dotnet", "wasm"]
     debug_id: uuid.UUID | None = None
+    debug_checksum: str | None = None
     image_addr: str | None = None
     image_size: int | None = None
     code_file: str | None = None
@@ -421,7 +422,9 @@ class TransactionEventSchema(LaxIngestSchema):
     @field_validator("start_timestamp")
     @classmethod
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
-        """Validator to ensure the datetime is recent"""
+        """Validator to ensure the datetime is recent and timezone-aware."""
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
         minimum_date = now() - timedelta(
             days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
         )

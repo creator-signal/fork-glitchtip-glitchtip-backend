@@ -18,7 +18,7 @@ async def internal_health(request):
     return JsonResponse({"healthy": {}, "problems": []})
 
 
-def index(request, *args):
+async def index(request, *args):
     if base_path := settings.FORCE_SCRIPT_NAME:
         content = render_to_string(
             "index.html", {"base_path": base_path}, request=request

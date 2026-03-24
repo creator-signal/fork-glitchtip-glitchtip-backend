@@ -1,9 +1,10 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
+from unittest import mock
 from unittest.mock import patch
 from uuid import UUID
 
-import requests_mock
 from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -42,11 +43,11 @@ class SettingsTestCase(TestCase):
                 "socialaccount.socialapp",
                 provider=provider,
             )
-        with requests_mock.Mocker() as m:
-            m.get(
-                "https://example.com/.well-known/openid-configuration",
-                json={"authorization_endpoint": ""},
-            )
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {"authorization_endpoint": ""}
+        with mock.patch("requests.Session.send", return_value=mock_response):
             res = self.client.get(self.url)
         self.assertContains(res, social_app.name)
 
@@ -218,6 +219,16 @@ class UUID7HelperTestCase(TestCase):
         self.assertLess(uuid1, uuid2)
         self.assertLess(uuid2, uuid3)
         self.assertLess(uuid1, uuid3)
+
+    def test_pre_epoch_date_clamped(self):
+        """Dates before Unix epoch produce valid UUIDs (clamped to epoch)"""
+        pre_epoch = datetime.min.replace(tzinfo=timezone.utc)
+        start_uuid, end_uuid = UUID7Helper.get_range_for_date(
+            pre_epoch, datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        self.assertEqual(start_uuid.version, 7)
+        self.assertEqual(end_uuid.version, 7)
+        self.assertLess(start_uuid, end_uuid)
 
 
 class PartitionManagerTestCase(TestCase):
@@ -403,6 +414,23 @@ class PartitionManagerTestCase(TestCase):
         for i in range(4):
             expected_name = f"issue_events_issueaggregate_20250115_h{i}"
             self.assertIn(expected_name, sqls[i + 1])
+
+
+class DecompressBodyMiddlewareCancelledErrorTestCase(TestCase):
+    """CancelledError from client disconnect should return 499, not propagate."""
+
+    def test_cancelled_error_returns_499(self):
+        from django.test import RequestFactory
+
+        from glitchtip.middleware import DecompressBodyMiddleware
+
+        def raise_cancelled(request):
+            raise asyncio.CancelledError
+
+        middleware = DecompressBodyMiddleware(raise_cancelled)
+        request = RequestFactory().get("/")
+        response = middleware(request)
+        self.assertEqual(response.status_code, 499)
 
 
 class DatabaseSettingsTestCase(TestCase):

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
@@ -27,7 +28,7 @@ from apps.mcp.serializers import (
     serialize_organization,
     serialize_project,
 )
-from apps.mcp.server import _check_scopes
+from apps.mcp.server import _check_scopes, _parse_datetime
 
 
 class ValidateTokenTest(TestCase):
@@ -391,6 +392,134 @@ class DataLayerTest(TestCase):
         result = async_to_sync(update_issue)(self.user.id, 999999, "resolved")
         self.assertIsNone(result)
 
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.query_cold_events")
+    def test_get_latest_event_cold_storage_fallback(
+        self, mock_query_cold, _mock_duckdb
+    ):
+        """When Postgres has no events, fall back to cold storage."""
+        issue = baker.make("issue_events.Issue", project=self.project)
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_query_cold.return_value = [cold_event]
+
+        result = async_to_sync(get_latest_event)(self.user.id, issue.id)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_query_cold.assert_called_once()
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
+    )
+    def test_get_latest_event_no_duckdb(self, _mock_duckdb):
+        """When DuckDB is not available, return None."""
+        issue = baker.make("issue_events.Issue", project=self.project)
+
+        result = async_to_sync(get_latest_event)(self.user.id, issue.id)
+        self.assertIsNone(result)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.get_event_from_cold")
+    def test_get_event_cold_storage_uuid7_fallback(
+        self, mock_get_cold, _mock_duckdb
+    ):
+        """UUIDv7 cold fallback uses get_event_from_cold with extracted timestamp."""
+        from glitchtip.partition_manager import UUID7Helper
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        event_uuid = UUID7Helper._uuid7_for_timestamp(timezone.now())
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            id=event_uuid,
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_get_cold.return_value = cold_event
+
+        result = async_to_sync(get_event)(self.user.id, str(event_uuid))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_get_cold.assert_called_once()
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.query_cold_events")
+    def test_get_event_cold_storage_uuid4_fallback(
+        self, mock_query_cold, _mock_duckdb
+    ):
+        """UUIDv4 cold fallback scans recent cold storage by event_id."""
+        import uuid as uuid_mod
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        sdk_event_id = uuid_mod.uuid4()
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=self.organization,
+            event_id=sdk_event_id,
+            data={},
+            tags={},
+        )
+        mock_query_cold.return_value = [cold_event]
+
+        result = async_to_sync(get_event)(self.user.id, str(sdk_event_id))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+        mock_query_cold.assert_called_once()
+        # Verify event_id was passed to cold storage query
+        call_kwargs = mock_query_cold.call_args[1]
+        self.assertEqual(call_kwargs["event_id"], sdk_event_id)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
+    )
+    @patch("apps.issue_events.cold_storage.get_event_from_cold")
+    def test_get_event_cold_storage_with_org_slug(
+        self, mock_get_cold, _mock_duckdb
+    ):
+        """Providing organization_slug scopes the cold storage search."""
+        from glitchtip.partition_manager import UUID7Helper
+
+        issue = baker.make("issue_events.Issue", project=self.project)
+        event_uuid = UUID7Helper._uuid7_for_timestamp(timezone.now())
+        cold_event = baker.prepare(
+            "issue_events.IssueEvent",
+            id=event_uuid,
+            issue=issue,
+            organization=self.organization,
+            data={},
+            tags={},
+        )
+        mock_get_cold.return_value = cold_event
+
+        result = async_to_sync(get_event)(
+            self.user.id, str(event_uuid), self.organization.slug
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.issue, issue)
+
+    @patch(
+        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
+    )
+    def test_get_event_no_duckdb(self, _mock_duckdb):
+        """When DuckDB is not available, return None for missing events."""
+        import uuid as uuid_mod
+
+        result = async_to_sync(get_event)(self.user.id, str(uuid_mod.uuid4()))
+        self.assertIsNone(result)
+
 
 class SerializerTest(TestCase):
     def setUp(self):
@@ -472,3 +601,129 @@ class SerializerTest(TestCase):
         self.assertEqual(result["name"], "Uptime Check")
         self.assertEqual(result["url"], "https://example.com")
         self.assertEqual(result["interval"], 60)
+
+
+class ParseDatetimeTest(TestCase):
+    def test_none_returns_none(self):
+        self.assertIsNone(_parse_datetime(None))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_parse_datetime(""))
+
+    def test_iso8601(self):
+        result = _parse_datetime("2025-01-15T10:00:00Z")
+        self.assertEqual(result.year, 2025)
+        self.assertEqual(result.month, 1)
+        self.assertEqual(result.day, 15)
+
+    def test_iso8601_naive_gets_utc(self):
+        result = _parse_datetime("2025-01-15T10:00:00")
+        self.assertIsNotNone(result.tzinfo)
+
+    def test_relative_now(self):
+        before = timezone.now()
+        result = _parse_datetime("now")
+        after = timezone.now()
+        self.assertGreaterEqual(result, before)
+        self.assertLessEqual(result, after)
+
+    def test_relative_now_minus_10m(self):
+        result = _parse_datetime("now-10m")
+        expected = timezone.now() - timedelta(minutes=10)
+        self.assertAlmostEqual(
+            result.timestamp(), expected.timestamp(), delta=2
+        )
+
+    def test_relative_now_minus_1h(self):
+        result = _parse_datetime("now-1h")
+        expected = timezone.now() - timedelta(hours=1)
+        self.assertAlmostEqual(
+            result.timestamp(), expected.timestamp(), delta=2
+        )
+
+    def test_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            _parse_datetime("not-a-date")
+
+
+class IssueFilterTest(TestCase):
+    def setUp(self):
+        self.user = baker.make("users.user")
+        self.project = baker.make("projects.Project")
+        self.organization = self.project.organization
+        self.org_user = self.organization.add_user(self.user)
+        self.team = baker.make("teams.Team", organization=self.organization)
+        self.team.members.add(self.org_user)
+        self.project.teams.add(self.team)
+
+    def test_filter_by_start(self):
+        now = timezone.now()
+        old_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=2),
+        )
+        new_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(minutes=5),
+        )
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            start=now - timedelta(minutes=10),
+        )
+        issue_ids = [i.id for i in issues]
+        self.assertIn(new_issue.id, issue_ids)
+        self.assertNotIn(old_issue.id, issue_ids)
+
+    def test_filter_by_start_and_end(self):
+        now = timezone.now()
+        baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=5),
+        )
+        target_issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(hours=2),
+        )
+        baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            first_seen=now - timedelta(minutes=5),
+        )
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            start=now - timedelta(hours=3),
+            end=now - timedelta(hours=1),
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].id, target_issue.id)
+
+    def test_filter_by_environment(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+        )
+        tag_key = baker.make("issue_events.TagKey", key="environment")
+        tag_value = baker.make("issue_events.TagValue", value="production")
+        baker.make(
+            "issue_events.IssueTag",
+            issue=issue,
+            tag_key=tag_key,
+            tag_value=tag_value,
+        )
+        baker.make("issue_events.Issue", project=self.project)
+
+        issues = async_to_sync(get_issues)(
+            self.user.id,
+            self.organization.slug,
+            environment="production",
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].id, issue.id)

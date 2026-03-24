@@ -5,20 +5,20 @@ from operator import itemgetter
 from typing import Any, Literal
 from urllib.parse import ParseResult, urlparse
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
+from django.core.cache import caches
 from django.db import connection, transaction
 from django.db.models import (
     Exists,
     OuterRef,
     Q,
-    QuerySet,
     Value,
 )
 from django.db.models.functions import Coalesce
 from django.db.utils import IntegrityError
 from django.utils import timezone
-from django_valkey import get_valkey_connection
 from ninja import Schema
 from user_agents import parse
 
@@ -102,12 +102,12 @@ StatsTableName = Literal[
 ]
 
 
-def _get_or_create_related_models(
+async def _get_or_create_related_models(
     release_set: set,
     environment_set: set,
     project_set: set,
     read_only_db: str = "default",
-) -> tuple[list[tuple[str, int, int]], QuerySet]:
+) -> tuple[list[tuple[str, int, int]], list[dict]]:
     """
     Given sets of release, environment, and project data,
     creates them if they don't exist, and returns release data and project data.
@@ -122,6 +122,9 @@ def _get_or_create_related_models(
         "release_name": Coalesce("releases__version", Value(None)),
         "environment_id": Coalesce("environment__id", Value(None)),
         "environment_name": Coalesce("environment__name", Value(None)),
+        "has_difs": Exists(
+            DebugInformationFile.objects.filter(project_id=OuterRef("pk"))
+        ),
     }
     values_list = [
         "id",
@@ -129,17 +132,19 @@ def _get_or_create_related_models(
         "release_name",
         "environment_id",
         "environment_name",
+        "has_difs",
     ]
 
-    projects_with_data = (
-        projects_query.annotate(**annotations)
+    projects_with_data = [
+        p
+        async for p in projects_query.annotate(**annotations)
         .filter(release_name__in=release_version_set.union({None}))
         .filter(environment_name__in=environment_name_set.union({None}))
         .values(*values_list)
-    )
+    ]
 
-    releases = get_and_create_releases(release_set, projects_with_data)
-    create_environments(environment_set, projects_with_data)
+    releases = await get_and_create_releases(release_set, projects_with_data)
+    await create_environments(environment_set, projects_with_data)
 
     return releases, projects_with_data
 
@@ -227,7 +232,7 @@ def get_search_vector(event: ProcessingEvent) -> str:
     return remove_bad_chars(final_vector_string)
 
 
-def update_issues(processing_events: list[ProcessingEvent]):
+async def update_issues(processing_events: list[ProcessingEvent]):
     """
     Update any existing issues based on new statistics
     """
@@ -276,20 +281,23 @@ def update_issues(processing_events: list[ProcessingEvent]):
         key=itemgetter(0),
     )
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
-        max_lexemes = settings.SEARCH_MAX_LEXEMES
+    def _execute():
+        with connection.cursor() as cursor:
+            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
+            max_lexemes = settings.SEARCH_MAX_LEXEMES
 
-        sql = (
-            "UPDATE issue_events_issue SET "
-            "count = issue_events_issue.count + v.added_count, "
-            f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
-            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
-            "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
-            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
-            "WHERE issue_events_issue.id = v.id"
-        )
-        cursor.execute(sql)
+            sql = (
+                "UPDATE issue_events_issue SET "
+                "count = issue_events_issue.count + v.added_count, "
+                f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
+                "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
+                "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
+                f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
+                "WHERE issue_events_issue.id = v.id"
+            )
+            cursor.execute(sql)
+
+    await sync_to_async(_execute)()
 
 
 def generate_contexts(event: TaskIssueEvent) -> Contexts:
@@ -392,8 +400,8 @@ def check_set_issue_id(
             event.issue_id = issue_id
 
 
-def create_environments(
-    environment_set: set[tuple[str, int, int]], projects_with_data: QuerySet
+async def create_environments(
+    environment_set: set[tuple[str, int, int]], projects_with_data: list[dict]
 ):
     """
     Create newly seen environments.
@@ -414,15 +422,16 @@ def create_environments(
     ]
 
     if environments_to_create:
-        Environment.objects.bulk_create(environments_to_create, ignore_conflicts=True)
+        await Environment.objects.abulk_create(
+            environments_to_create, ignore_conflicts=True
+        )
         query = Q()
         for environment in environments_to_create:
             query |= Q(
                 name=environment.name, organization_id=environment.organization_id
             )
-        environments = Environment.objects.filter(query)
         environment_projects: list = []
-        for environment in environments:
+        async for environment in Environment.objects.filter(query):
             project_id = next(
                 project_id
                 for (name, project_id, organization_id) in environment_set
@@ -432,13 +441,13 @@ def create_environments(
             environment_projects.append(
                 EnvironmentProject(project_id=project_id, environment=environment)
             )
-        EnvironmentProject.objects.bulk_create(
+        await EnvironmentProject.objects.abulk_create(
             environment_projects, ignore_conflicts=True
         )
 
 
-def get_and_create_releases(
-    release_set: set[tuple[str, int, int]], projects_with_data: QuerySet
+async def get_and_create_releases(
+    release_set: set[tuple[str, int, int]], projects_with_data: list[dict]
 ) -> list[tuple[str, int, int]]:
     """
     Create newly seen releases.
@@ -458,14 +467,14 @@ def get_and_create_releases(
             None,
         )
     ]
-    releases: list | QuerySet = []
+    releases: list = []
     if releases_to_create:
         # Create database records for any release that doesn't exist
-        Release.objects.bulk_create(releases_to_create, ignore_conflicts=True)
+        await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
         query = Q()
         for release in releases_to_create:
             query |= Q(version=release.version, organization_id=release.organization_id)
-        releases = Release.objects.filter(query)
+        releases = [r async for r in Release.objects.filter(query)]
         ReleaseProject = Release.projects.through
         release_projects = [
             ReleaseProject(
@@ -479,7 +488,9 @@ def get_and_create_releases(
             )
             for release in releases
         ]
-        ReleaseProject.objects.bulk_create(release_projects, ignore_conflicts=True)
+        await ReleaseProject.objects.abulk_create(
+            release_projects, ignore_conflicts=True
+        )
     return [
         (
             version,
@@ -539,7 +550,7 @@ def hydrate_stacktrace(event: TaskIssueEvent):
                 exception.stacktrace = match.stacktrace.copy(deep=True)
 
 
-def process_issue_events(
+async def process_issue_events(
     messages: list[IssueTaskMessage], read_only_db: str = "default"
 ):
     """
@@ -554,9 +565,9 @@ def process_issue_events(
     """
     projects_to_update = {msg.project_id for msg in messages if msg.update_first_event}
     if projects_to_update:
-        Project.objects.filter(
+        await Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
-        ).update(first_event=timezone.now())
+        ).aupdate(first_event=timezone.now())
 
     # Fetch any needed releases, environments, and whether there is a dif file association
     # Get unique release/environment for each project_id
@@ -575,12 +586,8 @@ def process_issue_events(
     )
     release_version_set = {version for version, _, _ in release_set}
 
-    releases, projects_with_data = _get_or_create_related_models(
+    releases, projects_with_data = await _get_or_create_related_models(
         release_set, environment_set, project_set, read_only_db
-    )
-
-    projects_with_data = projects_with_data.annotate(
-        has_difs=Exists(DebugInformationFile.objects.filter(project_id=OuterRef("pk")))
     )
 
     sourcemap_images = [
@@ -609,7 +616,7 @@ def process_issue_events(
         if frame.filename
     }
 
-    debug_files = (
+    debug_files_qs = (
         DebugSymbolBundle.objects.using(read_only_db)
         .filter(organization__in={event.organization_id for event in messages})
         .filter(
@@ -622,18 +629,20 @@ def process_issue_events(
         )
         .select_related("file", "sourcemap_file", "release")
     )
+    # Materialize once — iterated multiple times below
+    debug_files = [df async for df in debug_files_qs]
+
     now = timezone.now()
     # Update last used if older than 1 day, to minimize queries
     if debug_files:
         update_threshold = now - timedelta(days=1)
-        ids_to_update = list(
-            debug_files.filter(last_used__lt=update_threshold).values_list(
-                "pk", flat=True
+        ids_to_update = [
+            df.pk for df in debug_files if df.last_used < update_threshold
+        ]
+        if ids_to_update:
+            await DebugSymbolBundle.objects.filter(pk__in=ids_to_update).aupdate(
+                last_used=now
             )
-        )
-        DebugSymbolBundle.objects.filter(pk__in=ids_to_update).select_for_update(
-            skip_locked=True
-        ).update(last_used=now)
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
@@ -675,7 +684,7 @@ def process_issue_events(
                         if sourcemap_image.debug_id == debug_file.debug_id:
                             debug_file.data["code_file"] = sourcemap_image.code_file
 
-            JavascriptEventProcessor(
+            processor = JavascriptEventProcessor(
                 release_id,
                 event,
                 [
@@ -684,7 +693,8 @@ def process_issue_events(
                     if debug_file.release_id == release_id
                     or debug_file.data.get("code_file")
                 ],
-            ).transform()
+            )
+            await sync_to_async(processor.transform)()
         elif isinstance(event, ErrorIssueEventSchema) and event.exception:
             # Events with debug_meta may not appear in projects_with_data
             # (which is built from release/environment joins), so check
@@ -699,11 +709,13 @@ def process_issue_events(
                 None,
             )
             if _has_difs is None and event.debug_meta:
-                _has_difs = DebugInformationFile.objects.filter(
+                _has_difs = await DebugInformationFile.objects.filter(
                     project_id=ingest_event.project_id
-                ).exists()
+                ).aexists()
             if _has_difs:
-                event_difs_resolve_stacktrace(event, ingest_event.project_id)
+                await sync_to_async(event_difs_resolve_stacktrace)(
+                    event, ingest_event.project_id
+                )
 
         event_data = event.model_dump(
             mode="json",
@@ -798,8 +810,10 @@ def process_issue_events(
         )
         q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
 
-    hash_queryset = (
-        IssueHash.objects.using(read_only_db)
+    # Build a dict for O(1) lookups instead of iterating the queryset per event
+    hash_dict: dict[tuple[int, str], dict] = {
+        (h["project_id"], h["value"].hex): h
+        async for h in IssueHash.objects.using(read_only_db)
         .filter(q_objects)
         .values(
             "value",
@@ -808,11 +822,6 @@ def process_issue_events(
             "issue__status",
             "issue__resolved_in_release_id",
         )
-    )
-
-    # Build a dict for O(1) lookups instead of iterating the queryset per event
-    hash_dict: dict[tuple[int, str], dict] = {
-        (h["project_id"], h["value"].hex): h for h in hash_queryset
     }
 
     # Primary fallback: check the primary for hashes not found on the replica.
@@ -823,7 +832,7 @@ def process_issue_events(
             if (pe.project_id, pe.issue_hash) not in hash_dict:
                 missing_q |= Q(project_id=pe.project_id, value=pe.issue_hash)
         if missing_q:
-            for h in (
+            async for h in (
                 IssueHash.objects.using("default")
                 .filter(missing_q)
                 .values(
@@ -872,44 +881,58 @@ def process_issue_events(
                     issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO projects_projectcounter (project_id, value)
-                    VALUES (%s, 1)
-                    ON CONFLICT (project_id) DO UPDATE
-                    SET value = projects_projectcounter.value + 1
-                    RETURNING value;
-                    """,
-                    [project_id],
-                )
-                issue_defaults["short_id"] = cursor.fetchone()[0]
-            try:
-                with transaction.atomic():
-                    issue = Issue.objects.create(
-                        project_id=project_id,
-                        search_vector=SearchVector(
-                            Value(get_search_vector(processing_event))
-                        ),
-                        **issue_defaults,
+            # Project counter + atomic Issue/IssueHash creation needs sync_to_async
+            # because Django doesn't support async transaction.atomic() yet
+            def _create_issue_and_hash(
+                _project_id, _issue_defaults, _processing_event, _processing_events
+            ):
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO projects_projectcounter (project_id, value)
+                        VALUES (%s, 1)
+                        ON CONFLICT (project_id) DO UPDATE
+                        SET value = projects_projectcounter.value + 1
+                        RETURNING value;
+                        """,
+                        [_project_id],
                     )
-                    new_issue_hash = IssueHash.objects.create(
-                        issue=issue,
-                        value=processing_event.issue_hash,
-                        project_id=project_id,
+                    _issue_defaults["short_id"] = cursor.fetchone()[0]
+                try:
+                    with transaction.atomic():
+                        issue = Issue.objects.create(
+                            project_id=_project_id,
+                            search_vector=SearchVector(
+                                Value(get_search_vector(_processing_event))
+                            ),
+                            **_issue_defaults,
+                        )
+                        new_issue_hash = IssueHash.objects.create(
+                            issue=issue,
+                            value=_processing_event.issue_hash,
+                            project_id=_project_id,
+                        )
+                        check_set_issue_id(
+                            _processing_events,
+                            issue.project_id,
+                            new_issue_hash.value,
+                            issue.id,
+                        )
+                    return issue.id, True
+                except IntegrityError:
+                    return (
+                        IssueHash.objects.get(
+                            project_id=_project_id,
+                            value=_processing_event.issue_hash,
+                        ).issue_id,
+                        False,
                     )
-                    check_set_issue_id(
-                        processing_events,
-                        issue.project_id,
-                        new_issue_hash.value,
-                        issue.id,
-                    )
-                processing_event.issue_id = issue.id
-                processing_event.issue_created = True
-            except IntegrityError:
-                processing_event.issue_id = IssueHash.objects.get(
-                    project_id=project_id, value=processing_event.issue_hash
-                ).issue_id
+
+            issue_id, created = await sync_to_async(_create_issue_and_hash)(
+                project_id, issue_defaults, processing_event, processing_events
+            )
+            processing_event.issue_id = issue_id
+            processing_event.issue_created = created
 
         hour_received = processing_event.received.replace(
             minute=0, second=0, microsecond=0
@@ -945,44 +968,47 @@ def process_issue_events(
             )
         )
 
-    update_issues(processing_events)
+    await update_issues(processing_events)
 
     if settings.CACHE_IS_VALKEY:
         # Add set of issue_ids for alerts to process later
-        with get_valkey_connection("default") as con:
-            if (
-                con.sadd(
-                    ISSUE_IDS_KEY, *{event.issue_id for event in processing_events}
-                )
-                > 0
-            ):
-                # Set a long expiration time when a key is added
-                # We want all keys to have a long "sanity check" TTL to avoid valkey out
-                # of memory errors (we can't ensure end users use all keys lru eviction)
-                con.expire(ISSUE_IDS_KEY, 3600)
+        # Lua script: atomically SADD + EXPIRE in a single round-trip
+        driver = caches["default"].get_raw_client()
+        issue_ids_bytes = [
+            str(event.issue_id).encode() for event in processing_events
+        ]
+        await driver.eval(
+            "local added = redis.call('SADD', KEYS[1], unpack(ARGV))\n"
+            "if added > 0 then\n"
+            "  redis.call('EXPIRE', KEYS[1], 3600)\n"
+            "end\n"
+            "return added",
+            [ISSUE_IDS_KEY],
+            issue_ids_bytes,
+        )
 
     if issues_to_reopen:
-        Issue.objects.filter(id__in=issues_to_reopen).update(
+        await Issue.objects.filter(id__in=issues_to_reopen).aupdate(
             status=EventStatus.UNRESOLVED,
             resolved_in_release=None,
         )
-        Notification.objects.filter(issues__in=issues_to_reopen).delete()
+        await Notification.objects.filter(issues__in=issues_to_reopen).adelete()
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
-    IssueEvent.objects.bulk_create(issue_events, ignore_conflicts=True)
+    await IssueEvent.objects.abulk_create(issue_events, ignore_conflicts=True)
 
-    update_tags(processing_events)
-    update_statistics(
+    await update_tags(processing_events)
+    await update_statistics(
         data_stats,
         table_name="projects_issueeventprojecthourlystatistic",
     )
-    update_org_statistics(
+    await update_org_statistics(
         issue_hourly_stats,
         table_name="issue_events_issueaggregate",
     )
 
 
-def update_statistics(
+async def update_statistics(
     stats_data: defaultdict[datetime, defaultdict[int, dict]],
     table_name: StatsTableName,
 ):
@@ -1006,18 +1032,21 @@ def update_statistics(
 
     data.sort(key=itemgetter(0, 1, 2))
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
-        sql = (
-            f"INSERT INTO {table_name} (date, {id_column_name}, organization_id, count)\n"
-            f"VALUES {args_str}\n"
-            f"ON CONFLICT ({id_column_name}, organization_id, date)\n"
-            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
-        )
-        cursor.execute(sql)
+    def _execute():
+        with connection.cursor() as cursor:
+            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+            sql = (
+                f"INSERT INTO {table_name} (date, {id_column_name}, organization_id, count)\n"
+                f"VALUES {args_str}\n"
+                f"ON CONFLICT ({id_column_name}, organization_id, date)\n"
+                f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
+            )
+            cursor.execute(sql)
+
+    await sync_to_async(_execute)()
 
 
-def update_org_statistics(
+async def update_org_statistics(
     stats_data: defaultdict[datetime, defaultdict[int, IssueStats]],
     table_name: StatsTableName,
 ):
@@ -1043,22 +1072,25 @@ def update_org_statistics(
     # Sort by all key components to avoid deadlocks on concurrent writes
     data.sort(key=itemgetter(0, 1, 2))
 
-    with connection.cursor() as cursor:
-        # Prepare the data for a single, bulk INSERT statement
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+    def _execute():
+        with connection.cursor() as cursor:
+            # Prepare the data for a single, bulk INSERT statement
+            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
 
-        # The ON CONFLICT target must match the composite primary key
-        # of (issue_id, organization_id, date)
-        conflict_target = f"({id_column_name}, organization_id, date)"
+            # The ON CONFLICT target must match the composite primary key
+            # of (issue_id, organization_id, date)
+            conflict_target = f"({id_column_name}, organization_id, date)"
 
-        # Construct the final SQL query
-        sql = (
-            f"INSERT INTO {table_name} (date, organization_id, {id_column_name}, count)\n"
-            f"VALUES {args_str}\n"
-            f"ON CONFLICT {conflict_target}\n"
-            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
-        )
-        cursor.execute(sql)
+            # Construct the final SQL query
+            sql = (
+                f"INSERT INTO {table_name} (date, organization_id, {id_column_name}, count)\n"
+                f"VALUES {args_str}\n"
+                f"ON CONFLICT {conflict_target}\n"
+                f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
+            )
+            cursor.execute(sql)
+
+    await sync_to_async(_execute)()
 
 
 def _is_error_status(trace_status: str | None) -> bool:
@@ -1079,7 +1111,7 @@ def _is_error_status(trace_status: str | None) -> bool:
     )
 
 
-def _update_transaction_group_stats(
+async def _update_transaction_group_stats(
     group_durations: dict[int, list[float]],
     group_error_counts: dict[int, int],
     group_org_ids: dict[int, int],
@@ -1119,32 +1151,36 @@ def _update_transaction_group_stats(
     # Phase 1: Atomically merge count, error_count, avg_duration,
     # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
     # Row locks are held only for the duration of this statement.
-    with connection.cursor() as cursor:
-        placeholders = ",".join(
-            cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row) for row in values_data
-        )
-        cursor.execute(
-            f"""
-            UPDATE performance_transactiongroup AS tg
-            SET count = tg.count + v.batch_count,
-                error_count = tg.error_count + v.error_count,
-                avg_duration = CASE
-                    WHEN tg.count + v.batch_count > 0
-                    THEN (tg.avg_duration * tg.count + v.batch_total)
-                         / (tg.count + v.batch_count)
-                    ELSE 0
-                END,
-                last_seen = NOW(),
-                duration_histogram = ARRAY(
-                    SELECT COALESCE(a, 0) + COALESCE(b, 0)
-                    FROM unnest(tg.duration_histogram, v.hist_arr) AS t(a, b)
-                )
-            FROM (VALUES {placeholders})
-                AS v(group_id, org_id, batch_count, batch_total, error_count, hist_arr)
-            WHERE tg.id = v.group_id
-              AND tg.organization_id = v.org_id
-            """
-        )
+    def _execute_phase1():
+        with connection.cursor() as cursor:
+            placeholders = ",".join(
+                cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row)
+                for row in values_data
+            )
+            cursor.execute(
+                f"""
+                UPDATE performance_transactiongroup AS tg
+                SET count = tg.count + v.batch_count,
+                    error_count = tg.error_count + v.error_count,
+                    avg_duration = CASE
+                        WHEN tg.count + v.batch_count > 0
+                        THEN (tg.avg_duration * tg.count + v.batch_total)
+                             / (tg.count + v.batch_count)
+                        ELSE 0
+                    END,
+                    last_seen = NOW(),
+                    duration_histogram = ARRAY(
+                        SELECT COALESCE(a, 0) + COALESCE(b, 0)
+                        FROM unnest(tg.duration_histogram, v.hist_arr) AS t(a, b)
+                    )
+                FROM (VALUES {placeholders})
+                    AS v(group_id, org_id, batch_count, batch_total, error_count, hist_arr)
+                WHERE tg.id = v.group_id
+                  AND tg.organization_id = v.org_id
+                """
+            )
+
+    await sync_to_async(_execute_phase1)()
 
     # Phase 2: Recompute p50/p95 from the merged histogram.
     # Runs after Phase 1 commits — no row locks held. p50/p95 are
@@ -1152,9 +1188,12 @@ def _update_transaction_group_stats(
     # which makes them more accurate, not less).
     org_ids = {row[1] for row in values_data}
     group_ids = [row[0] for row in values_data]
-    updated_groups = TransactionGroup.objects.filter(
-        id__in=group_ids, organization_id__in=org_ids
-    ).only("id", "organization_id", "count", "duration_histogram")
+    updated_groups = [
+        g
+        async for g in TransactionGroup.objects.filter(
+            id__in=group_ids, organization_id__in=org_ids
+        ).only("id", "organization_id", "count", "duration_histogram")
+    ]
     p_updates = []
     for g in updated_groups:
         p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
@@ -1163,20 +1202,26 @@ def _update_transaction_group_stats(
 
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
-        with connection.cursor() as cursor:
-            placeholders = ",".join(
-                cursor.mogrify("(%s::double precision,%s::double precision,%s,%s)", row)
-                for row in p_updates
-            )
-            cursor.execute(
-                f"""
-                UPDATE performance_transactiongroup AS tg
-                SET p50 = v.p50, p95 = v.p95
-                FROM (VALUES {placeholders}) AS v(p50, p95, group_id, org_id)
-                WHERE tg.id = v.group_id
-                  AND tg.organization_id = v.org_id
-                """
-            )
+
+        def _execute_phase2():
+            with connection.cursor() as cursor:
+                placeholders = ",".join(
+                    cursor.mogrify(
+                        "(%s::double precision,%s::double precision,%s,%s)", row
+                    )
+                    for row in p_updates
+                )
+                cursor.execute(
+                    f"""
+                    UPDATE performance_transactiongroup AS tg
+                    SET p50 = v.p50, p95 = v.p95
+                    FROM (VALUES {placeholders}) AS v(p50, p95, group_id, org_id)
+                    WHERE tg.id = v.group_id
+                      AND tg.organization_id = v.org_id
+                    """
+                )
+
+        await sync_to_async(_execute_phase2)()
 
 
 TagStats = defaultdict[
@@ -1185,7 +1230,7 @@ TagStats = defaultdict[
 ]
 
 
-def update_tags(processing_events: list[ProcessingEvent]):
+async def update_tags(processing_events: list[ProcessingEvent]):
     # Truncate long values and strip NUL bytes
     for processing_event in processing_events:
         processing_event.event_tags = {
@@ -1199,17 +1244,20 @@ def update_tags(processing_events: list[ProcessingEvent]):
         {value for d in processing_events for value in d.event_tags.values()}
     )
 
-    TagKey.objects.bulk_create([TagKey(key=key) for key in keys], ignore_conflicts=True)
-    TagValue.objects.bulk_create(
+    await TagKey.objects.abulk_create(
+        [TagKey(key=key) for key in keys], ignore_conflicts=True
+    )
+    await TagValue.objects.abulk_create(
         [TagValue(value=value) for value in values], ignore_conflicts=True
     )
     # Postgres cannot return ids with ignore_conflicts
     tag_keys = {
-        tag["key"]: tag["id"] for tag in TagKey.objects.filter(key__in=keys).values()
+        tag["key"]: tag["id"]
+        async for tag in TagKey.objects.filter(key__in=keys).values()
     }
     tag_values = {
         tag["value"]: tag["id"]
-        for tag in TagValue.objects.filter(value__in=values).values()
+        async for tag in TagValue.objects.filter(value__in=values).values()
     }
 
     tag_stats: TagStats = defaultdict(
@@ -1258,19 +1306,24 @@ def update_tags(processing_events: list[ProcessingEvent]):
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4))
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data)
-        sql = (
-            "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
-            f"VALUES {args_str}\n"
-            "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date)\n"
-            "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
-        )
-        cursor.execute(sql)
+    def _execute():
+        with connection.cursor() as cursor:
+            args_str = ",".join(
+                cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data
+            )
+            sql = (
+                "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
+                f"VALUES {args_str}\n"
+                "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date)\n"
+                "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
+            )
+            cursor.execute(sql)
+
+    await sync_to_async(_execute)()
 
 
 # Transactions
-def process_transaction_events(
+async def process_transaction_events(
     ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
 ):
     now = timezone.now()
@@ -1279,9 +1332,9 @@ def process_transaction_events(
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
     if projects_to_update:
-        Project.objects.filter(
+        await Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
-        ).update(first_event=now)
+        ).aupdate(first_event=now)
 
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)
@@ -1296,7 +1349,7 @@ def process_transaction_events(
     project_set = {project_id for _, project_id, _ in release_set}.union(
         {project_id for _, project_id, _ in environment_set}
     )
-    _get_or_create_related_models(
+    await _get_or_create_related_models(
         release_set, environment_set, project_set, read_only_db
     )
 
@@ -1334,7 +1387,7 @@ def process_transaction_events(
             q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
         existing = {
             (g.project_id, g.transaction, g.op, g.method): g
-            for g in TransactionGroup.objects.using(read_only_db).filter(q)
+            async for g in TransactionGroup.objects.using(read_only_db).filter(q)
         }
     else:
         existing = {}
@@ -1354,13 +1407,15 @@ def process_transaction_events(
             )
             for k in missing_keys
         ]
-        TransactionGroup.objects.bulk_create(new_groups, ignore_conflicts=True)
+        await TransactionGroup.objects.abulk_create(
+            new_groups, ignore_conflicts=True
+        )
         # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
         if missing_keys:
             q = Q()
             for project_id, txn, op, method in missing_keys:
                 q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
-            for g in TransactionGroup.objects.filter(q):
+            async for g in TransactionGroup.objects.filter(q):
                 existing[(g.project_id, g.transaction, g.op, g.method)] = g
 
     # 3. Collect durations, error counts, and spans per group
@@ -1429,14 +1484,16 @@ def process_transaction_events(
                 )
 
     # 4. Update TransactionGroup stats (append-only, no read-modify-write)
-    _update_transaction_group_stats(group_durations, group_error_counts, group_org_ids)
+    await _update_transaction_group_stats(
+        group_durations, group_error_counts, group_org_ids
+    )
 
     # 5. Bulk insert span staging rows
     if span_rows:
-        SpanStaging.objects.bulk_create(span_rows, batch_size=1000)
+        await SpanStaging.objects.abulk_create(span_rows, batch_size=1000)
 
     # 6. Update hourly project statistics
-    update_statistics(
+    await update_statistics(
         data_stats,
         table_name="projects_transactioneventprojecthourlystatistic",
     )

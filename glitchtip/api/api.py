@@ -125,6 +125,7 @@ class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
+    license_key: str
     enable_user_registration: bool
     enable_social_apps_user_registration: bool
     enable_organization_creation: bool
@@ -186,6 +187,7 @@ async def get_settings(request: HttpRequest):
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
         "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
+        "license_key": settings.GLITCHTIP_LICENSE_KEY or "",
         "enable_user_registration": enable_user_registration,
         "enable_social_apps_user_registration": enable_social_apps_user_registration,
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,

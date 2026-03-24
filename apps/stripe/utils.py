@@ -60,29 +60,34 @@ def compute_cycle(period_start: datetime, period_end: datetime, is_annual: bool)
     return cycle_start, cycle_end
 
 
-def compute_previous_cycle(
+def compute_cycle_n_ago(
     current_period_start: datetime,
     current_period_end: datetime,
     subscription_cycle_start: datetime | None,
     subscription_cycle_end: datetime | None,
+    periods_ago: int,
 ) -> tuple[datetime, datetime] | None:
-    """Return (prev_start, prev_end) for the billing cycle before the current one.
+    """Return (start, end) for a billing cycle N periods before the current one.
 
-    Returns None if there is no previous cycle (e.g. subscription just started).
+    periods_ago=0 is not handled here (use with_event_counts current_period=True).
+    periods_ago=1 returns the immediately preceding cycle.
 
-    Monthly plans: previous period is the month before current_period_start.
-    Annual plans with virtual monthly cycles: go back one month from the
-    current cycle, but only if the result doesn't precede period_start.
+    Returns None if the requested period precedes the subscription start
+    (annual plans only — monthly plans always have a valid prior period).
+
+    Monthly plans: go back periods_ago months from current_period_start.
+    Annual plans with virtual monthly cycles: go back periods_ago months from
+    subscription_cycle_start, but only if the result doesn't precede period_start.
     """
     if subscription_cycle_start and subscription_cycle_end:
         # Annual plan with virtual monthly cycles
-        prev_end = subscription_cycle_start
-        prev_start = subscription_cycle_start - relativedelta(months=1)
-        if prev_start < current_period_start:
+        cycle_start = subscription_cycle_start - relativedelta(months=periods_ago)
+        cycle_end = subscription_cycle_start - relativedelta(months=periods_ago - 1)
+        if cycle_start < current_period_start:
             return None
-        return prev_start, prev_end
+        return cycle_start, cycle_end
     else:
         # Monthly plan
-        prev_end = current_period_start
-        prev_start = current_period_start - relativedelta(months=1)
-        return prev_start, prev_end
+        period_end = current_period_start - relativedelta(months=periods_ago - 1)
+        period_start = current_period_start - relativedelta(months=periods_ago)
+        return period_start, period_end

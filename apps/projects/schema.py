@@ -44,7 +44,7 @@ class ProjectSchema(NameSlugProjectSchema, ModelSchema):
     id: str
     avatar: dict[str, str | None] = {"avatarType": "", "avatarUuid": None}
     color: str = ""
-    features: list = []
+    features: list[str] = []
     has_access: bool = True
     is_bookmarked: bool = False
     is_internal: bool = False

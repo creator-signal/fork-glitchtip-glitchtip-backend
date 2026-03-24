@@ -14,7 +14,8 @@ from mcp.server.auth.settings import (
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from apps.oauth.provider import DEFAULT_SCOPES, VALID_SCOPES, GlitchTipOAuthProvider
+from apps.oauth.provider import GlitchTipOAuthProvider
+from apps.shared.schema.fields import parse_relative_datetime
 
 from . import data, serializers
 
@@ -27,12 +28,12 @@ mcp = FastMCP(
     stateless_http=True,
     auth_server_provider=GlitchTipOAuthProvider(),
     auth=AuthSettings(
-        issuer_url=_base_url,
+        issuer_url=f"{_base_url}/mcp",
         resource_server_url=f"{_base_url}/mcp",
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
-            valid_scopes=VALID_SCOPES,
-            default_scopes=DEFAULT_SCOPES,
+            valid_scopes=["org:read", "project:read", "event:read", "event:write"],
+            default_scopes=["org:read", "project:read", "event:read", "event:write"],
         ),
         revocation_options=RevocationOptions(enabled=True),
     ),
@@ -43,16 +44,28 @@ mcp = FastMCP(
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
-    """Parse an ISO 8601 datetime string, returning None if not provided."""
+    """Parse a datetime string, returning None if not provided.
+
+    Accepts ISO 8601 (e.g. "2025-01-15T10:00:00Z") or relative syntax
+    (e.g. "now", "now-10m", "now-1h", "now-7d").
+    """
     if not value:
         return None
+    # Try relative syntax first (now, now-10m, etc.)
+    result = parse_relative_datetime(value)
+    if isinstance(result, datetime):
+        return result
+    # Fall back to ISO 8601
     try:
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
     except ValueError:
-        raise ValueError(f"Invalid datetime format: {value!r}. Use ISO 8601.")
+        raise ValueError(
+            f"Invalid datetime format: {value!r}. "
+            "Use ISO 8601 or relative syntax (now, now-10m, now-1h, now-7d)."
+        )
 
 
 def _error(message: str) -> str:
@@ -111,6 +124,9 @@ async def list_issues(
     project_slug: str | None = None,
     query: str | None = None,
     sort: str | None = None,
+    environment: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
     limit: int = 25,
 ) -> str:
     """List issues for an organization, optionally filtered by project.
@@ -123,9 +139,15 @@ async def list_issues(
         organization_slug: Organization slug
         project_slug: Optional project slug to filter by
         query: Search query. Examples: "is:unresolved", "is:resolved",
-            "level:error", or free text search. Combine with spaces.
+            "level:error", or free text search. Tag filters like
+            "server_name:pod-name" filter by tag key:value. Combine
+            with spaces.
         sort: Sort field: "-last_seen" (default), "-count", "-priority",
             "-first_seen"
+        environment: Filter by environment tag value
+        start: Only issues first seen after this time. ISO 8601 or
+            relative (e.g. "now-10m", "now-1h", "now-7d").
+        end: Only issues first seen before this time. Same format as start.
         limit: Max issues to return (default 25, max 100)
     """
     try:
@@ -138,6 +160,9 @@ async def list_issues(
             project_slug=project_slug,
             query=query,
             sort=sort,
+            environment=environment,
+            start=_parse_datetime(start),
+            end=_parse_datetime(end),
             limit=limit,
         )
         return json.dumps([serializers.serialize_issue(i) for i in issues])
@@ -176,7 +201,9 @@ async def get_latest_event(issue_id: int) -> str:
 
 
 @mcp.tool()
-async def get_event(event_id: str) -> str:
+async def get_event(
+    event_id: str, organization_slug: str | None = None
+) -> str:
     """Look up a specific event by its ID and return it with its parent issue.
 
     Accepts either format:
@@ -187,10 +214,11 @@ async def get_event(event_id: str) -> str:
 
     Args:
         event_id: Event UUID (either GlitchTip id or Sentry SDK event_id)
+        organization_slug: Optional org slug for faster lookup (recommended)
     """
     try:
         user_id = _check_scopes(["event:read", "event:write", "event:admin"])
-        event = await data.get_event(user_id, event_id)
+        event = await data.get_event(user_id, event_id, organization_slug)
         if event is None:
             return _error("Event not found")
         result = serializers.serialize_event(event)
@@ -493,11 +521,14 @@ if django_settings.GLITCHTIP_ENABLE_LOGS:
         level: str | None = None,
         service: str | None = None,
         environment: str | None = None,
+        host: str | None = None,
         query: str | None = None,
         trace_id: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
         limit: int = 50,
     ) -> str:
-        """Search log events for an organization (last 7 days).
+        """Search log events for an organization.
 
         Returns logs from most recent to oldest. Useful for investigating
         application behavior, debugging errors, and correlating with traces.
@@ -508,8 +539,13 @@ if django_settings.GLITCHTIP_ENABLE_LOGS:
             level: Log level filter (trace, debug, info, warn, error, fatal)
             service: Filter by service name (exact match)
             environment: Filter by environment (exact match)
+            host: Filter by hostname (exact match). Useful for filtering
+                logs from a specific pod during rolling deploys.
             query: Search text in log body (case-insensitive)
             trace_id: Filter by trace ID for correlation
+            start: Start of time range. ISO 8601 or relative
+                (e.g. "now-10m", "now-1h", "now-7d"). Defaults to 7 days ago.
+            end: End of time range. Same format as start. Defaults to now.
             limit: Max logs to return (default 50, max 100)
         """
         try:
@@ -521,8 +557,11 @@ if django_settings.GLITCHTIP_ENABLE_LOGS:
                 level=level,
                 service=service,
                 environment=environment,
+                host=host,
                 query=query,
                 trace_id=trace_id,
+                start=_parse_datetime(start),
+                end=_parse_datetime(end),
                 limit=limit,
             )
             return json.dumps([serializers.serialize_log_event(log) for log in logs])

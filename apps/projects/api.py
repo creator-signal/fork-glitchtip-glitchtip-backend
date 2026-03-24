@@ -2,7 +2,7 @@ from uuid import UUID
 
 from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import ValidationError
 from ninja.pagination import paginate
 
@@ -139,7 +139,7 @@ async def delete_project(
         organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
     )
     await project.adelete()
-    return 204, None
+    return Status(204, None)
 
 
 @router.get(
@@ -190,7 +190,7 @@ async def create_project(
     )
     await project.teams.aadd(team)
     project = await get_projects_queryset(user_id).aget(id=project.id)
-    return 201, project
+    return Status(201, project)
 
 
 @router.get(
@@ -306,12 +306,12 @@ async def create_project_key(
         get_projects_queryset(request.auth.user_id, organization_slug),
         slug=project_slug,
     )
-    return 201, await ProjectKey.objects.acreate(
+    return Status(201, await ProjectKey.objects.acreate(
         project=project,
         name=payload.name,
         rate_limit_count=payload.rate_limit.count if payload.rate_limit else None,
         rate_limit_window=payload.rate_limit.window if payload.rate_limit else None,
-    )
+    ))
 
 
 @router.delete(
@@ -333,7 +333,7 @@ async def delete_project_key(
     )
     if not result:
         raise Http404
-    return 204, None
+    return Status(204, None)
 
 
 @router.get("/users/{slug:user_id}/notifications/alerts/", response=StrKeyIntValue)
@@ -379,4 +379,4 @@ async def update_user_notification_alerts(
             user_id=user_id, project_id=project_id, defaults={"status": alert_status}
         )
 
-    return 204, None
+    return Status(204, None)

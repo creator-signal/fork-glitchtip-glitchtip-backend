@@ -2,7 +2,7 @@ from uuid import UUID
 
 from django.http import HttpResponse
 from django.shortcuts import aget_object_or_404
-from ninja import Query, Schema
+from ninja import Query, Schema, Status
 from ninja.pagination import paginate
 
 from apps.issue_events.models import IssueEvent, IssueHash
@@ -77,4 +77,4 @@ async def delete_hash(
         issue_id=issue_id,
         issue__project__organization=organization,
     ).adelete()
-    return 202, None
+    return Status(202, None)

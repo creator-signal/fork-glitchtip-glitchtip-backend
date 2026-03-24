@@ -1,13 +1,11 @@
 from django.urls import path
-from django.views.decorators.cache import cache_page
-from django.views.decorators.vary import vary_on_cookie
 
-from .views import StatusPageDetailView
+from .views import status_page_detail
 
 urlpatterns = [
     path(
         "status-pages/<organization>/<slug>/",
-        cache_page(60)(vary_on_cookie(StatusPageDetailView.as_view())),
+        status_page_detail,
         name="status-page-detail",
     ),
 ]

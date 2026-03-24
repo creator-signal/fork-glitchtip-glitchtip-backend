@@ -141,7 +141,10 @@ def filter_issue_list(
                 event_filter &= Q(issueevent__organization_id=organization_id)
             qs = qs.filter(event_filter)
     elif query:
-        queries = shlex.split(query)
+        try:
+            queries = shlex.split(query)
+        except ValueError:
+            queries = query.split()
         # First look for structured queries
         for i, query in enumerate(queries):
             query_part = query.split(":", 1)
