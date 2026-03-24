@@ -50,7 +50,7 @@ class IssueTag(AggregationModel):
     It is denormalized data that powers fast search results.
     """
 
-    issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
+    issue = models.ForeignKey("Issue", on_delete=models.CASCADE, db_constraint=False)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
@@ -72,7 +72,7 @@ class IssueAggregate(AggregationModel):
     """Count the number of events for an issue per time unit"""
 
     # Fields ordered for optimal data alignment: 8-byte foreign keys first, then other fields
-    issue = models.ForeignKey("Issue", on_delete=models.CASCADE)
+    issue = models.ForeignKey("Issue", on_delete=models.CASCADE, db_constraint=False)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
@@ -253,7 +253,7 @@ class IssueEvent(models.Model):
     # Note: `received` is now a property derived from UUIDv7 id (millisecond precision)
 
     # 8-byte alignment: Foreign keys
-    issue = models.ForeignKey(Issue, on_delete=models.CASCADE)
+    issue = models.ForeignKey(Issue, on_delete=models.CASCADE, db_constraint=False)
     organization = models.ForeignKey(
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
