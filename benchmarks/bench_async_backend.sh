@@ -22,6 +22,7 @@ CONCURRENCY=200
 REQUESTS_PER_WAVE=1000
 WAVES=5
 PAUSE=3
+DB_LATENCY_MS="${DB_LATENCY_MS:-2}"
 
 cd "$REPO_ROOT"
 
@@ -72,6 +73,18 @@ except Exception as e:
     done
     echo ""
 
+    # Inject DB latency via tc netem
+    echo ">>> Injecting ${DB_LATENCY_MS}ms DB latency..."
+    $COMPOSE exec -T web bash -c "which tc >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq iproute2 >/dev/null 2>&1)"
+    $COMPOSE exec -T web tc qdisc del dev eth0 root 2>/dev/null || true
+    local POSTGRES_IP
+    POSTGRES_IP=$($COMPOSE exec -T web getent hosts postgres | awk '{print $1}')
+    $COMPOSE exec -T web tc qdisc add dev eth0 root handle 1: prio priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    $COMPOSE exec -T web tc qdisc add dev eth0 parent 1:2 handle 20: netem delay ${DB_LATENCY_MS}ms
+    $COMPOSE exec -T web tc filter add dev eth0 parent 1:0 protocol ip u32 match ip dst "$POSTGRES_IP"/32 flowid 1:2
+    echo "    Applied ${DB_LATENCY_MS}ms to postgres ($POSTGRES_IP)"
+    echo ""
+
     # Capture baseline memory
     WEB_CONTAINER=$($COMPOSE ps -q web)
     local baseline_mem
@@ -107,8 +120,9 @@ except Exception as e:
     local end_time
     end_time=$(date +%s.%N)
 
-    # Stop monitor
+    # Stop monitor, remove tc rules
     kill "$monitor_pid" 2>/dev/null && wait "$monitor_pid" 2>/dev/null || true
+    $COMPOSE exec -T web tc qdisc del dev eth0 root 2>/dev/null || true
 
     # Post-benchmark memory
     local final_mem
