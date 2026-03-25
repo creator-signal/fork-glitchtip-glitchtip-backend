@@ -673,7 +673,7 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
-    db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
+    db_config["ENGINE"] = "glitchtip.db_backend"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)

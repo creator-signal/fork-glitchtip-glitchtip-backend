@@ -53,8 +53,8 @@ services:
     environment:
       <<: *bench-environment
       MALLOC_ARENA_MAX: "${MALLOC_ARENA_MAX:-4}"
-      MALLOC_MMAP_THRESHOLD_: "${MALLOC_MMAP_THRESHOLD_:-}"
-      MALLOC_TRIM_THRESHOLD_: "${MALLOC_TRIM_THRESHOLD_:-}"
+      MALLOC_MMAP_THRESHOLD_: "${MALLOC_MMAP_THRESHOLD_:-65536}"
+      MALLOC_TRIM_THRESHOLD_: "${MALLOC_TRIM_THRESHOLD_:-65536}"
     deploy:
       resources:
         limits:
