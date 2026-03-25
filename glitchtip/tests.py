@@ -448,7 +448,13 @@ class DatabaseSettingsTestCase(TestCase):
         self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
-        self.assertEqual(db_settings.get("ENGINE"), "django.db.backends.postgresql")
+        self.assertIn(
+            db_settings.get("ENGINE"),
+            [
+                "django.db.backends.postgresql",
+                "django_async_backend.db.backends.postgresql",
+            ],
+        )
 
 
 class IsSelfReferencingDsnTestCase(TestCase):

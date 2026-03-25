@@ -46,6 +46,7 @@ from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
+from glitchtip.async_db import async_cursor, has_async_backend
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
@@ -281,23 +282,20 @@ async def update_issues(processing_events: list[ProcessingEvent]):
         key=itemgetter(0),
     )
 
-    def _execute():
-        with connection.cursor() as cursor:
-            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
-            max_lexemes = settings.SEARCH_MAX_LEXEMES
+    async with async_cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s)", x) for x in data)
+        max_lexemes = settings.SEARCH_MAX_LEXEMES
 
-            sql = (
-                "UPDATE issue_events_issue SET "
-                "count = issue_events_issue.count + v.added_count, "
-                f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
-                "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
-                "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
-                f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
-                "WHERE issue_events_issue.id = v.id"
-            )
-            cursor.execute(sql)
-
-    await sync_to_async(_execute)()
+        sql = (
+            "UPDATE issue_events_issue SET "
+            "count = issue_events_issue.count + v.added_count, "
+            f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
+            "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
+            "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
+            f"FROM (VALUES {args_str}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
+            "WHERE issue_events_issue.id = v.id"
+        )
+        await cursor.execute(sql)
 
 
 def generate_contexts(event: TaskIssueEvent) -> Contexts:
@@ -881,13 +879,11 @@ async def process_issue_events(
                     issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
-            # Project counter + atomic Issue/IssueHash creation needs sync_to_async
-            # because Django doesn't support async transaction.atomic() yet
-            def _create_issue_and_hash(
-                _project_id, _issue_defaults, _processing_event, _processing_events
-            ):
-                with connection.cursor() as cursor:
-                    cursor.execute(
+            if has_async_backend():
+                from django_async_backend.db.transaction import async_atomic
+
+                async with async_cursor() as cursor:
+                    await cursor.execute(
                         """
                         INSERT INTO projects_projectcounter (project_id, value)
                         VALUES (%s, 1)
@@ -895,44 +891,90 @@ async def process_issue_events(
                         SET value = projects_projectcounter.value + 1
                         RETURNING value;
                         """,
-                        [_project_id],
+                        [project_id],
                     )
-                    _issue_defaults["short_id"] = cursor.fetchone()[0]
+                    row = await cursor.fetchone()
+                    issue_defaults["short_id"] = row[0]
                 try:
-                    with transaction.atomic():
-                        issue = Issue.objects.create(
-                            project_id=_project_id,
+                    async with async_atomic():
+                        issue = await Issue.objects.acreate(
+                            project_id=project_id,
                             search_vector=SearchVector(
-                                Value(get_search_vector(_processing_event))
+                                Value(get_search_vector(processing_event))
                             ),
-                            **_issue_defaults,
+                            **issue_defaults,
                         )
-                        new_issue_hash = IssueHash.objects.create(
+                        new_issue_hash = await IssueHash.objects.acreate(
                             issue=issue,
-                            value=_processing_event.issue_hash,
-                            project_id=_project_id,
+                            value=processing_event.issue_hash,
+                            project_id=project_id,
                         )
                         check_set_issue_id(
-                            _processing_events,
+                            processing_events,
                             issue.project_id,
                             new_issue_hash.value,
                             issue.id,
                         )
-                    return issue.id, True
+                    processing_event.issue_id = issue.id
+                    processing_event.issue_created = True
                 except IntegrityError:
-                    return (
-                        IssueHash.objects.get(
-                            project_id=_project_id,
-                            value=_processing_event.issue_hash,
-                        ).issue_id,
-                        False,
-                    )
+                    processing_event.issue_id = (
+                        await IssueHash.objects.aget(
+                            project_id=project_id,
+                            value=processing_event.issue_hash,
+                        )
+                    ).issue_id
+            else:
+                def _create_issue_and_hash(
+                    _project_id, _issue_defaults, _processing_event, _processing_events
+                ):
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO projects_projectcounter (project_id, value)
+                            VALUES (%s, 1)
+                            ON CONFLICT (project_id) DO UPDATE
+                            SET value = projects_projectcounter.value + 1
+                            RETURNING value;
+                            """,
+                            [_project_id],
+                        )
+                        _issue_defaults["short_id"] = cursor.fetchone()[0]
+                    try:
+                        with transaction.atomic():
+                            issue = Issue.objects.create(
+                                project_id=_project_id,
+                                search_vector=SearchVector(
+                                    Value(get_search_vector(_processing_event))
+                                ),
+                                **_issue_defaults,
+                            )
+                            new_issue_hash = IssueHash.objects.create(
+                                issue=issue,
+                                value=_processing_event.issue_hash,
+                                project_id=_project_id,
+                            )
+                            check_set_issue_id(
+                                _processing_events,
+                                issue.project_id,
+                                new_issue_hash.value,
+                                issue.id,
+                            )
+                        return issue.id, True
+                    except IntegrityError:
+                        return (
+                            IssueHash.objects.get(
+                                project_id=_project_id,
+                                value=_processing_event.issue_hash,
+                            ).issue_id,
+                            False,
+                        )
 
-            issue_id, created = await sync_to_async(_create_issue_and_hash)(
-                project_id, issue_defaults, processing_event, processing_events
-            )
-            processing_event.issue_id = issue_id
-            processing_event.issue_created = created
+                issue_id, created = await sync_to_async(_create_issue_and_hash)(
+                    project_id, issue_defaults, processing_event, processing_events
+                )
+                processing_event.issue_id = issue_id
+                processing_event.issue_created = created
 
         hour_received = processing_event.received.replace(
             minute=0, second=0, microsecond=0
@@ -1032,18 +1074,15 @@ async def update_statistics(
 
     data.sort(key=itemgetter(0, 1, 2))
 
-    def _execute():
-        with connection.cursor() as cursor:
-            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
-            sql = (
-                f"INSERT INTO {table_name} (date, {id_column_name}, organization_id, count)\n"
-                f"VALUES {args_str}\n"
-                f"ON CONFLICT ({id_column_name}, organization_id, date)\n"
-                f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
-            )
-            cursor.execute(sql)
-
-    await sync_to_async(_execute)()
+    async with async_cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+        sql = (
+            f"INSERT INTO {table_name} (date, {id_column_name}, organization_id, count)\n"
+            f"VALUES {args_str}\n"
+            f"ON CONFLICT ({id_column_name}, organization_id, date)\n"
+            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
+        )
+        await cursor.execute(sql)
 
 
 async def update_org_statistics(
@@ -1072,25 +1111,16 @@ async def update_org_statistics(
     # Sort by all key components to avoid deadlocks on concurrent writes
     data.sort(key=itemgetter(0, 1, 2))
 
-    def _execute():
-        with connection.cursor() as cursor:
-            # Prepare the data for a single, bulk INSERT statement
-            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
-
-            # The ON CONFLICT target must match the composite primary key
-            # of (issue_id, organization_id, date)
-            conflict_target = f"({id_column_name}, organization_id, date)"
-
-            # Construct the final SQL query
-            sql = (
-                f"INSERT INTO {table_name} (date, organization_id, {id_column_name}, count)\n"
-                f"VALUES {args_str}\n"
-                f"ON CONFLICT {conflict_target}\n"
-                f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
-            )
-            cursor.execute(sql)
-
-    await sync_to_async(_execute)()
+    async with async_cursor() as cursor:
+        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x) for x in data)
+        conflict_target = f"({id_column_name}, organization_id, date)"
+        sql = (
+            f"INSERT INTO {table_name} (date, organization_id, {id_column_name}, count)\n"
+            f"VALUES {args_str}\n"
+            f"ON CONFLICT {conflict_target}\n"
+            f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count;"
+        )
+        await cursor.execute(sql)
 
 
 def _is_error_status(trace_status: str | None) -> bool:
@@ -1151,36 +1181,33 @@ async def _update_transaction_group_stats(
     # Phase 1: Atomically merge count, error_count, avg_duration,
     # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
     # Row locks are held only for the duration of this statement.
-    def _execute_phase1():
-        with connection.cursor() as cursor:
-            placeholders = ",".join(
-                cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row)
-                for row in values_data
-            )
-            cursor.execute(
-                f"""
-                UPDATE performance_transactiongroup AS tg
-                SET count = tg.count + v.batch_count,
-                    error_count = tg.error_count + v.error_count,
-                    avg_duration = CASE
-                        WHEN tg.count + v.batch_count > 0
-                        THEN (tg.avg_duration * tg.count + v.batch_total)
-                             / (tg.count + v.batch_count)
-                        ELSE 0
-                    END,
-                    last_seen = NOW(),
-                    duration_histogram = ARRAY(
-                        SELECT COALESCE(a, 0) + COALESCE(b, 0)
-                        FROM unnest(tg.duration_histogram, v.hist_arr) AS t(a, b)
-                    )
-                FROM (VALUES {placeholders})
-                    AS v(group_id, org_id, batch_count, batch_total, error_count, hist_arr)
-                WHERE tg.id = v.group_id
-                  AND tg.organization_id = v.org_id
-                """
-            )
-
-    await sync_to_async(_execute_phase1)()
+    async with async_cursor() as cursor:
+        placeholders = ",".join(
+            cursor.mogrify("(%s,%s,%s,%s,%s,%s::integer[])", row)
+            for row in values_data
+        )
+        await cursor.execute(
+            f"""
+            UPDATE performance_transactiongroup AS tg
+            SET count = tg.count + v.batch_count,
+                error_count = tg.error_count + v.error_count,
+                avg_duration = CASE
+                    WHEN tg.count + v.batch_count > 0
+                    THEN (tg.avg_duration * tg.count + v.batch_total)
+                         / (tg.count + v.batch_count)
+                    ELSE 0
+                END,
+                last_seen = NOW(),
+                duration_histogram = ARRAY(
+                    SELECT COALESCE(a, 0) + COALESCE(b, 0)
+                    FROM unnest(tg.duration_histogram, v.hist_arr) AS t(a, b)
+                )
+            FROM (VALUES {placeholders})
+                AS v(group_id, org_id, batch_count, batch_total, error_count, hist_arr)
+            WHERE tg.id = v.group_id
+              AND tg.organization_id = v.org_id
+            """
+        )
 
     # Phase 2: Recompute p50/p95 from the merged histogram.
     # Runs after Phase 1 commits — no row locks held. p50/p95 are
@@ -1203,25 +1230,22 @@ async def _update_transaction_group_stats(
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
 
-        def _execute_phase2():
-            with connection.cursor() as cursor:
-                placeholders = ",".join(
-                    cursor.mogrify(
-                        "(%s::double precision,%s::double precision,%s,%s)", row
-                    )
-                    for row in p_updates
+        async with async_cursor() as cursor:
+            placeholders = ",".join(
+                cursor.mogrify(
+                    "(%s::double precision,%s::double precision,%s,%s)", row
                 )
-                cursor.execute(
-                    f"""
-                    UPDATE performance_transactiongroup AS tg
-                    SET p50 = v.p50, p95 = v.p95
-                    FROM (VALUES {placeholders}) AS v(p50, p95, group_id, org_id)
-                    WHERE tg.id = v.group_id
-                      AND tg.organization_id = v.org_id
-                    """
-                )
-
-        await sync_to_async(_execute_phase2)()
+                for row in p_updates
+            )
+            await cursor.execute(
+                f"""
+                UPDATE performance_transactiongroup AS tg
+                SET p50 = v.p50, p95 = v.p95
+                FROM (VALUES {placeholders}) AS v(p50, p95, group_id, org_id)
+                WHERE tg.id = v.group_id
+                  AND tg.organization_id = v.org_id
+                """
+            )
 
 
 TagStats = defaultdict[
@@ -1306,20 +1330,17 @@ async def update_tags(processing_events: list[ProcessingEvent]):
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4))
 
-    def _execute():
-        with connection.cursor() as cursor:
-            args_str = ",".join(
-                cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data
-            )
-            sql = (
-                "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
-                f"VALUES {args_str}\n"
-                "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date)\n"
-                "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
-            )
-            cursor.execute(sql)
-
-    await sync_to_async(_execute)()
+    async with async_cursor() as cursor:
+        args_str = ",".join(
+            cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data
+        )
+        sql = (
+            "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
+            f"VALUES {args_str}\n"
+            "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date)\n"
+            "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
+        )
+        await cursor.execute(sql)
 
 
 # Transactions
