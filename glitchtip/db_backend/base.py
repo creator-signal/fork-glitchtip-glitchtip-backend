@@ -25,3 +25,10 @@ class DatabaseWrapper(_DatabaseWrapper):
     @cached_property
     def pool(self):
         return None
+
+    def get_connection_params(self):
+        # Skip the pool warning from the parent class — we intentionally
+        # disable the sync pool while keeping OPTIONS.pool for the async pool.
+        from django.db.backends.postgresql.base import DatabaseWrapper as _DjangoDW
+
+        return _DjangoDW.get_connection_params(self)
