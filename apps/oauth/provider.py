@@ -17,7 +17,7 @@ from apps.api_tokens.models import generate_token
 
 from .models import OAuthApplication, OAuthRefreshToken
 
-ACCESS_TOKEN_LIFETIME = 3600  # 1 hour
+ACCESS_TOKEN_LIFETIME = 28800  # 8 hours
 REFRESH_TOKEN_LIFETIME = 30 * 86400  # 30 days
 AUTH_CODE_LIFETIME = 300  # 5 minutes
 
