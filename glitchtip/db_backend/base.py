@@ -1,17 +1,12 @@
 """
-PostgreSQL backend that disables the sync connection pool.
+PostgreSQL backend extending django-async-backend with suppressed pool warning.
 
-Under ASGI, the async pool (AsyncDatabaseWrapper) handles connection
-pooling for async_objects queries. The sync DatabaseWrapper only serves
-sync_to_async fallback calls (write operations, raw SQL) and doesn't
-need its own pool — avoiding double pool overhead and excess PG connections.
-
-Under WSGI, there is no async pool, so the sync pool would be useful.
-However, WSGI deployments can set DATABASE_CONN_MAX_AGE=None for
-persistent per-thread connections instead.
+The async backend warns when OPTIONS.pool is set because WSGI creates a new
+event loop per request, breaking async pool state. However, our sync pool works
+fine (it's psycopg3's sync ConnectionPool, not async), and OPTIONS.pool is also
+read by the async AsyncDatabaseWrapper for the async pool. So the warning is a
+false positive — suppress it by skipping the parent's get_connection_params().
 """
-
-from functools import cached_property
 
 # Re-export everything from the async backend's postgresql module
 # so Django can find all standard backend attributes.
@@ -22,13 +17,10 @@ from django_async_backend.db.backends.postgresql.base import (
 
 
 class DatabaseWrapper(_DatabaseWrapper):
-    @cached_property
-    def pool(self):
-        return None
-
     def get_connection_params(self):
-        # Skip the pool warning from the parent class — we intentionally
-        # disable the sync pool while keeping OPTIONS.pool for the async pool.
+        # Skip the async-backend's get_connection_params which emits a
+        # misleading RuntimeWarning about pool + sync mode. Call Django's
+        # stock implementation directly.
         from django.db.backends.postgresql.base import DatabaseWrapper as _DjangoDW
 
         return _DjangoDW.get_connection_params(self)

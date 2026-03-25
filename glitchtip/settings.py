@@ -441,7 +441,7 @@ if DEBUG_TOOLBAR:
 INSTALLED_APPS += [
     "storages",
     "django_vtasks",
-    "glitchtip",
+    "glitchtip.apps.GlitchtipConfig",
     "apps.alerts",
     "apps.environments",
     "apps.organizations_ext",
