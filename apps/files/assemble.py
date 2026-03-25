@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import shutil
 import tempfile
 from enum import Enum
@@ -14,8 +15,10 @@ from apps.releases.models import Release
 from apps.sourcecode.models import DebugSymbolBundle
 from sentry.utils.zip import safe_extract_zip
 
-from .exceptions import AssembleArtifactsError, AssembleChecksumMismatch
+from .exceptions import AssembleChecksumMismatch
 from .models import File, FileBlob
+
+logger = logging.getLogger("glitchtip.files")
 
 MAX_FILE_SIZE = 2**31  # 2GB is the maximum offset supported by fileblob
 
@@ -82,25 +85,60 @@ def assemble_artifacts(
 
     bundle_file, temp_file = rv
     scratchpad = tempfile.mkdtemp()
+    files: list[File] = []
+
+    def _fail_and_cleanup(detail: str):
+        set_assemble_status(
+            AssembleTask.ARTIFACTS,
+            organization.pk,
+            checksum,
+            ChunkFileState.ERROR,
+            detail=detail,
+        )
+        if files:
+            File.objects.filter(id__in=[f.id for f in files]).delete()
+        shutil.rmtree(scratchpad)
+        bundle_file.delete()
 
     try:
         safe_extract_zip(temp_file, scratchpad, strip_toplevel=False)
-    except Exception as ex:
-        raise AssembleArtifactsError("failed to extract bundle") from ex
+    except Exception:
+        # Catch broadly: zipfile raises BadZipFile, but other I/O errors are
+        # possible. All mean the uploaded blob is not a usable zip bundle.
+        logger.warning(
+            "assemble_artifacts: invalid zip bundle for org %s checksum %s",
+            organization.pk,
+            checksum,
+            exc_info=True,
+        )
+        _fail_and_cleanup(
+            "Failed to extract bundle: uploaded file is not a valid zip archive"
+        )
+        return
 
     try:
         manifest_path = path.join(scratchpad, "manifest.json")
         with open(manifest_path, "rb") as manifest:
             manifest = json.loads(manifest.read())
-    except Exception as ex:
-        raise AssembleArtifactsError("failed to open release manifest") from ex
+    except Exception:
+        # Missing or malformed manifest.json inside the zip.
+        logger.warning(
+            "assemble_artifacts: bad manifest for org %s checksum %s",
+            organization.pk,
+            checksum,
+            exc_info=True,
+        )
+        _fail_and_cleanup("Failed to open release manifest")
+        return
 
     if organization.slug != manifest.get("org"):
-        raise AssembleArtifactsError("organization does not match uploaded bundle")
+        _fail_and_cleanup("Organization does not match uploaded bundle")
+        return
 
     release_name = manifest.get("release")
     if release_name != version:
-        raise AssembleArtifactsError("release does not match uploaded bundle")
+        _fail_and_cleanup("Release does not match uploaded bundle")
+        return
 
     release: Release | None = None
     if release_name:
@@ -111,11 +149,11 @@ def assemble_artifacts(
     # Sentry OSS would add dist to release here
 
     artifacts = manifest.get("files", {})
-    files = []
     for rel_path, artifact in artifacts.items():
         full_path = path.normpath(path.join(scratchpad, rel_path))
         if not full_path.startswith(path.normpath(scratchpad) + path.sep):
-            raise AssembleArtifactsError("invalid path in manifest")
+            _fail_and_cleanup("Invalid path in manifest")
+            return
 
         artifact_url = artifact.get("url", rel_path)
         artifact_basename = artifact_url.rsplit("/", 1)[-1]
