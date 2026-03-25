@@ -1089,15 +1089,11 @@ wheels = [
 [[package]]
 name = "django-vtasks"
 version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://gitlab.com/glitchtip/django-vtasks.git?rev=feat%2Fasync-task-signals#f30deb4a485a8846bd1acde88680d55a40b0c6b3" }
 dependencies = [
     { name = "croniter" },
     { name = "django" },
     { name = "orjson" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/06/5a/40377fda9c489821e0212cd0f295771bc5877a95a4699e480d025325040a/django_vtasks-2.0.0.tar.gz", hash = "sha256:aca2698b913d1248fc2ee938725a518e15560645a2e87cfa69f2f88d040766ce", size = 29097, upload-time = "2026-03-12T14:49:28.834Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/5c/f65ab32c8b11f43a70e222ef3a02f0d2bc7bf1389f7a86e22938d53d2b22/django_vtasks-2.0.0-py3-none-any.whl", hash = "sha256:6f60275e7c1a0df427fd0f3734b541085d4b5e42c69089e792c5b07d9b593268", size = 41221, upload-time = "2026-03-12T14:49:29.904Z" },
 ]
 
 [package.optional-dependencies]
@@ -1508,7 +1504,7 @@ requires-dist = [
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
     { name = "django-vcache", specifier = ">=2.0.10" },
-    { name = "django-vtasks", extras = ["valkey"], specifier = "~=2.0" },
+    { name = "django-vtasks", extras = ["valkey"], git = "https://gitlab.com/glitchtip/django-vtasks.git?rev=feat%2Fasync-task-signals" },
     { name = "duckdb", specifier = ">=1.2.0" },
     { name = "google-cloud-logging", specifier = "~=3.0" },
     { name = "granian", extras = ["reload", "uvloop"], specifier = ">=2.6.0" },
