@@ -7,6 +7,7 @@ from django.db import models
 from django.db.models import Count, Q, QuerySet
 from django.db.models.functions import Cast
 from django.utils.text import slugify
+from django_async_backend.db.models.manager import AsyncManager
 from django_extensions.db.fields import AutoSlugField
 
 from apps.observability.utils import clear_metrics_cache
@@ -48,8 +49,10 @@ class Project(CreatedModel, SoftDeleteModel):
         help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
     )
     undeleted_objects = ProjectSoftDeleteManager()
+    async_objects = AsyncManager()
 
     class Meta:
+        default_manager_name = "objects"
         unique_together = (("organization", "slug"),)
 
     def __str__(self):

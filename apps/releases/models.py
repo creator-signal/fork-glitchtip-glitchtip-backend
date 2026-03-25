@@ -1,4 +1,5 @@
 from django.db import models
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import CreatedModel
 
@@ -40,6 +41,9 @@ class Release(CreatedModel):
         through_fields=["release", "file"],
     )
 
+    objects = models.Manager()
+    async_objects = AsyncManager()
+
     class Meta:
         unique_together = ("organization", "version")
 
@@ -49,6 +53,9 @@ class ReleaseProject(models.Model):
 
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
     release = models.ForeignKey(Release, on_delete=models.CASCADE)
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         unique_together = ("project", "release")
