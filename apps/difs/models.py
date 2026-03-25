@@ -1,4 +1,5 @@
 from django.db import models
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import CreatedModel
 
@@ -12,6 +13,8 @@ class DebugInformationFile(CreatedModel):
     project = models.ForeignKey("projects.Project", on_delete=models.CASCADE)
     file = models.ForeignKey("files.File", on_delete=models.CASCADE)
     data = models.JSONField(null=True, blank=True)
+
+    async_objects = AsyncManager()
 
     class Meta:
         indexes = [models.Index(fields=["project", "file"])]

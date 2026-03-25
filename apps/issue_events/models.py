@@ -4,6 +4,7 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.utils import timezone
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
 from glitchtip.partition_manager import UUID7Helper
@@ -32,9 +33,15 @@ class TagKey(models.Model):
     id = models.AutoField(primary_key=True)
     key = models.CharField(max_length=MAX_TAG_LENGTH, unique=True)
 
+    objects = models.Manager()
+    async_objects = AsyncManager()
+
 
 class TagValue(models.Model):
     value = models.CharField(max_length=MAX_TAG_LENGTH)
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         constraints = [
@@ -123,6 +130,7 @@ class Issue(SoftDeleteModel):
     search_vector = SearchVectorField(editable=False, default="")
 
     objects = DeferedFieldManager(["search_vector"])
+    async_objects = AsyncManager()
 
     class Meta:
         base_manager_name = "objects"
@@ -174,6 +182,9 @@ class IssueHash(models.Model):
     )
     value = models.UUIDField(db_index=True)
 
+    objects = models.Manager()
+    async_objects = AsyncManager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -203,6 +214,9 @@ class UserReport(CreatedModel):
     name = models.CharField(max_length=128)
     email = models.EmailField()
     comments = models.TextField()
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         constraints = [
@@ -276,6 +290,7 @@ class IssueEvent(models.Model):
 
     # Use custom manager for smart partition-aware queries
     objects = EventManager()
+    async_objects = AsyncManager()
 
     class Meta:
         indexes = [

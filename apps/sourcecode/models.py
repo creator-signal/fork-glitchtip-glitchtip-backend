@@ -1,4 +1,5 @@
 from django.db import models
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import CreatedModel
 
@@ -57,6 +58,8 @@ class DebugSymbolBundle(CreatedModel):
     )
     file = models.ForeignKey("files.File", on_delete=models.CASCADE)
     data = models.JSONField(default=dict)
+
+    async_objects = AsyncManager()
 
     class Meta:
         constraints = [

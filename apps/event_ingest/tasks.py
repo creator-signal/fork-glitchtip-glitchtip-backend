@@ -54,7 +54,7 @@ async def ingest_user_report(tasks: list):
         recent_lower = UUID7Helper.from_datetime(timezone.now() - timedelta(weeks=1))
         org_ids = {msg.organization_id for msg in messages if msg.event_id}
         async for evt in (
-            IssueEvent.objects.filter(
+            IssueEvent.async_objects.filter(
                 event_id__in=event_id_map.keys(),
                 id__gte=recent_lower,
                 organization_id__in=org_ids,
@@ -84,4 +84,4 @@ async def ingest_user_report(tasks: list):
             )
         )
 
-    await UserReport.objects.abulk_create(reports, ignore_conflicts=True)
+    await UserReport.async_objects.abulk_create(reports, ignore_conflicts=True)

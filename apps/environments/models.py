@@ -1,4 +1,5 @@
 from django.db import models
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import CreatedModel
 
@@ -10,6 +11,9 @@ class EnvironmentProject(CreatedModel):
     )
     is_hidden = models.BooleanField(default=False)
 
+    objects = models.Manager()
+    async_objects = AsyncManager()
+
     class Meta:
         unique_together = ("project", "environment")
 
@@ -20,6 +24,9 @@ class Environment(CreatedModel):
         "organizations_ext.Organization", on_delete=models.CASCADE
     )
     projects = models.ManyToManyField("projects.Project", through=EnvironmentProject)
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         unique_together = ("organization", "name")

@@ -1,5 +1,6 @@
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from django_async_backend.db.models.manager import AsyncManager
 
 from glitchtip.base_models import CreatedModel
 from glitchtip.partition_manager import UUID7Helper
@@ -53,6 +54,9 @@ class TransactionGroup(CreatedModel):
         size=50,
         default=new_histogram,
     )
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         constraints = [
@@ -114,6 +118,9 @@ class SpanStaging(models.Model):
     description = models.CharField(max_length=500, default="", blank=True)
     duration = models.FloatField(help_text="Duration in milliseconds")
     timestamp = models.DateTimeField(help_text="Span start time")
+
+    objects = models.Manager()
+    async_objects = AsyncManager()
 
     class Meta:
         db_table = "performance_spanstaging"
