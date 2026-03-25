@@ -148,6 +148,10 @@ EOFSUM
     echo ""
 }
 
+# ── Save compose file (survives branch switch) ──────────────────
+SAVED_COMPOSE=$(mktemp /tmp/bench_compose_XXXXXX.yml)
+cp "$SCRIPT_DIR/compose.bench.yml" "$SAVED_COMPOSE"
+
 # ── Run on current branch (async backend) ────────────────────────
 ASYNC_OUT=$(mktemp /tmp/bench_async_XXXXXX.txt)
 run_benchmark "async-backend ($CURRENT_BRANCH)" "$ASYNC_OUT"
@@ -157,6 +161,9 @@ echo ""
 echo ">>> Switching to master for baseline..."
 git stash --include-untracked -q || true
 git checkout master -q
+
+# Restore compose file so master gets the same env (malloc tuning, pool sizes)
+cp "$SAVED_COMPOSE" "$SCRIPT_DIR/compose.bench.yml"
 
 BASELINE_OUT=$(mktemp /tmp/bench_baseline_XXXXXX.txt)
 run_benchmark "stock (master)" "$BASELINE_OUT"
