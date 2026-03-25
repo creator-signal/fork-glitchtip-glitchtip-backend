@@ -84,4 +84,4 @@ async def ingest_user_report(tasks: list):
             )
         )
 
-    await UserReport.async_objects.abulk_create(reports, ignore_conflicts=True)
+    await UserReport.objects.abulk_create(reports, ignore_conflicts=True)

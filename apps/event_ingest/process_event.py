@@ -422,7 +422,7 @@ async def create_environments(
     ]
 
     if environments_to_create:
-        await Environment.async_objects.abulk_create(
+        await Environment.objects.abulk_create(
             environments_to_create, ignore_conflicts=True
         )
         query = Q()
@@ -441,7 +441,7 @@ async def create_environments(
             environment_projects.append(
                 EnvironmentProject(project_id=project_id, environment=environment)
             )
-        await EnvironmentProject.async_objects.abulk_create(
+        await EnvironmentProject.objects.abulk_create(
             environment_projects, ignore_conflicts=True
         )
 
@@ -470,7 +470,7 @@ async def get_and_create_releases(
     releases: list = []
     if releases_to_create:
         # Create database records for any release that doesn't exist
-        await Release.async_objects.abulk_create(releases_to_create, ignore_conflicts=True)
+        await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
         query = Q()
         for release in releases_to_create:
             query |= Q(version=release.version, organization_id=release.organization_id)
@@ -488,7 +488,7 @@ async def get_and_create_releases(
             )
             for release in releases
         ]
-        await ReleaseProject.async_objects.abulk_create(
+        await ReleaseProject.objects.abulk_create(
             release_projects, ignore_conflicts=True
         )
     return [
@@ -565,7 +565,7 @@ async def process_issue_events(
     """
     projects_to_update = {msg.project_id for msg in messages if msg.update_first_event}
     if projects_to_update:
-        await Project.async_objects.filter(
+        await Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
         ).aupdate(first_event=timezone.now())
 
@@ -640,7 +640,7 @@ async def process_issue_events(
             df.pk for df in debug_files if df.last_used < update_threshold
         ]
         if ids_to_update:
-            await DebugSymbolBundle.async_objects.filter(pk__in=ids_to_update).aupdate(
+            await DebugSymbolBundle.objects.filter(pk__in=ids_to_update).aupdate(
                 last_used=now
             )
 
@@ -988,14 +988,14 @@ async def process_issue_events(
         )
 
     if issues_to_reopen:
-        await Issue.async_objects.filter(id__in=issues_to_reopen).aupdate(
+        await Issue.objects.filter(id__in=issues_to_reopen).aupdate(
             status=EventStatus.UNRESOLVED,
             resolved_in_release=None,
         )
         await Notification.objects.filter(issues__in=issues_to_reopen).adelete()
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
-    await IssueEvent.async_objects.abulk_create(issue_events, ignore_conflicts=True)
+    await IssueEvent.objects.abulk_create(issue_events, ignore_conflicts=True)
 
     await update_tags(processing_events)
     await update_statistics(
@@ -1244,10 +1244,10 @@ async def update_tags(processing_events: list[ProcessingEvent]):
         {value for d in processing_events for value in d.event_tags.values()}
     )
 
-    await TagKey.async_objects.abulk_create(
+    await TagKey.objects.abulk_create(
         [TagKey(key=key) for key in keys], ignore_conflicts=True
     )
-    await TagValue.async_objects.abulk_create(
+    await TagValue.objects.abulk_create(
         [TagValue(value=value) for value in values], ignore_conflicts=True
     )
     # Postgres cannot return ids with ignore_conflicts
@@ -1332,7 +1332,7 @@ async def process_transaction_events(
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
     if projects_to_update:
-        await Project.async_objects.filter(
+        await Project.objects.filter(
             id__in=projects_to_update, first_event__isnull=True
         ).aupdate(first_event=now)
 
@@ -1407,7 +1407,7 @@ async def process_transaction_events(
             )
             for k in missing_keys
         ]
-        await TransactionGroup.async_objects.abulk_create(
+        await TransactionGroup.objects.abulk_create(
             new_groups, ignore_conflicts=True
         )
         # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
@@ -1490,7 +1490,7 @@ async def process_transaction_events(
 
     # 5. Bulk insert span staging rows
     if span_rows:
-        await SpanStaging.async_objects.abulk_create(span_rows, batch_size=1000)
+        await SpanStaging.objects.abulk_create(span_rows, batch_size=1000)
 
     # 6. Update hourly project statistics
     await update_statistics(

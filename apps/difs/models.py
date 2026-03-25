@@ -14,6 +14,7 @@ class DebugInformationFile(CreatedModel):
     file = models.ForeignKey("files.File", on_delete=models.CASCADE)
     data = models.JSONField(null=True, blank=True)
 
+    objects = models.Manager()
     async_objects = AsyncManager()
 
     class Meta:
