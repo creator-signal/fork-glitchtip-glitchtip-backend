@@ -22,6 +22,16 @@ class ReleaseAPITestCase(GlitchTestCase):
         self.assertContains(res, data["version"], status_code=201)
         self.assertTrue(Release.objects.filter(version=data["version"]).exists())
 
+    def test_create_duplicate(self):
+        """Creating a release with the same version should be idempotent."""
+        url = reverse("api:create_release", args=[self.organization.slug])
+        data = {"version": "1.0", "projects": [self.project.slug]}
+        res1 = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+        res2 = self.client.post(url, data, content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+        self.assertEqual(Release.objects.filter(version="1.0").count(), 1)
+
     def test_list(self):
         url = reverse(
             "api:list_releases",
