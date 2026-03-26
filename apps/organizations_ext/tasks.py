@@ -18,10 +18,10 @@ from apps.projects.models import (
     LogProjectHourlyStatistic,
     TransactionEventProjectHourlyStatistic,
 )
-from apps.uptime.models import MonitorCheck
+from apps.uptime.models import MonitorCheck, UptimeCheckHourlyStatistic
 
 from .email import InvitationEmail, ThrottleNoticeEmail
-from .models import Organization
+from .models import Organization, get_current_period_dates, get_event_counts
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,9 @@ async def check_organization_throttle(organization_id: int, bypass_cache: bool =
         return  # Recent check already performed
 
     org = await (
-        Organization.objects.with_event_counts()
-        .select_related("stripe_primary_subscription__price__product")
-        .aget(id=organization_id)
+        Organization.objects.select_related(
+            "stripe_primary_subscription__price__product"
+        ).aget(id=organization_id)
     )
     await _check_and_update_throttle(org)
 
@@ -80,9 +80,9 @@ async def check_organization_throttle(organization_id: int, bypass_cache: bool =
 @task
 async def check_all_organizations_throttle():
     async for org in (
-        Organization.objects.with_event_counts()
-        .select_related("stripe_primary_subscription__price__product")
-        .aiterator()
+        Organization.objects.select_related(
+            "stripe_primary_subscription__price__product"
+        ).aiterator()
     ):
         await _check_and_update_throttle(org)
 
@@ -92,48 +92,41 @@ async def _check_and_update_throttle(org: Organization):
         return
 
     plan_events: int | None = None
+    total_event_count = 0
 
     if org.stripe_primary_subscription:
         price = org.stripe_primary_subscription.price
         if price.no_throttle:
             org_throttle = 0
-            # Early return? No, we need to update DB if it changed
         else:
             plan_events = price.product.events
             org_throttle = 0
 
-            # Count is already accurate from with_event_counts (using subscription_cycle fields)
-            if plan_events is None or org.total_event_count > plan_events * 2:
-                org_throttle = 100
-            elif org.total_event_count > plan_events * 1.5:
-                org_throttle = 50
-            elif org.total_event_count > plan_events:
-                org_throttle = 10
+            period = await get_current_period_dates(org)
+            start, end = period if period else (None, None)
+            counts = await get_event_counts(org.id, start, end)
+            total_event_count = counts.total_event_count
 
-        # Logic for sending email / saving is at the end
+            if plan_events is None or total_event_count > plan_events * 2:
+                org_throttle = 100
+            elif total_event_count > plan_events * 1.5:
+                org_throttle = 50
+            elif total_event_count > plan_events:
+                org_throttle = 10
     else:
-        # Free Tier
+        # Free Tier - use anchored cycle dates
         plan_events = settings.GLITCHTIP_FREE_TIER_EVENTS
 
-        # For free tier, we must ensure we are using the Anchored Cycle count
-        # The default with_event_counts uses Rolling 30 Days (or whatever fallback)
-        # So we should re-query with the precise Anchored Date
         start, end = get_free_tier_cycle(org.created)
-
-        # We need to fetch the count for this specific range
-        # We can reuse with_event_counts but filtering for this specific org and range
-        # This is an extra query, but necessary for accuracy of Anchored Free Tier
-        free_org = await Organization.objects.with_event_counts(
-            start=start, end=end
-        ).aget(id=org.id)
-        current_count = free_org.total_event_count
+        counts = await get_event_counts(org.id, start, end)
+        total_event_count = counts.total_event_count
 
         org_throttle = 0
-        if current_count > plan_events * 2:
+        if total_event_count > plan_events * 2:
             org_throttle = 100
-        elif current_count > plan_events * 1.5:
+        elif total_event_count > plan_events * 1.5:
             org_throttle = 50
-        elif current_count > plan_events:
+        elif total_event_count > plan_events:
             org_throttle = 10
 
     if org.event_throttle_rate != org_throttle:
@@ -141,12 +134,16 @@ async def _check_and_update_throttle(org: Organization):
         org.event_throttle_rate = org_throttle
         await org.asave(update_fields=["event_throttle_rate"])
         if org_throttle > old_throttle:
-            await send_throttle_email.aenqueue(org.id)
+            await send_throttle_email.aenqueue(org.id, total_event_count)
 
 
 @task
-async def send_throttle_email(organization_id: int):
-    await sync_to_async(ThrottleNoticeEmail(pk=organization_id).send_email)()
+async def send_throttle_email(organization_id: int, total_event_count: int = 0):
+    await sync_to_async(
+        ThrottleNoticeEmail(
+            pk=organization_id, total_event_count=total_event_count
+        ).send_email
+    )()
 
 
 @task
@@ -185,6 +182,7 @@ async def delete_organization(organization_id: int):
         IssueEventProjectHourlyStatistic,
         TransactionEventProjectHourlyStatistic,
         LogProjectHourlyStatistic,
+        UptimeCheckHourlyStatistic,
     ]:
         await sync_to_async(
             model.objects.filter(organization_id=org.id)._raw_delete

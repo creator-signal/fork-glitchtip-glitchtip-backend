@@ -1,6 +1,6 @@
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib import admin
-from django.db.models import F
 from django.utils.html import format_html
 from import_export.admin import ImportExportModelAdmin
 from organizations.base_admin import (
@@ -17,13 +17,14 @@ from .models import (
     OrganizationOwner,
     OrganizationSocialApp,
     OrganizationUser,
+    get_current_period_dates,
+    get_event_counts,
 )
 from .resources import OrganizationResource, OrganizationUserResource
 
 ORGANIZATION_LIST_FILTER = (
     "is_active",
     "is_accepting_events",
-    "stripesubscription__price__product",
 )
 
 
@@ -43,14 +44,70 @@ class OrganizationSubscriptionInline(admin.StackedInline):
     readonly_fields = [field.name for field in StripeSubscription._meta.fields]
 
 
-class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
-    readonly_fields = ("customer_link", "subscription_link", "created")
+class OrganizationAdmin(BaseOrganizationAdmin, ImportExportModelAdmin):
+    list_display = [
+        "name",
+        "is_active",
+        "is_accepting_events",
+    ]
+    readonly_fields = (
+        "created",
+        "issue_events",
+        "transaction_events",
+        "uptime_check_events",
+        "log_events",
+        "file_size",
+        "total_events",
+    )
     list_filter = ORGANIZATION_LIST_FILTER
-    inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
+    inlines = [OrganizationUserInline, OwnerInline]
     show_full_result_count = False
+    resource_class = OrganizationResource
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        fields = list(self.readonly_fields)
+        if settings.BILLING_ENABLED:
+            fields += ["customer_link", "subscription_link", "max_events"]
+        return fields
+
+    def get_inlines(self, request, obj=None):
+        inlines = list(self.inlines)
+        if settings.BILLING_ENABLED:
+            inlines.append(OrganizationSubscriptionInline)
+        return inlines
+
+    def _get_event_counts(self, obj):
+        """Cached per-request event counts for the detail page."""
+        if not hasattr(obj, "_event_counts_cache"):
+            period = async_to_sync(get_current_period_dates)(obj)
+            start, end = period if period else (None, None)
+            obj._event_counts_cache = async_to_sync(get_event_counts)(
+                obj.id, start, end
+            )
+        return obj._event_counts_cache
 
     def issue_events(self, obj):
-        return obj.issue_event_count
+        return self._get_event_counts(obj).issue_event_count
+
+    def transaction_events(self, obj):
+        return self._get_event_counts(obj).transaction_count
+
+    def uptime_check_events(self, obj):
+        return self._get_event_counts(obj).uptime_check_event_count
+
+    def log_events(self, obj):
+        return self._get_event_counts(obj).log_count
+
+    def file_size(self, obj):
+        return f"{self._get_event_counts(obj).file_size} MB"
+
+    def total_events(self, obj):
+        return self._get_event_counts(obj).total_event_count
+
+    def max_events(self, obj):
+        if obj.stripe_primary_subscription:
+            return obj.stripe_primary_subscription.price.product.events
 
     def customer_link(self, obj):
         if customer_id := obj.stripe_customer_id:
@@ -68,105 +125,13 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
                 subscription_id,
             )
 
-    def transaction_events(self, obj):
-        return obj.transaction_count
-
-    def uptime_check_events(self, obj):
-        return obj.uptime_check_event_count
-
-    def file_size(self, obj):
-        return obj.file_size
-
-    def total_events(self, obj):
-        return obj.total_event_count
-
-
-class OrganizationAdmin(GlitchTipBaseOrganizationAdmin, ImportExportModelAdmin):
-    list_display = [
-        "name",
-        "is_active",
-        "is_accepting_events",
-        "issue_events",
-        "transaction_events",
-        "uptime_check_events",
-        "file_size",
-        "total_events",
-        "stripe_primary_subscription",
-    ]
-    resource_class = OrganizationResource
-
     def get_queryset(self, request):
-        qs = self.model.objects.with_event_counts()
-
-        # From super
-        ordering = self.ordering or ()
-        if ordering:
-            qs = qs.order_by(*ordering)
-
-        return qs
-
-
-class OrganizationSubscription(Organization):
-    class Meta:
-        proxy = True
-
-
-class IsOverListFilter(admin.SimpleListFilter):
-    title = "Is over plan limit"
-    parameter_name = "is_over"
-
-    def lookups(self, request, _model_admin):
-        return (
-            (True, "Yes"),
-            (False, "No"),
-        )
-
-    def queryset(self, request, queryset):
-        if self.value() is not None:
-            queryset = queryset.filter(
-                stripe_primary_subscription__price__product__events__isnull=False
+        qs = super().get_queryset(request)
+        if settings.BILLING_ENABLED:
+            qs = qs.select_related(
+                "stripe_primary_subscription__price__product"
             )
-        if self.value() is False:
-            return queryset.filter(total_event_count__lte=F("max_events"))
-        if self.value() is True:
-            return queryset.filter(total_event_count__gt=F("max_events"))
-        return queryset
-
-
-class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
-    list_display = [
-        "name",
-        "is_active",
-        "is_accepting_events",
-        "issue_events",
-        "transaction_events",
-        "uptime_check_events",
-        "file_size",
-        "total_events",
-        "max_events",
-        "current_period_end",
-    ]
-
-    def max_events(self, obj):
-        if obj.stripe_primary_subscription:
-            return obj.stripe_primary_subscription.price.product.events
-
-    def current_period_end(self, obj):
-        if obj.stripe_primary_subscription:
-            return obj.stripe_primary_subscription.current_period_end
-
-    def get_queryset(self, request):
-        qs = Organization.objects.with_event_counts().select_related(
-            "stripe_primary_subscription__price__product"
-        )
-        # From super
-        ordering = self.ordering or ()
-        if ordering:
-            qs = qs.order_by(*ordering)
-
         return qs
-
-    list_filter = GlitchTipBaseOrganizationAdmin.list_filter + (IsOverListFilter,)
 
 
 class OrganizationUserAdmin(BaseOrganizationUserAdmin, ImportExportModelAdmin):
@@ -182,7 +147,5 @@ class OrganizationSocialAppAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Organization, OrganizationAdmin)
-if settings.BILLING_ENABLED:
-    admin.site.register(OrganizationSubscription, OrganizationSubscriptionAdmin)
 admin.site.register(OrganizationUser, OrganizationUserAdmin)
 admin.site.register(OrganizationSocialApp, OrganizationSocialAppAdmin)

@@ -80,6 +80,10 @@ class Command(BaseCommand):
                 "projects_logprojecthourlystatistic",
                 settings.GLITCHTIP_LOG_RETENTION_DAYS,
             ),
+            (
+                "uptime_uptimecheckhourlystatistic",
+                settings.GLITCHTIP_UPTIME_RETENTION_DAYS,
+            ),
         ]
         start_of_week = start_date_daily - timedelta(days=start_date_daily.weekday())
         end_date_weekly = start_of_week + timedelta(weeks=4)
