@@ -9,17 +9,12 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.core.cache import caches
-from django.db import connection, transaction
-from django.db.models import (
-    Exists,
-    OuterRef,
-    Q,
-    Value,
-)
-from django.db.models.functions import Coalesce
+from django.db import connection, connections, transaction
+from django.db.models import Q, Value
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from ninja import Schema
+from psycopg.types.json import Jsonb
 from user_agents import parse
 
 from apps.alerts.constants import ISSUE_IDS_KEY
@@ -115,33 +110,43 @@ async def _get_or_create_related_models(
     release_version_set = {version for version, _, _ in release_set}
     environment_name_set = {name for name, _, _ in environment_set}
 
-    projects_query = Project.objects.using(read_only_db).filter(id__in=project_set)
+    if not project_set or not release_version_set or not environment_name_set:
+        projects_with_data: list[dict] = []
+    else:
 
-    annotations = {
-        "release_id": Coalesce("releases__id", Value(None)),
-        "release_name": Coalesce("releases__version", Value(None)),
-        "environment_id": Coalesce("environment__id", Value(None)),
-        "environment_name": Coalesce("environment__name", Value(None)),
-        "has_difs": Exists(
-            DebugInformationFile.objects.filter(project_id=OuterRef("pk"))
-        ),
-    }
-    values_list = [
-        "id",
-        "release_id",
-        "release_name",
-        "environment_id",
-        "environment_name",
-        "has_difs",
-    ]
+        def _fetch_projects():
+            with connections[read_only_db].cursor() as cursor:
+                project_ids = list(project_set)
+                release_versions = list(release_version_set)
+                environment_names = list(environment_name_set)
 
-    projects_with_data = [
-        p
-        async for p in projects_query.annotate(**annotations)
-        .filter(release_name__in=release_version_set.union({None}))
-        .filter(environment_name__in=environment_name_set.union({None}))
-        .values(*values_list)
-    ]
+                cursor.execute(
+                    """
+                    SELECT
+                        p.id,
+                        rp.release_id,
+                        r.version AS release_name,
+                        ep.environment_id,
+                        e.name AS environment_name,
+                        EXISTS(
+                            SELECT 1 FROM difs_debuginformationfile dif
+                            WHERE dif.project_id = p.id LIMIT 1
+                        ) AS has_difs
+                    FROM projects_project p
+                    LEFT JOIN releases_release_projects rp ON p.id = rp.project_id
+                    LEFT JOIN releases_release r ON rp.release_id = r.id
+                    LEFT JOIN environments_environmentproject ep ON p.id = ep.project_id
+                    LEFT JOIN environments_environment e ON ep.environment_id = e.id
+                    WHERE p.id = ANY(%s)
+                      AND r.version = ANY(%s)
+                      AND (e.name = ANY(%s) OR e.name IS NULL)
+                    """,
+                    [project_ids, release_versions, environment_names],
+                )
+                columns = [col[0] for col in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        projects_with_data = await sync_to_async(_fetch_projects)()
 
     releases = await get_and_create_releases(release_set, projects_with_data)
     await create_environments(environment_set, projects_with_data)
@@ -425,21 +430,27 @@ async def create_environments(
         await Environment.objects.abulk_create(
             environments_to_create, ignore_conflicts=True
         )
-        query = Q()
-        for environment in environments_to_create:
-            query |= Q(
-                name=environment.name, organization_id=environment.organization_id
-            )
-        environment_projects: list = []
-        async for environment in Environment.objects.filter(query):
-            project_id = next(
+        env_pairs = [(e.name, e.organization_id) for e in environments_to_create]
+
+        def _fetch_env_ids():
+            with connections["default"].cursor() as cursor:
+                values_str = ",".join(cursor.mogrify("(%s,%s)", p) for p in env_pairs)
+                cursor.execute(
+                    "SELECT id, name, organization_id FROM environments_environment "
+                    f"WHERE (name, organization_id) IN (VALUES {values_str})"
+                )
+                return cursor.fetchall()
+
+        env_rows = await sync_to_async(_fetch_env_ids)()
+        environment_projects = []
+        for env_id, env_name, env_org_id in env_rows:
+            pid = next(
                 project_id
                 for (name, project_id, organization_id) in environment_set
-                if environment.name == name
-                and environment.organization_id == organization_id
+                if env_name == name and env_org_id == organization_id
             )
             environment_projects.append(
-                EnvironmentProject(project_id=project_id, environment=environment)
+                EnvironmentProject(project_id=pid, environment_id=env_id)
             )
         await EnvironmentProject.objects.abulk_create(
             environment_projects, ignore_conflicts=True
@@ -467,26 +478,33 @@ async def get_and_create_releases(
             None,
         )
     ]
-    releases: list = []
+    release_rows: list[tuple] = []
     if releases_to_create:
         # Create database records for any release that doesn't exist
         await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
-        query = Q()
-        for release in releases_to_create:
-            query |= Q(version=release.version, organization_id=release.organization_id)
-        releases = [r async for r in Release.objects.filter(query)]
+        rel_pairs = [(r.version, r.organization_id) for r in releases_to_create]
+
+        def _fetch_release_ids():
+            with connections["default"].cursor() as cursor:
+                values_str = ",".join(cursor.mogrify("(%s,%s)", p) for p in rel_pairs)
+                cursor.execute(
+                    "SELECT id, version, organization_id FROM releases_release "
+                    f"WHERE (version, organization_id) IN (VALUES {values_str})"
+                )
+                return cursor.fetchall()
+
+        release_rows = await sync_to_async(_fetch_release_ids)()
         ReleaseProject = Release.projects.through
         release_projects = [
             ReleaseProject(
-                release=release,
+                release_id=rel_id,
                 project_id=next(
                     project_id
                     for (version, project_id, organization_id) in release_set
-                    if release.version == version
-                    and release.organization_id == organization_id
+                    if rel_version == version and rel_org_id == organization_id
                 ),
             )
-            for release in releases
+            for rel_id, rel_version, rel_org_id in release_rows
         ]
         await ReleaseProject.objects.abulk_create(
             release_projects, ignore_conflicts=True
@@ -504,10 +522,9 @@ async def get_and_create_releases(
                 ),
                 next(
                     (
-                        release.id
-                        for release in releases
-                        if release.version == version
-                        and release.organization_id == organization_id
+                        rel_id
+                        for rel_id, rel_version, rel_org_id in release_rows
+                        if rel_version == version and rel_org_id == organization_id
                     ),
                     0,
                 ),
@@ -548,6 +565,45 @@ def hydrate_stacktrace(event: TaskIssueEvent):
                 exception.stacktrace = match.stacktrace.model_copy(deep=True)
             else:
                 exception.stacktrace = match.stacktrace.copy(deep=True)
+
+
+async def _fetch_issue_hashes_raw(
+    pairs: list[tuple[int, str]], db_alias: str
+) -> dict[tuple[int, str], dict]:
+    """Fetch IssueHash rows with issue status via raw SQL VALUES lookup."""
+    if not pairs:
+        return {}
+
+    def _execute():
+        with connections[db_alias].cursor() as cursor:
+            values_str = ",".join(
+                cursor.mogrify("(%s,%s::uuid)", (pid, h)) for pid, h in pairs
+            )
+            cursor.execute(
+                f"""
+                SELECT ih.project_id, ih.value, ih.issue_id,
+                       i.status AS issue__status,
+                       i.resolved_in_release_id AS issue__resolved_in_release_id
+                FROM issue_events_issuehash ih
+                INNER JOIN issue_events_issue i ON i.id = ih.issue_id
+                WHERE (ih.project_id, ih.value) IN (VALUES {values_str})
+                """
+            )
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    rows = await sync_to_async(_execute)()
+    return {(h["project_id"], h["value"].hex): h for h in rows}
+
+
+async def _fetch_issue_hashes(
+    processing_events: list[ProcessingEvent], db_alias: str
+) -> dict[tuple[int, str], dict]:
+    """Collect unique (project_id, issue_hash) pairs and fetch via raw SQL."""
+    pairs = list(
+        {(pe.project_id, pe.issue_hash) for pe in processing_events if pe.issue_hash}
+    )
+    return await _fetch_issue_hashes_raw(pairs, db_alias)
 
 
 async def process_issue_events(
@@ -636,9 +692,7 @@ async def process_issue_events(
     # Update last used if older than 1 day, to minimize queries
     if debug_files:
         update_threshold = now - timedelta(days=1)
-        ids_to_update = [
-            df.pk for df in debug_files if df.last_used < update_threshold
-        ]
+        ids_to_update = [df.pk for df in debug_files if df.last_used < update_threshold]
         if ids_to_update:
             await DebugSymbolBundle.objects.filter(pk__in=ids_to_update).aupdate(
                 last_used=now
@@ -646,8 +700,6 @@ async def process_issue_events(
 
     # Collected/calculated event data while processing
     processing_events: list[ProcessingEvent] = []
-    # Collect Q objects for bulk issue hash lookup
-    q_objects = Q()
     for ingest_event in messages:
         event = ingest_event.payload
         hydrate_stacktrace(event)
@@ -808,42 +860,23 @@ async def process_issue_events(
                 uuid=ingest_event.uuid,
             )
         )
-        q_objects |= Q(project_id=ingest_event.project_id, value=issue_hash)
 
     # Build a dict for O(1) lookups instead of iterating the queryset per event
-    hash_dict: dict[tuple[int, str], dict] = {
-        (h["project_id"], h["value"].hex): h
-        async for h in IssueHash.objects.using(read_only_db)
-        .filter(q_objects)
-        .values(
-            "value",
-            "project_id",
-            "issue_id",
-            "issue__status",
-            "issue__resolved_in_release_id",
-        )
-    }
+    hash_dict: dict[tuple[int, str], dict] = await _fetch_issue_hashes(
+        processing_events, read_only_db
+    )
 
     # Primary fallback: check the primary for hashes not found on the replica.
     # Avoids unnecessary IntegrityErrors caused by replication lag.
     if read_only_db != "default":
-        missing_q = Q()
-        for pe in processing_events:
-            if (pe.project_id, pe.issue_hash) not in hash_dict:
-                missing_q |= Q(project_id=pe.project_id, value=pe.issue_hash)
-        if missing_q:
-            async for h in (
-                IssueHash.objects.using("default")
-                .filter(missing_q)
-                .values(
-                    "value",
-                    "project_id",
-                    "issue_id",
-                    "issue__status",
-                    "issue__resolved_in_release_id",
-                )
-            ):
-                hash_dict[(h["project_id"], h["value"].hex)] = h
+        missing = [
+            (pe.project_id, pe.issue_hash)
+            for pe in processing_events
+            if (pe.project_id, pe.issue_hash) not in hash_dict
+        ]
+        if missing:
+            fallback = await _fetch_issue_hashes_raw(missing, "default")
+            hash_dict.update(fallback)
 
     issue_events: list[IssueEvent] = []
     issues_to_reopen = []
@@ -974,9 +1007,7 @@ async def process_issue_events(
         # Add set of issue_ids for alerts to process later
         # Lua script: atomically SADD + EXPIRE in a single round-trip
         driver = caches["default"].get_raw_client()
-        issue_ids_bytes = [
-            str(event.issue_id).encode() for event in processing_events
-        ]
+        issue_ids_bytes = [str(event.issue_id).encode() for event in processing_events]
         await driver.eval(
             "local added = redis.call('SADD', KEYS[1], unpack(ARGV))\n"
             "if added > 0 then\n"
@@ -995,7 +1026,39 @@ async def process_issue_events(
         await Notification.objects.filter(issues__in=issues_to_reopen).adelete()
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
-    await IssueEvent.objects.abulk_create(issue_events, ignore_conflicts=True)
+    if issue_events:
+
+        def _insert_events():
+            with connection.cursor() as cursor:
+                args_str = ",".join(
+                    cursor.mogrify(
+                        "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::text[])",
+                        (
+                            e.id,
+                            e.event_id,
+                            e.timestamp,
+                            e.issue_id,
+                            e.organization_id,
+                            e.release_id,
+                            e.type,
+                            e.level,
+                            e.title,
+                            e.transaction,
+                            Jsonb(e.data),
+                            Jsonb(e.tags),
+                            e.hashes,
+                        ),
+                    )
+                    for e in issue_events
+                )
+                cursor.execute(
+                    "INSERT INTO issue_events_issueevent "
+                    "(id, event_id, timestamp, issue_id, organization_id, release_id, "
+                    "type, level, title, transaction, data, tags, hashes) "
+                    f"VALUES {args_str} ON CONFLICT DO NOTHING"
+                )
+
+        await sync_to_async(_insert_events)()
 
     await update_tags(processing_events)
     await update_statistics(
@@ -1186,19 +1249,26 @@ async def _update_transaction_group_stats(
     # Runs after Phase 1 commits — no row locks held. p50/p95 are
     # eventually consistent (may include other workers' concurrent changes,
     # which makes them more accurate, not less).
-    org_ids = {row[1] for row in values_data}
+    org_ids = list({row[1] for row in values_data})
     group_ids = [row[0] for row in values_data]
-    updated_groups = [
-        g
-        async for g in TransactionGroup.objects.filter(
-            id__in=group_ids, organization_id__in=org_ids
-        ).only("id", "organization_id", "count", "duration_histogram")
-    ]
+
+    def _fetch_histograms():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, organization_id, count, duration_histogram "
+                "FROM performance_transactiongroup "
+                "WHERE id = ANY(%s) AND organization_id = ANY(%s)",
+                [group_ids, org_ids],
+            )
+            return cursor.fetchall()
+
+    rows = await sync_to_async(_fetch_histograms)()
     p_updates = []
-    for g in updated_groups:
-        p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
-        p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
-        p_updates.append((p50, p95, g.id, g.organization_id))
+    for row in rows:
+        gid, oid, count, histogram = row
+        p50 = percentile_from_histogram(histogram, count, 50)
+        p95 = percentile_from_histogram(histogram, count, 95)
+        p_updates.append((p50, p95, gid, oid))
 
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
@@ -1244,21 +1314,32 @@ async def update_tags(processing_events: list[ProcessingEvent]):
         {value for d in processing_events for value in d.event_tags.values()}
     )
 
+    if not keys:
+        return
+
     await TagKey.objects.abulk_create(
         [TagKey(key=key) for key in keys], ignore_conflicts=True
     )
     await TagValue.objects.abulk_create(
         [TagValue(value=value) for value in values], ignore_conflicts=True
     )
+
     # Postgres cannot return ids with ignore_conflicts
-    tag_keys = {
-        tag["key"]: tag["id"]
-        async for tag in TagKey.objects.filter(key__in=keys).values()
-    }
-    tag_values = {
-        tag["value"]: tag["id"]
-        async for tag in TagValue.objects.filter(value__in=values).values()
-    }
+    def _fetch_tag_ids():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, key FROM issue_events_tagkey WHERE key = ANY(%s)",
+                [keys],
+            )
+            tk = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                "SELECT id, value FROM issue_events_tagvalue WHERE value = ANY(%s)",
+                [values],
+            )
+            tv = {row[1]: row[0] for row in cursor.fetchall()}
+            return tk, tv
+
+    tag_keys, tag_values = await sync_to_async(_fetch_tag_ids)()
 
     tag_stats: TagStats = defaultdict(
         lambda: defaultdict(
@@ -1308,9 +1389,7 @@ async def update_tags(processing_events: list[ProcessingEvent]):
 
     def _execute():
         with connection.cursor() as cursor:
-            args_str = ",".join(
-                cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data
-            )
+            args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s)", x) for x in data)
             sql = (
                 "INSERT INTO issue_events_issuetag (date, issue_id, organization_id, tag_key_id, tag_value_id, count)\n"
                 f"VALUES {args_str}\n"
@@ -1323,6 +1402,46 @@ async def update_tags(processing_events: list[ProcessingEvent]):
 
 
 # Transactions
+
+
+class _TxnGroupRef:
+    """Lightweight stand-in for TransactionGroup with only the fields needed downstream."""
+
+    __slots__ = ("id", "organization_id")
+
+    def __init__(self, id: int, organization_id: int):
+        self.id = id
+        self.organization_id = organization_id
+
+
+async def _fetch_transaction_groups(
+    keys: list[tuple[int, str, str, str]], db_alias: str
+) -> dict[tuple[int, str, str, str], _TxnGroupRef]:
+    """Fetch TransactionGroup id/organization_id via raw SQL VALUES lookup."""
+    if not keys:
+        return {}
+
+    def _execute():
+        with connections[db_alias].cursor() as cursor:
+            values_str = ",".join(cursor.mogrify("(%s,%s,%s,%s)", k) for k in keys)
+            cursor.execute(
+                f"""
+                SELECT id, organization_id, project_id, transaction, op, method
+                FROM performance_transactiongroup
+                WHERE (project_id, transaction, op, method) IN (VALUES {values_str})
+                """
+            )
+            return cursor.fetchall()
+
+    rows = await sync_to_async(_execute)()
+    return {
+        (row[2], row[3], row[4], row[5]): _TxnGroupRef(
+            id=row[0], organization_id=row[1]
+        )
+        for row in rows
+    }
+
+
 async def process_transaction_events(
     ingest_events: list[InterchangeTransactionEvent], read_only_db: str = "default"
 ):
@@ -1381,16 +1500,11 @@ async def process_transaction_events(
         event_data.append((ingest_event, transaction_name, op, trace_status, key))
 
     # 2. Batch fetch existing TransactionGroups (single query)
+    existing: dict[GroupKey, _TxnGroupRef] = {}
     if unique_keys:
-        q = Q()
-        for project_id, txn, op, method in unique_keys:
-            q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
-        existing = {
-            (g.project_id, g.transaction, g.op, g.method): g
-            async for g in TransactionGroup.objects.using(read_only_db).filter(q)
-        }
-    else:
-        existing = {}
+        existing = await _fetch_transaction_groups(
+            list(unique_keys.keys()), read_only_db
+        )
 
     # Batch create any missing groups
     missing_keys = [k for k in unique_keys if k not in existing]
@@ -1407,16 +1521,11 @@ async def process_transaction_events(
             )
             for k in missing_keys
         ]
-        await TransactionGroup.objects.abulk_create(
-            new_groups, ignore_conflicts=True
-        )
+        await TransactionGroup.objects.abulk_create(new_groups, ignore_conflicts=True)
         # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
         if missing_keys:
-            q = Q()
-            for project_id, txn, op, method in missing_keys:
-                q |= Q(project_id=project_id, transaction=txn, op=op, method=method)
-            async for g in TransactionGroup.objects.filter(q):
-                existing[(g.project_id, g.transaction, g.op, g.method)] = g
+            refetched = await _fetch_transaction_groups(missing_keys, "default")
+            existing.update(refetched)
 
     # 3. Collect durations, error counts, and spans per group
     collect_spans = is_duckdb_available()
