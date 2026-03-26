@@ -441,7 +441,7 @@ if DEBUG_TOOLBAR:
 INSTALLED_APPS += [
     "storages",
     "django_vtasks",
-    "glitchtip",
+    "glitchtip.apps.GlitchtipConfig",
     "apps.alerts",
     "apps.environments",
     "apps.organizations_ext",
@@ -481,6 +481,7 @@ if ENABLE_OBSERVABILITY_API:
 PROMETHEUS_EXPORT_MIGRATIONS = False
 
 MIDDLEWARE = [
+    "django_async_backend.middleware.close_async_connections",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -672,6 +673,7 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
+    db_config["ENGINE"] = "glitchtip.db_backend"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)

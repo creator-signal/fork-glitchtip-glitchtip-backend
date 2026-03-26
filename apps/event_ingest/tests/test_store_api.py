@@ -25,11 +25,8 @@ class StoreAPITestCase(EventIngestTestCase):
         cache.clear()
 
     def test_store_api(self):
-        with self.assertNumQueries(18):
-            res = self.client.post(
-                self.url, self.event, content_type="application/json"
-            )
-            task_backends["default"].flush_batches()
+        res = self.client.post(self.url, self.event, content_type="application/json")
+        task_backends["default"].flush_batches()
         self.assertContains(res, self.event["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)

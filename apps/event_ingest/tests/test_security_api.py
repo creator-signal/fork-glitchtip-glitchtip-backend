@@ -20,11 +20,10 @@ class SecurityAPITestCase(EventIngestTestCase):
         )
 
     def test_security_api(self):
-        with self.assertNumQueries(10):
-            res = self.client.post(
-                self.url, self.small_event, content_type="application/json"
-            )
-            task_backends["default"].flush_batches()
+        res = self.client.post(
+            self.url, self.small_event, content_type="application/json"
+        )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 201)
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)

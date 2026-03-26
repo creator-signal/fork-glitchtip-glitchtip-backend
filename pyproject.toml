@@ -9,7 +9,7 @@ dependencies = [
     "Brotli>=1.2.0",
     "zstandard>=0.23.0; python_version < '3.14'",
     "django~=6.0",
-    "django-vtasks[valkey]~=2.0",
+    "django-vtasks[valkey] @ git+https://gitlab.com/glitchtip/django-vtasks.git@feat/async-task-signals",
     "django-allauth[mfa,socialaccount]~=65.0",
     "django-cors-headers~=4.0",
     "django-environ~=0.11",
@@ -46,6 +46,7 @@ dependencies = [
     "minidump>=0.0.24",
     "arro3-core~=0.8",
     "arro3-io~=0.8",
+    "django-async-backend @ git+https://github.com/bufke/django-async-backend.git@fix-connection-isolation",
 ]
 
 [dependency-groups]

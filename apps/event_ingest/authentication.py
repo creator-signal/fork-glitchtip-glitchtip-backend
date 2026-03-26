@@ -6,12 +6,11 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection, connections
 from django.db.utils import OperationalError
 from django.http import HttpRequest
+from django_async_backend.db import async_connections
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
@@ -110,34 +109,27 @@ def calculate_retry_after(throttle: int):
     return math.ceil(0.02 * throttle**2.3)
 
 
-def get_project_auth_info_row(project_id: int, sentry_key: UUID):
-    # May someday be async https://code.djangoproject.com/ticket/35629
+async def get_project_auth_info_row(project_id: int, sentry_key: UUID):
     if "read_only" in settings.DATABASES:
         try:
-            with connections["read_only"].cursor() as cursor:
-                cursor.callproc(
-                    "get_project_auth_info",
-                    [
-                        project_id,
-                        sentry_key,
-                    ],
+            async with await async_connections["read_only"].cursor() as cursor:
+                await cursor.execute(
+                    "SELECT * FROM get_project_auth_info(%s, %s)",
+                    [project_id, sentry_key],
                 )
-                return cursor.fetchone()
+                return await cursor.fetchone()
         except OperationalError:
             pass
         except Exception as e:
             # Fail safe - don't let a read only db failure stop the request
             logger.warning("Failed to read from read_only database", exc_info=e)
 
-    with connection.cursor() as cursor:
-        cursor.callproc(
-            "get_project_auth_info",
-            [
-                project_id,
-                sentry_key,
-            ],
+    async with await async_connections["default"].cursor() as cursor:
+        await cursor.execute(
+            "SELECT * FROM get_project_auth_info(%s, %s)",
+            [project_id, sentry_key],
         )
-        return cursor.fetchone()
+        return await cursor.fetchone()
 
 
 async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
@@ -170,7 +162,7 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             # Repeat the original message until cache expires
             raise REJECTION_MAP[block_value]
 
-    row = await sync_to_async(get_project_auth_info_row)(project_id, sentry_key)
+    row = await get_project_auth_info_row(project_id, sentry_key)
 
     if not row:
         await cache.aset(block_cache_key, "v", REJECTION_WAIT)

@@ -35,6 +35,24 @@ class TimedTestRunner(DiscoverRunner):
 
     test_runner = TimedTextTestRunner
 
+    def teardown_databases(self, old_config, **kwargs):
+        # Close async connections before destroying test databases.
+        # django-async-backend maintains its own connection pool that Django's
+        # test framework doesn't know about.
+        import asyncio
+
+        from django_async_backend.db import async_connections
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(async_connections.close_all())
+            else:
+                loop.run_until_complete(async_connections.close_all())
+        except RuntimeError:
+            asyncio.run(async_connections.close_all())
+        super().teardown_databases(old_config, **kwargs)
+
     def setup_databases(self, **kwargs):
         from django.db.models.signals import post_migrate
 
