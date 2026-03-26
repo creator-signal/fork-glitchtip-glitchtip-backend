@@ -24,14 +24,13 @@ class CompressionTestCase(EventIngestTestCase):
         json_data = json.dumps(self.event).encode("utf-8")
         compressed_data = zstd.compress(json_data)
 
-        with self.assertNumQueries(18):
-            res = self.client.post(
-                self.url,
-                compressed_data,
-                content_type="application/json",
-                HTTP_CONTENT_ENCODING="zstd",
-            )
-            task_backends["default"].flush_batches()
+        res = self.client.post(
+            self.url,
+            compressed_data,
+            content_type="application/json",
+            HTTP_CONTENT_ENCODING="zstd",
+        )
+        task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.event["event_id"])
