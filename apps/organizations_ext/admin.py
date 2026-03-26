@@ -25,7 +25,6 @@ from .resources import OrganizationResource, OrganizationUserResource
 ORGANIZATION_LIST_FILTER = (
     "is_active",
     "is_accepting_events",
-    "stripesubscription__price__product",
 )
 
 
@@ -45,10 +44,13 @@ class OrganizationSubscriptionInline(admin.StackedInline):
     readonly_fields = [field.name for field in StripeSubscription._meta.fields]
 
 
-class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
+class OrganizationAdmin(BaseOrganizationAdmin, ImportExportModelAdmin):
+    list_display = [
+        "name",
+        "is_active",
+        "is_accepting_events",
+    ]
     readonly_fields = (
-        "customer_link",
-        "subscription_link",
         "created",
         "issue_events",
         "transaction_events",
@@ -58,8 +60,22 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
         "total_events",
     )
     list_filter = ORGANIZATION_LIST_FILTER
-    inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
+    inlines = [OrganizationUserInline, OwnerInline]
     show_full_result_count = False
+    resource_class = OrganizationResource
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        fields = list(self.readonly_fields)
+        if settings.BILLING_ENABLED:
+            fields += ["customer_link", "subscription_link", "max_events"]
+        return fields
+
+    def get_inlines(self, request, obj=None):
+        inlines = list(self.inlines)
+        if settings.BILLING_ENABLED:
+            inlines.append(OrganizationSubscriptionInline)
+        return inlines
 
     def _get_event_counts(self, obj):
         """Cached per-request event counts for the detail page."""
@@ -89,6 +105,10 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
     def total_events(self, obj):
         return self._get_event_counts(obj).total_event_count
 
+    def max_events(self, obj):
+        if obj.stripe_primary_subscription:
+            return obj.stripe_primary_subscription.price.product.events
+
     def customer_link(self, obj):
         if customer_id := obj.stripe_customer_id:
             return format_html(
@@ -105,46 +125,12 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
                 subscription_id,
             )
 
-
-class OrganizationAdmin(GlitchTipBaseOrganizationAdmin, ImportExportModelAdmin):
-    list_display = [
-        "name",
-        "is_active",
-        "is_accepting_events",
-        "stripe_primary_subscription",
-    ]
-    resource_class = OrganizationResource
-
-
-class OrganizationSubscription(Organization):
-    class Meta:
-        proxy = True
-
-
-class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
-    list_display = [
-        "name",
-        "is_active",
-        "is_accepting_events",
-        "max_events",
-        "current_period_end",
-    ]
-
-    def max_events(self, obj):
-        if obj.stripe_primary_subscription:
-            return obj.stripe_primary_subscription.price.product.events
-
-    def current_period_end(self, obj):
-        if obj.stripe_primary_subscription:
-            return obj.stripe_primary_subscription.current_period_end
-
     def get_queryset(self, request):
-        qs = Organization.objects.select_related(
-            "stripe_primary_subscription__price__product"
-        )
-        ordering = self.ordering or ()
-        if ordering:
-            qs = qs.order_by(*ordering)
+        qs = super().get_queryset(request)
+        if settings.BILLING_ENABLED:
+            qs = qs.select_related(
+                "stripe_primary_subscription__price__product"
+            )
         return qs
 
 
@@ -161,7 +147,5 @@ class OrganizationSocialAppAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Organization, OrganizationAdmin)
-if settings.BILLING_ENABLED:
-    admin.site.register(OrganizationSubscription, OrganizationSubscriptionAdmin)
 admin.site.register(OrganizationUser, OrganizationUserAdmin)
 admin.site.register(OrganizationSocialApp, OrganizationSocialAppAdmin)
