@@ -49,6 +49,31 @@ if [ "${ENABLE_OBSERVABILITY_API}" = "True" ] || [ "${ENABLE_OBSERVABILITY_API}"
     fi
 fi
 
+# Worker memory limit: restart workers that grow too large (likely fragmentation).
+# Granian spawns a new worker before terminating the old one, so traffic is not interrupted.
+# Skip if the operator has already set GRANIAN_WORKERS_MAX_RSS.
+if [ -z "$GRANIAN_WORKERS_MAX_RSS" ]; then
+    MEM_LIMIT_MB=0
+    if [ -f /sys/fs/cgroup/memory.max ]; then
+        MEM_LIMIT_BYTES=$(cat /sys/fs/cgroup/memory.max)
+        if [ "$MEM_LIMIT_BYTES" != "max" ] 2>/dev/null; then
+            MEM_LIMIT_MB=$(( MEM_LIMIT_BYTES / 1048576 ))
+        fi
+    fi
+    if [ "$MEM_LIMIT_MB" -gt 0 ] 2>/dev/null; then
+        # Use 50% of the cgroup limit, but no less than 1024 MiB.
+        # 50% leaves headroom for the brief overlap when granian runs
+        # both the old and new worker during a respawn.
+        RSS_LIMIT=$(( MEM_LIMIT_MB / 2 ))
+        if [ "$RSS_LIMIT" -lt 1024 ]; then
+            RSS_LIMIT=1024
+        fi
+    else
+        RSS_LIMIT=2048
+    fi
+    export GRANIAN_WORKERS_MAX_RSS=$RSS_LIMIT
+fi
+
 # Run Granian
 
 exec granian --interface asgi glitchtip.asgi:application --host $HOST --port $PORT --workers $WORKERS --log-level $G_LOG_LEVEL --no-ws "$@"
