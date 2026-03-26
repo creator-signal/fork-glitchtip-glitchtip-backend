@@ -9,7 +9,7 @@ from apps.teams.models import Team
 from apps.users.models import User
 
 DEV_EMAIL = "test@example.com"
-DEV_PASSWORD = "admin"
+DEV_PASSWORD = "admin_pass"
 DEV_TOKEN = "d" * 64
 ALL_SCOPES = [
     "project:read",
