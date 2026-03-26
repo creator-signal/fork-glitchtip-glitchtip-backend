@@ -79,12 +79,18 @@ async def check_organization_throttle(organization_id: int, bypass_cache: bool =
 
 @task
 async def check_all_organizations_throttle():
-    async for org in (
-        Organization.objects.select_related(
-            "stripe_primary_subscription__price__product"
-        ).aiterator()
-    ):
-        await _check_and_update_throttle(org)
+    BATCH_SIZE = 500
+    base_qs = Organization.objects.select_related(
+        "stripe_primary_subscription__price__product"
+    ).order_by("id")
+    last_id = 0
+    while True:
+        orgs = await sync_to_async(list)(base_qs.filter(id__gt=last_id)[:BATCH_SIZE])
+        if not orgs:
+            break
+        for org in orgs:
+            await _check_and_update_throttle(org)
+        last_id = orgs[-1].id
 
 
 async def _check_and_update_throttle(org: Organization):
