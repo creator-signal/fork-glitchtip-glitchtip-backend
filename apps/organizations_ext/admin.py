@@ -1,3 +1,4 @@
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib import admin
 from django.utils.html import format_html
@@ -16,6 +17,8 @@ from .models import (
     OrganizationOwner,
     OrganizationSocialApp,
     OrganizationUser,
+    get_current_period_dates,
+    get_event_counts,
 )
 from .resources import OrganizationResource, OrganizationUserResource
 
@@ -43,10 +46,48 @@ class OrganizationSubscriptionInline(admin.StackedInline):
 
 
 class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
-    readonly_fields = ("customer_link", "subscription_link", "created")
+    readonly_fields = (
+        "customer_link",
+        "subscription_link",
+        "created",
+        "issue_events",
+        "transaction_events",
+        "uptime_check_events",
+        "log_events",
+        "file_size",
+        "total_events",
+    )
     list_filter = ORGANIZATION_LIST_FILTER
     inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
     show_full_result_count = False
+
+    def _get_event_counts(self, obj):
+        """Cached per-request event counts for the detail page."""
+        if not hasattr(obj, "_event_counts_cache"):
+            period = async_to_sync(get_current_period_dates)(obj)
+            start, end = period if period else (None, None)
+            obj._event_counts_cache = async_to_sync(get_event_counts)(
+                obj.id, start, end
+            )
+        return obj._event_counts_cache
+
+    def issue_events(self, obj):
+        return self._get_event_counts(obj).issue_event_count
+
+    def transaction_events(self, obj):
+        return self._get_event_counts(obj).transaction_count
+
+    def uptime_check_events(self, obj):
+        return self._get_event_counts(obj).uptime_check_event_count
+
+    def log_events(self, obj):
+        return self._get_event_counts(obj).log_count
+
+    def file_size(self, obj):
+        return f"{self._get_event_counts(obj).file_size} MB"
+
+    def total_events(self, obj):
+        return self._get_event_counts(obj).total_event_count
 
     def customer_link(self, obj):
         if customer_id := obj.stripe_customer_id:
