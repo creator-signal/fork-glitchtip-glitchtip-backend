@@ -4,7 +4,7 @@
 Hello and thank you for using GlitchTip. We noticed your organization {{ organization.name|striptags }}
 has exceeded its monthly event limit on your {{ product.name }} and wanted to give you a heads up.
 Your plan allows for {{ event_limit|intcomma }} events, but for the current billing period we have received
-{{ organization.total_event_count|intcomma }} events for your organization. Here are a couple options to avoid this in the future.
+{{ total_event_count|intcomma }} events for your organization. Here are a couple options to avoid this in the future.
 
 Upgrade to a new plan for more events at this link:
 {{ subscription_link }}

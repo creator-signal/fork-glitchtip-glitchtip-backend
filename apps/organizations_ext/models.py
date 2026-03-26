@@ -1,11 +1,12 @@
 import logging
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.db.models import Count, F, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.text import slugify
@@ -28,7 +29,7 @@ from apps.projects.models import (
     TransactionEventProjectHourlyStatistic,
 )
 from apps.sourcecode.models import DebugSymbolBundle
-from apps.uptime.models import MonitorCheck
+from apps.uptime.models import UptimeCheckHourlyStatistic
 
 from .constants import OrganizationUserRole
 from .fields import OrganizationSlugField
@@ -37,191 +38,118 @@ logger = logging.getLogger(__name__)
 
 
 class OrganizationManager(OrgManager):
-    def with_event_counts(self, current_period=True, start=None, end=None):
-        queryset = self
-        subscription_filter = Q()
-        event_subscription_filter = Q()
-        checks_subscription_filter = Q()
-        if start and end:
-            queryset = queryset.annotate(cycle_start=Value(start), cycle_end=Value(end))
-            subscription_filter = Q(
-                created__gte=OuterRef("cycle_start"),
-                created__lt=OuterRef("cycle_end"),
-            )
-            event_subscription_filter = Q(
-                date__gte=OuterRef("cycle_start"),
-                date__lt=OuterRef("cycle_end"),
-            )
-            checks_subscription_filter = Q(
-                start_check__gte=OuterRef("cycle_start"),
-                start_check__lt=OuterRef("cycle_end"),
-            )
-        elif current_period and settings.BILLING_ENABLED:
-            now = timezone.now()
-            thirty_days_ago = now - timedelta(days=30)
+    pass
 
-            # Use subscription cycle if available, else current period, else rolling 30 days
-            cycle_start = Coalesce(
-                "stripe_primary_subscription__subscription_cycle_start",
-                "stripe_primary_subscription__current_period_start",
-                Value(thirty_days_ago),
-            )
-            cycle_end = Coalesce(
-                "stripe_primary_subscription__subscription_cycle_end",
-                "stripe_primary_subscription__current_period_end",
-                Value(now),
-            )
 
-            queryset = queryset.annotate(cycle_start=cycle_start, cycle_end=cycle_end)
+@dataclass
+class EventCounts:
+    issue_event_count: int = 0
+    transaction_count: int = 0
+    log_count: int = 0
+    uptime_check_event_count: int = 0
+    file_size: int = 0
 
-            subscription_filter = Q(
-                created__gte=OuterRef("cycle_start"),
-                created__lt=OuterRef("cycle_end"),
-            )
-            event_subscription_filter = Q(
-                date__gte=OuterRef("cycle_start"),
-                date__lt=OuterRef("cycle_end"),
-            )
-            checks_subscription_filter = Q(
-                start_check__gte=OuterRef("cycle_start"),
-                start_check__lt=OuterRef("cycle_end"),
-            )
+    @property
+    def total_event_count(self) -> int:
+        """Weighted total: errors=1.0, transactions=1.0, uptime=1.0, file_size=1.0, logs=0.1"""
+        return (
+            self.issue_event_count * 10
+            + self.transaction_count * 10
+            + self.log_count  # 0.1 weight
+            + self.uptime_check_event_count * 10
+            + self.file_size * 10
+        ) // 10
 
-        # Subquery for Issue Events Sum
-        issue_event_subquery = Subquery(
-            IssueEventProjectHourlyStatistic.objects.filter(
-                Q(project__organization=OuterRef("pk")),  # Link to outer Organization
-                event_subscription_filter,  # Apply date filtering
-            )
-            .values(
-                "project__organization"  # Group by organization (required for annotate)
-            )
-            .annotate(
-                sum_count=Sum("count")  # Calculate sum for this group
-            )
-            .values(
-                "sum_count"  # Select only the calculated sum
-            )
-            .order_by(),  # Prevent potential default ordering issues in subquery
-            output_field=models.BigIntegerField(),  # Define output type
+
+async def get_event_counts(
+    org_id: int,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> EventCounts:
+    """
+    Get event counts for an organization using separate queries per table.
+
+    Unlike with_event_counts() which builds one SQL statement with correlated
+    subqueries across all partitioned tables (acquiring locks on every partition
+    simultaneously), this runs separate aggregate queries. Each query only locks
+    one table's partitions and releases them before the next query runs.
+    """
+    date_filter = Q()
+    created_filter = Q()
+    if start and end:
+        date_filter = Q(date__gte=start, date__lt=end)
+        created_filter = Q(created__gte=start, created__lt=end)
+
+    issue_result = await IssueEventProjectHourlyStatistic.objects.filter(
+        Q(organization_id=org_id) & date_filter
+    ).aaggregate(total=Coalesce(Sum("count"), 0))
+
+    transaction_result = await TransactionEventProjectHourlyStatistic.objects.filter(
+        Q(organization_id=org_id) & date_filter
+    ).aaggregate(total=Coalesce(Sum("count"), 0))
+
+    log_result = await LogProjectHourlyStatistic.objects.filter(
+        Q(organization_id=org_id) & date_filter
+    ).aaggregate(total=Coalesce(Sum("count"), 0))
+
+    uptime_result = await UptimeCheckHourlyStatistic.objects.filter(
+        Q(organization_id=org_id) & date_filter
+    ).aaggregate(total=Coalesce(Sum("count"), 0))
+
+    symbol_result = await DebugSymbolBundle.objects.filter(
+        Q(organization_id=org_id) & created_filter
+    ).aaggregate(total=Coalesce(Sum("file__blob__size"), 0))
+
+    info_result = await DebugInformationFile.objects.filter(
+        Q(project__organization_id=org_id) & created_filter
+    ).aaggregate(total=Coalesce(Sum("file__blob__size"), 0))
+
+    file_size = int(
+        (symbol_result["total"] + info_result["total"]) / 1000000
+    )
+
+    return EventCounts(
+        issue_event_count=issue_result["total"],
+        transaction_count=transaction_result["total"],
+        log_count=log_result["total"],
+        uptime_check_event_count=uptime_result["total"],
+        file_size=file_size,
+    )
+
+
+async def get_current_period_dates(
+    org: "Organization",
+) -> tuple[datetime, datetime] | None:
+    """
+    Determine the current billing period date range for an organization.
+    Returns None if billing is disabled (meaning no date filtering needed).
+    """
+    if not settings.BILLING_ENABLED:
+        return None
+
+    now = timezone.now()
+    thirty_days_ago = now - timedelta(days=30)
+
+    sub = await (
+        type(org)
+        .objects.filter(pk=org.pk)
+        .values_list(
+            "stripe_primary_subscription__subscription_cycle_start",
+            "stripe_primary_subscription__subscription_cycle_end",
+            "stripe_primary_subscription__current_period_start",
+            "stripe_primary_subscription__current_period_end",
         )
+        .afirst()
+    )
+    if sub:
+        cycle_start, cycle_end, period_start, period_end = sub
+        start = cycle_start or period_start or thirty_days_ago
+        end = cycle_end or period_end or now
+    else:
+        start = thirty_days_ago
+        end = now
 
-        # Subquery for Transaction Events Sum
-        transaction_subquery = Subquery(
-            TransactionEventProjectHourlyStatistic.objects.filter(
-                Q(project__organization=OuterRef("pk")), event_subscription_filter
-            )
-            .values("project__organization")
-            .annotate(sum_count=Sum("count"))
-            .values("sum_count")
-            .order_by(),
-            output_field=models.BigIntegerField(),
-        )
-
-        # Subquery for Log Events Sum
-        log_subquery = Subquery(
-            LogProjectHourlyStatistic.objects.filter(
-                Q(project__organization=OuterRef("pk")), event_subscription_filter
-            )
-            .values("project__organization")
-            .annotate(sum_count=Sum("count"))
-            .values("sum_count")
-            .order_by(),
-            output_field=models.BigIntegerField(),
-        )
-
-        # Subquery for Uptime Checks Count
-        # Assumes MonitorCheck relates to Monitor which relates to Organization
-        uptime_check_subquery = Subquery(
-            MonitorCheck.objects.filter(
-                Q(monitor__organization=OuterRef("pk")),  # Link Monitor -> Organization
-                Q(checks_subscription_filter),  # Apply date filtering
-            )
-            .values(
-                "monitor__organization"  # Group by organization
-            )
-            .annotate(
-                check_count=Count("pk")  # Count checks for this group
-            )
-            .values(
-                "check_count"  # Select only the count
-            )
-            .order_by(),
-            output_field=models.IntegerField(),
-        )
-
-        # Subquery for Debug Symbol Bundle File Size Sum
-        # Assumes DebugSymbolBundle relates directly to Organization
-        debugsymbol_size_subquery = Subquery(
-            DebugSymbolBundle.objects.filter(
-                Q(organization=OuterRef("pk")),  # Direct link to Organization
-                Q(subscription_filter),  # Apply created date filtering
-            )
-            .values(
-                "organization"  # Group by organization
-            )
-            .annotate(
-                total_size=Sum("file__blob__size")  # Sum blob sizes
-            )
-            .values(
-                "total_size"  # Select the sum
-            )
-            .order_by(),
-            output_field=models.BigIntegerField(),
-        )
-
-        # Subquery for Debug Information File Size Sum
-        # Assumes DebugInformationFile relates to Project which relates to Organization
-        debuginfo_size_subquery = Subquery(
-            DebugInformationFile.objects.filter(
-                Q(project__organization=OuterRef("pk")),  # Link via Project
-                subscription_filter,  # Apply created date filtering
-            )
-            .values(
-                "project__organization"  # Group by organization
-            )
-            .annotate(
-                total_size=Sum("file__blob__size")  # Sum blob sizes
-            )
-            .values(
-                "total_size"  # Select the sum
-            )
-            .order_by(),
-            output_field=models.BigIntegerField(),
-        )
-        return queryset.annotate(
-            issue_event_count=Coalesce(issue_event_subquery, 0),
-            transaction_count=Coalesce(transaction_subquery, 0),
-            log_count=Coalesce(log_subquery, 0),
-            # Use Coalesce for count as well, safer if no checks exist
-            uptime_check_event_count=Coalesce(uptime_check_subquery, 0),
-            # Calculate total file size, Coalesce each part, sum, then convert/divide
-            # Use FloatField for output if division result can be non-integer
-            file_size=Coalesce(
-                models.ExpressionWrapper(
-                    (
-                        Coalesce(debugsymbol_size_subquery, 0)
-                        + Coalesce(debuginfo_size_subquery, 0)
-                    ),
-                    output_field=models.FloatField(),  # Cast sum before division
-                )
-                / 1000000.0,  # Divide by 1 million (ensure float division)
-                0.0,  # Coalesce the final division result
-                output_field=models.BigIntegerField(),
-            ),
-        ).annotate(
-            # Calculate weighted total for quota purposes
-            # Weights: errors=1.0, transactions=1.0, uptime=1.0, file_size=1.0, logs=0.1
-            # Using integer math: multiply by 10, sum, divide by 10
-            total_event_count=(
-                F("issue_event_count") * 10
-                + F("transaction_count") * 10
-                + F("log_count")  # 0.1 weight
-                + F("uptime_check_event_count") * 10
-                + F("file_size") * 10
-            )
-            / 10,
-        )
+    return start, end
 
 
 class Organization(SharedBaseModel, OrganizationBase):
