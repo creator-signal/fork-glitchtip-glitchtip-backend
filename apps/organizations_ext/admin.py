@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.contrib import admin
-from django.db.models import F
 from django.utils.html import format_html
 from import_export.admin import ImportExportModelAdmin
 from organizations.base_admin import (
@@ -49,9 +48,6 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
     inlines = [OrganizationUserInline, OwnerInline, OrganizationSubscriptionInline]
     show_full_result_count = False
 
-    def issue_events(self, obj):
-        return obj.issue_event_count
-
     def customer_link(self, obj):
         if customer_id := obj.stripe_customer_id:
             return format_html(
@@ -68,42 +64,15 @@ class GlitchTipBaseOrganizationAdmin(BaseOrganizationAdmin):
                 subscription_id,
             )
 
-    def transaction_events(self, obj):
-        return obj.transaction_count
-
-    def uptime_check_events(self, obj):
-        return obj.uptime_check_event_count
-
-    def file_size(self, obj):
-        return obj.file_size
-
-    def total_events(self, obj):
-        return obj.total_event_count
-
 
 class OrganizationAdmin(GlitchTipBaseOrganizationAdmin, ImportExportModelAdmin):
     list_display = [
         "name",
         "is_active",
         "is_accepting_events",
-        "issue_events",
-        "transaction_events",
-        "uptime_check_events",
-        "file_size",
-        "total_events",
         "stripe_primary_subscription",
     ]
     resource_class = OrganizationResource
-
-    def get_queryset(self, request):
-        qs = self.model.objects.with_event_counts()
-
-        # From super
-        ordering = self.ordering or ()
-        if ordering:
-            qs = qs.order_by(*ordering)
-
-        return qs
 
 
 class OrganizationSubscription(Organization):
@@ -111,38 +80,11 @@ class OrganizationSubscription(Organization):
         proxy = True
 
 
-class IsOverListFilter(admin.SimpleListFilter):
-    title = "Is over plan limit"
-    parameter_name = "is_over"
-
-    def lookups(self, request, _model_admin):
-        return (
-            (True, "Yes"),
-            (False, "No"),
-        )
-
-    def queryset(self, request, queryset):
-        if self.value() is not None:
-            queryset = queryset.filter(
-                stripe_primary_subscription__price__product__events__isnull=False
-            )
-        if self.value() is False:
-            return queryset.filter(total_event_count__lte=F("max_events"))
-        if self.value() is True:
-            return queryset.filter(total_event_count__gt=F("max_events"))
-        return queryset
-
-
 class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
     list_display = [
         "name",
         "is_active",
         "is_accepting_events",
-        "issue_events",
-        "transaction_events",
-        "uptime_check_events",
-        "file_size",
-        "total_events",
         "max_events",
         "current_period_end",
     ]
@@ -156,17 +98,13 @@ class OrganizationSubscriptionAdmin(GlitchTipBaseOrganizationAdmin):
             return obj.stripe_primary_subscription.current_period_end
 
     def get_queryset(self, request):
-        qs = Organization.objects.with_event_counts().select_related(
+        qs = Organization.objects.select_related(
             "stripe_primary_subscription__price__product"
         )
-        # From super
         ordering = self.ordering or ()
         if ordering:
             qs = qs.order_by(*ordering)
-
         return qs
-
-    list_filter = GlitchTipBaseOrganizationAdmin.list_filter + (IsOverListFilter,)
 
 
 class OrganizationUserAdmin(BaseOrganizationUserAdmin, ImportExportModelAdmin):
