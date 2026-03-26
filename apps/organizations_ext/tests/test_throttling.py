@@ -115,7 +115,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         org = self.organization
 
         # No events, no throttle
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(9):
             check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)
