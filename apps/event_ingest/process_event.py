@@ -14,6 +14,7 @@ from django.db.models import Q, Value
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from ninja import Schema
+from psycopg.types.json import Jsonb
 from user_agents import parse
 
 from apps.alerts.constants import ISSUE_IDS_KEY
@@ -429,21 +430,27 @@ async def create_environments(
         await Environment.objects.abulk_create(
             environments_to_create, ignore_conflicts=True
         )
-        query = Q()
-        for environment in environments_to_create:
-            query |= Q(
-                name=environment.name, organization_id=environment.organization_id
-            )
-        environment_projects: list = []
-        async for environment in Environment.objects.filter(query):
-            project_id = next(
+        env_pairs = [(e.name, e.organization_id) for e in environments_to_create]
+
+        def _fetch_env_ids():
+            with connections["default"].cursor() as cursor:
+                values_str = ",".join(cursor.mogrify("(%s,%s)", p) for p in env_pairs)
+                cursor.execute(
+                    "SELECT id, name, organization_id FROM environments_environment "
+                    f"WHERE (name, organization_id) IN (VALUES {values_str})"
+                )
+                return cursor.fetchall()
+
+        env_rows = await sync_to_async(_fetch_env_ids)()
+        environment_projects = []
+        for env_id, env_name, env_org_id in env_rows:
+            pid = next(
                 project_id
                 for (name, project_id, organization_id) in environment_set
-                if environment.name == name
-                and environment.organization_id == organization_id
+                if env_name == name and env_org_id == organization_id
             )
             environment_projects.append(
-                EnvironmentProject(project_id=project_id, environment=environment)
+                EnvironmentProject(project_id=pid, environment_id=env_id)
             )
         await EnvironmentProject.objects.abulk_create(
             environment_projects, ignore_conflicts=True
@@ -471,26 +478,33 @@ async def get_and_create_releases(
             None,
         )
     ]
-    releases: list = []
+    release_rows: list[tuple] = []
     if releases_to_create:
         # Create database records for any release that doesn't exist
         await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
-        query = Q()
-        for release in releases_to_create:
-            query |= Q(version=release.version, organization_id=release.organization_id)
-        releases = [r async for r in Release.objects.filter(query)]
+        rel_pairs = [(r.version, r.organization_id) for r in releases_to_create]
+
+        def _fetch_release_ids():
+            with connections["default"].cursor() as cursor:
+                values_str = ",".join(cursor.mogrify("(%s,%s)", p) for p in rel_pairs)
+                cursor.execute(
+                    "SELECT id, version, organization_id FROM releases_release "
+                    f"WHERE (version, organization_id) IN (VALUES {values_str})"
+                )
+                return cursor.fetchall()
+
+        release_rows = await sync_to_async(_fetch_release_ids)()
         ReleaseProject = Release.projects.through
         release_projects = [
             ReleaseProject(
-                release=release,
+                release_id=rel_id,
                 project_id=next(
                     project_id
                     for (version, project_id, organization_id) in release_set
-                    if release.version == version
-                    and release.organization_id == organization_id
+                    if rel_version == version and rel_org_id == organization_id
                 ),
             )
-            for release in releases
+            for rel_id, rel_version, rel_org_id in release_rows
         ]
         await ReleaseProject.objects.abulk_create(
             release_projects, ignore_conflicts=True
@@ -508,10 +522,9 @@ async def get_and_create_releases(
                 ),
                 next(
                     (
-                        release.id
-                        for release in releases
-                        if release.version == version
-                        and release.organization_id == organization_id
+                        rel_id
+                        for rel_id, rel_version, rel_org_id in release_rows
+                        if rel_version == version and rel_org_id == organization_id
                     ),
                     0,
                 ),
@@ -1013,7 +1026,39 @@ async def process_issue_events(
         await Notification.objects.filter(issues__in=issues_to_reopen).adelete()
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
-    await IssueEvent.objects.abulk_create(issue_events, ignore_conflicts=True)
+    if issue_events:
+
+        def _insert_events():
+            with connection.cursor() as cursor:
+                args_str = ",".join(
+                    cursor.mogrify(
+                        "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::text[])",
+                        (
+                            e.id,
+                            e.event_id,
+                            e.timestamp,
+                            e.issue_id,
+                            e.organization_id,
+                            e.release_id,
+                            e.type,
+                            e.level,
+                            e.title,
+                            e.transaction,
+                            Jsonb(e.data),
+                            Jsonb(e.tags),
+                            e.hashes,
+                        ),
+                    )
+                    for e in issue_events
+                )
+                cursor.execute(
+                    "INSERT INTO issue_events_issueevent "
+                    "(id, event_id, timestamp, issue_id, organization_id, release_id, "
+                    "type, level, title, transaction, data, tags, hashes) "
+                    f"VALUES {args_str} ON CONFLICT DO NOTHING"
+                )
+
+        await sync_to_async(_insert_events)()
 
     await update_tags(processing_events)
     await update_statistics(
@@ -1204,19 +1249,26 @@ async def _update_transaction_group_stats(
     # Runs after Phase 1 commits — no row locks held. p50/p95 are
     # eventually consistent (may include other workers' concurrent changes,
     # which makes them more accurate, not less).
-    org_ids = {row[1] for row in values_data}
+    org_ids = list({row[1] for row in values_data})
     group_ids = [row[0] for row in values_data]
-    updated_groups = [
-        g
-        async for g in TransactionGroup.objects.filter(
-            id__in=group_ids, organization_id__in=org_ids
-        ).only("id", "organization_id", "count", "duration_histogram")
-    ]
+
+    def _fetch_histograms():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, organization_id, count, duration_histogram "
+                "FROM performance_transactiongroup "
+                "WHERE id = ANY(%s) AND organization_id = ANY(%s)",
+                [group_ids, org_ids],
+            )
+            return cursor.fetchall()
+
+    rows = await sync_to_async(_fetch_histograms)()
     p_updates = []
-    for g in updated_groups:
-        p50 = percentile_from_histogram(g.duration_histogram, g.count, 50)
-        p95 = percentile_from_histogram(g.duration_histogram, g.count, 95)
-        p_updates.append((p50, p95, g.id, g.organization_id))
+    for row in rows:
+        gid, oid, count, histogram = row
+        p50 = percentile_from_histogram(histogram, count, 50)
+        p95 = percentile_from_histogram(histogram, count, 95)
+        p_updates.append((p50, p95, gid, oid))
 
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
@@ -1262,21 +1314,32 @@ async def update_tags(processing_events: list[ProcessingEvent]):
         {value for d in processing_events for value in d.event_tags.values()}
     )
 
+    if not keys:
+        return
+
     await TagKey.objects.abulk_create(
         [TagKey(key=key) for key in keys], ignore_conflicts=True
     )
     await TagValue.objects.abulk_create(
         [TagValue(value=value) for value in values], ignore_conflicts=True
     )
+
     # Postgres cannot return ids with ignore_conflicts
-    tag_keys = {
-        tag["key"]: tag["id"]
-        async for tag in TagKey.objects.filter(key__in=keys).values()
-    }
-    tag_values = {
-        tag["value"]: tag["id"]
-        async for tag in TagValue.objects.filter(value__in=values).values()
-    }
+    def _fetch_tag_ids():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, key FROM issue_events_tagkey WHERE key = ANY(%s)",
+                [keys],
+            )
+            tk = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                "SELECT id, value FROM issue_events_tagvalue WHERE value = ANY(%s)",
+                [values],
+            )
+            tv = {row[1]: row[0] for row in cursor.fetchall()}
+            return tk, tv
+
+    tag_keys, tag_values = await sync_to_async(_fetch_tag_ids)()
 
     tag_stats: TagStats = defaultdict(
         lambda: defaultdict(
