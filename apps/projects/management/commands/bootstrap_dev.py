@@ -9,7 +9,7 @@ from apps.teams.models import Team
 from apps.users.models import User
 
 DEV_EMAIL = "test@example.com"
-DEV_PASSWORD = "admin"
+DEV_PASSWORD = "admin_pass"
 DEV_TOKEN = "d" * 64
 ALL_SCOPES = [
     "project:read",
@@ -65,7 +65,7 @@ class Command(BaseCommand):
             return User.objects.get(email=DEV_EMAIL)
         except User.DoesNotExist:
             self.stdout.write(f"Creating user {DEV_EMAIL}")
-            return User.objects.create_user(email=DEV_EMAIL, password=DEV_PASSWORD)
+            return User.objects.create_superuser(email=DEV_EMAIL, password=DEV_PASSWORD)
 
     def _ensure_verified_email(self, user):
         EmailAddress.objects.get_or_create(

@@ -23,7 +23,7 @@ from .schema import (
     StatusPageIn,
     StatusPageSchema,
 )
-from .tasks import send_monitor_notification
+from .tasks import send_monitor_notification, update_uptime_statistics
 
 router = Router()
 
@@ -159,6 +159,11 @@ async def heartbeat_check(
         is_up=True,
         reason=None,
         is_change=is_change,
+    )
+
+    # Update hourly statistics
+    await update_uptime_statistics(
+        {monitor.organization_id: 1}, monitor_check.start_check
     )
 
     # Update cached fields on monitor

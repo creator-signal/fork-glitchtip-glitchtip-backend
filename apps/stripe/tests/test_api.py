@@ -113,11 +113,13 @@ class StripeAPITestCase(TestCase):
             baker.make(
                 "projects.IssueEventProjectHourlyStatistic",
                 project__organization=self.organization,
+                organization=self.organization,
                 count=1,
             )
             baker.make(
                 "projects.TransactionEventProjectHourlyStatistic",
                 project__organization=self.organization,
+                organization=self.organization,
                 count=1,
             )
             baker.make(

@@ -178,6 +178,23 @@ class MonitorCheck(models.Model):
         return "Down"
 
 
+class UptimeCheckHourlyStatistic(models.Model):
+    """
+    Hourly uptime check counts per organization.
+    Weekly range partitioned by date (like other ProjectStatisticBase tables).
+    """
+
+    organization = models.ForeignKey(
+        "organizations_ext.Organization", on_delete=models.CASCADE
+    )
+    date = models.DateTimeField()
+    count = models.PositiveIntegerField()
+    pk = models.CompositePrimaryKey("organization", "date")
+
+    class Meta:
+        pass
+
+
 class StatusPage(CreatedModel):
     """
     A status page is a collection of monitors that are available to view
