@@ -35,7 +35,7 @@ GlitchTip is API-compatible with Sentry, but **their server code and documentati
 
 Running `docker compose up` auto-provisions a dev environment with:
 
-- **User:** `test@example.com` / `admin`
+- **User:** `test@example.com` / `admin_pass`
 - **Organization:** `org`
 - **Project:** `project`
 - **API Token:** `dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd` (all scopes)
