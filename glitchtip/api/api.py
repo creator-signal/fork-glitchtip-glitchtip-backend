@@ -7,7 +7,8 @@ from allauth.socialaccount.providers.openid_connect.views import (
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import aget_user
-from django.http import HttpRequest
+from django.core.exceptions import RequestDataTooBig
+from django.http import HttpRequest, HttpResponse
 from ninja import Field, ModelSchema, NinjaAPI, Router, Schema
 
 from apps.alerts.api import router as alerts_router
@@ -110,6 +111,11 @@ def throttled(request: HttpRequest, exc: ThrottleException):
             response["Retry-After"] = retry_after.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
     return response
+
+
+@api.exception_handler(RequestDataTooBig)
+def request_too_big(request: HttpRequest, exc: RequestDataTooBig):
+    return HttpResponse(str(exc), status=413, content_type="text/plain")
 
 
 class SocialAppSchema(ModelSchema):
