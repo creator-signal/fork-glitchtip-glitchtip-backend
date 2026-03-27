@@ -19,6 +19,8 @@ x-depends_on: &default-depends_on
   - valkey
 x-volumes: &default-volumes
   - .:/code
+  # Mount local django-vtasks for development (remove before release)
+  - ../django-vtasks/django_vtasks:/usr/local/lib/python3.14/site-packages/django_vtasks
 services:
   postgres:
     image: postgres:18
