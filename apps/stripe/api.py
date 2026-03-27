@@ -25,7 +25,12 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import compute_cycle, compute_cycle_n_ago, compute_previous_cycle, unix_to_datetime
+from .utils import (
+    compute_cycle,
+    compute_cycle_n_ago,
+    compute_previous_cycle,
+    unix_to_datetime,
+)
 
 router = Router()
 
