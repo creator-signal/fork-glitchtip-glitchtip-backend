@@ -61,15 +61,16 @@ async def cleanup_old_releases():
             ReleaseProject.objects.filter(release_id__in=batch_ids)._raw_delete
         )(db_alias)
         # A concurrent ingest task may re-create a ReleaseProject between
-        # the delete above and this delete (TOCTOU race). Skip and retry
-        # on the next maintenance run.
+        # the delete above and this delete (TOCTOU race). Stop and let
+        # the next maintenance run pick up where we left off — continuing
+        # would re-select the same undeletable batch and loop forever.
         try:
             count = await sync_to_async(
                 Release.objects.filter(id__in=batch_ids)._raw_delete
             )(db_alias)
         except IntegrityError:
             logger.info("Skipped release batch due to concurrent FK insert")
-            continue
+            break
         total_deleted += count
 
     if total_deleted:

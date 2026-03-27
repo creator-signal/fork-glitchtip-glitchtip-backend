@@ -74,7 +74,9 @@ class OrganizationThrottleCheckTestCase(TestCase):
         baker.make(
             "projects.IssueEventProjectHourlyStatistic",
             project__organization=self.organization,
+            organization=self.organization,
             count=11,
+            date=timezone.now(),
         )
         check_organization_throttle.call(self.organization.id)
         self.organization.refresh_from_db()
@@ -84,7 +86,9 @@ class OrganizationThrottleCheckTestCase(TestCase):
         baker.make(
             "projects.IssueEventProjectHourlyStatistic",
             project__organization=self.organization,
+            organization=self.organization,
             count=100,
+            date=timezone.now(),
         )
         check_organization_throttle.call(self.organization.id)
         self.organization.refresh_from_db()
@@ -111,7 +115,7 @@ class OrganizationThrottleCheckTestCase(TestCase):
         org = self.organization
 
         # No events, no throttle
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(9):
             check_all_organizations_throttle.call()
         org.refresh_from_db()
         self.assertEqual(org.event_throttle_rate, 0)

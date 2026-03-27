@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import time
+from collections import Counter
 from uuid import UUID
 
 import aiohttp
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
+from django.db import IntegrityError, connection, transaction
 from django.db.models import F, Q
 from django.tasks import task
 from django.utils import timezone
@@ -56,6 +58,39 @@ async def dispatch_checks():
         await perform_checks.aenqueue(monitor_ids)
 
 
+async def update_uptime_statistics(org_counts: dict[int, int], check_time):
+    """
+    Bulk upsert UptimeCheckHourlyStatistic for a batch of monitor checks.
+    Silently skips if no partition exists for the date (e.g. old test data).
+    """
+    hour = check_time.replace(minute=0, second=0, microsecond=0)
+    data = [(org_id, hour, count) for org_id, count in org_counts.items()]
+    if not data:
+        return
+
+    def _execute():
+        with connection.cursor() as cursor:
+            args_str = ",".join(cursor.mogrify("(%s,%s,%s)", row) for row in data)
+            try:
+                with transaction.atomic():
+                    cursor.execute(
+                        "INSERT INTO uptime_uptimecheckhourlystatistic"
+                        " (organization_id, date, count)"
+                        f" VALUES {args_str}"
+                        " ON CONFLICT (organization_id, date)"
+                        " DO UPDATE SET count ="
+                        " uptime_uptimecheckhourlystatistic.count + EXCLUDED.count;"
+                    )
+            except IntegrityError:
+                logger.warning(
+                    "Failed to update uptime statistics for hour %s"
+                    " (missing partition)",
+                    hour,
+                )
+
+    await sync_to_async(_execute)()
+
+
 async def save_monitor_checks(results, now):
     """
     Bulk save monitor checks and trigger notifications.
@@ -91,6 +126,10 @@ async def save_monitor_checks(results, now):
         await Monitor.objects.abulk_update(
             monitors_to_update, ["cached_is_up", "cached_last_change"]
         )
+
+    # Update hourly statistics
+    org_counts = Counter(r["organization_id"] for r in results)
+    await update_uptime_statistics(org_counts, now)
 
     for i, result in enumerate(results):
         if result["latest_is_up"] != result["is_up"]:
