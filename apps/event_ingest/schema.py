@@ -440,7 +440,9 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     sent_at: datetime = Field(default_factory=now)
 
 
-SupportedItemType = Literal["transaction", "event", "user_report", "feedback", "log"]
+SupportedItemType = Literal[
+    "transaction", "event", "user_report", "feedback", "log", "otel_log"
+]
 IgnoredItemType = Literal[
     "session",
     "sessions",
@@ -725,3 +727,86 @@ class LogEnvelopePayload(LaxIngestSchema):
     """Schema for log envelope payload containing multiple log items."""
 
     items: list[LogItemSchema]
+
+
+# OTel Log Envelope Schemas
+# https://opentelemetry.io/docs/specs/otel/logs/data-model/
+
+# Severity number ranges per OTel spec
+_OTEL_SEVERITY_TO_LEVEL = {
+    range(1, 5): "trace",
+    range(5, 9): "debug",
+    range(9, 13): "info",
+    range(13, 17): "warn",
+    range(17, 21): "error",
+    range(21, 25): "fatal",
+}
+
+
+def _otel_severity_to_level(severity_number: int | None, severity_text: str | None) -> str:
+    """Convert OTel severity_number/severity_text to a log level string."""
+    if severity_number is not None:
+        for r, level in _OTEL_SEVERITY_TO_LEVEL.items():
+            if severity_number in r:
+                return level
+    if severity_text:
+        return severity_text.lower()
+    return "info"
+
+
+def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
+    """Extract a plain value from an OTel AnyValue wrapper.
+
+    OTel uses typed wrappers like ``{"string_value": "..."}`` or
+    ``{"int_value": 42}``.  Returns the unwrapped value.
+    """
+    if not isinstance(val, dict):
+        return val
+    for suffix in ("string_value", "int_value", "double_value", "bool_value"):
+        if suffix in val:
+            return val[suffix]
+    return val
+
+
+def otel_log_to_log_item(otel: dict) -> dict:
+    """Convert a single OTel log record dict to a LogItemSchema-compatible dict."""
+    # Timestamp: nanoseconds (string or int) → seconds (float)
+    time_unix_nano = otel.get("time_unix_nano") or otel.get("timeUnixNano") or "0"
+    timestamp = int(time_unix_nano) / 1e9
+
+    # Body: {"string_value": "..."} or plain string
+    raw_body = otel.get("body", "")
+    body = _extract_otel_value(raw_body) if isinstance(raw_body, dict) else str(raw_body)
+
+    # Severity
+    severity_number = otel.get("severity_number") or otel.get("severityNumber")
+    if isinstance(severity_number, str):
+        severity_number = int(severity_number) if severity_number.isdigit() else None
+    severity_text = otel.get("severity_text") or otel.get("severityText")
+    level = _otel_severity_to_level(severity_number, severity_text)
+
+    # Trace context
+    trace_id = otel.get("trace_id") or otel.get("traceId")
+    span_id = otel.get("span_id") or otel.get("spanId")
+
+    # Attributes: list of {"key": k, "value": {...}} → dict for LogItemSchema
+    otel_attrs = otel.get("attributes") or []
+    attributes: dict[str, Any] = {}
+    if isinstance(otel_attrs, list):
+        for attr in otel_attrs:
+            if isinstance(attr, dict) and "key" in attr:
+                attributes[attr["key"]] = {"value": _extract_otel_value(attr.get("value")), "type": "string"}
+    elif isinstance(otel_attrs, dict):
+        # Already in dict form (some senders use this)
+        for k, v in otel_attrs.items():
+            attributes[k] = {"value": _extract_otel_value(v), "type": "string"}
+
+    return {
+        "timestamp": timestamp,
+        "level": level,
+        "body": body,
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "severity_number": severity_number,
+        "attributes": attributes,
+    }

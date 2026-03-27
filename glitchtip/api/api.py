@@ -89,7 +89,7 @@ fallback_router = Router()
     auth=None,
     include_in_schema=False,
 )
-def api_fallback_404(request: HttpRequest, path: str):
+async def api_fallback_404(request: HttpRequest, path: str):
     return api.create_response(request, {"detail": "Not found"}, status=404)
 
 

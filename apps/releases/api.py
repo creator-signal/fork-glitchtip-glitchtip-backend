@@ -108,15 +108,19 @@ async def create_release(
         Organization, slug=organization_slug, users=user_id
     )
     data = payload.dict()
+    project_slugs = data.pop("projects")
     projects = [
         project_id
         async for project_id in Project.objects.filter(
-            slug__in=data.pop("projects"), organization=organization
+            slug__in=project_slugs, organization=organization
         ).values_list("id", flat=True)
     ]
     if not projects:
         raise ValidationError([{"projects": "Require at least one valid project"}])
-    release = await Release.objects.acreate(organization=organization, **data)
+    version = data.pop("version")
+    release, _ = await Release.objects.aget_or_create(
+        organization=organization, version=version, defaults=data
+    )
     await release.projects.aadd(*projects)
     return await get_releases_queryset(organization_slug, user_id, id=release.id).aget()
 

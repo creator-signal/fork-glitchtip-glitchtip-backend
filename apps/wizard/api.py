@@ -43,7 +43,7 @@ router = Router()
 
 
 @router.get("wizard/", response=SetupWizardSchema, auth=None)
-def setup_wizard(request):
+async def setup_wizard(request):
     """
     First step used by sentry-wizard
     Generates a random hash for later usage
@@ -52,7 +52,7 @@ def setup_wizard(request):
         64, allowed_chars=string.ascii_lowercase + string.digits
     )
     key = SETUP_WIZARD_CACHE_KEY + wizard_hash
-    cache.set(key, SETUP_WIZARD_CACHE_EMPTY, SETUP_WIZARD_CACHE_TIMEOUT)
+    await cache.aset(key, SETUP_WIZARD_CACHE_EMPTY, SETUP_WIZARD_CACHE_TIMEOUT)
     return {"hash": wizard_hash}
 
 
@@ -75,12 +75,12 @@ async def setup_wizard_hash(request, wizard_hash: str, auth=None):
 
 
 @router.delete("wizard/{wizard_hash}/")
-def setup_wizard_delete(request, wizard_hash: str, auth=None):
+async def setup_wizard_delete(request, wizard_hash: str, auth=None):
     """
     Delete hash used by sentry-wizard.
     It contains sensitive data, so it makes sense to remove when done.
     """
-    cache.delete(SETUP_WIZARD_CACHE_KEY + wizard_hash)
+    await cache.adelete(SETUP_WIZARD_CACHE_KEY + wizard_hash)
 
 
 @router.post("wizard-set-token/")

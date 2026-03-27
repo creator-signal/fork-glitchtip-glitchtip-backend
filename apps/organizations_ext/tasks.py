@@ -7,8 +7,21 @@ from django.core.cache import cache
 from django.tasks import task
 from django.utils import timezone
 
+from apps.issue_events.maintenance import (
+    delete_issues_in_batches,
+    raw_delete_in_batches,
+)
+from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueTag
+from apps.logs.models import LogEvent
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.uptime.models import MonitorCheck, UptimeCheckHourlyStatistic
+
 from .email import InvitationEmail, ThrottleNoticeEmail
-from .models import Organization
+from .models import Organization, get_current_period_dates, get_event_counts
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +70,27 @@ async def check_organization_throttle(organization_id: int, bypass_cache: bool =
         return  # Recent check already performed
 
     org = await (
-        Organization.objects.with_event_counts()
-        .select_related("stripe_primary_subscription__price__product")
-        .aget(id=organization_id)
+        Organization.objects.select_related(
+            "stripe_primary_subscription__price__product"
+        ).aget(id=organization_id)
     )
     await _check_and_update_throttle(org)
 
 
 @task
 async def check_all_organizations_throttle():
-    async for org in (
-        Organization.objects.with_event_counts()
-        .select_related("stripe_primary_subscription__price__product")
-        .aiterator()
-    ):
-        await _check_and_update_throttle(org)
+    BATCH_SIZE = 500
+    base_qs = Organization.objects.select_related(
+        "stripe_primary_subscription__price__product"
+    ).order_by("id")
+    last_id = 0
+    while True:
+        orgs = await sync_to_async(list)(base_qs.filter(id__gt=last_id)[:BATCH_SIZE])
+        if not orgs:
+            break
+        for org in orgs:
+            await _check_and_update_throttle(org)
+        last_id = orgs[-1].id
 
 
 async def _check_and_update_throttle(org: Organization):
@@ -79,48 +98,41 @@ async def _check_and_update_throttle(org: Organization):
         return
 
     plan_events: int | None = None
+    total_event_count = 0
 
     if org.stripe_primary_subscription:
         price = org.stripe_primary_subscription.price
         if price.no_throttle:
             org_throttle = 0
-            # Early return? No, we need to update DB if it changed
         else:
             plan_events = price.product.events
             org_throttle = 0
 
-            # Count is already accurate from with_event_counts (using subscription_cycle fields)
-            if plan_events is None or org.total_event_count > plan_events * 2:
-                org_throttle = 100
-            elif org.total_event_count > plan_events * 1.5:
-                org_throttle = 50
-            elif org.total_event_count > plan_events:
-                org_throttle = 10
+            period = await get_current_period_dates(org)
+            start, end = period if period else (None, None)
+            counts = await get_event_counts(org.id, start, end)
+            total_event_count = counts.total_event_count
 
-        # Logic for sending email / saving is at the end
+            if plan_events is None or total_event_count > plan_events * 2:
+                org_throttle = 100
+            elif total_event_count > plan_events * 1.5:
+                org_throttle = 50
+            elif total_event_count > plan_events:
+                org_throttle = 10
     else:
-        # Free Tier
+        # Free Tier - use anchored cycle dates
         plan_events = settings.GLITCHTIP_FREE_TIER_EVENTS
 
-        # For free tier, we must ensure we are using the Anchored Cycle count
-        # The default with_event_counts uses Rolling 30 Days (or whatever fallback)
-        # So we should re-query with the precise Anchored Date
         start, end = get_free_tier_cycle(org.created)
-
-        # We need to fetch the count for this specific range
-        # We can reuse with_event_counts but filtering for this specific org and range
-        # This is an extra query, but necessary for accuracy of Anchored Free Tier
-        free_org = await Organization.objects.with_event_counts(
-            start=start, end=end
-        ).aget(id=org.id)
-        current_count = free_org.total_event_count
+        counts = await get_event_counts(org.id, start, end)
+        total_event_count = counts.total_event_count
 
         org_throttle = 0
-        if current_count > plan_events * 2:
+        if total_event_count > plan_events * 2:
             org_throttle = 100
-        elif current_count > plan_events * 1.5:
+        elif total_event_count > plan_events * 1.5:
             org_throttle = 50
-        elif current_count > plan_events:
+        elif total_event_count > plan_events:
             org_throttle = 10
 
     if org.event_throttle_rate != org_throttle:
@@ -128,12 +140,16 @@ async def _check_and_update_throttle(org: Organization):
         org.event_throttle_rate = org_throttle
         await org.asave(update_fields=["event_throttle_rate"])
         if org_throttle > old_throttle:
-            await send_throttle_email.aenqueue(org.id)
+            await send_throttle_email.aenqueue(org.id, total_event_count)
 
 
 @task
-async def send_throttle_email(organization_id: int):
-    await sync_to_async(ThrottleNoticeEmail(pk=organization_id).send_email)()
+async def send_throttle_email(organization_id: int, total_event_count: int = 0):
+    await sync_to_async(
+        ThrottleNoticeEmail(
+            pk=organization_id, total_event_count=total_event_count
+        ).send_email
+    )()
 
 
 @task
@@ -143,12 +159,46 @@ async def send_email_invite(org_user_id: int, token: str):
 
 @task
 async def delete_organization(organization_id: int):
-    """Delete cold storage files for an org, then hard-delete from DB."""
+    """Delete cold storage files for an org, then hard-delete from DB.
+
+    Batch-deletes rows from partitioned tables first to avoid exhausting
+    the PostgreSQL shared lock table (each partition + index = one lock).
+    """
     org = await Organization.objects.aget(id=organization_id)
 
     # Delete cold storage files before removing DB rows
     await sync_to_async(_delete_org_cold_storage)(org.id)
 
+    # Batch-delete from partitioned tables to keep lock counts low.
+    # Django's cascade collector would lock every partition + index at once.
+    for qs in [
+        IssueEvent.objects.filter(organization_id=org.id),
+        LogEvent.objects.filter(organization_id=org.id),
+        MonitorCheck.objects.filter(organization_id=org.id),
+    ]:
+        await raw_delete_in_batches(qs)
+
+    # Partitioned tables with composite PKs (no id field) — delete directly.
+    # Filtered by organization_id so Postgres prunes to the org's hash bucket.
+    # IssueAggregate/IssueTag have DB-level CASCADE from Issue, so must be
+    # deleted before Issues to avoid lock escalation across their partitions.
+    for model in [
+        IssueAggregate,
+        IssueTag,
+        IssueEventProjectHourlyStatistic,
+        TransactionEventProjectHourlyStatistic,
+        LogProjectHourlyStatistic,
+        UptimeCheckHourlyStatistic,
+    ]:
+        await sync_to_async(
+            model.objects.filter(organization_id=org.id)._raw_delete
+        )("default")
+
+    # Issues have non-partitioned FK dependents (IssueHash, Comment, etc.)
+    # that need explicit cleanup — use the issue-aware batch helper.
+    await delete_issues_in_batches(Issue.objects.filter(project__organization=org))
+
+    # Remaining relations are non-partitioned — safe for Django cascade.
     await sync_to_async(org.force_delete)()
     logger.info("Organization %s (id=%s) fully deleted", org.slug, org.id)
 

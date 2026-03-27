@@ -148,6 +148,7 @@ class Command(MakeSampleCommand):
             for _ in range(options["tag_keys_per_event"])
         }
 
+        all_event_timestamps: list = []
         issues: list[Issue] = []
         issue_events: list[list[IssueEvent]] = []
         for _ in range(issue_quantity):
@@ -201,11 +202,16 @@ class Command(MakeSampleCommand):
                 ),
             )
             issue_events.append(events)
+            all_event_timestamps.extend(e.timestamp for e in events)
             if len(issues) > issue_batch_size:
                 self.create_events_and_issues(issues, issue_events)
                 issues = []
                 issue_events = []
         if issues:
             self.create_events_and_issues(issues, issue_events)
+
+        self.upsert_hourly_project_stats(
+            "projects_issueeventprojecthourlystatistic", all_event_timestamps
+        )
 
         self.success_message('Successfully created "%s" issues' % issue_quantity)

@@ -1,10 +1,11 @@
 import random
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from django.db import connection
 
 from apps.logs.constants import LogLevel
-from apps.logs.models import LogResource
+from apps.logs.models import LogResource, compute_hash_bucket
 from glitchtip.base_commands import MakeSampleCommand
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 
@@ -86,7 +87,8 @@ class Command(MakeSampleCommand):
 
         self._ensure_partitions(start_time, end_time)
 
-        logs_created = self._bulk_create_logs(quantity, start_time, end_time)
+        logs_created, log_stats = self._bulk_create_logs(quantity, start_time, end_time)
+        self._upsert_log_stats(log_stats)
         self._ensure_log_resources()
 
         self.success_message(f"Successfully created {logs_created} log events")
@@ -121,8 +123,10 @@ class Command(MakeSampleCommand):
         quantity: int,
         start_time: datetime,
         end_time: datetime,
-    ) -> int:
-        """Bulk create log events using raw SQL for performance."""
+    ) -> tuple[int, Counter]:
+        """Bulk create log events using raw SQL for performance.
+        Returns (count, stats_counter) where stats_counter keys are
+        (hour, level, service_bucket, env_bucket)."""
         import orjson
 
         time_range_seconds = int((end_time - start_time).total_seconds())
@@ -139,6 +143,7 @@ class Command(MakeSampleCommand):
         weights = [lw[1] for lw in level_weights]
 
         rows = []
+        stats: Counter[tuple] = Counter()
         for i in range(quantity):
             random_offset = timedelta(seconds=random.randint(0, time_range_seconds))
             log_timestamp = start_time + random_offset
@@ -195,6 +200,9 @@ class Command(MakeSampleCommand):
                 )
             )
 
+            hour = log_timestamp.replace(minute=0, second=0, microsecond=0)
+            stats[(hour, level, compute_hash_bucket(service), compute_hash_bucket(environment))] += 1
+
             if (i + 1) % 1000 == 0:
                 self.progress_tick()
 
@@ -212,7 +220,27 @@ class Command(MakeSampleCommand):
         with connection.cursor() as cursor:
             cursor.executemany(insert_sql, rows)
 
-        return len(rows)
+        return len(rows), stats
+
+    def _upsert_log_stats(self, stats: Counter):
+        """Upsert LogProjectHourlyStatistic from collected stats."""
+        if not stats:
+            return
+        data = [
+            (hour, self.project.id, self.organization.id, level, svc, env, count)
+            for (hour, level, svc, env), count in sorted(stats.items())
+        ]
+        with connection.cursor() as cursor:
+            args_str = ",".join(
+                cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", row) for row in data
+            )
+            cursor.execute(
+                "INSERT INTO projects_logprojecthourlystatistic"
+                " (date, project_id, organization_id, level, service_bucket, environment_bucket, count)"
+                f" VALUES {args_str}"
+                " ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment_bucket)"
+                " DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count;"
+            )
 
     def _ensure_log_resources(self):
         """Create LogResource entries for sample services, environments, and hosts."""
