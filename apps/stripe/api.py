@@ -14,6 +14,7 @@ from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
 from apps.projects.models import (
     IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
     TransactionEventProjectHourlyStatistic,
 )
 from apps.uptime.models import MonitorCheck
@@ -125,7 +126,8 @@ class StripePortalSessionSchema(CamelSchema):
     url: str
 
 
-class EventsCountSchema(CamelSchema):
+class SubscriptionUsageSchema(CamelSchema):
+    total: int
     event_count: int
     transaction_event_count: int
     uptime_check_event_count: int
@@ -133,15 +135,12 @@ class EventsCountSchema(CamelSchema):
     file_size_mb: int
 
 
-class SubscriptionUsageSchema(EventsCountSchema):
-    total: int
-
-
 class DailyEventCountEntry(CamelSchema):
     date: date
     event_count: int
     transaction_event_count: int
     uptime_check_event_count: int
+    log_event_count: int
 
 
 class DailyEventsCountSchema(CamelSchema):
@@ -272,25 +271,6 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         "subscription": subscription,
     }
 
-
-@router.get(
-    "subscriptions/{slug:organization_slug}/events_count/",
-    response=EventsCountSchema,
-    by_alias=True,
-)
-async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
-    org = await aget_object_or_404(
-        Organization.objects.with_event_counts(),
-        slug=organization_slug,
-        users=request.auth.user_id,
-    )
-    return {
-        "event_count": org.issue_event_count,
-        "transaction_event_count": org.transaction_count,
-        "uptime_check_event_count": org.uptime_check_event_count,
-        "log_event_count": org.log_count,
-        "file_size_mb": org.file_size,
-    }
 
 
 @router.get(
@@ -456,6 +436,15 @@ async def subscription_events_count_daily(
     )
     uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
 
+    log_rows = await sync_to_async(list)(
+        LogProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        .annotate(day=TruncDate("date"))
+        .values("day")
+        .annotate(total=Coalesce(Sum("count"), 0))
+        .order_by("day")
+    )
+    log_daily = {row["day"]: row["total"] for row in log_rows}
+
     # Build response with one entry per day, filling gaps with zeros
     data = []
     current = period_start_date
@@ -466,6 +455,7 @@ async def subscription_events_count_daily(
                 "event_count": issue_daily.get(current, 0),
                 "transaction_event_count": txn_daily.get(current, 0),
                 "uptime_check_event_count": uptime_daily.get(current, 0),
+                "log_event_count": log_daily.get(current, 0),
             }
         )
         current += timedelta(days=1)
