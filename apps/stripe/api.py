@@ -272,7 +272,6 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     }
 
 
-
 @router.get(
     "subscriptions/{slug:organization_slug}/events_count/period/",
     response=SubscriptionUsageSchema,
@@ -366,8 +365,7 @@ async def subscription_events_count_for_period(
 async def subscription_events_count_daily(
     request: AuthHttpRequest, organization_slug: str
 ):
-    # Verify org exists and user has access (matches peer endpoints)
-    await aget_object_or_404(
+    org = await aget_object_or_404(
         Organization,
         slug=organization_slug,
         users=request.auth.user_id,
@@ -375,8 +373,7 @@ async def subscription_events_count_daily(
 
     subscription = await (
         StripeSubscription.objects.filter(
-            organization__users=request.auth.user_id,
-            organization__slug=organization_slug,
+            organization_id=org.id,
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
         )
         .order_by("-created")
@@ -395,15 +392,13 @@ async def subscription_events_count_daily(
     period_start_date = cycle_start.date()
     period_end_date = min(cycle_end.date(), today)
 
-    org_filter = Q(
-        project__organization__slug=organization_slug,
-        project__organization__users=request.auth.user_id,
-    )
     date_filter = Q(date__gte=cycle_start, date__lt=cycle_end)
 
     # Use sync_to_async(list)() to avoid server-side cursors (PgBouncer compat)
     issue_rows = await sync_to_async(list)(
-        IssueEventProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        IssueEventProjectHourlyStatistic.objects.filter(
+            Q(organization_id=org.id) & date_filter
+        )
         .annotate(day=TruncDate("date"))
         .values("day")
         .annotate(total=Coalesce(Sum("count"), 0))
@@ -412,7 +407,9 @@ async def subscription_events_count_daily(
     issue_daily = {row["day"]: row["total"] for row in issue_rows}
 
     txn_rows = await sync_to_async(list)(
-        TransactionEventProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        TransactionEventProjectHourlyStatistic.objects.filter(
+            Q(organization_id=org.id) & date_filter
+        )
         .annotate(day=TruncDate("date"))
         .values("day")
         .annotate(total=Coalesce(Sum("count"), 0))
@@ -420,15 +417,11 @@ async def subscription_events_count_daily(
     )
     txn_daily = {row["day"]: row["total"] for row in txn_rows}
 
-    uptime_filter = Q(
-        monitor__organization__slug=organization_slug,
-        monitor__organization__users=request.auth.user_id,
-    )
-    uptime_date_filter = Q(
-        start_check__gte=cycle_start, start_check__lt=cycle_end
-    )
     uptime_rows = await sync_to_async(list)(
-        MonitorCheck.objects.filter(uptime_filter, uptime_date_filter)
+        MonitorCheck.objects.filter(
+            Q(monitor__organization_id=org.id)
+            & Q(start_check__gte=cycle_start, start_check__lt=cycle_end)
+        )
         .annotate(day=TruncDate("start_check"))
         .values("day")
         .annotate(total=Count("pk"))
@@ -437,7 +430,9 @@ async def subscription_events_count_daily(
     uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
 
     log_rows = await sync_to_async(list)(
-        LogProjectHourlyStatistic.objects.filter(org_filter, date_filter)
+        LogProjectHourlyStatistic.objects.filter(
+            Q(organization_id=org.id) & date_filter
+        )
         .annotate(day=TruncDate("date"))
         .values("day")
         .annotate(total=Coalesce(Sum("count"), 0))
