@@ -181,6 +181,37 @@ GLITCHTIP_LOG_HOT_DAYS = env.int(
 DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
 
 
+def _get_cgroup_memory_bytes() -> int | None:
+    """Read cgroup v2 memory limit (Docker/Kubernetes). Returns None if unavailable."""
+    try:
+        with open("/sys/fs/cgroup/memory.max") as f:
+            val = f.read().strip()
+            if val != "max":
+                return int(val)
+    except (FileNotFoundError, PermissionError, ValueError):
+        pass
+    return None
+
+
+def _get_cgroup_cpu_count() -> int | None:
+    """Read cgroup v2 CPU quota (Docker/Kubernetes). Returns None if unavailable.
+
+    Reads cpu.max which contains "quota period" (e.g. "200000 100000" = 2 CPUs).
+    Returns the effective CPU count, minimum 1.
+    """
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            parts = f.read().strip().split()
+            if parts[0] == "max":
+                return None  # No CPU limit set
+            quota = int(parts[0])
+            period = int(parts[1])
+            return max(1, quota // period)
+    except (FileNotFoundError, PermissionError, ValueError, IndexError):
+        pass
+    return None
+
+
 def _default_duckdb_memory_limit() -> str:
     """Auto-detect a safe DuckDB memory limit from container/system memory.
 
@@ -189,20 +220,9 @@ def _default_duckdb_memory_limit() -> str:
     its internal buffer pool — thread stacks, mmap'd file regions, and
     jemalloc overhead are all OUTSIDE this limit. A 256 MB buffer pool
     with 2 threads typically peaks at ~400-500 MB total process impact.
-
-    For dedicated analytics workloads, set DUCKDB_MEMORY_LIMIT explicitly.
     """
     try:
-        total = None
-        # cgroup v2 (Docker/Kubernetes)
-        try:
-            with open("/sys/fs/cgroup/memory.max") as f:
-                val = f.read().strip()
-                if val != "max":
-                    total = int(val)
-        except (FileNotFoundError, PermissionError):
-            pass
-        # Host memory fallback
+        total = _get_cgroup_memory_bytes()
         if total is None:
             total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         quarter = total // 4
@@ -212,17 +232,34 @@ def _default_duckdb_memory_limit() -> str:
         return "128MB"
 
 
+def _default_duckdb_threads() -> int:
+    """Auto-detect DuckDB thread count from container CPU limit.
+
+    Reads cgroup v2 cpu.max (Docker/Kubernetes) to get the pod's CPU
+    quota. Falls back to min(os.cpu_count(), 4) for bare-metal.
+
+    Without this, DuckDB defaults to os.cpu_count() which in Kubernetes
+    returns the NODE's cores (e.g. 64), not the pod's limit (e.g. 2).
+    Each thread allocates scan buffers outside memory_limit, so uncapped
+    threads are the primary cause of VmPeak explosion.
+    """
+    cgroup_cpus = _get_cgroup_cpu_count()
+    if cgroup_cpus is not None:
+        return max(1, cgroup_cpus)
+    # Bare-metal / no cgroup: cap at 4 to be safe
+    return min(os.cpu_count() or 2, 4)
+
+
 # DuckDB memory limit — controls peak RAM for analytical reads.
 # Also used as a proxy for the deployment's memory budget to size
 # arro3 write batches during archival.
-# Defaults to 25% of container/system memory, capped at 256 MB.
+# Auto-detected from cgroup memory limit (25%, capped at 256 MB).
 # Set to empty string to disable (unbounded memory).
 DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", _default_duckdb_memory_limit())
-# Max threads for DuckDB queries. DuckDB defaults to host CPU count, which in
-# Kubernetes is the NODE's cores (e.g. 64), not the pod limit. Each thread
-# allocates scan buffers outside the memory_limit, causing VmPeak explosion.
-# Default 2 is safe for typical pods; increase for dedicated analytics workloads.
-DUCKDB_THREADS = env.int("DUCKDB_THREADS", 2)
+# Max threads for DuckDB queries. Auto-detected from cgroup CPU quota
+# (Kubernetes/Docker) or capped at 4 for bare-metal.
+# DuckDB's default (host core count) causes VmPeak explosion in containers.
+DUCKDB_THREADS = env.int("DUCKDB_THREADS", _default_duckdb_threads())
 # Writable directory for DuckDB spill-to-disk. Set to empty string to disable
 # the memory limit (needed for read-only root filesystems with no writable mount).
 DUCKDB_TEMP_DIRECTORY = env.str("DUCKDB_TEMP_DIRECTORY", "/tmp")
@@ -1011,9 +1048,7 @@ PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 GLITCHTIP_LICENSE_KEY = env.str("GLITCHTIP_LICENSE_KEY", None)
 
 # Legacy setting — still accepted. New deployments should use GLITCHTIP_LICENSE_KEY.
-I_PAID_FOR_GLITCHTIP = env.bool(
-    "I_PAID_FOR_GLITCHTIP", bool(GLITCHTIP_LICENSE_KEY)
-)
+I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", bool(GLITCHTIP_LICENSE_KEY))
 
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
