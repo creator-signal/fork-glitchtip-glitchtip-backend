@@ -3,14 +3,20 @@ Span promotion and compaction for Performance Monitoring V2.
 
 Promotes span_staging rows to per-org Parquet files, then compacts
 chunk files into daily files for efficient analytical queries.
+
+Memory isolation: Parquet/DuckDB work runs in child processes via
+run_in_process() so that arro3/Arrow/DuckDB memory is fully reclaimed
+by the OS when the child exits — no heap fragmentation in the worker.
 """
 
 import io
 import logging
 import os
+import tempfile
 import time
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
@@ -20,7 +26,6 @@ from glitchtip.cold_storage import (
     _parquet_encoding_opts,
     duckdb_quote_path,
     get_cold_storage_backend,
-    get_duckdb_connection,
     get_duckdb_parquet_path,
     is_duckdb_available,
 )
@@ -36,56 +41,66 @@ TABLE_NAME = "performance_spans"
 BATCH_LIMIT_PER_ORG = 100_000
 
 
-def promote_spans() -> tuple[int, bool]:
-    """
-    Promote span_staging rows to per-org Parquet files.
+# ---------------------------------------------------------------------------
+# Storage config helpers (serialize storage object for child processes)
+# ---------------------------------------------------------------------------
 
-    1. Get distinct org_ids with rows older than cutoff (partition-prunable)
-    2. For each org, query rows with both id + organization_id filters
-       (prunes both RANGE and HASH partitions)
-    3. Group by date, write chunk Parquet files per org+date
-    4. DELETE consumed rows by exact id + organization_id
 
-    Returns (rows_promoted, truncated) where truncated is True if any org
-    hit the per-org batch limit, indicating more rows likely remain.
+def _get_storage_config(storage) -> dict:
+    """Extract picklable storage config from a django-storages backend."""
+    if _is_s3_storage(storage):
+        return {
+            "type": "s3",
+            "bucket_name": storage.bucket_name,
+            "access_key": getattr(storage, "access_key", None),
+            "secret_key": getattr(storage, "secret_key", None),
+            "endpoint_url": getattr(storage, "endpoint_url", None),
+        }
+    return {
+        "type": "filesystem",
+        "location": storage.location,
+    }
 
-    Concurrency note: This function is not guarded by its own lock — it
-    relies on django-tasks' built-in scheduling lock to prevent overlapping
-    runs. If called concurrently (e.g., manual enqueue), duplicate span
-    rows may appear in Parquet. This is acceptable: span data is ephemeral
-    and duplicates only slightly inflate aggregate metrics.
+
+# ---------------------------------------------------------------------------
+# Phase 1: Fetch (runs in parent process — needs Django ORM)
+# ---------------------------------------------------------------------------
+
+
+def fetch_promotable_spans() -> tuple[list[tuple], bool]:
+    """Query all promotable span rows, grouped by org and date.
+
+    Returns:
+        (org_batches, truncated) where org_batches is a list of
+        (org_id, date_groups, storage_config, column_types) tuples.
+        All values are picklable for dispatch to a child process.
+        truncated is True if any org hit BATCH_LIMIT_PER_ORG.
     """
     if not is_duckdb_available():
-        logger.debug("DuckDB not available, skipping span promotion")
-        return 0, False
+        return [], False
 
     storage = get_cold_storage_backend()
     if not storage:
-        logger.debug("No storage backend, skipping span promotion")
-        return 0, False
+        return [], False
 
     from apps.performance.models import SpanStaging
 
     cutoff = timezone.now() - timedelta(minutes=5)
-    # UUID7 with min random bits — everything before this was inserted before cutoff
     cutoff_uuid = UUID7Helper.from_datetime(cutoff)
 
-    # Step 1: Get distinct org_ids. This scans range partitions but the query
-    # is lightweight (only reads organization_id column).
     org_ids = list(
         SpanStaging.objects.filter(id__lt=cutoff_uuid)
         .values_list("organization_id", flat=True)
         .distinct()
     )
-
     if not org_ids:
-        return 0, False
+        return [], False
 
-    total_promoted = 0
+    storage_config = _get_storage_config(storage)
+    column_types = dict(SPAN_PARQUET_COLUMN_TYPES)
     truncated = False
+    org_batches = []
 
-    # Step 2: Process each org separately — both id and organization_id
-    # filters allow PostgreSQL to prune RANGE and HASH partitions.
     for org_id in org_ids:
         rows = list(
             SpanStaging.objects.filter(
@@ -111,70 +126,69 @@ def promote_spans() -> tuple[int, bool]:
         if len(rows) >= BATCH_LIMIT_PER_ORG:
             truncated = True
 
-        # Group rows by date within this org
+        # Group rows by date. Convert datetimes to float timestamps
+        # so the tuples are fully picklable (datetime is picklable,
+        # but explicit about it for clarity).
         date_groups: dict[str, list[tuple]] = {}
         for row in rows:
             ts = row[9]  # timestamp
             date_str = ts.strftime("%Y%m%d") if ts else "unknown"
             date_groups.setdefault(date_str, []).append(row)
 
-        for date_str, group_rows in date_groups.items():
-            try:
-                chunk_path = _write_chunk_parquet(storage, org_id, date_str, group_rows)
-            except Exception:
-                logger.error(
-                    "Failed to write parquet chunk for org %d date %s",
-                    org_id,
-                    date_str,
-                    exc_info=True,
-                )
-                continue
+        org_batches.append((org_id, date_groups, storage_config, column_types))
 
-            # Delete exactly the promoted rows by ID.
-            # Includes organization_id for HASH partition pruning.
-            group_uuids = [r[0] for r in group_rows]
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        DELETE FROM performance_spanstaging
-                        WHERE id = ANY(%s)
-                          AND organization_id = %s
-                        """,
-                        [group_uuids, org_id],
-                    )
-            except Exception:
-                # DELETE failed after chunk was written — remove the chunk
-                # to prevent duplicate data on the next promotion run.
-                logger.error(
-                    "Failed to delete promoted rows for org %d date %s, "
-                    "removing chunk to prevent duplicates",
-                    org_id,
-                    date_str,
-                    exc_info=True,
-                )
-                try:
-                    storage.delete(chunk_path)
-                except Exception:
-                    logger.error(
-                        "Failed to remove chunk %s — duplicates may "
-                        "exist on next promotion run",
-                        chunk_path,
-                    )
-                continue
-            total_promoted += len(group_rows)
-
-    if total_promoted:
-        logger.info("Promoted %d span rows to cold storage", total_promoted)
-    return total_promoted, truncated
+    return org_batches, truncated
 
 
-def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
-    """Write a chunk Parquet file for a single org+date group via arro3.
+# ---------------------------------------------------------------------------
+# Phase 2: Write (runs in child process — no Django, no DB)
+# ---------------------------------------------------------------------------
 
-    Builds Arrow arrays directly from Python tuples — no CSV serialization,
-    no temp files, no DuckDB dependency for writes.
+
+def write_org_parquet_chunks(
+    storage_config: dict,
+    org_id: int,
+    date_groups: dict[str, list[tuple]],
+    column_types: dict[str, str],
+) -> list[tuple[str, str, list]]:
+    """Write Parquet chunks for one org. Runs in a child process.
+
+    This function must not import Django or use DB connections.
+    All heavy arro3/Arrow memory is allocated here and fully reclaimed
+    by the OS when this child process exits.
+
+    Returns list of (date_str, chunk_path, row_ids) for successful writes.
     """
+    results = []
+    for date_str, group_rows in date_groups.items():
+        try:
+            chunk_path = _write_chunk_parquet_isolated(
+                storage_config, org_id, date_str, group_rows, column_types
+            )
+            row_ids = [r[0] for r in group_rows]
+            results.append((date_str, chunk_path, row_ids))
+        except Exception:
+            # Log in child — the parent will also see the exception if
+            # the entire function fails, but partial failures are handled here.
+            import logging as _logging
+
+            _logging.getLogger(__name__).error(
+                "Failed to write parquet chunk for org %d date %s",
+                org_id,
+                date_str,
+                exc_info=True,
+            )
+    return results
+
+
+def _write_chunk_parquet_isolated(
+    storage_config: dict,
+    org_id: int,
+    date_str: str,
+    rows: list[tuple],
+    column_types: dict[str, str],
+) -> str:
+    """Write a single chunk Parquet file via arro3. Runs in child process."""
     import arro3.core as ac
     import arro3.io as aio
 
@@ -182,9 +196,6 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
     org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
     relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
 
-    # Build Arrow arrays directly from row tuples.
-    # Row layout: (id, org_id, project_id, txn_name, span_id, txn_id,
-    #              op, description, duration, timestamp)
     batch = ac.RecordBatch.from_arrays(
         [
             ac.Array([r[1] for r in rows], type=ac.DataType.int32()),
@@ -195,87 +206,156 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
             ac.Array([r[6] for r in rows], type=ac.DataType.utf8()),
             ac.Array([r[7] for r in rows], type=ac.DataType.utf8()),
             ac.Array([r[8] for r in rows], type=ac.DataType.float64()),
-            # arro3 doesn't yet support timestamp from Python lists;
-            # build as int64 microseconds then cast.
             ac.Array(
                 [int(r[9].timestamp() * 1_000_000) if r[9] else 0 for r in rows],
                 type=ac.DataType.int64(),
             ).cast(ac.DataType.timestamp("us")),
         ],
-        names=list(SPAN_PARQUET_COLUMN_TYPES.keys()),
+        names=list(column_types.keys()),
     )
 
-    encoding_opts = _parquet_encoding_opts(SPAN_PARQUET_COLUMN_TYPES)
+    encoding_opts = _parquet_encoding_opts(column_types)
     write_kwargs = {
         "compression": "zstd(3)",
         "max_row_group_size": min(len(rows), 100_000),
         **encoding_opts,
     }
 
-    if _is_s3_storage(storage):
+    if storage_config["type"] == "s3":
         buf = io.BytesIO()
         aio.write_parquet(batch, buf, **write_kwargs)
         buf.seek(0)
-        from django.core.files.base import ContentFile
+        import boto3
 
-        try:
-            storage.delete(relative_path)
-        except Exception:
-            pass
-        storage.save(relative_path, ContentFile(buf.read()))
+        s3_kwargs = {}
+        if storage_config.get("endpoint_url"):
+            s3_kwargs["endpoint_url"] = storage_config["endpoint_url"]
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=storage_config.get("access_key"),
+            aws_secret_access_key=storage_config.get("secret_key"),
+            **s3_kwargs,
+        )
+        s3.put_object(
+            Bucket=storage_config["bucket_name"],
+            Key=relative_path,
+            Body=buf.getvalue(),
+        )
     else:
-        parquet_path = storage.path(relative_path)
+        parquet_path = os.path.join(storage_config["location"], relative_path)
         os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
         aio.write_parquet(batch, parquet_path, **write_kwargs)
 
     return relative_path
 
 
-def compact_span_chunks() -> int:
-    """
-    Compact chunk Parquet files into single daily files per org.
+# ---------------------------------------------------------------------------
+# Phase 3: Delete (runs in parent process — needs DB connection)
+# ---------------------------------------------------------------------------
 
-    For each org directory, merges chunk files for completed days
-    (before today) into a single sorted Parquet file.
 
-    Returns number of files compacted.
+def delete_promoted_rows(
+    org_id: int,
+    written_chunks: list[tuple[str, str, list]],
+) -> int:
+    """Delete promoted rows from span_staging. Runs in parent process."""
+    storage = get_cold_storage_backend()
+    promoted = 0
+
+    for date_str, chunk_path, row_ids in written_chunks:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM performance_spanstaging
+                    WHERE id = ANY(%s)
+                      AND organization_id = %s
+                    """,
+                    [row_ids, org_id],
+                )
+        except Exception:
+            logger.error(
+                "Failed to delete promoted rows for org %d date %s, "
+                "removing chunk to prevent duplicates",
+                org_id,
+                date_str,
+                exc_info=True,
+            )
+            if storage:
+                try:
+                    storage.delete(chunk_path)
+                except Exception:
+                    logger.error(
+                        "Failed to remove chunk %s — duplicates may "
+                        "exist on next promotion run",
+                        chunk_path,
+                    )
+            continue
+        promoted += len(row_ids)
+
+    return promoted
+
+
+# ---------------------------------------------------------------------------
+# Compaction: collect (parent) → compact (child) → finalize (parent)
+# ---------------------------------------------------------------------------
+
+
+def collect_compactable_chunks() -> list[dict]:
+    """Find chunk directories that need compaction. Runs in parent process.
+
+    Returns a list of job dicts with all info needed by the child process
+    (file paths, DuckDB config) — no Django objects.
     """
     if not is_duckdb_available():
-        return 0
+        return []
 
     storage = get_cold_storage_backend()
     if not storage:
-        return 0
+        return []
 
     spans_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}"
     now = timezone.now()
-    # Skip the last 2 days to avoid racing with the promotion job,
-    # which may still be writing chunks for yesterday's timestamps.
     skip_dates = {
         now.strftime("%Y%m%d"),
         (now - timedelta(days=1)).strftime("%Y%m%d"),
     }
-    compacted = 0
 
     try:
         org_dirs, _ = storage.listdir(spans_prefix)
     except (NotImplementedError, OSError):
-        return 0
+        return []
 
+    # Extract DuckDB config once for all jobs
+    s3_config = None
+    if _is_s3_storage(storage):
+        s3_config = {
+            "access_key": getattr(storage, "access_key", None),
+            "secret_key": getattr(storage, "secret_key", None),
+            "endpoint_url": getattr(storage, "endpoint_url", None),
+        }
+
+    duckdb_config = {
+        "memory_limit": getattr(settings, "DUCKDB_MEMORY_LIMIT", "128MB"),
+        "extension_directory": getattr(settings, "DUCKDB_EXTENSION_DIRECTORY", None),
+        "temp_directory": getattr(settings, "DUCKDB_TEMP_DIRECTORY", ""),
+        "s3_config": s3_config,
+    }
+
+    jobs = []
     for org_dir in org_dirs:
         if not org_dir.startswith("org_"):
             continue
 
         org_path = f"{spans_prefix}/{org_dir}"
         try:
-            date_dirs, flat_files = storage.listdir(org_path)
+            date_dirs, _ = storage.listdir(org_path)
         except (NotImplementedError, OSError):
             continue
 
-        # Process date subdirectories with chunk files
         for date_dir in date_dirs:
             if date_dir in skip_dates:
-                continue  # Don't compact recent chunks
+                continue
 
             date_path = f"{org_path}/{date_dir}"
             try:
@@ -287,71 +367,171 @@ def compact_span_chunks() -> int:
             if len(chunks) <= 1:
                 continue
 
-            try:
-                _compact_date_chunks(storage, org_path, date_dir, date_path, chunks)
-                compacted += len(chunks)
-            except Exception:
-                logger.error("Failed to compact chunks in %s", date_path, exc_info=True)
+            # Build DuckDB-accessible paths for child process
+            chunk_duckdb_paths = [
+                get_duckdb_parquet_path(storage, f"{date_path}/{c}") for c in chunks
+            ]
+            output_relative = f"{org_path}/{date_dir}.parquet"
+            output_duckdb_path = get_duckdb_parquet_path(storage, output_relative)
 
-    if compacted:
-        logger.info("Compacted %d span chunk files", compacted)
+            is_s3 = output_duckdb_path.startswith("s3://")
 
-    return compacted
+            jobs.append(
+                {
+                    "chunk_duckdb_paths": chunk_duckdb_paths,
+                    "write_path": output_duckdb_path
+                    if is_s3
+                    else output_duckdb_path + ".tmp",
+                    "output_path": output_duckdb_path,
+                    "is_s3": is_s3,
+                    "duckdb_config": duckdb_config,
+                    # For finalize (parent-side cleanup)
+                    "date_path": date_path,
+                    "chunks": chunks,
+                    "org_path": org_path,
+                    "date_dir": date_dir,
+                }
+            )
+
+    return jobs
 
 
-def _compact_date_chunks(
-    storage, org_path: str, date_dir: str, date_path: str, chunks: list[str]
-):
-    """Compact multiple chunk files into a single daily Parquet file.
+def compact_chunks_in_child(job: dict) -> None:
+    """Run DuckDB compaction in a child process. No Django imports needed."""
+    import duckdb
 
-    Crash safety: On filesystem, writes to a .tmp file first, then
-    atomically renames. A crash mid-write leaves a .tmp file (ignored by
-    enumerate_org_parquet_files) and chunks remain intact for the next run.
-    On S3, PUT is atomic so no temp file is needed.
-    """
-    # Build list of chunk paths for DuckDB
-    chunk_paths = [
-        get_duckdb_parquet_path(storage, f"{date_path}/{chunk}") for chunk in chunks
-    ]
+    cfg = job["duckdb_config"]
+    config = {}
+    if cfg.get("extension_directory"):
+        config["extension_directory"] = cfg["extension_directory"]
+        config["autoinstall_known_extensions"] = "false"
 
-    # Output path: org_{id}/{date_str}.parquet (flat file)
-    output_relative = f"{org_path}/{date_dir}.parquet"
-    output_path = get_duckdb_parquet_path(storage, output_relative)
-
-    # Write to a temp file first, then rename for crash safety.
-    # If the process crashes mid-write, the .tmp file is ignored by
-    # enumerate_org_parquet_files (doesn't match *.parquet) and chunks
-    # remain intact for the next compaction run.
-    # S3 PUT is atomic, so no temp file needed there.
-    is_s3 = output_path.startswith("s3://")
-    write_path = output_path if is_s3 else output_path + ".tmp"
-
-    duck_conn = get_duckdb_connection(storage)
+    conn = duckdb.connect(config=config)
     try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in chunk_paths)
-        duck_conn.execute(f"""
+        if cfg.get("memory_limit"):
+            conn.execute(f"SET memory_limit = '{cfg['memory_limit']}'")
+
+        temp_dir = cfg.get("temp_directory") or tempfile.gettempdir()
+        if os.path.isdir(temp_dir) and os.access(temp_dir, os.W_OK):
+            conn.execute(f"SET temp_directory = '{temp_dir}'")
+
+        conn.execute("SET threads = 1")
+        conn.execute("SET preserve_insertion_order = false")
+
+        s3 = cfg.get("s3_config")
+        if s3:
+            conn.load_extension("httpfs")
+            if s3.get("access_key"):
+                conn.execute(f"SET s3_access_key_id = '{s3['access_key']}'")
+            if s3.get("secret_key"):
+                conn.execute(f"SET s3_secret_access_key = '{s3['secret_key']}'")
+            if s3.get("endpoint_url"):
+                endpoint = (
+                    s3["endpoint_url"].replace("http://", "").replace("https://", "")
+                )
+                use_ssl = "true" if s3["endpoint_url"].startswith("https") else "false"
+                conn.execute(f"SET s3_endpoint = '{endpoint}'")
+                conn.execute(f"SET s3_use_ssl = {use_ssl}")
+                conn.execute("SET s3_url_style = 'path'")
+
+        paths_list = ", ".join(
+            f"'{duckdb_quote_path(p)}'" for p in job["chunk_duckdb_paths"]
+        )
+        conn.execute(f"""
             COPY (
                 SELECT * FROM read_parquet([{paths_list}])
                 ORDER BY timestamp
-            ) TO '{duckdb_quote_path(write_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{duckdb_quote_path(job["write_path"])}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
     finally:
-        duck_conn.close()
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Sync convenience wrappers (used by tests and management commands)
+# ---------------------------------------------------------------------------
+
+
+def promote_spans() -> tuple[int, bool]:
+    """Run the full promotion pipeline synchronously (in-process).
+
+    Equivalent to what the async task does, but without process isolation.
+    Used by tests and management commands where memory isolation isn't needed.
+    """
+    org_batches, truncated = fetch_promotable_spans()
+    if not org_batches:
+        return 0, False
+
+    total_promoted = 0
+    for org_id, date_groups, storage_config, column_types in org_batches:
+        written_chunks = write_org_parquet_chunks(
+            storage_config, org_id, date_groups, column_types
+        )
+        promoted = delete_promoted_rows(org_id, written_chunks)
+        total_promoted += promoted
+
+    if total_promoted:
+        logger.info("Promoted %d span rows to cold storage", total_promoted)
+    return total_promoted, truncated
+
+
+def compact_span_chunks() -> int:
+    """Run the full compaction pipeline synchronously (in-process).
+
+    Used by tests and management commands.
+    """
+    jobs = collect_compactable_chunks()
+    if not jobs:
+        return 0
+
+    compacted = 0
+    for job in jobs:
+        try:
+            # Run compaction in-process (no child) for simplicity in tests
+            compact_chunks_in_child(job)
+            finalize_compaction(job)
+            compacted += len(job["chunks"])
+        except Exception:
+            logger.error(
+                "Failed to compact chunks in %s", job["date_path"], exc_info=True
+            )
+
+    if compacted:
+        logger.info("Compacted %d span chunk files", compacted)
+    return compacted
+
+
+def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
+    """Write a chunk Parquet file using a storage object directly.
+
+    Convenience wrapper for tests that pass a storage object rather than
+    a serializable config dict.
+    """
+    storage_config = _get_storage_config(storage)
+    column_types = dict(SPAN_PARQUET_COLUMN_TYPES)
+    return _write_chunk_parquet_isolated(
+        storage_config, org_id, date_str, rows, column_types
+    )
+
+
+def finalize_compaction(job: dict) -> None:
+    """Post-compaction cleanup in parent process (file renames, deletes)."""
+    storage = get_cold_storage_backend()
 
     # Atomic rename on filesystem
-    if not is_s3:
-        os.rename(write_path, output_path)
+    if not job["is_s3"]:
+        os.rename(job["write_path"], job["output_path"])
 
-    # Delete chunk files and empty directory
-    for chunk in chunks:
+    # Delete chunk files
+    for chunk in job["chunks"]:
         try:
-            storage.delete(f"{date_path}/{chunk}")
+            storage.delete(f"{job['date_path']}/{chunk}")
         except Exception:
-            logger.warning("Failed to delete chunk %s/%s", date_path, chunk)
+            logger.warning("Failed to delete chunk %s/%s", job["date_path"], chunk)
 
     # Try to remove the empty date directory (filesystem only)
-    if not output_path.startswith("s3://"):
+    if not job["is_s3"]:
         try:
-            os.rmdir(storage.path(date_path))
+            os.rmdir(storage.path(job["date_path"]))
         except OSError:
             pass
