@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 from django.test import SimpleTestCase
 from django.utils.timezone import make_aware
 
-from apps.stripe.utils import _MAX_CYCLE_MONTHS, compute_cycle, compute_previous_cycle
+from apps.stripe.utils import _MAX_CYCLE_MONTHS, compute_cycle, compute_cycle_n_ago
 
 
 def dt(year, month, day):
@@ -108,39 +108,53 @@ class ComputeCycleTests(SimpleTestCase):
         mock_logger.warning.assert_called_once()
 
 
-class ComputePreviousCycleTests(SimpleTestCase):
+class ComputeCycleNAgoTests(SimpleTestCase):
     def test_monthly_plan(self):
-        result = compute_previous_cycle(
+        result = compute_cycle_n_ago(
             current_period_start=dt(2026, 3, 15),
             current_period_end=dt(2026, 4, 15),
             subscription_cycle_start=None,
             subscription_cycle_end=None,
+            periods_ago=1,
         )
         self.assertEqual(result, (dt(2026, 2, 15), dt(2026, 3, 15)))
 
     def test_annual_plan_with_previous_cycle(self):
-        result = compute_previous_cycle(
+        result = compute_cycle_n_ago(
             current_period_start=dt(2025, 10, 1),
             current_period_end=dt(2026, 10, 1),
             subscription_cycle_start=dt(2026, 3, 1),
             subscription_cycle_end=dt(2026, 4, 1),
+            periods_ago=1,
         )
         self.assertEqual(result, (dt(2026, 2, 1), dt(2026, 3, 1)))
 
     def test_annual_plan_first_month_returns_none(self):
-        result = compute_previous_cycle(
+        result = compute_cycle_n_ago(
             current_period_start=dt(2026, 1, 15),
             current_period_end=dt(2027, 1, 15),
             subscription_cycle_start=dt(2026, 1, 15),
             subscription_cycle_end=dt(2026, 2, 15),
+            periods_ago=1,
         )
         self.assertIsNone(result)
 
     def test_monthly_plan_jan_to_feb(self):
-        result = compute_previous_cycle(
+        result = compute_cycle_n_ago(
             current_period_start=dt(2026, 1, 1),
             current_period_end=dt(2026, 2, 1),
             subscription_cycle_start=None,
             subscription_cycle_end=None,
+            periods_ago=1,
         )
         self.assertEqual(result, (dt(2025, 12, 1), dt(2026, 1, 1)))
+
+    def test_monthly_plan_two_periods_ago(self):
+        result = compute_cycle_n_ago(
+            current_period_start=dt(2026, 3, 15),
+            current_period_end=dt(2026, 4, 15),
+            subscription_cycle_start=None,
+            subscription_cycle_end=None,
+            periods_ago=2,
+        )
+        self.assertEqual(result, (dt(2026, 1, 15), dt(2026, 2, 15)))
