@@ -64,7 +64,10 @@ async def update_uptime_statistics(org_counts: dict[int, int], check_time):
     Silently skips if no partition exists for the date (e.g. old test data).
     """
     hour = check_time.replace(minute=0, second=0, microsecond=0)
-    data = [(org_id, hour, count) for org_id, count in org_counts.items()]
+    data = sorted(
+        ((org_id, hour, count) for org_id, count in org_counts.items()),
+        key=lambda row: row[0],
+    )
     if not data:
         return
 
