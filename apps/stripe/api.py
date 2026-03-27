@@ -25,7 +25,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import compute_cycle_n_ago, compute_previous_cycle, unix_to_datetime
+from .utils import compute_cycle, compute_cycle_n_ago, compute_previous_cycle, unix_to_datetime
 
 router = Router()
 
@@ -234,18 +234,27 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     ).aexists():
         return JsonResponse({"detail": "Customer already has subscription"}, status=400)
     subscription_resp = await create_subscription(customer_id, price.stripe_id)
+    current_period_start = unix_to_datetime(
+        subscription_resp.items.data[0].current_period_start
+    )
+    current_period_end = unix_to_datetime(
+        subscription_resp.items.data[0].current_period_end
+    )
+    price_data = subscription_resp.items.data[0].price
+    is_annual = bool(
+        price_data.recurring and price_data.recurring.get("interval") == "year"
+    )
+    cycle_start, cycle_end = compute_cycle(current_period_start, current_period_end, is_annual)
     subscription = await StripeSubscription.objects.acreate(
         stripe_id=subscription_resp.id,
         status=SubscriptionStatus.ACTIVE,
         created=unix_to_datetime(subscription_resp.created),
-        current_period_start=unix_to_datetime(
-            subscription_resp.items.data[0].current_period_start
-        ),
-        current_period_end=unix_to_datetime(
-            subscription_resp.items.data[0].current_period_end
-        ),
+        current_period_start=current_period_start,
+        current_period_end=current_period_end,
         start_date=unix_to_datetime(subscription_resp.start_date),
         collection_method=subscription_resp.collection_method,
+        subscription_cycle_start=cycle_start,
+        subscription_cycle_end=cycle_end,
         price=price,
         organization=organization,
     )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from asgiref.sync import async_to_sync
 from django.test import TestCase
@@ -10,6 +10,7 @@ from model_bakery import baker
 
 from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripeSubscription
+from apps.stripe.utils import unix_to_datetime
 
 
 class StripeAPITestCase(TestCase):
@@ -64,9 +65,17 @@ class StripeAPITestCase(TestCase):
 
     @patch("apps.stripe.api.create_subscription")
     def test_stripe_create_subscription(self, mock_create_subscription):
+        period_start = 1681564800
+        period_end = 1684243200
         mock_create_subscription.return_value.id = "test"
-        mock_create_subscription.return_value.start_date = 1681564800
+        mock_create_subscription.return_value.start_date = period_start
         mock_create_subscription.return_value.collection_method = "charge_automatically"
+        mock_create_subscription.return_value.created = period_start
+        item = MagicMock()
+        item.current_period_start = period_start
+        item.current_period_end = period_end
+        item.price.recurring = {"interval": "month"}
+        mock_create_subscription.return_value.items.data = [item]
         url = reverse("api:stripe_create_subscription")
         res = self.client.post(
             url,
@@ -75,6 +84,9 @@ class StripeAPITestCase(TestCase):
         )
         self.assertEqual(res.status_code, 200)
         mock_create_subscription.assert_called_once()
+        sub = StripeSubscription.objects.get(stripe_id="test")
+        self.assertEqual(sub.subscription_cycle_start, unix_to_datetime(period_start))
+        self.assertEqual(sub.subscription_cycle_end, unix_to_datetime(period_end))
 
     def test_events_count(self):
         # Ensure we don't filter on any unrelated subscription
