@@ -182,10 +182,15 @@ DUCKDB_EXTENSION_DIRECTORY = env.str("DUCKDB_EXTENSION_DIRECTORY", None)
 
 
 def _default_duckdb_memory_limit() -> str:
-    """Auto-detect 25% of container/system memory for DuckDB.
+    """Auto-detect a safe DuckDB memory limit from container/system memory.
 
-    Reads the cgroup memory limit first (works in Docker/Kubernetes),
-    then falls back to total system memory via os.sysconf.
+    Uses 25% of container memory (cgroup v2) or system memory, capped at
+    256 MB. This is conservative because DuckDB's memory_limit only bounds
+    its internal buffer pool — thread stacks, mmap'd file regions, and
+    jemalloc overhead are all OUTSIDE this limit. A 256 MB buffer pool
+    with 2 threads typically peaks at ~400-500 MB total process impact.
+
+    For dedicated analytics workloads, set DUCKDB_MEMORY_LIMIT explicitly.
     """
     try:
         total = None
@@ -202,7 +207,7 @@ def _default_duckdb_memory_limit() -> str:
             total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         quarter = total // 4
         mb = quarter // (1024 * 1024)
-        return f"{min(mb, 1024)}MB"
+        return f"{min(mb, 256)}MB"
     except (ValueError, OSError, AttributeError):
         return "128MB"
 
@@ -213,6 +218,11 @@ def _default_duckdb_memory_limit() -> str:
 # Defaults to 25% of container/system memory.
 # Set to empty string to disable (unbounded memory).
 DUCKDB_MEMORY_LIMIT = env.str("DUCKDB_MEMORY_LIMIT", _default_duckdb_memory_limit())
+# Max threads for DuckDB queries. DuckDB defaults to host CPU count, which in
+# Kubernetes is the NODE's cores (e.g. 64), not the pod limit. Each thread
+# allocates scan buffers outside the memory_limit, causing VmPeak explosion.
+# Default 2 is safe for typical pods; increase for dedicated analytics workloads.
+DUCKDB_THREADS = env.int("DUCKDB_THREADS", 2)
 # Writable directory for DuckDB spill-to-disk. Set to empty string to disable
 # the memory limit (needed for read-only root filesystems with no writable mount).
 DUCKDB_TEMP_DIRECTORY = env.str("DUCKDB_TEMP_DIRECTORY", "/tmp")

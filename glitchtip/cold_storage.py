@@ -250,6 +250,15 @@ def _create_duckdb_connection(storage=None):
     if memory_limit:
         conn.execute(f"SET memory_limit = '{memory_limit}'")
 
+    # Limit DuckDB's thread pool. By default DuckDB spawns one thread per
+    # HOST CPU core, which in Kubernetes means it sees the node's cores
+    # (e.g. 64) rather than the pod's CPU limit (e.g. 2). Each thread
+    # allocates its own scan buffers, causing VmPeak to explode well
+    # beyond the memory_limit setting (which only bounds DuckDB's
+    # internal buffer pool, not thread stacks or mmap'd file regions).
+    threads = getattr(settings, "DUCKDB_THREADS", 2)
+    conn.execute(f"SET threads = {int(threads)}")
+
     # Auto-detect a writable temp directory for DuckDB spill-to-disk.
     # Explicit setting takes priority, then Python's tempfile default.
     temp_dir = getattr(settings, "DUCKDB_TEMP_DIRECTORY", "") or tempfile.gettempdir()
