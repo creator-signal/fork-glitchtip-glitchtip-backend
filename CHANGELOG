@@ -1,3 +1,21 @@
+# 6.1.3
+
+- Fix: Return 413 response for oversized request data instead of unhandled exception
+- Fix: Sort uptime stats upsert by org_id to prevent deadlock
+- Fix: Cap DuckDB threads and memory to prevent VmPeak explosion; auto-detect from cgroup CPU quota
+- Fix: Convert remaining sync views to async
+- Fix: Replace server-side cursor with batched iteration in throttle check (PgBouncer compatible)
+- Fix: Auto-set GRANIAN_WORKERS_MAX_RSS to bound memory fragmentation
+- Fix: Split event count queries to prevent shared memory exhaustion
+- Fix: Increase MCP OAuth access token lifetime to 8 hours
+- Fix: Handle duplicate release creation with get_or_create
+- Fix: Set ERROR status on artifact assembly failures instead of raising
+- Feat: Show event counts on org admin detail page
+- Feat: Populate hourly stats in make_sample_* commands
+- Feat: Add billing cycle dates to created subscriptions
+- Perf: Convert hot-path ORM queries to raw SQL in event ingest
+- Refactor: Consolidate org admin into single registration
+
 # 6.1.1
 
 - Fix: Batch-delete partitioned tables before org/project/issue cascade delete to avoid exhausting PostgreSQL shared lock table
