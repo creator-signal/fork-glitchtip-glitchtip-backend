@@ -1,6 +1,6 @@
+import asyncio
 from datetime import date, timedelta
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
@@ -404,49 +404,50 @@ async def subscription_events_count_daily(
 
     date_filter = Q(date__gte=cycle_start, date__lt=cycle_end)
 
-    # Use sync_to_async(list)() to avoid server-side cursors (PgBouncer compat)
-    issue_rows = await sync_to_async(list)(
-        IssueEventProjectHourlyStatistic.objects.filter(
-            Q(organization_id=org.id) & date_filter
-        )
-        .annotate(day=TruncDate("date"))
-        .values("day")
-        .annotate(total=Coalesce(Sum("count"), 0))
-        .order_by("day")
+    async def collect(queryset):
+        return [row async for row in queryset.aiterator()]
+
+    issue_rows, txn_rows, uptime_rows, log_rows = await asyncio.gather(
+        collect(
+            IssueEventProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            TransactionEventProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            UptimeCheckHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            LogProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
     )
     issue_daily = {row["day"]: row["total"] for row in issue_rows}
-
-    txn_rows = await sync_to_async(list)(
-        TransactionEventProjectHourlyStatistic.objects.filter(
-            Q(organization_id=org.id) & date_filter
-        )
-        .annotate(day=TruncDate("date"))
-        .values("day")
-        .annotate(total=Coalesce(Sum("count"), 0))
-        .order_by("day")
-    )
     txn_daily = {row["day"]: row["total"] for row in txn_rows}
-
-    uptime_rows = await sync_to_async(list)(
-        UptimeCheckHourlyStatistic.objects.filter(
-            Q(organization_id=org.id) & date_filter
-        )
-        .annotate(day=TruncDate("date"))
-        .values("day")
-        .annotate(total=Coalesce(Sum("count"), 0))
-        .order_by("day")
-    )
     uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
-
-    log_rows = await sync_to_async(list)(
-        LogProjectHourlyStatistic.objects.filter(
-            Q(organization_id=org.id) & date_filter
-        )
-        .annotate(day=TruncDate("date"))
-        .values("day")
-        .annotate(total=Coalesce(Sum("count"), 0))
-        .order_by("day")
-    )
     log_daily = {row["day"]: row["total"] for row in log_rows}
 
     # Build response with one entry per day, filling gaps with zeros
