@@ -526,3 +526,157 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertEqual(result.id, target_id)
             self.assertEqual(result.title, "Event 2")
             self.assertEqual(result.organization_id, self.organization.id)
+
+
+class MultiDateColdStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """
+    Test querying cold storage across multiple date files.
+
+    Verifies that query_cold_parquet_files iterates newest-first and
+    stops early when the limit is reached, avoiding unnecessary file reads.
+    """
+
+    def setUp(self):
+        self.create_logged_in_user()
+        self.cold_dir = tempfile.mkdtemp(prefix="glitchtip_cold_test_")
+        self.dates = [
+            datetime(2025, 3, 1, tzinfo=dt_timezone.utc),
+            datetime(2025, 3, 15, tzinfo=dt_timezone.utc),
+            datetime(2025, 3, 30, tzinfo=dt_timezone.utc),
+        ]
+
+    def tearDown(self):
+        from glitchtip.cold_storage import close_duckdb_read_connection
+
+        close_duckdb_read_connection()
+        shutil.rmtree(self.cold_dir, ignore_errors=True)
+
+    def _write_parquet_files(self, issue_id: int) -> dict[str, list]:
+        """Write parquet files for multiple dates and return {date_str: [event_ids]}."""
+        import os
+        import uuid
+
+        import duckdb
+
+        all_event_ids = {}
+        org_id = self.organization.id
+
+        for date in self.dates:
+            date_str = date.strftime("%Y%m%d")
+            parquet_dir = os.path.join(
+                self.cold_dir,
+                "cold_storage",
+                TABLE_NAME,
+                f"org_{org_id}",
+            )
+            os.makedirs(parquet_dir, exist_ok=True)
+            parquet_path = os.path.join(parquet_dir, f"{date_str}.parquet")
+
+            event_ids = []
+            rows = []
+            for i in range(5):
+                event_time = date + timedelta(hours=i)
+                event_id = UUID7Helper.from_datetime(event_time)
+                event_ids.append(event_id)
+                rows.append({
+                    "id": str(event_id),
+                    "event_id": str(uuid.uuid4()),
+                    "timestamp": event_time,
+                    "issue_id": issue_id,
+                    "organization_id": org_id,
+                    "release_id": None,
+                    "type": 0,
+                    "level": 4,
+                    "title": f"Event {date_str}_{i}",
+                    "transaction": "/api/test",
+                    "data": "{}",
+                    "tags": "{}",
+                    "hashes": "[]",
+                })
+
+            conn = duckdb.connect()
+            conn.execute("SET threads=1")
+            # Create table from rows
+            conn.execute("""
+                CREATE TABLE events (
+                    id VARCHAR, event_id VARCHAR, timestamp TIMESTAMP,
+                    issue_id BIGINT, organization_id BIGINT, release_id BIGINT,
+                    type SMALLINT, level SMALLINT, title VARCHAR,
+                    "transaction" VARCHAR, data VARCHAR, tags VARCHAR, hashes VARCHAR
+                )
+            """)
+            for row in rows:
+                conn.execute(
+                    "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    list(row.values()),
+                )
+            conn.execute(f"COPY events TO '{parquet_path}' (FORMAT PARQUET)")
+            conn.close()
+
+            all_event_ids[date_str] = event_ids
+
+        return all_event_ids
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_query_returns_newest_first(self):
+        """query_cold_events returns events from newest date files first."""
+        from ..models import Issue
+
+        issue = Issue.objects.create(
+            project=self.project,
+            title="Test Issue",
+            metadata={"title": "Test Issue"},
+            type=0,
+            level=40,
+        )
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            all_ids = self._write_parquet_files(issue.id)
+            newest_ids = all_ids[self.dates[-1].strftime("%Y%m%d")]
+
+            # limit=1 should return only the newest event
+            results = query_cold_events(
+                organization_id=self.organization.id,
+                start_dt=datetime(2025, 1, 1, tzinfo=dt_timezone.utc),
+                end_dt=datetime(2025, 12, 31, tzinfo=dt_timezone.utc),
+                issue_id=issue.id,
+                limit=1,
+            )
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].id, newest_ids[-1])
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_latest_event_api_falls_back_to_cold(self):
+        """The /events/latest/ endpoint falls back to cold storage."""
+        from django.urls import reverse
+
+        from ..models import Issue
+
+        issue = Issue.objects.create(
+            project=self.project,
+            title="Test Issue",
+            metadata={"title": "Test Issue"},
+            type=0,
+            level=40,
+        )
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            all_ids = self._write_parquet_files(issue.id)
+            newest_ids = all_ids[self.dates[-1].strftime("%Y%m%d")]
+
+            url = reverse(
+                "api:get_latest_issue_event", kwargs={"issue_id": issue.id}
+            )
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["id"], newest_ids[-1].hex)

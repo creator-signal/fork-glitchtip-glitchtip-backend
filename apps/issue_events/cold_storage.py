@@ -240,6 +240,7 @@ def query_cold_events(
         limit_param=limit_param,
         start_dt=start_dt,
         end_dt=end_dt,
+        limit=limit,
     )
 
     results = [_row_to_issue_event(row) for row in rows]

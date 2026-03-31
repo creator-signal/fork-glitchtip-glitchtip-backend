@@ -1147,6 +1147,7 @@ def query_cold_parquet_files(
     limit_param: str,
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
+    limit: int | None = None,
 ) -> list[tuple]:
     """
     Query cold storage parquet files individually with per-file error handling.
@@ -1154,6 +1155,9 @@ def query_cold_parquet_files(
     Instead of a single glob query (which fails entirely if any file is corrupt),
     this enumerates files in the org directory and queries each one separately.
     Corrupt files are logged at ERROR level and skipped; valid results are merged.
+
+    Files are iterated newest-first (matching ORDER BY id DESC) so that queries
+    for recent data (e.g., latest event) can stop early without scanning all files.
 
     Args:
         organization_id: Org whose files to query
@@ -1164,6 +1168,7 @@ def query_cold_parquet_files(
         limit_param: DuckDB positional parameter for LIMIT (e.g., "$5")
         start_dt: Optional start datetime for date-based file filtering
         end_dt: Optional end datetime for date-based file filtering
+        limit: Optional early-exit limit — stop scanning once this many rows collected
 
     Returns:
         List of raw row tuples from all successfully read files.
@@ -1181,7 +1186,10 @@ def query_cold_parquet_files(
     all_rows: list[tuple] = []
     duck_conn = get_duckdb_read_connection(storage)
     try:
-        for relative_path in parquet_paths:
+        # Iterate newest files first — ids are UUIDv7 (time-ordered) and queries
+        # use ORDER BY id DESC, so newer files have higher-ranked results.
+        # Early exit once we have enough rows since older files cannot outrank them.
+        for relative_path in reversed(parquet_paths):
             parquet_path = get_duckdb_parquet_path(storage, relative_path)
             sql = f"""
                 SELECT {select_columns}
@@ -1193,6 +1201,8 @@ def query_cold_parquet_files(
             try:
                 result = duck_conn.execute(sql, params)
                 all_rows.extend(result.fetchall())
+                if limit is not None and len(all_rows) >= limit:
+                    break
             except Exception:
                 close_duckdb_read_connection()
                 duck_conn = get_duckdb_read_connection(storage)
