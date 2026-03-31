@@ -88,129 +88,6 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(sub.subscription_cycle_start, unix_to_datetime(period_start))
         self.assertEqual(sub.subscription_cycle_end, unix_to_datetime(period_end))
 
-    def test_events_count(self):
-        # Ensure we don't filter on any unrelated subscription
-        baker.make("stripe.StripeSubscription", status=SubscriptionStatus.ACTIVE)
-        # Create a few subscriptions, but only one is active
-        baker.make(
-            "stripe.StripeSubscription",
-            organization=self.organization,
-            status=SubscriptionStatus.CANCELED,
-        )
-        # Active subscription has a set time period to match events
-        baker.make(
-            "stripe.StripeSubscription",
-            organization=self.organization,
-            status=SubscriptionStatus.ACTIVE,
-            current_period_start=timezone.make_aware(datetime(2020, 1, 2)),
-            current_period_end=timezone.make_aware(datetime(2020, 2, 2)),
-        )
-        baker.make(
-            "stripe.StripeSubscription",
-            organization=self.organization,
-            status=SubscriptionStatus.CANCELED,
-        )
-        url = reverse("api:subscription_events_count", args=[self.organization.slug])
-        with freeze_time(datetime(2020, 3, 1)):
-            baker.make(
-                "issue_events.IssueEvent",
-                issue__project__organization=self.organization,
-            )
-        with freeze_time(datetime(2020, 1, 5)):
-            baker.make("issue_events.IssueEvent")
-            baker.make(
-                "issue_events.IssueEvent",
-                issue__project__organization=self.organization,
-            )
-            baker.make(
-                "projects.IssueEventProjectHourlyStatistic",
-                project__organization=self.organization,
-                organization=self.organization,
-                count=1,
-            )
-            baker.make(
-                "projects.TransactionEventProjectHourlyStatistic",
-                project__organization=self.organization,
-                organization=self.organization,
-                count=1,
-            )
-            baker.make(
-                "sourcecode.DebugSymbolBundle",
-                file__blob__size=1234567,
-                organization=self.organization,
-                release__organization=self.organization,
-                _quantity=2,
-            )
-        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
-            {self.organization.id}
-        )
-        res = self.client.get(url)
-        self.assertEqual(
-            res.json(),
-            {
-                "eventCount": 1,
-                "fileSizeMb": 2,
-                "transactionEventCount": 1,
-                "uptimeCheckEventCount": 0,
-                "logEventCount": 0,
-            },
-        )
-
-    def test_events_count_without_customer(self):
-        """
-        Due to async nature of Stripe integration, a customer may not exist
-        """
-        baker.make("stripe.StripeSubscription")
-        url = reverse("api:subscription_events_count", args=[self.organization.slug])
-        res = self.client.get(url)
-        self.assertEqual(sum(res.json().values()), 0)
-
-    def test_events_count_previous_period(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        baker.make(
-            "stripe.StripeSubscription",
-            organization=self.organization,
-            status=SubscriptionStatus.ACTIVE,
-            current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
-            current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
-        )
-        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
-            {self.organization.id}
-        )
-        # Create stats in the previous period (January)
-        baker.make(
-            "projects.IssueEventProjectHourlyStatistic",
-            project=project,
-            organization=self.organization,
-            date=timezone.make_aware(datetime(2020, 1, 15, 10)),
-            count=50,
-        )
-        baker.make(
-            "projects.TransactionEventProjectHourlyStatistic",
-            project=project,
-            organization=self.organization,
-            date=timezone.make_aware(datetime(2020, 1, 20, 14)),
-            count=100,
-        )
-        url = reverse(
-            "api:subscription_events_count_previous_period",
-            args=[self.organization.slug],
-        )
-        res = self.client.get(url)
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(data["eventCount"], 50)
-        self.assertEqual(data["transactionEventCount"], 100)
-        self.assertEqual(data["total"], 150)
-
-    def test_events_count_previous_period_no_subscription(self):
-        url = reverse(
-            "api:subscription_events_count_previous_period",
-            args=[self.organization.slug],
-        )
-        res = self.client.get(url)
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()["total"], 0)
 
     def test_subscription_events_count_for_period_current(self):
         project = baker.make("projects.Project", organization=self.organization)
@@ -287,3 +164,84 @@ class StripeAPITestCase(TestCase):
         res = self.client.get(url, {"periods_ago": 1})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["total"], 0)
+
+    def test_events_count_daily(self):
+        project = baker.make("projects.Project", organization=self.organization)
+        period_start = timezone.make_aware(datetime(2020, 1, 1))
+        period_end = timezone.make_aware(datetime(2020, 2, 1))
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+        # Create stats on two different days
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 5, 10)),
+            count=15,
+        )
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 5, 14)),
+            count=5,
+        )
+        baker.make(
+            "projects.TransactionEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 10, 8)),
+            count=30,
+        )
+        baker.make(
+            "projects.LogProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 10, 8)),
+            count=40,
+        )
+
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 1, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()["data"]
+        # Should have entries from Jan 1 through Jan 15 (today)
+        self.assertEqual(len(data), 15)
+        # Jan 5 should have 20 issue events (15 + 5 from two hourly rows)
+        jan5 = next(d for d in data if d["date"] == "2020-01-05")
+        self.assertEqual(jan5["eventCount"], 20)
+        self.assertEqual(jan5["transactionEventCount"], 0)
+        self.assertEqual(jan5["logEventCount"], 0)
+        # Jan 10 should have 30 transaction events and 40 log events
+        jan10 = next(d for d in data if d["date"] == "2020-01-10")
+        self.assertEqual(jan10["eventCount"], 0)
+        self.assertEqual(jan10["transactionEventCount"], 30)
+        self.assertEqual(jan10["logEventCount"], 40)
+        # Jan 1 should be all zeros
+        jan1 = data[0]
+        self.assertEqual(jan1["date"], "2020-01-01")
+        self.assertEqual(jan1["eventCount"], 0)
+        self.assertEqual(jan1["transactionEventCount"], 0)
+        self.assertEqual(jan1["uptimeCheckEventCount"], 0)
+        self.assertEqual(jan1["logEventCount"], 0)
+
+    def test_events_count_daily_no_subscription(self):
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["data"], [])
