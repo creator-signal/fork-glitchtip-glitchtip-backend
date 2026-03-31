@@ -70,7 +70,7 @@ def compute_cycle_n_ago(
     """Return (start, end) for a billing cycle N periods before the current one.
 
     periods_ago=0 is not handled here (use with_event_counts current_period=True).
-    periods_ago=1 is equivalent to the old compute_previous_cycle behavior.
+    periods_ago=1 returns the immediately preceding cycle.
 
     Returns None if the requested period precedes the subscription start
     (annual plans only — monthly plans always have a valid prior period).
@@ -91,22 +91,3 @@ def compute_cycle_n_ago(
         period_end = current_period_start - relativedelta(months=periods_ago - 1)
         period_start = current_period_start - relativedelta(months=periods_ago)
         return period_start, period_end
-
-
-def compute_previous_cycle(
-    current_period_start: datetime,
-    current_period_end: datetime,
-    subscription_cycle_start: datetime | None,
-    subscription_cycle_end: datetime | None,
-) -> tuple[datetime, datetime] | None:
-    """Return (prev_start, prev_end) for the billing cycle before the current one.
-
-    Deprecated: use compute_cycle_n_ago with periods_ago=1 instead.
-    """
-    return compute_cycle_n_ago(
-        current_period_start,
-        current_period_end,
-        subscription_cycle_start,
-        subscription_cycle_end,
-        periods_ago=1,
-    )
