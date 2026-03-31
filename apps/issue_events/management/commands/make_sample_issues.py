@@ -1,7 +1,9 @@
 import random
+from collections import Counter
 from datetime import timedelta
 
 from django.contrib.postgres.search import SearchVector
+from django.db import connection
 from django.db.models import Value
 from django.utils import timezone
 
@@ -116,6 +118,32 @@ class Command(MakeSampleCommand):
                     )
 
         IssueTag.objects.bulk_create(issue_tags)
+
+        # Populate IssueAggregate (per-issue hourly counts for issues-stats API)
+        org_id = self.project.organization_id
+        aggregate_data = []
+        for i, issue in enumerate(issues):
+            hourly_counts: Counter[timezone.datetime] = Counter()
+            for event in issue_events[i]:
+                hour = event.timestamp.replace(minute=0, second=0, microsecond=0)
+                hourly_counts[hour] += 1
+            for hour, count in hourly_counts.items():
+                aggregate_data.append([hour, org_id, issue.id, count])
+
+        if aggregate_data:
+            aggregate_data.sort(key=lambda x: (x[0], x[1], x[2]))
+            with connection.cursor() as cursor:
+                args_str = ",".join(
+                    cursor.mogrify("(%s,%s,%s,%s)", row) for row in aggregate_data
+                )
+                cursor.execute(
+                    "INSERT INTO issue_events_issueaggregate"
+                    " (date, organization_id, issue_id, count)"
+                    f" VALUES {args_str}"
+                    " ON CONFLICT (issue_id, organization_id, date)"
+                    " DO UPDATE SET count = issue_events_issueaggregate.count + EXCLUDED.count;"
+                )
+
         self.progress_tick()
 
     def handle(self, *args, **options):
