@@ -1,6 +1,12 @@
+import asyncio
+from datetime import date, timedelta
+
 from django.conf import settings
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce, TruncDate
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
+from django.utils import timezone
 from ninja import ModelSchema, Router
 
 from apps.organizations_ext.constants import OrganizationUserRole
@@ -10,6 +16,12 @@ from apps.organizations_ext.models import (
     get_event_counts,
 )
 from apps.organizations_ext.tasks import check_organization_throttle
+from apps.projects.models import (
+    IssueEventProjectHourlyStatistic,
+    LogProjectHourlyStatistic,
+    TransactionEventProjectHourlyStatistic,
+)
+from apps.uptime.models import UptimeCheckHourlyStatistic
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
@@ -25,12 +37,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import (
-    compute_cycle,
-    compute_cycle_n_ago,
-    compute_previous_cycle,
-    unix_to_datetime,
-)
+from .utils import compute_cycle, compute_cycle_n_ago, unix_to_datetime
 
 router = Router()
 
@@ -123,7 +130,8 @@ class StripePortalSessionSchema(CamelSchema):
     url: str
 
 
-class EventsCountSchema(CamelSchema):
+class SubscriptionUsageSchema(CamelSchema):
+    total: int
     event_count: int
     transaction_event_count: int
     uptime_check_event_count: int
@@ -131,12 +139,16 @@ class EventsCountSchema(CamelSchema):
     file_size_mb: int
 
 
-class PreviousPeriodEventsCountSchema(EventsCountSchema):
-    total: int
+class DailyEventCountEntry(CamelSchema):
+    date: date
+    event_count: int
+    transaction_event_count: int
+    uptime_check_event_count: int
+    log_event_count: int
 
 
-class SubscriptionUsageSchema(EventsCountSchema):
-    total: int
+class DailyEventsCountSchema(CamelSchema):
+    data: list[DailyEventCountEntry]
 
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
@@ -274,29 +286,6 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
 
 
 @router.get(
-    "subscriptions/{slug:organization_slug}/events_count/",
-    response=EventsCountSchema,
-    by_alias=True,
-)
-async def subscription_events_count(request: AuthHttpRequest, organization_slug: str):
-    org = await aget_object_or_404(
-        Organization,
-        slug=organization_slug,
-        users=request.auth.user_id,
-    )
-    period = await get_current_period_dates(org)
-    start, end = period if period else (None, None)
-    counts = await get_event_counts(org.id, start, end)
-    return {
-        "event_count": counts.issue_event_count,
-        "transaction_event_count": counts.transaction_count,
-        "uptime_check_event_count": counts.uptime_check_event_count,
-        "log_event_count": counts.log_count,
-        "file_size_mb": counts.file_size,
-    }
-
-
-@router.get(
     "subscriptions/{slug:organization_slug}/events_count/period/",
     response=SubscriptionUsageSchema,
     by_alias=True,
@@ -336,8 +325,7 @@ async def subscription_events_count_for_period(
 
     subscription = await (
         StripeSubscription.objects.filter(
-            organization__users=request.auth.user_id,
-            organization__slug=organization_slug,
+            organization_id=org.id,
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
         )
         .select_related("price")
@@ -380,54 +368,101 @@ async def subscription_events_count_for_period(
 
 
 @router.get(
-    "subscriptions/{slug:organization_slug}/events_count/previous_period/",
-    response=PreviousPeriodEventsCountSchema,
+    "subscriptions/{slug:organization_slug}/events_count/daily/",
+    response=DailyEventsCountSchema,
     by_alias=True,
 )
-async def subscription_events_count_previous_period(
+async def subscription_events_count_daily(
     request: AuthHttpRequest, organization_slug: str
 ):
+    org = await aget_object_or_404(
+        Organization,
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+
     subscription = await (
         StripeSubscription.objects.filter(
-            organization__users=request.auth.user_id,
-            organization__slug=organization_slug,
+            organization_id=org.id,
             status__in=ACTIVE_SUBSCRIPTION_STATUSES,
         )
-        .select_related("price")
         .order_by("-created")
         .afirst()
     )
 
-    zero_response = {
-        "total": 0,
-        "event_count": 0,
-        "transaction_event_count": 0,
-        "uptime_check_event_count": 0,
-        "log_event_count": 0,
-        "file_size_mb": 0,
-    }
-
     if subscription is None:
-        return zero_response
+        return {"data": []}
 
-    prev = compute_previous_cycle(
-        subscription.current_period_start,
-        subscription.current_period_end,
-        subscription.subscription_cycle_start,
-        subscription.subscription_cycle_end,
+    cycle_start = (
+        subscription.subscription_cycle_start or subscription.current_period_start
     )
-    if prev is None:
-        return zero_response
+    cycle_end = subscription.subscription_cycle_end or subscription.current_period_end
 
-    prev_start, prev_end = prev
-    counts = await get_event_counts(
-        subscription.organization_id, prev_start, prev_end
+    today = timezone.now().date()
+    period_start_date = cycle_start.date()
+    period_end_date = min(cycle_end.date(), today)
+
+    date_filter = Q(date__gte=cycle_start, date__lt=cycle_end)
+
+    async def collect(queryset):
+        return [row async for row in queryset.aiterator()]
+
+    issue_rows, txn_rows, uptime_rows, log_rows = await asyncio.gather(
+        collect(
+            IssueEventProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            TransactionEventProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            UptimeCheckHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
+        collect(
+            LogProjectHourlyStatistic.objects.filter(
+                Q(organization_id=org.id) & date_filter
+            )
+            .annotate(day=TruncDate("date"))
+            .values("day")
+            .annotate(total=Coalesce(Sum("count"), 0))
+            .order_by("day")
+        ),
     )
-    return {
-        "total": counts.total_event_count,
-        "event_count": counts.issue_event_count,
-        "transaction_event_count": counts.transaction_count,
-        "uptime_check_event_count": counts.uptime_check_event_count,
-        "log_event_count": counts.log_count,
-        "file_size_mb": counts.file_size,
-    }
+    issue_daily = {row["day"]: row["total"] for row in issue_rows}
+    txn_daily = {row["day"]: row["total"] for row in txn_rows}
+    uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
+    log_daily = {row["day"]: row["total"] for row in log_rows}
+
+    # Build response with one entry per day, filling gaps with zeros
+    data = []
+    current = period_start_date
+    while current <= period_end_date:
+        data.append(
+            {
+                "date": current,
+                "event_count": issue_daily.get(current, 0),
+                "transaction_event_count": txn_daily.get(current, 0),
+                "uptime_check_event_count": uptime_daily.get(current, 0),
+                "log_event_count": log_daily.get(current, 0),
+            }
+        )
+        current += timedelta(days=1)
+
+    return {"data": data}
