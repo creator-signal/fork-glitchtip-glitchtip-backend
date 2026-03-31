@@ -72,9 +72,11 @@ def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> None:
     if not resource_data:
         return
 
-    data = [
-        [org_id, name, res_type] for org_id, name, res_type in resource_data if name
-    ]
+    data = sorted(
+        [org_id, name, res_type]
+        for org_id, name, res_type in resource_data
+        if name
+    )
 
     if not data:
         return
