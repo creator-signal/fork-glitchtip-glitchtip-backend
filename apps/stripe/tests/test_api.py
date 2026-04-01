@@ -152,9 +152,13 @@ class StripeAPITestCase(TestCase):
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
         )
-        # periods_ago=3 → 90 days, not < 90 (default retention)
-        res = self.client.get(url, {"periods_ago": 3})
+        # periods_ago=4 → 120 days, exceeds default retention
+        res = self.client.get(url, {"periods_ago": 4})
         self.assertEqual(res.status_code, 400)
+        # periods_ago=1 should always pass even with low retention configured
+        with self.settings(GLITCHTIP_RETENTION_DAYS=14):
+            res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
 
     def test_subscription_events_count_for_period_no_subscription(self):
         url = reverse(
