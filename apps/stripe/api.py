@@ -295,8 +295,8 @@ async def subscription_events_count_for_period(
     organization_slug: str,
     periods_ago: int = 0,
 ):
-    retention_days = getattr(settings, "GLITCHTIP_RETENTION_DAYS", 90)
-    if periods_ago * 30 >= retention_days:
+    retention_days = max(30, settings.GLITCHTIP_RETENTION_DAYS)
+    if periods_ago * 30 > retention_days:
         return JsonResponse(
             {
                 "detail": f"periods_ago exceeds data retention limit ({retention_days} days)"
