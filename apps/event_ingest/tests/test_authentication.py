@@ -1,7 +1,20 @@
 from django.test import TestCase
+from django.test import RequestFactory
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from model_bakery import baker
+from ninja.errors import AuthenticationError
+
+from apps.event_ingest.authentication import auth_from_request
+
+
+class AuthFromRequestTestCase(TestCase):
+    def test_missing_auth_raises_with_integer_status_code(self):
+        """AuthenticationError must use an integer status_code, not the message string."""
+        request = RequestFactory().post("/api/1/store/")
+        with self.assertRaises(AuthenticationError) as ctx:
+            auth_from_request(request)
+        self.assertIsInstance(ctx.exception.status_code, int)
 
 
 class AuthenticationTestCase(TestCase):

@@ -68,7 +68,7 @@ def auth_from_request(request: HttpRequest):
         result = parse_auth_header(auth_header)
         return result.get("sentry_key", result.get("glitchtip_key"))
 
-    raise AuthenticationError("Unable to find authentication information")
+    raise AuthenticationError(message="Unable to find authentication information")
 
 
 # One letter codes to save cache memory and map to various event rejection type exceptions
