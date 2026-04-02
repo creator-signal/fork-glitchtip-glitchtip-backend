@@ -319,7 +319,7 @@ async def subscription_events_count_for_period(
             "event_count": counts.issue_event_count,
             "transaction_event_count": counts.transaction_count,
             "uptime_check_event_count": counts.uptime_check_event_count,
-            "log_event_count": counts.log_count,
+            "log_event_count": counts.log_count // 10,
             "file_size_mb": counts.file_size,
         }
 
@@ -460,7 +460,7 @@ async def subscription_events_count_daily(
                 "event_count": issue_daily.get(current, 0),
                 "transaction_event_count": txn_daily.get(current, 0),
                 "uptime_check_event_count": uptime_daily.get(current, 0),
-                "log_event_count": log_daily.get(current, 0),
+                "log_event_count": log_daily.get(current, 0) // 10,
             }
         )
         current += timedelta(days=1)
