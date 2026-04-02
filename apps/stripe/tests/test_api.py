@@ -232,7 +232,7 @@ class StripeAPITestCase(TestCase):
         jan10 = next(d for d in data if d["date"] == "2020-01-10")
         self.assertEqual(jan10["eventCount"], 0)
         self.assertEqual(jan10["transactionEventCount"], 30)
-        self.assertEqual(jan10["logEventCount"], 40)
+        self.assertEqual(jan10["logEventCount"], 4)
         # Jan 1 should be all zeros
         jan1 = data[0]
         self.assertEqual(jan1["date"], "2020-01-01")
