@@ -160,6 +160,8 @@ class StacktraceProcessor:
             # Process the first exception only.
             exceptions = (event.get("exception") or {}).get("values")
             stacktrace = exceptions[0].get("stacktrace")
+            if stacktrace is None:
+                return
         except Exception as e:
             getLogger().error(
                 f"StacktraceProcessor: Invalid event: {event}, error: {e}"
