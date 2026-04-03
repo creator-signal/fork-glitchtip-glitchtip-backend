@@ -1582,11 +1582,11 @@ async def process_transaction_events(
                     SpanStaging(
                         organization_id=ingest_event.organization_id,
                         project_id=ingest_event.project_id,
-                        transaction_name=transaction_name,
+                        transaction_name=remove_bad_chars(transaction_name),
                         span_id=span.span_id[:32],
                         transaction_id=event_id_hex[:32],
-                        op=span.op[:255],
-                        description=description,
+                        op=remove_bad_chars(span.op[:255]),
+                        description=remove_bad_chars(description),
                         duration=span_duration_ms,
                         timestamp=span.start_timestamp or event.start_timestamp,
                     )

@@ -454,6 +454,7 @@ IgnoredItemType = Literal[
     "replay_event",
     "replay_video",
     "span",
+    "profile_chunk",
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
