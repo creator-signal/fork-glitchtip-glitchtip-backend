@@ -691,9 +691,23 @@ class LogItemSchema(BaseModel):
         Extracts known Sentry/OTel attribute keys into their corresponding
         schema fields, and promotes remaining attributes as flat extras so
         they end up in the JSONB ``data`` column.
+
+        Also coerces ISO-8601 ``timestamp`` strings to Unix float seconds:
+        sentry-dart <= 9.6.0 sends ISO strings (fixed in later versions, but
+        shipped clients remain in the wild).
         """
         if not isinstance(values, dict):
             return values
+
+        # Coerce ISO-8601 timestamp strings to Unix float seconds.
+        ts = values.get("timestamp")
+        if isinstance(ts, str):
+            try:
+                values["timestamp"] = datetime.fromisoformat(
+                    ts.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                pass  # let pydantic surface the float_parsing error
 
         attributes = values.pop("attributes", None)
         if not attributes or not isinstance(attributes, dict):
@@ -744,7 +758,9 @@ _OTEL_SEVERITY_TO_LEVEL = {
 }
 
 
-def _otel_severity_to_level(severity_number: int | None, severity_text: str | None) -> str:
+def _otel_severity_to_level(
+    severity_number: int | None, severity_text: str | None
+) -> str:
     """Convert OTel severity_number/severity_text to a log level string."""
     if severity_number is not None:
         for r, level in _OTEL_SEVERITY_TO_LEVEL.items():
@@ -777,7 +793,9 @@ def otel_log_to_log_item(otel: dict) -> dict:
 
     # Body: {"string_value": "..."} or plain string
     raw_body = otel.get("body", "")
-    body = _extract_otel_value(raw_body) if isinstance(raw_body, dict) else str(raw_body)
+    body = (
+        _extract_otel_value(raw_body) if isinstance(raw_body, dict) else str(raw_body)
+    )
 
     # Severity
     severity_number = otel.get("severity_number") or otel.get("severityNumber")
@@ -796,7 +814,10 @@ def otel_log_to_log_item(otel: dict) -> dict:
     if isinstance(otel_attrs, list):
         for attr in otel_attrs:
             if isinstance(attr, dict) and "key" in attr:
-                attributes[attr["key"]] = {"value": _extract_otel_value(attr.get("value")), "type": "string"}
+                attributes[attr["key"]] = {
+                    "value": _extract_otel_value(attr.get("value")),
+                    "type": "string",
+                }
     elif isinstance(otel_attrs, dict):
         # Already in dict form (some senders use this)
         for k, v in otel_attrs.items():
