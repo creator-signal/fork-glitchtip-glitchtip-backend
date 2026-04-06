@@ -161,7 +161,7 @@ def _estimate_image_base(sym_cache, instruction_addrs):
     threshold = max(len(instruction_addrs) // 2, 1)
 
     for elf_offset in range(0, 0x500000, 0x1000):
-        if not list(sym_cache.lookup(elf_offset)):
+        if next(sym_cache.lookup(elf_offset), None) is None:
             continue
         candidate_base = probe - elf_offset
         if candidate_base < 0:
@@ -169,7 +169,7 @@ def _estimate_image_base(sym_cache, instruction_addrs):
         score = sum(
             1
             for addr in instruction_addrs
-            if list(sym_cache.lookup(addr - candidate_base))
+            if next(sym_cache.lookup(addr - candidate_base), None) is not None
         )
         if score > best_score:
             best_score = score
@@ -298,7 +298,12 @@ class StacktraceProcessor:
                     continue
                 frame = copy.copy(frame)
 
-                image_addr = parse_addr(frame.get("image_addr")) or estimated_base
+                raw_image_addr = frame.get("image_addr")
+                image_addr = (
+                    parse_addr(raw_image_addr)
+                    if raw_image_addr is not None
+                    else estimated_base
+                )
                 instruction_addr = parse_addr(frame.get("instruction_addr"))
                 addr = instruction_addr - image_addr
                 symbol = sym_cache.lookup(addr)

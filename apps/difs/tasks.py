@@ -5,7 +5,7 @@ from hashlib import sha1
 
 from asgiref.sync import sync_to_async
 from django.tasks import task
-from symbolic import Archive, normalize_debug_id
+from symbolic import Archive, normalize_debug_id, parse_addr
 
 from apps.difs.models import DebugInformationFile
 from apps.difs.stacktrace_processor import StacktraceProcessor
@@ -130,9 +130,13 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
         for value in (event_json.get("exception") or {}).get("values", []):
             for frame in (value.get("stacktrace") or {}).get("frames", []):
                 addr = frame.get("instruction_addr")
-                if addr and int(addr, 16) > 0xFFFFFFFF:
-                    _is_64bit = True
-                    break
+                if addr:
+                    try:
+                        if parse_addr(addr) > 0xFFFFFFFF:
+                            _is_64bit = True
+                            break
+                    except Exception:
+                        pass
             if _is_64bit:
                 break
 
