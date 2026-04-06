@@ -627,6 +627,132 @@ class NativeSymbolicationTestCase(GlitchTestCase):
         self.assertTrue(result.frames[0]["resolved"])
 
 
+class HasNativeFramesTestCase(GlitchTestCase):
+    """Test frame-based detection of native vs proguard events."""
+
+    def test_native_frames_detected(self):
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"instruction_addr": "0x20d9a0", "image_addr": "0x0"}
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        self.assertTrue(StacktraceProcessor.has_native_frames(event))
+
+    def test_jvm_frames_not_native(self):
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.Foo",
+                                    "function": "bar",
+                                    "lineno": 1,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        self.assertFalse(StacktraceProcessor.has_native_frames(event))
+
+    def test_empty_event(self):
+        self.assertFalse(StacktraceProcessor.has_native_frames({}))
+        self.assertFalse(StacktraceProcessor.has_native_frames({"exception": None}))
+
+    def test_mixed_frames_detected(self):
+        """If even one frame has instruction_addr, treat as native."""
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"module": "com.example.Foo", "function": "bar"},
+                                {"instruction_addr": "0x20d9a0"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        self.assertTrue(StacktraceProcessor.has_native_frames(event))
+
+
+class ResolverRoutingTestCase(GlitchTestCase):
+    """Test that resolve_stacktrace routes to the correct resolver."""
+
+    def test_android_native_frames_use_native_resolver(self):
+        """Android events with instruction_addr frames use native symbolication."""
+        event = {
+            "contexts": {"os": {"name": "Android"}, "device": {"arch": "x86_64"}},
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {"instruction_addr": "0x20d9a0", "image_addr": "0x0"}
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+        with (
+            patch.object(
+                StacktraceProcessor, "resolve_native_stacktrace"
+            ) as mock_native,
+            patch.object(
+                StacktraceProcessor, "resolve_proguard_stacktrace"
+            ) as mock_proguard,
+        ):
+            StacktraceProcessor.resolve_stacktrace(event, "/fake/symbol.elf")
+            mock_native.assert_called_once()
+            mock_proguard.assert_not_called()
+
+    def test_android_jvm_frames_use_proguard_resolver(self):
+        """Android events with JVM-style frames use proguard symbolication."""
+        event = {
+            "contexts": {"os": {"name": "Android"}, "device": {"arch": "arm64"}},
+            "exception": {
+                "values": [
+                    {
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "module": "com.example.Foo",
+                                    "function": "bar",
+                                    "lineno": 1,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+        with (
+            patch.object(
+                StacktraceProcessor, "resolve_native_stacktrace"
+            ) as mock_native,
+            patch.object(
+                StacktraceProcessor, "resolve_proguard_stacktrace"
+            ) as mock_proguard,
+        ):
+            StacktraceProcessor.resolve_stacktrace(event, "/fake/mapping.txt")
+            mock_proguard.assert_called_once()
+            mock_native.assert_not_called()
+
+
 class DifTypeFilteringTestCase(GlitchTestCase):
     """Test that event_difs_resolve_stacktrace filters DIFs by type at the DB level."""
 
@@ -787,6 +913,54 @@ class DifTypeFilteringTestCase(GlitchTestCase):
         with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
             event_difs_resolve_stacktrace(event, self.project.id)
             # Should only try the matching DIF (1 call), not both
+            self.assertEqual(mock_concat.call_count, 1)
+
+    def test_android_native_frames_query_native_difs(self):
+        """Android events with native frames should query native DIFs, not proguard."""
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+        from apps.event_ingest.schema import ErrorIssueEventSchema
+
+        # Create both proguard and native DIFs
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"kind": "debug", "symbol_type": "proguard", "debug_id": "aaa"},
+        )
+        baker.make(
+            "difs.DebugInformationFile",
+            project=self.project,
+            data={"kind": "debug", "symbol_type": "native", "debug_id": "bbb"},
+        )
+
+        event = ErrorIssueEventSchema(
+            platform="dart",
+            exception={
+                "values": [
+                    {
+                        "type": "Exception",
+                        "value": "test",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "instruction_addr": "0x20d9a0",
+                                    "image_addr": "0x0",
+                                    "function": "bK",
+                                    "in_app": True,
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            contexts={
+                "os": {"name": "Android"},
+                "device": {"arch": "x86_64"},
+            },
+        )
+
+        with patch("apps.difs.tasks.difs_concat_file_blobs_to_disk") as mock_concat:
+            event_difs_resolve_stacktrace(event, self.project.id)
+            # Should try the native DIF (1 call), not the proguard one
             self.assertEqual(mock_concat.call_count, 1)
 
 

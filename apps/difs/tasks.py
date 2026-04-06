@@ -108,13 +108,14 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
     # mutate this dict but we re-serialize from the Pydantic event below.
     event_json = event.model_dump(mode="json")
     is_android = StacktraceProcessor.is_android_event(event_json)
+    native_frames = StacktraceProcessor.has_native_frames(event_json)
 
     # Filter DIFs at DB level: exclude source bundles (handled separately by
     # resolve_jvm_source_context), and only fetch the relevant symbol type.
     difs = DebugInformationFile.objects.filter(project_id=project_id).exclude(
         data__kind__in=["src", "sources"]
     )
-    if is_android:
+    if is_android and not native_frames:
         difs = difs.filter(data__symbol_type="proguard")
     else:
         difs = difs.exclude(data__symbol_type="proguard")
@@ -123,9 +124,24 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
             difs = difs.filter(data__debug_id__in=native_debug_ids)
     difs = difs.select_related("file", "file__blob").order_by("-created")
 
+    # Detect 64-bit addresses to skip 32-bit DIFs that can't match.
+    _is_64bit = False
+    if native_frames:
+        for value in (event_json.get("exception") or {}).get("values", []):
+            for frame in (value.get("stacktrace") or {}).get("frames", []):
+                addr = frame.get("instruction_addr")
+                if addr and int(addr, 16) > 0xFFFFFFFF:
+                    _is_64bit = True
+                    break
+            if _is_64bit:
+                break
+
+    _32bit_archs = {"arm", "x86", "mips", "ppc"}
     resolved_stracktrackes = []
 
     for dif in difs:
+        if _is_64bit and dif.data.get("arch") in _32bit_archs:
+            continue
         blobs = [dif.file.blob]
         with difs_concat_file_blobs_to_disk(blobs) as symbol_file:
             remapped_stacktrace = StacktraceProcessor.resolve_stacktrace(
@@ -139,7 +155,11 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
 
     if len(resolved_stracktrackes) > 0:
         best_remapped_stacktrace = max(
-            resolved_stracktrackes, key=lambda item: item.score
+            resolved_stracktrackes,
+            key=lambda item: (
+                item.score,
+                sum(1 for f in item.frames if f and f.get("filename")),
+            ),
         )
         update_frames(event, best_remapped_stacktrace.frames)
 

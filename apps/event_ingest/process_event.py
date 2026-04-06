@@ -748,10 +748,10 @@ async def process_issue_events(
             )
             await sync_to_async(processor.transform)()
         elif isinstance(event, ErrorIssueEventSchema) and event.exception:
-            # Events with debug_meta may not appear in projects_with_data
-            # (which is built from release/environment joins), so check
-            # has_difs from the annotation when available, otherwise fall
-            # back to a direct existence check for events with debug_meta.
+            # Projects may not appear in projects_with_data (which is built
+            # from release/environment joins), so check has_difs from the
+            # annotation when available, otherwise fall back to a direct
+            # existence check (e.g. Flutter Android sends no debug_meta).
             _has_difs = next(
                 (
                     project["has_difs"]
@@ -760,7 +760,7 @@ async def process_issue_events(
                 ),
                 None,
             )
-            if _has_difs is None and event.debug_meta:
+            if _has_difs is None:
                 _has_difs = await DebugInformationFile.objects.filter(
                     project_id=ingest_event.project_id
                 ).aexists()
