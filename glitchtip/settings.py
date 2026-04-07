@@ -822,11 +822,24 @@ except ImportError:
 USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
 
 # VALKEY_URL drives both cache and task broker. Empty string disables valkey.
+# TLS: use rediss:// or valkeys:// URL scheme. For custom CA or mTLS, set
+# VALKEY_SSL_CA_CERTS, VALKEY_SSL_CERTFILE, VALKEY_SSL_KEYFILE env vars.
+# Set VALKEY_SSL_CERT_REQS=none to skip certificate verification.
 if VALKEY_URL:
+    _valkey_options = {}
+    if _ssl_ca := env.str("VALKEY_SSL_CA_CERTS", None):
+        _valkey_options["ssl_ca_certs"] = _ssl_ca
+    if _ssl_cert := env.str("VALKEY_SSL_CERTFILE", None):
+        _valkey_options["ssl_certfile"] = _ssl_cert
+    if _ssl_key := env.str("VALKEY_SSL_KEYFILE", None):
+        _valkey_options["ssl_keyfile"] = _ssl_key
+    if _ssl_reqs := env.str("VALKEY_SSL_CERT_REQS", None):
+        _valkey_options["ssl_cert_reqs"] = _ssl_reqs
     CACHES = {
         "default": {
             "BACKEND": "django_vcache.backend.ValkeyCache",
             "LOCATION": VALKEY_URL,
+            **({"OPTIONS": _valkey_options} if _valkey_options else {}),
         }
     }
     TASKS = {
