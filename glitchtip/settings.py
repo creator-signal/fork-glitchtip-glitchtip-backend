@@ -739,7 +739,9 @@ for db_config in DATABASES.values():
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Make a best attempt to support both Valkey and Redis. Support full auth string or parts.
+# Valkey/Redis connection. VALKEY_URL is the source of truth — supports any scheme
+# that django-vcache understands: redis://, rediss://, valkey://, valkeys://, sentinel://
+# Component env vars (VALKEY_HOST, etc.) are a convenience for simple single-node setups.
 VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
 if VALKEY_HOST:
     VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
@@ -819,17 +821,25 @@ except ImportError:
 # Default to True for now, but if running under uWSGI or Granian WSGI, we might need to switch
 USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
 
-if os.environ.get("CACHE_URL"):
-    CACHES = {
-        "default": env.cache(),
-    }
-    if "django_vtasks.db" not in INSTALLED_APPS:
-        INSTALLED_APPS.append("django_vtasks.db")
-elif VALKEY_URL:
+# VALKEY_URL drives both cache and task broker. Empty string disables valkey.
+# TLS: use rediss:// or valkeys:// URL scheme. For custom CA or mTLS, set
+# VALKEY_SSL_CA_CERTS, VALKEY_SSL_CERTFILE, VALKEY_SSL_KEYFILE env vars.
+# Set VALKEY_SSL_CERT_REQS=none to skip certificate verification.
+if VALKEY_URL:
+    _valkey_options = {}
+    if _ssl_ca := env.str("VALKEY_SSL_CA_CERTS", None):
+        _valkey_options["ssl_ca_certs"] = _ssl_ca
+    if _ssl_cert := env.str("VALKEY_SSL_CERTFILE", None):
+        _valkey_options["ssl_certfile"] = _ssl_cert
+    if _ssl_key := env.str("VALKEY_SSL_KEYFILE", None):
+        _valkey_options["ssl_keyfile"] = _ssl_key
+    if _ssl_reqs := env.str("VALKEY_SSL_CERT_REQS", None):
+        _valkey_options["ssl_cert_reqs"] = _ssl_reqs
     CACHES = {
         "default": {
             "BACKEND": "django_vcache.backend.ValkeyCache",
             "LOCATION": VALKEY_URL,
+            **({"OPTIONS": _valkey_options} if _valkey_options else {}),
         }
     }
     TASKS = {
@@ -838,6 +848,7 @@ elif VALKEY_URL:
             "OPTIONS": {"cache_alias": "default"},
         }
     }
+    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 else:  # Fallback to database cache
     CACHES = {
         "default": {
@@ -848,17 +859,6 @@ else:  # Fallback to database cache
     INSTALLED_APPS.append("django.contrib.sessions")
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
-if cache_sentinel_url := env.str("CACHE_SENTINEL_URL", None):
-    # Build a sentinel:// URL for django-vcache v2's Rust driver.
-    # CACHE_SENTINEL_URL format: "host1:port,host2:port"
-    # Becomes: sentinel://host1:port,host2:port/service_name/db
-    cache_sentinel_service = env.str("CACHE_SENTINEL_SERVICE_NAME", "mymaster")
-    cache_sentinel_db = env.int("CACHE_SENTINEL_DB", 0)
-    CACHES["default"]["LOCATION"] = (
-        f"sentinel://{cache_sentinel_url}/{cache_sentinel_service}/{cache_sentinel_db}"
-    )
-if "vcache" in CACHES["default"]["BACKEND"]:
-    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
