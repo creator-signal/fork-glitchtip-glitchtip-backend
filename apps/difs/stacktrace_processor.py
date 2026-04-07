@@ -16,6 +16,13 @@ class ResolvedStacktrace:
 
 
 def find_arch_object(archive, arch):
+    if arch is None:
+        # No arch in event context — use the first object in the archive.
+        # Each uploaded DIF typically contains a single architecture.
+        for obj in archive.iter_objects():
+            return obj
+        return None
+
     if arch in alternative_arch:
         arch_list = alternative_arch[arch]
     else:
@@ -137,6 +144,41 @@ def open_source_bundle(source_bundle_dif):
             yield get_source_lines
 
 
+def _estimate_image_base(sym_cache, instruction_addrs):
+    """Estimate the image base address when debug_meta is absent.
+
+    Some SDKs (e.g. Flutter on Android) send native frames with absolute
+    instruction_addr but no image_addr / debug_meta.  We recover the base by
+    probing: pick one address, slide it across the sym_cache's valid range,
+    and choose the base offset that resolves the most frames.
+    """
+    if not instruction_addrs:
+        return 0
+
+    probe = instruction_addrs[0]
+    best_base = 0
+    best_score = 0
+    threshold = max(len(instruction_addrs) // 2, 1)
+
+    for elf_offset in range(0, 0x500000, 0x1000):
+        if next(sym_cache.lookup(elf_offset), None) is None:
+            continue
+        candidate_base = probe - elf_offset
+        if candidate_base < 0:
+            continue
+        score = sum(
+            1
+            for addr in instruction_addrs
+            if next(sym_cache.lookup(addr - candidate_base), None) is not None
+        )
+        if score > best_score:
+            best_score = score
+            best_base = candidate_base
+            if score >= threshold:
+                break
+    return best_base
+
+
 class StacktraceProcessor:
     """
     This class process an event with exceptions. Try to load DIF and resolve
@@ -169,8 +211,9 @@ class StacktraceProcessor:
             return
 
         is_android = cls.is_android_event(event)
+        native_frames = cls.has_native_frames(event)
 
-        if is_android:
+        if is_android and not native_frames:
             return cls.resolve_proguard_stacktrace(stacktrace, symbol_file)
 
         return cls.resolve_native_stacktrace(
@@ -234,13 +277,33 @@ class StacktraceProcessor:
             frames = stacktrace.get("frames")
             score = 0
             resolved_frames = []
+
+            # When frames lack image_addr (e.g. Flutter Android without
+            # debug_meta), estimate the image base so relative offsets
+            # land inside the symbol cache.
+            estimated_base = 0
+            if frames and not any(
+                f.get("image_addr") for f in frames if f
+            ):
+                addrs = [
+                    parse_addr(f.get("instruction_addr"))
+                    for f in frames
+                    if f and f.get("instruction_addr")
+                ]
+                estimated_base = _estimate_image_base(sym_cache, addrs)
+
             for frame in frames:
                 if frame is None:
                     resolved_frames.append(frame)
                     continue
                 frame = copy.copy(frame)
 
-                image_addr = parse_addr(frame.get("image_addr"))
+                raw_image_addr = frame.get("image_addr")
+                image_addr = (
+                    parse_addr(raw_image_addr)
+                    if raw_image_addr is not None
+                    else estimated_base
+                )
                 instruction_addr = parse_addr(frame.get("instruction_addr"))
                 addr = instruction_addr - image_addr
                 symbol = sym_cache.lookup(addr)
@@ -299,6 +362,23 @@ class StacktraceProcessor:
         except Exception as e:
             getLogger().error(f"StacktraceProcessor: Unexpected error: {e}")
             pass
+
+    @classmethod
+    def has_native_frames(cls, event):
+        """Return True if any exception frame contains an instruction_addr.
+
+        Native frames (ELF/Mach-O) carry instruction_addr; JVM/proguard frames
+        carry module + function + lineno instead.  This lets us pick the right
+        resolver without hard-coding SDK names.
+        """
+        try:
+            for value in (event.get("exception") or {}).get("values", []):
+                for frame in (value.get("stacktrace") or {}).get("frames", []):
+                    if frame.get("instruction_addr"):
+                        return True
+        except Exception:
+            pass
+        return False
 
     @classmethod
     def is_android_event(cls, event):
