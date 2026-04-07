@@ -1,5 +1,8 @@
 import asyncio
+import json
 import logging
+import subprocess
+import sys
 from datetime import datetime, timezone
 from unittest import mock
 from unittest.mock import patch
@@ -851,3 +854,183 @@ class ColdStorageFreeTierGatingTestCase(TestCase):
         org_ids = [self.org_free.id]
         result = self._get_eligible_org_ids(org_ids)
         self.assertEqual(result, [])
+
+
+# Helper script executed in a subprocess to inspect Django settings under
+# controlled env vars.  Prints a JSON dict of the settings we care about.
+_SETTINGS_PROBE = """\
+import django, os, json
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "glitchtip.settings")
+django.setup()
+from django.conf import settings
+json.dump({
+    "cache_backend": settings.CACHES["default"]["BACKEND"],
+    "cache_location": settings.CACHES["default"].get("LOCATION", ""),
+    "cache_options": settings.CACHES["default"].get("OPTIONS", {}),
+    "task_backend": settings.TASKS["default"]["BACKEND"],
+    "session_engine": settings.SESSION_ENGINE,
+}, __import__("sys").stdout)
+"""
+
+
+class CacheConfigTestCase(TestCase):
+    """
+    Boot Django in a subprocess with different env vars and verify that
+    CACHES, TASKS, and SESSION_ENGINE are wired correctly.
+    """
+
+    # Base env: just enough to let settings.py load (needs DATABASE_URL at minimum).
+    # Does NOT include any VALKEY_*/REDIS_* vars — each test sets exactly what it needs.
+    # We pass env={} to subprocess so the parent process env is NOT inherited.
+    BASE_ENV = {
+        "DJANGO_SETTINGS_MODULE": "glitchtip.settings",
+        "DATABASE_URL": settings.DATABASES["default"]["NAME"]
+        and f"postgres://postgres:postgres@localhost/{settings.DATABASES['default']['NAME']}"
+        or "postgres://postgres:postgres@localhost/glitchtip",
+        "SECRET_KEY": "test-secret-key",
+    }
+
+    VCACHE_BACKEND = "django_vcache.backend.ValkeyCache"
+    VTASKS_VALKEY = "django_vtasks.backends.valkey.ValkeyTaskBackend"
+    DB_CACHE_BACKEND = "django.core.cache.backends.db.DatabaseCache"
+    VTASKS_DB = "django_vtasks.backends.db.DatabaseTaskBackend"
+
+    def _probe(self, extra_env: dict) -> dict:
+        """Run the probe script with BASE_ENV + extra_env, return parsed JSON."""
+        env = {**self.BASE_ENV, **extra_env}
+        result = subprocess.run(
+            [sys.executable, "-c", _SETTINGS_PROBE],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Settings probe failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+        )
+        # stdout may contain the startup banner before the JSON — take last line
+        lines = result.stdout.strip().splitlines()
+        return json.loads(lines[-1])
+
+    def test_valkey_url_single_node(self):
+        """VALKEY_URL=redis://host:6379/0 → vcache + valkey tasks."""
+        info = self._probe({"VALKEY_URL": "redis://valkey:6379/0"})
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "redis://valkey:6379/0")
+        self.assertEqual(info["task_backend"], self.VTASKS_VALKEY)
+        self.assertEqual(info["session_engine"], "django.contrib.sessions.backends.cache")
+
+    def test_redis_url_fallback(self):
+        """REDIS_URL works as a fallback for VALKEY_URL."""
+        info = self._probe({"REDIS_URL": "redis://redis-host:6379/1"})
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "redis://redis-host:6379/1")
+
+    def test_valkey_host_components(self):
+        """VALKEY_HOST + VALKEY_PORT + VALKEY_PASSWORD builds a redis:// URL."""
+        info = self._probe({
+            "VALKEY_HOST": "myhost",
+            "VALKEY_PORT": "6380",
+            "VALKEY_DATABASE": "2",
+        })
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "redis://myhost:6380/2")
+
+    def test_valkey_host_with_password(self):
+        """VALKEY_PASSWORD is embedded in the URL."""
+        info = self._probe({
+            "VALKEY_HOST": "myhost",
+            "VALKEY_PASSWORD": "s3cret",
+        })
+        self.assertEqual(info["cache_location"], "redis://:s3cret@myhost:6379/0")
+
+    def test_sentinel_url(self):
+        """VALKEY_URL=sentinel://... is passed through to vcache."""
+        info = self._probe({
+            "VALKEY_URL": "sentinel://sentinel:26379/mymaster/0",
+        })
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(
+            info["cache_location"], "sentinel://sentinel:26379/mymaster/0"
+        )
+
+    def test_sentinel_url_with_password(self):
+        """Sentinel URL with embedded credentials."""
+        info = self._probe({
+            "VALKEY_URL": "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
+        })
+        self.assertEqual(
+            info["cache_location"],
+            "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
+        )
+
+    def test_tls_url(self):
+        """rediss:// (TLS) is passed through to vcache."""
+        info = self._probe({"VALKEY_URL": "rediss://secure-host:6380/0"})
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "rediss://secure-host:6380/0")
+
+    def test_tls_with_ca_cert(self):
+        """VALKEY_SSL_CA_CERTS populates OPTIONS."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+        })
+        self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
+
+    def test_tls_mtls(self):
+        """VALKEY_SSL_CERTFILE + VALKEY_SSL_KEYFILE for mTLS."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+            "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
+            "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
+        })
+        self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
+        self.assertEqual(info["cache_options"]["ssl_certfile"], "/etc/ssl/client.crt")
+        self.assertEqual(info["cache_options"]["ssl_keyfile"], "/etc/ssl/client.key")
+
+    def test_tls_skip_verification(self):
+        """VALKEY_SSL_CERT_REQS=none to skip certificate verification."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CERT_REQS": "none",
+        })
+        self.assertEqual(info["cache_options"]["ssl_cert_reqs"], "none")
+
+    def test_no_tls_options_means_no_options_key(self):
+        """Without TLS env vars, OPTIONS is not set (empty dict from probe)."""
+        info = self._probe({"VALKEY_URL": "redis://valkey:6379/0"})
+        self.assertEqual(info["cache_options"], {})
+
+    def test_empty_valkey_url_falls_back_to_db(self):
+        """VALKEY_URL="" → database cache + DB task backend."""
+        info = self._probe({"VALKEY_URL": ""})
+        self.assertEqual(info["cache_backend"], self.DB_CACHE_BACKEND)
+        self.assertEqual(info["task_backend"], self.VTASKS_DB)
+
+    def test_no_valkey_env_defaults_to_vcache(self):
+        """When no VALKEY_URL/REDIS_URL is set at all, settings.py defaults to
+        redis://redis:6379/0 (docker compose default) → vcache.
+
+        The only way to get DB fallback is to explicitly set VALKEY_URL="".
+        """
+        env = {
+            "DJANGO_SETTINGS_MODULE": "glitchtip.settings",
+            "DATABASE_URL": self.BASE_ENV["DATABASE_URL"],
+            "SECRET_KEY": "test-secret-key",
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", _SETTINGS_PROBE],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.strip().splitlines()
+        info = json.loads(lines[-1])
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "redis://redis:6379/0")
