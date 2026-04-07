@@ -866,6 +866,7 @@ from django.conf import settings
 json.dump({
     "cache_backend": settings.CACHES["default"]["BACKEND"],
     "cache_location": settings.CACHES["default"].get("LOCATION", ""),
+    "cache_options": settings.CACHES["default"].get("OPTIONS", {}),
     "task_backend": settings.TASKS["default"]["BACKEND"],
     "session_engine": settings.SESSION_ENGINE,
 }, __import__("sys").stdout)
@@ -970,6 +971,39 @@ class CacheConfigTestCase(TestCase):
         info = self._probe({"VALKEY_URL": "rediss://secure-host:6380/0"})
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "rediss://secure-host:6380/0")
+
+    def test_tls_with_ca_cert(self):
+        """VALKEY_SSL_CA_CERTS populates OPTIONS."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+        })
+        self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
+
+    def test_tls_mtls(self):
+        """VALKEY_SSL_CERTFILE + VALKEY_SSL_KEYFILE for mTLS."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+            "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
+            "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
+        })
+        self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
+        self.assertEqual(info["cache_options"]["ssl_certfile"], "/etc/ssl/client.crt")
+        self.assertEqual(info["cache_options"]["ssl_keyfile"], "/etc/ssl/client.key")
+
+    def test_tls_skip_verification(self):
+        """VALKEY_SSL_CERT_REQS=none to skip certificate verification."""
+        info = self._probe({
+            "VALKEY_URL": "rediss://secure-host:6380/0",
+            "VALKEY_SSL_CERT_REQS": "none",
+        })
+        self.assertEqual(info["cache_options"]["ssl_cert_reqs"], "none")
+
+    def test_no_tls_options_means_no_options_key(self):
+        """Without TLS env vars, OPTIONS is not set (empty dict from probe)."""
+        info = self._probe({"VALKEY_URL": "redis://valkey:6379/0"})
+        self.assertEqual(info["cache_options"], {})
 
     def test_empty_valkey_url_falls_back_to_db(self):
         """VALKEY_URL="" → database cache + DB task backend."""
