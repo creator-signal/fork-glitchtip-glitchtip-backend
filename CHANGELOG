@@ -1,3 +1,16 @@
+# 6.1.4
+
+- Feat: Add subscription usage endpoints with daily breakdown and previous period comparison
+- Feat: Return weighted log event counts in subscription usage API
+- Feat: Populate IssueAggregate in make_sample_issues command
+- Fix: Resolve three production ingest errors (profile_chunk envelope type, None stacktrace guard, NUL bytes in span fields)
+- Fix: Use keyword arg for AuthenticationError to avoid string status_code crash
+- Fix: Events count API now respects retention days setting
+- Fix: Iterate cold storage files newest-first with early exit to prevent DuckDB OOM on limit queries
+- Fix: Sort resource data before upsert to prevent deadlocks
+- Perf: Add org_date indexes and parallelize daily stats queries
+- Deps: Upgrade django-vtasks to v2.1.0
+
 # 6.1.3
 
 - Fix: Return 413 response for oversized request data instead of unhandled exception
