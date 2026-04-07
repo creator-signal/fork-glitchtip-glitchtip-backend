@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 
 from django.db.models import OuterRef, Subquery
 from django.http import Http404, HttpResponse
@@ -123,12 +123,16 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     if not is_duckdb_available():
         raise Http404()
 
+    # Narrow date range using issue.last_seen to avoid scanning all cold
+    # storage files. Buffer by 1 day to account for clock skew.
+    cold_end = issue.last_seen + timedelta(days=1)
+    cold_start = issue.last_seen - timedelta(days=1)
     cold_event = await asyncio.to_thread(
         _get_cold_events_for_issue,
         issue_id=issue_id,
         organization_id=issue.project.organization_id,
-        start_dt=datetime.min.replace(tzinfo=timezone.utc),
-        end_dt=datetime.now(timezone.utc),
+        start_dt=cold_start,
+        end_dt=cold_end,
         limit=1,
     )
     if not cold_event:

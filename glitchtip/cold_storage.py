@@ -1204,13 +1204,22 @@ def query_cold_parquet_files(
                 if limit is not None and len(all_rows) >= limit:
                     break
             except Exception:
-                close_duckdb_read_connection()
-                duck_conn = get_duckdb_read_connection(storage)
                 logger.error(
                     "Corrupt parquet file skipped: %s",
                     relative_path,
                     exc_info=True,
                 )
+                # Delete corrupt files so they don't cause repeated failures.
+                # The data is unrecoverable and each failed read wastes memory.
+                try:
+                    storage.delete(relative_path)
+                    logger.info("Deleted corrupt parquet file: %s", relative_path)
+                except Exception:
+                    logger.warning(
+                        "Failed to delete corrupt parquet file: %s",
+                        relative_path,
+                        exc_info=True,
+                    )
     except Exception:
         close_duckdb_read_connection()
         raise
