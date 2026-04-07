@@ -101,10 +101,12 @@ async def get_latest_event(user_id: int, issue_id: int) -> IssueEvent | None:
     if not is_duckdb_available():
         return None
 
+    # Narrow date range using issue.last_seen to avoid scanning all cold
+    # storage files. Buffer by 1 day to account for clock skew.
     cold_events = await sync_to_async(query_cold_events)(
         organization_id=issue.project.organization_id,
-        start_dt=datetime.min.replace(tzinfo=timezone.utc),
-        end_dt=datetime.now(timezone.utc),
+        start_dt=issue.last_seen - timedelta(days=1),
+        end_dt=issue.last_seen + timedelta(days=1),
         issue_id=issue_id,
         limit=1,
     )

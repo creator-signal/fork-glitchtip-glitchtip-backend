@@ -668,6 +668,7 @@ class MultiDateColdStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             metadata={"title": "Test Issue"},
             type=0,
             level=40,
+            last_seen=self.dates[-1] + timedelta(hours=4),
         )
 
         with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
