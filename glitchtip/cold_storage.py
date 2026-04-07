@@ -1215,7 +1215,11 @@ def query_cold_parquet_files(
                     storage.delete(relative_path)
                     logger.info("Deleted corrupt parquet file: %s", relative_path)
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to delete corrupt parquet file: %s",
+                        relative_path,
+                        exc_info=True,
+                    )
     except Exception:
         close_duckdb_read_connection()
         raise
