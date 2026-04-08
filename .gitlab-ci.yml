@@ -42,7 +42,7 @@ test-min:
     VALKEY_URL: "redis://redis:6379"
   services:
     - postgres:14
-    - name: redis:7
+    - name: redis:8
       alias: redis
   cache:
     - key:
