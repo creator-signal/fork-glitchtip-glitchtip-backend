@@ -2,7 +2,7 @@ import asyncio
 from datetime import date, timedelta
 
 from django.conf import settings
-from django.db.models import Q, Sum
+from django.db.models import Prefetch, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import JsonResponse
 from django.shortcuts import aget_object_or_404
@@ -51,7 +51,7 @@ class StripeNestedPriceSchema(StripeIDSchema, ModelSchema):
 
     class Meta:
         model = StripePrice
-        fields = ["price"]
+        fields = ["price", "interval"]
 
     @staticmethod
     def resolve_price(obj: StripePrice):
@@ -66,6 +66,8 @@ class StripeProductSchema(StripeIDSchema, ModelSchema):
 
 class StripeProductExpandedPriceSchema(StripeIDSchema, ModelSchema):
     default_price: StripeNestedPriceSchema
+    prices: list[StripeNestedPriceSchema]
+    marketing_features: list[str]
 
     class Meta:
         model = StripeProduct
@@ -74,6 +76,10 @@ class StripeProductExpandedPriceSchema(StripeIDSchema, ModelSchema):
     @staticmethod
     def resolve_default_price(obj: StripeProduct):
         return obj.default_price
+
+    @staticmethod
+    def resolve_prices(obj: StripeProduct):
+        return obj.prices_list  # type: ignore[attr-defined]
 
 
 class StripeSubscriptionSchema(StripeIDSchema, ModelSchema):
@@ -153,12 +159,17 @@ class DailyEventsCountSchema(CamelSchema):
 
 @router.get("products/", response=list[StripeProductExpandedPriceSchema], by_alias=True)
 async def list_stripe_products(request: AuthHttpRequest):
-    return [
-        product
-        async for product in StripeProduct.objects.filter(
-            is_public=True, events__gt=0
-        ).select_related("default_price")
-    ]
+    products = (
+        StripeProduct.objects.filter(is_public=True, events__gt=0)
+        .select_related("default_price")
+        .prefetch_related(
+            Prefetch("stripeprice_set", queryset=StripePrice.objects.all(), to_attr="prices_list")
+        )
+    )
+    result = []
+    async for product in products:
+        result.append(product)
+    return result
 
 
 @router.get(
