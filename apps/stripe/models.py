@@ -35,6 +35,7 @@ class StripeProduct(StripeModel):
     )
     events = models.PositiveBigIntegerField()
     is_public = models.BooleanField()
+    marketing_features = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return f"{self.name} {self.stripe_id}"
@@ -54,6 +55,11 @@ class StripeProduct(StripeModel):
                     description=product.description if product.description else "",
                     events=product.metadata["events"],
                     is_public=product.metadata.get("is_public", "").lower() == "true",
+                    marketing_features=[
+                        f["name"]
+                        for f in product.marketing_features
+                        if f.get("name")
+                    ],
                 )
                 for product in products_page
             ]
@@ -80,7 +86,7 @@ class StripeProduct(StripeModel):
             product_updated = await StripeProduct.objects.abulk_create(
                 products,
                 update_conflicts=True,
-                update_fields=["name", "description", "events", "is_public"],
+                update_fields=["name", "description", "events", "is_public", "marketing_features"],
                 unique_fields=["stripe_id"],
             )
             logger.info(f"Created/updated {len(product_updated)} products in Django")
