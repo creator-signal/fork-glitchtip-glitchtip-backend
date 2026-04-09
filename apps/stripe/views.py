@@ -39,6 +39,11 @@ async def update_product(product: Product):
             "description": product.description,
             "events": metadata["events"],
             "is_public": metadata.get("is_public") == "true",
+            "marketing_features": [
+                f["name"]
+                for f in product.marketing_features
+                if f.get("name")
+            ],
         },
     )
 
