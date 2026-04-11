@@ -12,6 +12,7 @@ import time
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
+from django.db import connection
 from django.utils import timezone
 
 from glitchtip.cold_storage import (
@@ -34,6 +35,27 @@ TABLE_NAME = "performance_spans"
 
 # Process up to this many rows per organization per invocation.
 BATCH_LIMIT_PER_ORG = 100_000
+
+
+def _delete_promoted_rows(group_uuids: list, org_id: int) -> None:
+    """
+    Delete promoted staging rows by id + organization_id.
+
+    Uses raw SQL with ``id = ANY(%s)`` rather than ORM ``.delete()`` with
+    ``id__in=...``. The ORM path inlines every UUID as a SQL literal
+    (tens of KB of query text per batch) and wraps the statement in
+    BEGIN/COMMIT. ``ANY(%s)`` passes the UUID list as a single bound
+    array parameter, skipping the parse/plan blowup on large batches.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            DELETE FROM performance_spanstaging
+            WHERE id = ANY(%s)
+              AND organization_id = %s
+            """,
+            [group_uuids, org_id],
+        )
 
 
 async def promote_spans() -> tuple[int, bool]:
@@ -141,10 +163,7 @@ async def promote_spans() -> tuple[int, bool]:
             # Includes organization_id for HASH partition pruning.
             group_uuids = [r[0] for r in group_rows]
             try:
-                await SpanStaging.objects.filter(
-                    id__in=group_uuids,
-                    organization_id=org_id,
-                ).adelete()
+                await sync_to_async(_delete_promoted_rows)(group_uuids, org_id)
             except Exception:
                 # DELETE failed after chunk was written — remove the chunk
                 # to prevent duplicate data on the next promotion run.
