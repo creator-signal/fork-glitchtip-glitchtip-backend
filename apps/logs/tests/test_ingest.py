@@ -91,6 +91,39 @@ class OtelLogConversionTestCase(TestCase):
         self.assertEqual(result["level"], "info")
 
 
+class LogItemSchemaCompatTestCase(TestCase):
+    """Test LogItemSchema compatibility with various SDK payload shapes."""
+
+    def test_iso_timestamp_string(self):
+        """sentry.dart sends ISO-8601 timestamp strings."""
+        from apps.event_ingest.schema import LogItemSchema
+
+        item = LogItemSchema(
+            timestamp="2026-04-03T02:57:11.646571Z",
+            level="info",
+            body="hello",
+        )
+        # 2026-04-03T02:57:11.646571Z → unix seconds
+        self.assertAlmostEqual(item.timestamp, 1775185031.646571, places=3)
+
+    def test_iso_timestamp_with_offset(self):
+        from apps.event_ingest.schema import LogItemSchema
+
+        # 2026-04-02T16:49:41.8508431+08:00 == 2026-04-02T08:49:41.8508431Z
+        item = LogItemSchema(
+            timestamp="2026-04-02T16:49:41.8508431+08:00",
+            level="info",
+            body="hello",
+        )
+        self.assertAlmostEqual(item.timestamp, 1775119781.850843, places=3)
+
+    def test_float_timestamp_still_works(self):
+        from apps.event_ingest.schema import LogItemSchema
+
+        item = LogItemSchema(timestamp=1775203281.699, level="info", body="hi")
+        self.assertEqual(item.timestamp, 1775203281.699)
+
+
 class LogIngestProcessingTestCase(TestCase):
     """Test log processing function"""
 
