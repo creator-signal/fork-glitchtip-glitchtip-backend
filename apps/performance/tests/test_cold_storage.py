@@ -102,15 +102,12 @@ class ColdStorageTestMixin:
 
 class TaskWrapperSyncRegressionTestCase(TestCase):
     """
-    Regression for INTERNAL-6P ("OperationalError: the connection is closed").
-
     promote_spans and compact_span_chunks must be registered as sync @task
     functions. django-vtasks wraps sync tasks with close_old_connections()
-    before/after execution (via _run_sync_with_db_cleanup in
-    django_vtasks/worker.py). Declaring them async def and then calling
-    asyncio.to_thread() internally bypasses that cleanup, leaving a stale
-    thread-local Django connection that fails on the next invocation when
-    PgBouncer has reaped the backend.
+    before and after execution; async tasks that internally call
+    asyncio.to_thread() bypass that wrapper, so the thread-local Django
+    connection can go stale between runs and raise "connection is closed"
+    once the pooler reaps the backend.
     """
 
     def test_promote_spans_task_is_sync(self):
@@ -120,8 +117,8 @@ class TaskWrapperSyncRegressionTestCase(TestCase):
 
         self.assertFalse(
             asyncio.iscoroutinefunction(promote_spans.func),
-            "promote_spans must be a sync @task so vtasks wraps it with "
-            "close_old_connections(). See INTERNAL-6P.",
+            "promote_spans must be a sync @task so django-vtasks wraps it "
+            "with close_old_connections().",
         )
 
     def test_compact_span_chunks_task_is_sync(self):
@@ -131,8 +128,8 @@ class TaskWrapperSyncRegressionTestCase(TestCase):
 
         self.assertFalse(
             asyncio.iscoroutinefunction(compact_span_chunks.func),
-            "compact_span_chunks must be a sync @task so vtasks wraps it "
-            "with close_old_connections(). See INTERNAL-6P.",
+            "compact_span_chunks must be a sync @task so django-vtasks "
+            "wraps it with close_old_connections().",
         )
 
 
