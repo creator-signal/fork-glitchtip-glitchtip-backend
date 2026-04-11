@@ -41,6 +41,7 @@ urlpatterns = [
         stripe_webhook_view,
         name="stripe_webhook_with_type",
     ),
+    path("", include("apps.self_host_licensing.urls")),
 ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:

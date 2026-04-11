@@ -1,0 +1,17 @@
+Thank you for supporting GlitchTip!
+
+Plan: {{ plan }}
+Current period ends: {{ expires_at|date:"Y-m-d" }}
+
+Your license key is below. Set it as the GLITCHTIP_LICENSE_KEY environment
+variable on your self-hosted GlitchTip instance (or paste it in the Django
+admin), then restart the server. The "Support GlitchTip" banner will
+disappear and any future support features will unlock.
+
+{{ license_blob }}
+
+To manage your subscription, update your card, or cancel, visit:
+https://glitchtip.com/manage
+
+If you need help, reply to this email and include the license key in your
+message so we can look up your account.

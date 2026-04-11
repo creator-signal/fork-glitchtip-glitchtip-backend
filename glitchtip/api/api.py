@@ -127,11 +127,19 @@ class SocialAppSchema(ModelSchema):
         fields = ["name", "client_id", "provider"]
 
 
+class LicenseSchema(Schema):
+    active: bool
+    plan: str | None
+    expires_at: int | None
+
+
 class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
     license_key: str
+    license: LicenseSchema
+    stripe_self_host_portal_url: str | None
     enable_user_registration: bool
     enable_social_apps_user_registration: bool
     enable_organization_creation: bool
@@ -189,11 +197,20 @@ async def get_settings(request: HttpRequest):
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
 
+    from apps.self_host_licensing.verifier import get_license_status
+
+    license_status = get_license_status()
+    # i_paid_for_glitchtip stays true for any of: legacy env flag, SaaS billing
+    # deployment, or a valid verified self-host license blob.
+    i_paid_for_glitchtip = settings.I_PAID_FOR_GLITCHTIP or license_status.active
+
     return {
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
-        "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
+        "i_paid_for_glitchtip": i_paid_for_glitchtip,
         "license_key": settings.GLITCHTIP_LICENSE_KEY or "",
+        "license": license_status.as_dict(),
+        "stripe_self_host_portal_url": settings.STRIPE_SELF_HOST_PORTAL_URL,
         "enable_user_registration": enable_user_registration,
         "enable_social_apps_user_registration": enable_social_apps_user_registration,
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,

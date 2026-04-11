@@ -509,6 +509,7 @@ INSTALLED_APPS += [
     "apps.event_ingest",
     "apps.mcp",
     "apps.oauth",
+    "apps.self_host_licensing",
     "import_export",  # Contains import management command, keep under apps.importer
 ]
 
@@ -1043,12 +1044,30 @@ LOGGING = {
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
 PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 
-# Support license key — typically a Stripe subscription ID.
-# Hides the "Support GlitchTip" banner and enables future support features.
+# Support license key — a signed blob issued by app.glitchtip.com after a
+# self-host support purchase. Verified offline against the public keys compiled
+# into apps.self_host_licensing.keys. Hides the "Support GlitchTip" banner and
+# enables future support features.
 GLITCHTIP_LICENSE_KEY = env.str("GLITCHTIP_LICENSE_KEY", None)
 
 # Legacy setting — still accepted. New deployments should use GLITCHTIP_LICENSE_KEY.
 I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", bool(GLITCHTIP_LICENSE_KEY))
+
+# Issuer-side configuration for self-host licensing. Only set on the
+# app.glitchtip.com deployment, which receives Stripe webhooks for the self-host
+# products and mints signed license blobs.
+SELF_HOST_LICENSE_SIGNING_KEY = env.str("SELF_HOST_LICENSE_SIGNING_KEY", default=None)
+SELF_HOST_LICENSE_SIGNING_KID = env.str("SELF_HOST_LICENSE_SIGNING_KID", default=None)
+STRIPE_SELF_HOST_WEBHOOK_SECRET = env.str(
+    "STRIPE_SELF_HOST_WEBHOOK_SECRET", default=None
+)
+SELF_HOST_LICENSING_ENABLED = bool(
+    SELF_HOST_LICENSE_SIGNING_KEY and SELF_HOST_LICENSE_SIGNING_KID
+)
+# Optional: URL of the Stripe Customer Portal login link configured for the
+# self-host product. Shown on self-host installs as the "Manage subscription"
+# link when a license is active.
+STRIPE_SELF_HOST_PORTAL_URL = env.str("STRIPE_SELF_HOST_PORTAL_URL", default=None)
 
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
