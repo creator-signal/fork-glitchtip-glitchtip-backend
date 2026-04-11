@@ -5,6 +5,7 @@ Tests the full lifecycle: SpanStaging → Parquet promotion → DuckDB queries,
 and the compaction pipeline including crash-recovery safety.
 """
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -111,8 +112,6 @@ class TaskWrapperSyncRegressionTestCase(TestCase):
     """
 
     def test_promote_spans_task_is_sync(self):
-        import asyncio
-
         from apps.performance.tasks import promote_spans
 
         self.assertFalse(
@@ -122,8 +121,6 @@ class TaskWrapperSyncRegressionTestCase(TestCase):
         )
 
     def test_compact_span_chunks_task_is_sync(self):
-        import asyncio
-
         from apps.performance.tasks import compact_span_chunks
 
         self.assertFalse(
