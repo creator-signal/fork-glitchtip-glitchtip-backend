@@ -16,6 +16,8 @@ from aiohttp.client_exceptions import (
 from django.conf import settings
 from django.utils import timezone
 
+from glitchtip.partition_manager import UUID7Helper
+
 from .constants import MonitorCheckReason, MonitorType
 from .models import MonitorCheck
 
@@ -113,9 +115,16 @@ async def fetch(session, monitor):
     monitor["is_up"] = False
     if monitor["monitor_type"] == MonitorType.HEARTBEAT:
         interval = timedelta(seconds=monitor["interval"])
+        since = timezone.now() - interval
+        # Partition-aware: organization_id prunes hash sub-partitions,
+        # id__gte prunes RANGE (UUIDv7) partitions to the interval window.
+        # Without both, Postgres locks every partition and exhausts
+        # max_locks_per_transaction.
         if await MonitorCheck.objects.filter(
+            organization_id=monitor["organization_id"],
             monitor_id=monitor["id"],
-            start_check__gte=timezone.now() - interval,
+            id__gte=UUID7Helper._uuid7_for_timestamp(since, min_random=True),
+            start_check__gte=since,
         ).aexists():
             monitor["is_up"] = True
         return monitor
