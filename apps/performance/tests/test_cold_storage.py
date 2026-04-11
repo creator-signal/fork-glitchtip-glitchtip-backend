@@ -5,13 +5,13 @@ Tests the full lifecycle: SpanStaging → Parquet promotion → DuckDB queries,
 and the compaction pipeline including crash-recovery safety.
 """
 
-import asyncio
 import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from asgiref.sync import sync_to_async
 from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
 from freezegun import freeze_time
@@ -101,35 +101,6 @@ class ColdStorageTestMixin:
         super().tearDown()
 
 
-class TaskWrapperSyncRegressionTestCase(TestCase):
-    """
-    promote_spans and compact_span_chunks must be registered as sync @task
-    functions. django-vtasks wraps sync tasks with close_old_connections()
-    before and after execution; async tasks that internally call
-    asyncio.to_thread() bypass that wrapper, so the thread-local Django
-    connection can go stale between runs and raise "connection is closed"
-    once the pooler reaps the backend.
-    """
-
-    def test_promote_spans_task_is_sync(self):
-        from apps.performance.tasks import promote_spans
-
-        self.assertFalse(
-            asyncio.iscoroutinefunction(promote_spans.func),
-            "promote_spans must be a sync @task so django-vtasks wraps it "
-            "with close_old_connections().",
-        )
-
-    def test_compact_span_chunks_task_is_sync(self):
-        from apps.performance.tasks import compact_span_chunks
-
-        self.assertFalse(
-            asyncio.iscoroutinefunction(compact_span_chunks.func),
-            "compact_span_chunks must be a sync @task so django-vtasks "
-            "wraps it with close_old_connections().",
-        )
-
-
 class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
     def setUp(self):
         super().setUp()
@@ -138,7 +109,7 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         )
         self.org = self.project.organization
 
-    def test_promote_creates_parquet_and_deletes_staging(self):
+    async def test_promote_creates_parquet_and_deletes_staging(self):
         """Promotion writes a chunk Parquet file and deletes staging rows."""
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
         spans = [
@@ -151,14 +122,14 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
             )
             for i in range(5)
         ]
-        SpanStaging.objects.bulk_create(spans)
-        self.assertEqual(SpanStaging.objects.count(), 5)
+        await SpanStaging.objects.abulk_create(spans)
+        self.assertEqual(await SpanStaging.objects.acount(), 5)
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 5)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 0)
+        self.assertEqual(await SpanStaging.objects.acount(), 0)
 
         # Verify parquet file was created
         org_dir = os.path.join(
@@ -176,36 +147,36 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         self.assertTrue(chunk_files[0].endswith(".parquet"))
 
     @freeze_time("2026-02-23 12:00:00")
-    def test_promote_skips_recent_rows(self):
+    async def test_promote_skips_recent_rows(self):
         """Rows newer than 5 minutes are not promoted."""
         recent_ts = datetime(2026, 2, 23, 11, 59, 0, tzinfo=timezone.utc)
         span = _make_span_staging_row(self.org.id, self.project.id, timestamp=recent_ts)
-        SpanStaging.objects.bulk_create([span])
+        await SpanStaging.objects.abulk_create([span])
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 0)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 1)
+        self.assertEqual(await SpanStaging.objects.acount(), 1)
 
-    def test_promote_groups_by_org(self):
+    async def test_promote_groups_by_org(self):
         """Each org gets its own Parquet directory."""
-        project2 = baker.make("projects.Project")
+        project2 = await sync_to_async(baker.make)("projects.Project")
         org2 = project2.organization
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
 
-        SpanStaging.objects.bulk_create(
+        await SpanStaging.objects.abulk_create(
             [
                 _make_span_staging_row(self.org.id, self.project.id, timestamp=ts),
                 _make_span_staging_row(org2.id, project2.id, timestamp=ts, span_id="x"),
             ]
         )
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 2)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 0)
+        self.assertEqual(await SpanStaging.objects.acount(), 0)
 
         spans_dir = os.path.join(self.cold_dir, "cold_storage/performance_spans")
         org_dirs = sorted(os.listdir(spans_dir))

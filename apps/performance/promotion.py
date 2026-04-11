@@ -11,7 +11,7 @@ import os
 import time
 from datetime import timedelta
 
-from django.db import connection
+from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from glitchtip.cold_storage import (
@@ -36,7 +36,7 @@ TABLE_NAME = "performance_spans"
 BATCH_LIMIT_PER_ORG = 100_000
 
 
-def promote_spans() -> tuple[int, bool]:
+async def promote_spans() -> tuple[int, bool]:
     """
     Promote span_staging rows to per-org Parquet files.
 
@@ -72,11 +72,12 @@ def promote_spans() -> tuple[int, bool]:
 
     # Step 1: Get distinct org_ids. This scans range partitions but the query
     # is lightweight (only reads organization_id column).
-    org_ids = list(
-        SpanStaging.objects.filter(id__lt=cutoff_uuid)
+    org_ids = [
+        org_id
+        async for org_id in SpanStaging.objects.filter(id__lt=cutoff_uuid)
         .values_list("organization_id", flat=True)
         .distinct()
-    )
+    ]
 
     if not org_ids:
         return 0, False
@@ -87,8 +88,9 @@ def promote_spans() -> tuple[int, bool]:
     # Step 2: Process each org separately — both id and organization_id
     # filters allow PostgreSQL to prune RANGE and HASH partitions.
     for org_id in org_ids:
-        rows = list(
-            SpanStaging.objects.filter(
+        rows = [
+            row
+            async for row in SpanStaging.objects.filter(
                 id__lt=cutoff_uuid,
                 organization_id=org_id,
             ).values_list(
@@ -103,7 +105,7 @@ def promote_spans() -> tuple[int, bool]:
                 "duration",
                 "timestamp",
             )[:BATCH_LIMIT_PER_ORG]
-        )
+        ]
 
         if not rows:
             continue
@@ -120,7 +122,12 @@ def promote_spans() -> tuple[int, bool]:
 
         for date_str, group_rows in date_groups.items():
             try:
-                chunk_path = _write_chunk_parquet(storage, org_id, date_str, group_rows)
+                # arro3 and Django storage are sync-only. Run them on the
+                # shared sync executor thread so the surrounding task stays
+                # async-native.
+                chunk_path = await sync_to_async(_write_chunk_parquet)(
+                    storage, org_id, date_str, group_rows
+                )
             except Exception:
                 logger.error(
                     "Failed to write parquet chunk for org %d date %s",
@@ -134,15 +141,10 @@ def promote_spans() -> tuple[int, bool]:
             # Includes organization_id for HASH partition pruning.
             group_uuids = [r[0] for r in group_rows]
             try:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        DELETE FROM performance_spanstaging
-                        WHERE id = ANY(%s)
-                          AND organization_id = %s
-                        """,
-                        [group_uuids, org_id],
-                    )
+                await SpanStaging.objects.filter(
+                    id__in=group_uuids,
+                    organization_id=org_id,
+                ).adelete()
             except Exception:
                 # DELETE failed after chunk was written — remove the chunk
                 # to prevent duplicate data on the next promotion run.
@@ -154,7 +156,7 @@ def promote_spans() -> tuple[int, bool]:
                     exc_info=True,
                 )
                 try:
-                    storage.delete(chunk_path)
+                    await sync_to_async(storage.delete)(chunk_path)
                 except Exception:
                     logger.error(
                         "Failed to remove chunk %s — duplicates may "
