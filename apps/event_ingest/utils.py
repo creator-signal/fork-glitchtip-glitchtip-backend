@@ -50,13 +50,17 @@ def transform_parameterized_message(message: str | EventMessage) -> str:
         return message
     if not message.formatted and message.message:
         params = message.params
-        if isinstance(params, list) and params:
-            return message.message % tuple(params)
-        elif isinstance(params, dict):
-            return message.message.format(**params)
-        else:
-            # Params not provided, return message as is
-            return message.message
+        # Formatting is best-effort: some SDKs ship mismatched templates
+        # (e.g. %d with a string param) which would otherwise crash the
+        # whole ingest batch. Fall back to the raw template on failure.
+        try:
+            if isinstance(params, list) and params:
+                return message.message % tuple(params)
+            elif isinstance(params, dict):
+                return message.message.format(**params)
+        except (TypeError, ValueError, KeyError, IndexError):
+            pass
+        return message.message
     return message.formatted
 
 
