@@ -144,10 +144,7 @@ async def promote_spans() -> tuple[int, bool]:
 
         for date_str, group_rows in date_groups.items():
             try:
-                # arro3 and Django storage are sync-only. Run them on the
-                # shared sync executor thread so the surrounding task stays
-                # async-native.
-                chunk_path = await sync_to_async(_write_chunk_parquet)(
+                chunk_path = await _write_chunk_parquet(
                     storage, org_id, date_str, group_rows
                 )
             except Exception:
@@ -190,11 +187,15 @@ async def promote_spans() -> tuple[int, bool]:
     return total_promoted, truncated
 
 
-def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
+async def _write_chunk_parquet(
+    storage, org_id: int, date_str: str, rows: list[tuple]
+) -> str:
     """Write a chunk Parquet file for a single org+date group via arro3.
 
     Builds Arrow arrays directly from Python tuples — no CSV serialization,
-    no temp files, no DuckDB dependency for writes.
+    no temp files, no DuckDB dependency for writes. arro3 and Django
+    storage are sync-only today; ``sync_to_async`` is applied at each leaf
+    call so the surrounding task stays async-native.
     """
     import arro3.core as ac
     import arro3.io as aio
@@ -235,19 +236,19 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
 
     if _is_s3_storage(storage):
         buf = io.BytesIO()
-        aio.write_parquet(batch, buf, **write_kwargs)
+        await sync_to_async(aio.write_parquet)(batch, buf, **write_kwargs)
         buf.seek(0)
         from django.core.files.base import ContentFile
 
         try:
-            storage.delete(relative_path)
+            await sync_to_async(storage.delete)(relative_path)
         except Exception:
             pass
-        storage.save(relative_path, ContentFile(buf.read()))
+        await sync_to_async(storage.save)(relative_path, ContentFile(buf.read()))
     else:
         parquet_path = storage.path(relative_path)
-        os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-        aio.write_parquet(batch, parquet_path, **write_kwargs)
+        await sync_to_async(os.makedirs)(os.path.dirname(parquet_path), exist_ok=True)
+        await sync_to_async(aio.write_parquet)(batch, parquet_path, **write_kwargs)
 
     return relative_path
 
