@@ -11,7 +11,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from asgiref.sync import sync_to_async
+from asgiref.sync import async_to_sync, sync_to_async
 from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
 from freezegun import freeze_time
@@ -319,7 +319,9 @@ class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
                 ts,
             )
         ]
-        _write_chunk_parquet(self.storage, self.org.id, date_str, chunk_rows)
+        async_to_sync(_write_chunk_parquet)(
+            self.storage, self.org.id, date_str, chunk_rows
+        )
 
         # Also write a compacted flat file (simulating post-crash state)
         from glitchtip.cold_storage import (
@@ -389,7 +391,7 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
     def _write_test_data(self, rows: list[tuple]):
         """Write test rows to a chunk Parquet file."""
         date_str = self.ts.strftime("%Y%m%d")
-        _write_chunk_parquet(self.storage, self.org.id, date_str, rows)
+        async_to_sync(_write_chunk_parquet)(self.storage, self.org.id, date_str, rows)
 
     def _make_row(self, **kwargs):
         """Build a tuple suitable for _write_chunk_parquet."""
@@ -524,11 +526,11 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
         ]
 
         # Write day 1 data
-        _write_chunk_parquet(
+        async_to_sync(_write_chunk_parquet)(
             self.storage, self.org.id, day1.strftime("%Y%m%d"), rows_day1
         )
         # Write day 2 data
-        _write_chunk_parquet(
+        async_to_sync(_write_chunk_parquet)(
             self.storage, self.org.id, day2.strftime("%Y%m%d"), rows_day2
         )
 
