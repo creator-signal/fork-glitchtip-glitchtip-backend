@@ -14,6 +14,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from apps.api_tokens.models import generate_token
+from apps.mcp.auth import validate_token
 
 from .models import OAuthApplication, OAuthRefreshToken
 
@@ -277,7 +278,17 @@ class GlitchTipOAuthProvider(
                 )
             await cache.adelete(_access_cache_key(token))
 
-        return None
+        # Fallback: check regular API tokens (e.g. for MCP clients using
+        # Bearer auth instead of the full OAuth flow)
+        try:
+            user_id, scopes = await validate_token(token)
+            return AccessToken(
+                token=token,
+                client_id=str(user_id),
+                scopes=scopes,
+            )
+        except ValueError:
+            return None
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         if isinstance(token, AccessToken):

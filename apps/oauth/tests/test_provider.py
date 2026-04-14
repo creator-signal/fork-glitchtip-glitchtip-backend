@@ -1,13 +1,14 @@
 import json
 import time
 
+from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull
 from model_bakery import baker
 
-from apps.api_tokens.models import generate_token
+from apps.api_tokens.models import APIToken, generate_token
 from apps.oauth.models import OAuthApplication, OAuthRefreshToken
 from apps.oauth.provider import (
     ACCESS_TOKEN_LIFETIME,
@@ -291,6 +292,28 @@ class OAuthProviderLoadAccessTokenTest(TestCase):
 
     async def test_load_missing_token(self):
         result = await self.provider.load_access_token("nonexistent")
+        self.assertIsNone(result)
+
+    async def test_load_api_token_fallback(self):
+        api_token = await sync_to_async(APIToken.objects.create)(
+            user=self.user,
+        )
+        scopes = await sync_to_async(api_token.get_scopes)()
+
+        result = await self.provider.load_access_token(api_token.token)
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, AccessToken)
+        self.assertEqual(result.token, api_token.token)
+        self.assertEqual(result.client_id, str(self.user.id))
+        self.assertEqual(result.scopes, scopes)
+
+    async def test_load_api_token_inactive_user_returns_none(self):
+        inactive_user = await sync_to_async(baker.make)("users.user", is_active=False)
+        api_token = await sync_to_async(APIToken.objects.create)(
+            user=inactive_user,
+        )
+
+        result = await self.provider.load_access_token(api_token.token)
         self.assertIsNone(result)
 
 
