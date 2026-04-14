@@ -11,6 +11,7 @@ import os
 import time
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.db import connection
 from django.utils import timezone
 
@@ -36,7 +37,28 @@ TABLE_NAME = "performance_spans"
 BATCH_LIMIT_PER_ORG = 100_000
 
 
-def promote_spans() -> tuple[int, bool]:
+def _delete_promoted_rows(group_uuids: list, org_id: int) -> None:
+    """
+    Delete promoted staging rows by id + organization_id.
+
+    Uses raw SQL with ``id = ANY(%s)`` rather than ORM ``.delete()`` with
+    ``id__in=...``. The ORM path inlines every UUID as a SQL literal
+    (tens of KB of query text per batch) and wraps the statement in
+    BEGIN/COMMIT. ``ANY(%s)`` passes the UUID list as a single bound
+    array parameter, skipping the parse/plan blowup on large batches.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            DELETE FROM performance_spanstaging
+            WHERE id = ANY(%s)
+              AND organization_id = %s
+            """,
+            [group_uuids, org_id],
+        )
+
+
+async def promote_spans() -> tuple[int, bool]:
     """
     Promote span_staging rows to per-org Parquet files.
 
@@ -72,11 +94,12 @@ def promote_spans() -> tuple[int, bool]:
 
     # Step 1: Get distinct org_ids. This scans range partitions but the query
     # is lightweight (only reads organization_id column).
-    org_ids = list(
-        SpanStaging.objects.filter(id__lt=cutoff_uuid)
+    org_ids = [
+        org_id
+        async for org_id in SpanStaging.objects.filter(id__lt=cutoff_uuid)
         .values_list("organization_id", flat=True)
         .distinct()
-    )
+    ]
 
     if not org_ids:
         return 0, False
@@ -87,8 +110,9 @@ def promote_spans() -> tuple[int, bool]:
     # Step 2: Process each org separately — both id and organization_id
     # filters allow PostgreSQL to prune RANGE and HASH partitions.
     for org_id in org_ids:
-        rows = list(
-            SpanStaging.objects.filter(
+        rows = [
+            row
+            async for row in SpanStaging.objects.filter(
                 id__lt=cutoff_uuid,
                 organization_id=org_id,
             ).values_list(
@@ -103,7 +127,7 @@ def promote_spans() -> tuple[int, bool]:
                 "duration",
                 "timestamp",
             )[:BATCH_LIMIT_PER_ORG]
-        )
+        ]
 
         if not rows:
             continue
@@ -120,7 +144,9 @@ def promote_spans() -> tuple[int, bool]:
 
         for date_str, group_rows in date_groups.items():
             try:
-                chunk_path = _write_chunk_parquet(storage, org_id, date_str, group_rows)
+                chunk_path = await _write_chunk_parquet(
+                    storage, org_id, date_str, group_rows
+                )
             except Exception:
                 logger.error(
                     "Failed to write parquet chunk for org %d date %s",
@@ -134,15 +160,7 @@ def promote_spans() -> tuple[int, bool]:
             # Includes organization_id for HASH partition pruning.
             group_uuids = [r[0] for r in group_rows]
             try:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        DELETE FROM performance_spanstaging
-                        WHERE id = ANY(%s)
-                          AND organization_id = %s
-                        """,
-                        [group_uuids, org_id],
-                    )
+                await sync_to_async(_delete_promoted_rows)(group_uuids, org_id)
             except Exception:
                 # DELETE failed after chunk was written — remove the chunk
                 # to prevent duplicate data on the next promotion run.
@@ -154,7 +172,7 @@ def promote_spans() -> tuple[int, bool]:
                     exc_info=True,
                 )
                 try:
-                    storage.delete(chunk_path)
+                    await sync_to_async(storage.delete)(chunk_path)
                 except Exception:
                     logger.error(
                         "Failed to remove chunk %s — duplicates may "
@@ -169,11 +187,15 @@ def promote_spans() -> tuple[int, bool]:
     return total_promoted, truncated
 
 
-def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple]) -> str:
+async def _write_chunk_parquet(
+    storage, org_id: int, date_str: str, rows: list[tuple]
+) -> str:
     """Write a chunk Parquet file for a single org+date group via arro3.
 
     Builds Arrow arrays directly from Python tuples — no CSV serialization,
-    no temp files, no DuckDB dependency for writes.
+    no temp files, no DuckDB dependency for writes. arro3 and Django
+    storage are sync-only today; ``sync_to_async`` is applied at each leaf
+    call so the surrounding task stays async-native.
     """
     import arro3.core as ac
     import arro3.io as aio
@@ -214,19 +236,19 @@ def _write_chunk_parquet(storage, org_id: int, date_str: str, rows: list[tuple])
 
     if _is_s3_storage(storage):
         buf = io.BytesIO()
-        aio.write_parquet(batch, buf, **write_kwargs)
+        await sync_to_async(aio.write_parquet)(batch, buf, **write_kwargs)
         buf.seek(0)
         from django.core.files.base import ContentFile
 
         try:
-            storage.delete(relative_path)
+            await sync_to_async(storage.delete)(relative_path)
         except Exception:
             pass
-        storage.save(relative_path, ContentFile(buf.read()))
+        await sync_to_async(storage.save)(relative_path, ContentFile(buf.read()))
     else:
         parquet_path = storage.path(relative_path)
-        os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
-        aio.write_parquet(batch, parquet_path, **write_kwargs)
+        await sync_to_async(os.makedirs)(os.path.dirname(parquet_path), exist_ok=True)
+        await sync_to_async(aio.write_parquet)(batch, parquet_path, **write_kwargs)
 
     return relative_path
 
