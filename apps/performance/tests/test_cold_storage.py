@@ -11,6 +11,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from asgiref.sync import async_to_sync, sync_to_async
 from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
 from freezegun import freeze_time
@@ -108,7 +109,7 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         )
         self.org = self.project.organization
 
-    def test_promote_creates_parquet_and_deletes_staging(self):
+    async def test_promote_creates_parquet_and_deletes_staging(self):
         """Promotion writes a chunk Parquet file and deletes staging rows."""
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
         spans = [
@@ -121,14 +122,14 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
             )
             for i in range(5)
         ]
-        SpanStaging.objects.bulk_create(spans)
-        self.assertEqual(SpanStaging.objects.count(), 5)
+        await SpanStaging.objects.abulk_create(spans)
+        self.assertEqual(await SpanStaging.objects.acount(), 5)
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 5)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 0)
+        self.assertEqual(await SpanStaging.objects.acount(), 0)
 
         # Verify parquet file was created
         org_dir = os.path.join(
@@ -146,36 +147,36 @@ class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
         self.assertTrue(chunk_files[0].endswith(".parquet"))
 
     @freeze_time("2026-02-23 12:00:00")
-    def test_promote_skips_recent_rows(self):
+    async def test_promote_skips_recent_rows(self):
         """Rows newer than 5 minutes are not promoted."""
         recent_ts = datetime(2026, 2, 23, 11, 59, 0, tzinfo=timezone.utc)
         span = _make_span_staging_row(self.org.id, self.project.id, timestamp=recent_ts)
-        SpanStaging.objects.bulk_create([span])
+        await SpanStaging.objects.abulk_create([span])
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 0)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 1)
+        self.assertEqual(await SpanStaging.objects.acount(), 1)
 
-    def test_promote_groups_by_org(self):
+    async def test_promote_groups_by_org(self):
         """Each org gets its own Parquet directory."""
-        project2 = baker.make("projects.Project")
+        project2 = await sync_to_async(baker.make)("projects.Project")
         org2 = project2.organization
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
 
-        SpanStaging.objects.bulk_create(
+        await SpanStaging.objects.abulk_create(
             [
                 _make_span_staging_row(self.org.id, self.project.id, timestamp=ts),
                 _make_span_staging_row(org2.id, project2.id, timestamp=ts, span_id="x"),
             ]
         )
 
-        promoted, truncated = promote_spans()
+        promoted, truncated = await promote_spans()
 
         self.assertEqual(promoted, 2)
         self.assertFalse(truncated)
-        self.assertEqual(SpanStaging.objects.count(), 0)
+        self.assertEqual(await SpanStaging.objects.acount(), 0)
 
         spans_dir = os.path.join(self.cold_dir, "cold_storage/performance_spans")
         org_dirs = sorted(os.listdir(spans_dir))
@@ -318,7 +319,9 @@ class EnumerateParquetCrashSafetyTestCase(ColdStorageTestMixin, TestCase):
                 ts,
             )
         ]
-        _write_chunk_parquet(self.storage, self.org.id, date_str, chunk_rows)
+        async_to_sync(_write_chunk_parquet)(
+            self.storage, self.org.id, date_str, chunk_rows
+        )
 
         # Also write a compacted flat file (simulating post-crash state)
         from glitchtip.cold_storage import (
@@ -388,7 +391,7 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
     def _write_test_data(self, rows: list[tuple]):
         """Write test rows to a chunk Parquet file."""
         date_str = self.ts.strftime("%Y%m%d")
-        _write_chunk_parquet(self.storage, self.org.id, date_str, rows)
+        async_to_sync(_write_chunk_parquet)(self.storage, self.org.id, date_str, rows)
 
     def _make_row(self, **kwargs):
         """Build a tuple suitable for _write_chunk_parquet."""
@@ -523,11 +526,11 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
         ]
 
         # Write day 1 data
-        _write_chunk_parquet(
+        async_to_sync(_write_chunk_parquet)(
             self.storage, self.org.id, day1.strftime("%Y%m%d"), rows_day1
         )
         # Write day 2 data
-        _write_chunk_parquet(
+        async_to_sync(_write_chunk_parquet)(
             self.storage, self.org.id, day2.strftime("%Y%m%d"), rows_day2
         )
 
