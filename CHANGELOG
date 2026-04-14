@@ -1,3 +1,18 @@
+# 6.1.5
+
+- Feat: Accept ISO-8601 timestamps in log envelope items
+- Feat: Add TLS env vars for Valkey (VALKEY_SSL_CA_CERTS, etc.)
+- Feat: Return multiple prices and marketing features from Stripe products API
+- Fix: Symbolicate obfuscated Flutter Android stack traces
+- Fix: Reduce cold storage read memory by narrowing date range and cleaning corrupt files
+- Fix: Log warning instead of silently passing on corrupt parquet file delete failure
+- Fix: Tolerate malformed parameterized log messages in ingest
+- Fix: Prune partitions in uptime heartbeat existence check
+- Fix: Simplify cache config — VALKEY_URL is the single source of truth
+- Fix: Register promote_spans/compact_span_chunks as sync tasks
+- Refactor: Make promote_spans, compact_span_chunks, and _write_chunk_parquet async-native
+- Deps: Django 6.0.4, django-allauth 65.16.0, django-vcache >=2.1.1, duckdb 1.5.2, sentry-sdk 2.57.0
+
 # 6.1.4
 
 - Feat: Add subscription usage endpoints with daily breakdown and previous period comparison
