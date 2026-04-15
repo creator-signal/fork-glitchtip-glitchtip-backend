@@ -206,6 +206,37 @@ class MCPHttpIntegrationTest(TestCase):
             orgs = json.loads(content[0]["text"])
             self.assertIsInstance(orgs, list)
 
+    async def test_api_token_auth(self):
+        """MCP endpoint should accept regular API tokens, not just OAuth tokens."""
+        from asgiref.sync import sync_to_async
+
+        from apps.api_tokens.models import APIToken
+
+        api_token = await sync_to_async(APIToken.objects.create)(user=self.user)
+
+        app = self._fresh_app()
+        async with _run_lifespan(app):
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": ACCEPT_HEADERS,
+                "Authorization": f"Bearer {api_token.token}",
+            }
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            ) as client:
+                resp = await client.post(
+                    "/mcp",
+                    json=_jsonrpc("initialize", INITIALIZE_PARAMS),
+                    headers=headers,
+                )
+            self.assertEqual(resp.status_code, 200)
+            payload = _parse_sse_response(resp.text)
+            if payload is None:
+                payload = resp.json()
+            self.assertIn("result", payload)
+            self.assertIn("serverInfo", payload["result"])
+
     async def test_non_localhost_host_header(self):
         """Non-localhost Host header should NOT trigger 421.
 

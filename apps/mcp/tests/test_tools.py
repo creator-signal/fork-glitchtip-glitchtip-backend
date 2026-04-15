@@ -8,7 +8,7 @@ from mcp.server.auth.provider import AccessToken
 from model_bakery import baker
 
 from apps.issue_events.constants import EventStatus
-from apps.mcp.auth import GlitchTipTokenVerifier, validate_token
+from apps.mcp.auth import validate_token
 from apps.mcp.data import (
     get_alerts,
     get_event,
@@ -51,33 +51,6 @@ class ValidateTokenTest(TestCase):
 
         with self.assertRaises(ValueError):
             async_to_sync(validate_token)(token_obj.token)
-
-
-class GlitchTipTokenVerifierTest(TestCase):
-    def setUp(self):
-        self.verifier = GlitchTipTokenVerifier()
-
-    def test_valid_token(self):
-        user = baker.make("users.user", is_active=True)
-        token_obj = baker.make("api_tokens.APIToken", user=user)
-        token_obj.add_permission("project:read")
-
-        result = async_to_sync(self.verifier.verify_token)(token_obj.token)
-        self.assertIsNotNone(result)
-        self.assertEqual(result.client_id, str(user.id))
-        self.assertIn("project:read", result.scopes)
-        self.assertEqual(result.token, token_obj.token)
-
-    def test_invalid_token_returns_none(self):
-        result = async_to_sync(self.verifier.verify_token)("invalid_token")
-        self.assertIsNone(result)
-
-    def test_inactive_user_returns_none(self):
-        user = baker.make("users.user", is_active=False)
-        token_obj = baker.make("api_tokens.APIToken", user=user)
-
-        result = async_to_sync(self.verifier.verify_token)(token_obj.token)
-        self.assertIsNone(result)
 
 
 class CheckScopesTest(TestCase):
