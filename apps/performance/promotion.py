@@ -326,25 +326,41 @@ def _compact_date_chunks(
 ):
     """Compact multiple chunk files into a single daily Parquet file.
 
-    Crash safety: On filesystem, writes to a .tmp file first, then
-    atomically renames. A crash mid-write leaves a .tmp file (ignored by
+    Two tuning knobs on the COPY keep the compaction inside a small
+    DuckDB memory budget (controlled by ``DUCKDB_MEMORY_LIMIT``,
+    default 128 MiB) even on orgs with high-entropy span content:
+
+    1. No global ``ORDER BY``. An explicit sort forces DuckDB to fully
+       materialize the input and can exceed the memory limit. The
+       output is still roughly time-ordered — chunks are processed in
+       filename order (``time.time_ns()`` prefix) and rows within a
+       chunk come from the staging table in UUIDv7 id-order, which
+       tracks span ingest time closely — so each row-group in the
+       output spans only the time window of a single chunk and
+       Parquet ``timestamp`` min/max stats stay narrow enough for
+       range-predicate pruning.
+
+    2. Small ``ROW_GROUP_SIZE``. DuckDB's Parquet writer buffers a full
+       row group in memory before flushing. The default of ~120k rows
+       blows the budget for wide spans (long SQL-like descriptions can
+       push rows past 1 KiB). 20k rows keeps the writer buffer under
+       ~40 MiB of in-flight data even on worst-case row widths, which
+       is safe at a 128 MiB default budget and leaves room for
+       read-side buffers.
+
+    Crash safety: on filesystem, writes to a .tmp file then atomically
+    renames. A crash mid-write leaves a .tmp file (ignored by
     enumerate_org_parquet_files) and chunks remain intact for the next run.
     On S3, PUT is atomic so no temp file is needed.
     """
-    # Build list of chunk paths for DuckDB
+    chunks = sorted(chunks)
     chunk_paths = [
         get_duckdb_parquet_path(storage, f"{date_path}/{chunk}") for chunk in chunks
     ]
 
-    # Output path: org_{id}/{date_str}.parquet (flat file)
     output_relative = f"{org_path}/{date_dir}.parquet"
     output_path = get_duckdb_parquet_path(storage, output_relative)
 
-    # Write to a temp file first, then rename for crash safety.
-    # If the process crashes mid-write, the .tmp file is ignored by
-    # enumerate_org_parquet_files (doesn't match *.parquet) and chunks
-    # remain intact for the next compaction run.
-    # S3 PUT is atomic, so no temp file needed there.
     is_s3 = output_path.startswith("s3://")
     write_path = output_path if is_s3 else output_path + ".tmp"
 
@@ -354,25 +370,22 @@ def _compact_date_chunks(
         duck_conn.execute(f"""
             COPY (
                 SELECT * FROM read_parquet([{paths_list}])
-                ORDER BY timestamp
-            ) TO '{duckdb_quote_path(write_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{duckdb_quote_path(write_path)}'
+            (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)
         """)
     finally:
         duck_conn.close()
 
-    # Atomic rename on filesystem
     if not is_s3:
         os.rename(write_path, output_path)
 
-    # Delete chunk files and empty directory
     for chunk in chunks:
         try:
             storage.delete(f"{date_path}/{chunk}")
         except Exception:
             logger.warning("Failed to delete chunk %s/%s", date_path, chunk)
 
-    # Try to remove the empty date directory (filesystem only)
-    if not output_path.startswith("s3://"):
+    if not is_s3:
         try:
             os.rmdir(storage.path(date_path))
         except OSError:

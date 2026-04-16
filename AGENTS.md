@@ -13,6 +13,7 @@
 
 ## Version Control
 - **Commits:** Use conventional commits (e.g., `fix:`, `feat:`, `refactor:`).
+- **Merge requests:** GlitchTip is open source. Write MR titles and descriptions for an outside contributor reading them cold — describe the problem in terms anyone can verify from the code, not from private infra. Don't paste internal issue IDs, staging/prod URLs, API tokens, or snapshots from a personal install; if a bug was found via an error tracker, describe the symptom and reproduction, not the dashboard link.
 
 ## File Structure
 - `apps/`: Django apps (feature modules).
