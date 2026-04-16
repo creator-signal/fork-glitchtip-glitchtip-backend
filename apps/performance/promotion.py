@@ -327,8 +327,8 @@ def _compact_date_chunks(
     """Compact multiple chunk files into a single daily Parquet file.
 
     Two tuning knobs on the COPY keep the compaction inside a small
-    DuckDB memory budget (default ``DUCKDB_MEMORY_LIMIT=128MB``, prod
-    ~244MB) even on orgs with high-entropy span content:
+    DuckDB memory budget (controlled by ``DUCKDB_MEMORY_LIMIT``,
+    default 128 MiB) even on orgs with high-entropy span content:
 
     1. No global ``ORDER BY``. An explicit sort forces DuckDB to fully
        materialize the input and can exceed the memory limit. The
@@ -345,7 +345,7 @@ def _compact_date_chunks(
        blows the budget for wide spans (long SQL-like descriptions can
        push rows past 1 KiB). 20k rows keeps the writer buffer under
        ~40 MiB of in-flight data even on worst-case row widths, which
-       is safe at a 128-244 MiB DuckDB budget and leaves room for
+       is safe at a 128 MiB default budget and leaves room for
        read-side buffers.
 
     Crash safety: on filesystem, writes to a .tmp file then atomically
