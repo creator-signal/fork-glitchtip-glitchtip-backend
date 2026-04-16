@@ -41,7 +41,7 @@ test-min:
     ENABLE_OPEN_USER_REGISTRATION: "true"
     VALKEY_URL: "redis://redis:6379"
   services:
-    - postgres:14
+    - postgres:18
     - name: redis:7
       alias: redis
   cache:
