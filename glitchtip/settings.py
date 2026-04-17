@@ -1088,7 +1088,7 @@ if TESTING:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
-CACHE_IS_VALKEY = "valkey" in CACHES["default"]["BACKEND"]
+CACHE_IS_VALKEY = "valkey" in CACHES["default"]["BACKEND"].lower()
 
 warnings.filterwarnings(
     "ignore", message="No directory at", module="django.core.handlers.base"
