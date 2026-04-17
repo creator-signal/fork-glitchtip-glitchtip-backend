@@ -192,7 +192,11 @@ class TestStripeWebhookView(TestCase):
                     "images": [],
                     "livemode": False,
                     "marketing_features": [],
-                    "metadata": {"events": "1", "is_public": "true"},
+                    "metadata": {
+                        "events": "1",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
                     "name": "Test Product",
                     "statement_descriptor": None,
                     "tax_code": None,
