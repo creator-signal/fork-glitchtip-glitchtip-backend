@@ -1,3 +1,10 @@
+# 6.1.6
+
+- Feat: Accept API tokens as a fallback for MCP endpoint auth (for clients without full OAuth DCR support)
+- Fix: Detect ValkeyCache backend case-insensitively, restoring the issue-id SET optimization in alert/event processing
+- Fix: Cap Parquet row group size and drop ORDER BY in span chunk compaction to prevent DuckDB OOM on wide spans
+- Deps: pydantic 2.13.2, symbolic 12.18.1, django-allauth 65.16.1, sentry-sdk 2.58.0, boto3 1.42.91
+
 # 6.1.5
 
 - Feat: Accept ISO-8601 timestamps in log envelope items
