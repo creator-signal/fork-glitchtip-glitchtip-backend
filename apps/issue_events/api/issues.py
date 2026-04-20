@@ -11,11 +11,13 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Field, Query, Schema, Status
+from ninja.errors import HttpError
 from ninja.pagination import paginate
 
-from apps.organizations_ext.models import Organization
+from apps.organizations_ext.models import Organization, OrganizationUser
 from apps.releases.models import Release
 from apps.releases.schema import CommitSchema
+from apps.teams.models import Team
 from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
@@ -52,6 +54,58 @@ class UpdateIssueSchema(Schema):
         default=None, validation_alias="statusDetails"
     )
     merge: int | None = None
+    assigned_to: str | None = Field(default=None, validation_alias="assignedTo")
+
+
+async def resolve_assignee(
+    assigned_to: str | None, organization_id: int
+) -> tuple[OrganizationUser | None, Team | None]:
+    """Parse an assignedTo string into (org_user, team) objects.
+
+    Accepted formats:
+      - None or "" → unassign, returns (None, None)
+      - "user:<id>" → active OrganizationUser by global User id
+      - "team:<slug>" → team by slug
+      - "<email>" → active OrganizationUser by User.email (bare string fallback)
+
+    Only active (non-pending) members can be assigned — pending invites
+    have no User yet. The team must belong to the organization. Raises
+    ninja HttpError on failure.
+    """
+    if not assigned_to:
+        return None, None
+
+    if assigned_to.startswith("team:"):
+        slug = assigned_to[len("team:") :]
+        team = await Team.objects.filter(
+            slug=slug, organization_id=organization_id
+        ).afirst()
+        if team is None:
+            raise HttpError(404, "Team not found")
+        return None, team
+
+    if assigned_to.startswith("user:"):
+        raw_id = assigned_to[len("user:") :]
+        try:
+            user_id = int(raw_id)
+        except ValueError:
+            raise HttpError(400, "Invalid assignedTo format")
+        member_filter = {"user_id": user_id}
+    else:
+        member_filter = {"user__email": assigned_to}
+
+    org_user = (
+        await OrganizationUser.objects.select_related("user")
+        .filter(
+            organization_id=organization_id,
+            user__isnull=False,
+            **member_filter,
+        )
+        .afirst()
+    )
+    if org_user is None:
+        raise HttpError(404, "User is not a member of this organization")
+    return org_user, None
 
 
 @router.get(
@@ -142,34 +196,45 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
         obj = await qs.filter(id=issue_id).aget()
     except Issue.DoesNotExist:
         raise Http404()
-    obj.status = EventStatus.from_string(payload.status)
+    update_fields: list[str] = []
 
-    update_fields = ["status"]
-    if obj.status == EventStatus.RESOLVED and payload.status_details:
-        if payload.status_details.in_release:
-            release = await Release.objects.filter(
-                version=payload.status_details.in_release,
-                organization_id=obj.project.organization_id,
-            ).afirst()
-            if release:
-                obj.resolved_in_release = release
-                update_fields.append("resolved_in_release_id")
-        elif payload.status_details.in_next_release:
-            release = await (
-                Release.objects.filter(
-                    projects=obj.project_id,
+    if "status" in payload.model_fields_set and payload.status is not None:
+        obj.status = EventStatus.from_string(payload.status)
+        update_fields.append("status")
+        if obj.status == EventStatus.RESOLVED and payload.status_details:
+            if payload.status_details.in_release:
+                release = await Release.objects.filter(
+                    version=payload.status_details.in_release,
+                    organization_id=obj.project.organization_id,
+                ).afirst()
+                if release:
+                    obj.resolved_in_release = release
+                    update_fields.append("resolved_in_release_id")
+            elif payload.status_details.in_next_release:
+                release = await (
+                    Release.objects.filter(
+                        projects=obj.project_id,
+                    )
+                    .order_by("-created")
+                    .afirst()
                 )
-                .order_by("-created")
-                .afirst()
-            )
-            if release:
-                obj.resolved_in_release = release
-                update_fields.append("resolved_in_release_id")
-    elif obj.status != EventStatus.RESOLVED:
-        obj.resolved_in_release = None
-        update_fields.append("resolved_in_release_id")
+                if release:
+                    obj.resolved_in_release = release
+                    update_fields.append("resolved_in_release_id")
+        elif obj.status != EventStatus.RESOLVED:
+            obj.resolved_in_release = None
+            update_fields.append("resolved_in_release_id")
 
-    await obj.asave(update_fields=update_fields)
+    if "assigned_to" in payload.model_fields_set:
+        org_user, team = await resolve_assignee(
+            payload.assigned_to, obj.project.organization_id
+        )
+        obj.assigned_to_org_user = org_user
+        obj.assigned_to_team = team
+        update_fields.extend(["assigned_to_org_user_id", "assigned_to_team_id"])
+
+    if update_fields:
+        await obj.asave(update_fields=update_fields)
     return obj
 
 
@@ -270,6 +335,28 @@ async def update_issues(
             status=EventStatus.from_string(payload.status)
         )
         if should_enqueue:
+            await update_issues_task.aenqueue(**task_kwargs)
+
+    if "assigned_to" in payload.model_fields_set:
+        organization_id = (
+            await Organization.objects.filter(slug=organization_slug)
+            .values_list("id", flat=True)
+            .afirst()
+        )
+        assignee_org_user, assignee_team = await resolve_assignee(
+            payload.assigned_to, organization_id
+        )
+        assignee_org_user_id = assignee_org_user.id if assignee_org_user else None
+        assignee_team_id = assignee_team.id if assignee_team else None
+        await Issue.objects.filter(id__in=updated_ids).aupdate(
+            assigned_to_org_user_id=assignee_org_user_id,
+            assigned_to_team_id=assignee_team_id,
+        )
+        if should_enqueue:
+            task_kwargs["update_params"]["assigned_to_org_user_id"] = (
+                assignee_org_user_id
+            )
+            task_kwargs["update_params"]["assigned_to_team_id"] = assignee_team_id
             await update_issues_task.aenqueue(**task_kwargs)
 
     if payload.merge:

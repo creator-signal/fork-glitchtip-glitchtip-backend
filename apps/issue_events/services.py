@@ -102,7 +102,14 @@ async def get_queryset(
 
     return qs.annotate(
         num_comments=Count("comments", distinct=True),
-    ).select_related("project", "first_release", "last_release", "resolved_in_release")
+    ).select_related(
+        "project",
+        "first_release",
+        "last_release",
+        "resolved_in_release",
+        "assigned_to_org_user__user",
+        "assigned_to_team",
+    )
 
 
 def filter_issue_list(
