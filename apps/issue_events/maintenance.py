@@ -136,6 +136,7 @@ async def cleanup_old_issue_events():
         DICTIONARY_COLUMNS,
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
+        MAX_ROW_GROUP_SIZE,
     )
 
     hot_days = settings.GLITCHTIP_EVENT_HOT_DAYS
@@ -147,6 +148,7 @@ async def cleanup_old_issue_events():
         retention_days=settings.GLITCHTIP_EVENT_RETENTION_DAYS,
         db_alias=settings.MAINTENANCE_DATABASE_ALIAS,
         dictionary_columns=DICTIONARY_COLUMNS,
+        max_row_group_size=MAX_ROW_GROUP_SIZE,
     )
 
 
