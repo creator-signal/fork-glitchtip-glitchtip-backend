@@ -156,13 +156,15 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             [{"message": "dsn key badly formed hexadecimal UUID string"}]
         ) from err
 
-    # block cache check should be right before database call.
+    # Block cache check should be right before database call. Fetched in one
+    # MGET to keep the hot path at one Valkey round-trip.
     # Throttle ("t") state is project-scoped: it applies regardless of which
     # valid DSN is used. Invalid-DSN ("v") blocks are scoped by (project, key)
     # so one bad key cannot lock out a project's legitimate DSNs.
     block_cache_key = EVENT_BLOCK_CACHE_KEY + str(project_id)
     dsn_block_cache_key = f"{block_cache_key}:{sentry_key}"
-    if block_value := await cache.aget(block_cache_key):
+    cached = await cache.aget_many([block_cache_key, dsn_block_cache_key])
+    if block_value := cached.get(block_cache_key):
         if block_value.startswith("t"):
             if throttle := deserialize_throttle(block_value):
                 org_throttle, project_throttle = throttle
@@ -170,7 +172,7 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
                     project_throttle
                 ):
                     raise ThrottleException(calculate_retry_after(max(throttle)))
-    if await cache.aget(dsn_block_cache_key) == "v":
+    if cached.get(dsn_block_cache_key) == "v":
         raise REJECTION_MAP["v"]
 
     row = await sync_to_async(get_project_auth_info_row)(project_id, sentry_key)
