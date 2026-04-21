@@ -3,6 +3,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
@@ -103,6 +104,22 @@ class Issue(SoftDeleteModel):
         on_delete=models.SET_NULL,
         related_name="+",
     )
+    assigned_to_org_user = models.ForeignKey(
+        "organizations_ext.OrganizationUser",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        db_index=False,
+    )
+    assigned_to_team = models.ForeignKey(
+        "teams.Team",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        db_index=False,
+    )
     first_seen = models.DateTimeField(default=timezone.now, db_index=True)
     last_seen = models.DateTimeField(default=timezone.now, db_index=True)
     count = models.PositiveIntegerField(default=1, editable=False)
@@ -130,7 +147,12 @@ class Issue(SoftDeleteModel):
             models.UniqueConstraint(
                 fields=["project", "short_id"],
                 name="project_short_id_unique",
-            )
+            ),
+            models.CheckConstraint(
+                name="issue_assigned_to_user_xor_team",
+                condition=Q(assigned_to_org_user__isnull=True)
+                | Q(assigned_to_team__isnull=True),
+            ),
         ]
         indexes = [
             GinIndex(fields=["search_vector"]),
@@ -138,6 +160,16 @@ class Issue(SoftDeleteModel):
                 fields=["title"],
                 name="issue_title_trgm_idx",
                 opclasses=["gin_trgm_ops"],
+            ),
+            models.Index(
+                fields=["assigned_to_org_user"],
+                condition=Q(assigned_to_org_user__isnull=False),
+                name="issue_assigned_org_user_idx",
+            ),
+            models.Index(
+                fields=["assigned_to_team"],
+                condition=Q(assigned_to_team__isnull=False),
+                name="issue_assigned_team_idx",
             ),
         ]
 

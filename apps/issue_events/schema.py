@@ -62,6 +62,15 @@ class IssueReleaseSchema(CamelSchema, ModelSchema):
         fields = ["version"]
 
 
+class IssueActorSchema(Schema):
+    type: Literal["user", "team"]
+    id: str
+    name: str
+    username: str | None = None
+    email: str | None = None
+    slug: str | None = None
+
+
 class IssueSchema(ModelSchema):
     id: str
     count: str
@@ -94,10 +103,36 @@ class IssueSchema(ModelSchema):
     )
     firstSeen: datetime = Field(validation_alias="first_seen")
     lastSeen: datetime = Field(validation_alias="last_seen")
+    assigned_to: IssueActorSchema | None = Field(
+        default=None, serialization_alias="assignedTo"
+    )
 
     @staticmethod
     def resolve_culprit(obj: Issue):
         return obj.culprit or ""
+
+    @staticmethod
+    def resolve_assigned_to(obj: Issue) -> dict | None:
+        if obj.assigned_to_org_user_id:
+            u = obj.assigned_to_org_user.user
+            if u is None:
+                return None
+            return {
+                "type": "user",
+                "id": str(u.id),
+                "username": u.email,
+                "name": u.name or u.email,
+                "email": u.email,
+            }
+        if obj.assigned_to_team_id:
+            t = obj.assigned_to_team
+            return {
+                "type": "team",
+                "id": str(t.id),
+                "name": t.slug,
+                "slug": t.slug,
+            }
+        return None
 
     @staticmethod
     def resolve_matching_event_id(obj: Issue, context):
