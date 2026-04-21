@@ -831,6 +831,176 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(issue1.status, status_to_set)
         self.assertEqual(issue2.status, EventStatus.UNRESOLVED)
 
+    def test_assign_to_user_by_id(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": f"user:{self.user.id}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
+        self.assertIsNone(issue.assigned_to_team_id)
+        body = res.json()
+        self.assertEqual(body["assignedTo"]["type"], "user")
+        self.assertEqual(body["assignedTo"]["id"], str(self.user.id))
+        self.assertEqual(body["assignedTo"]["email"], self.user.email)
+
+    def test_assign_to_user_by_email(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": self.user.email}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
+
+    def test_assign_to_team(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": f"team:{self.team.slug}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertIsNone(issue.assigned_to_org_user_id)
+        self.assertEqual(issue.assigned_to_team_id, self.team.id)
+        body = res.json()
+        self.assertEqual(body["assignedTo"]["type"], "team")
+        self.assertEqual(body["assignedTo"]["slug"], self.team.slug)
+
+    def test_unassign(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            assigned_to_org_user=self.org_user,
+        )
+        data = {"assignedTo": None}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertIsNone(issue.assigned_to_org_user_id)
+        self.assertIsNone(issue.assigned_to_team_id)
+        self.assertIsNone(res.json()["assignedTo"])
+
+    def test_assign_switches_team_to_user(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            assigned_to_team=self.team,
+        )
+        data = {"assignedTo": f"user:{self.user.id}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
+        self.assertIsNone(issue.assigned_to_team_id)
+
+    def test_assign_unassigns_when_membership_removed(self):
+        """Removing an OrganizationUser SET_NULLs their issue assignments."""
+        other_user = baker.make("users.user")
+        other_org_user = self.organization.add_user(other_user)
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            assigned_to_org_user=other_org_user,
+        )
+        other_org_user.delete()
+        issue.refresh_from_db()
+        self.assertIsNone(issue.assigned_to_org_user_id)
+
+    def test_assign_user_not_in_org_is_not_found(self):
+        other_user = baker.make("users.user")
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": f"user:{other_user.id}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 404)
+        issue.refresh_from_db()
+        self.assertIsNone(issue.assigned_to_org_user_id)
+
+    def test_assign_team_from_other_org_is_not_found(self):
+        other_team = baker.make("teams.Team")
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": f"team:{other_team.slug}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_assign_unknown_user_is_not_found(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": "nobody@nowhere.invalid"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_assign_pending_invite_is_not_found(self):
+        """Pending invites (OrganizationUser.user is None) are not assignable."""
+        pending = baker.make(
+            "organizations_ext.OrganizationUser",
+            organization=self.organization,
+            user=None,
+            email="pending@example.com",
+        )
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": pending.email}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_assign_bad_user_id_format(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"assignedTo": "user:notanumber"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_assign_without_status_keeps_status(self):
+        issue = baker.make(
+            "issue_events.Issue",
+            project=self.project,
+            status=EventStatus.RESOLVED,
+        )
+        data = {"assignedTo": f"user:{self.user.id}"}
+        res = self.client.put(
+            get_issue_url(issue.pk), data, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.RESOLVED)
+        self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
+
+    def test_bulk_assign(self):
+        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+        url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
+        data = {"assignedTo": f"user:{self.user.id}"}
+        res = self.client.put(url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        for issue in Issue.objects.filter(id__in=[i.id for i in issues]):
+            self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
+
+    def test_db_constraint_rejects_both_user_and_team(self):
+        from django.db import IntegrityError, transaction
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                baker.make(
+                    "issue_events.Issue",
+                    project=self.project,
+                    assigned_to_org_user=self.org_user,
+                    assigned_to_team=self.team,
+                )
+
     @freeze_time("2025-06-19T17:47:00Z")
     def test_issue_stats_endpoint(self):
         """
