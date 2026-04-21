@@ -187,24 +187,55 @@ def get_duckdb_connection(storage=None):
 # Thread-local storage for cached read-only DuckDB connections.
 _thread_local = threading.local()
 
+# Recycle the cached read connection after this many fetches. Caps memory
+# growth from DuckDB's buffer pool accumulating pinned state across queries
+# in long-lived worker threads. Picking a good value needs insight into the
+# buffer-pool internals for a given query mix, so this is an internal tuning
+# knob, not a user-facing setting. Tests that want to exercise recycling
+# should patch this constant directly.
+_READ_CONNECTION_MAX_QUERIES = 100
+
 
 def get_duckdb_read_connection(storage=None):
     """
     Get a thread-local cached DuckDB connection for read-only queries.
 
     Avoids the overhead of creating a new DuckDB connection (and loading
-    S3 extensions) on every query. The connection is reused across calls
-    within the same thread and lazily created on first use.
+    S3 extensions) on every query — fresh connect + ``LOAD httpfs`` measures
+    ~40 ms p50, vs ~0 ms for a cached fetch.
+
+    Connections are recycled after ``_READ_CONNECTION_MAX_QUERIES`` fetches
+    to bound memory accumulation in DuckDB's buffer pool. With a long-lived
+    cached connection, pinned buffers from prior queries accumulate and
+    eventually push a new query past ``memory_limit``. Periodic recycling
+    resets the pool with ~1/N amortized setup cost.
+
+    Read connections also force ``threads=1`` and
+    ``preserve_insertion_order=false`` regardless of the global
+    ``DUCKDB_THREADS`` setting. Cold reads are point lookups with explicit
+    ``ORDER BY``; parallelism multiplies per-thread scan-buffer RAM
+    without reducing latency, and insertion-order preservation forces
+    extra intermediate buffering that we don't rely on.
 
     Do NOT call .close() on the returned connection — it is managed by
     the thread-local cache. Use ``close_duckdb_read_connection()`` for
     explicit cleanup (e.g. in tests).
     """
     conn = getattr(_thread_local, "duckdb_conn", None)
-    if conn is not None:
+    used = getattr(_thread_local, "duckdb_conn_uses", 0)
+    if conn is not None and used < _READ_CONNECTION_MAX_QUERIES:
+        _thread_local.duckdb_conn_uses = used + 1
         return conn
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
     conn = _create_duckdb_connection(storage)
+    conn.execute("SET threads = 1")
+    conn.execute("SET preserve_insertion_order = false")
     _thread_local.duckdb_conn = conn
+    _thread_local.duckdb_conn_uses = 1
     return conn
 
 
@@ -217,6 +248,7 @@ def close_duckdb_read_connection():
         except Exception:
             pass
         _thread_local.duckdb_conn = None
+        _thread_local.duckdb_conn_uses = 0
 
 
 def _create_duckdb_connection(storage=None):
@@ -504,6 +536,7 @@ def _flush_csv_to_parquet(
     *,
     is_final_flush: bool = False,
     dictionary_columns: set[str] | None = None,
+    max_row_group_size: int | None = None,
 ) -> tuple[int, int]:
     """
     Write CSV data to a Parquet file via arro3 (Rust Arrow/Parquet).
@@ -529,8 +562,12 @@ def _flush_csv_to_parquet(
         out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
         chunk_num += 1
 
-    # Match max_row_group_size to actual rows to avoid over-allocation.
-    row_group_size = min(row_count, 100_000)
+    # Cap row groups so DuckDB readers can decompress one at a time within
+    # their memory_limit. Tables with large blob columns (e.g. issue events
+    # `data` JSON, ~30 KB/row) override this; default 100k matches arro3's
+    # historical behavior for smaller schemas.
+    cap = max_row_group_size or 100_000
+    row_group_size = min(row_count, cap)
 
     reader = aio.read_csv(
         io.BytesIO(csv_data),
@@ -577,6 +614,7 @@ def archive_partition_per_org(
     select_sql: str,
     dictionary_columns: set[str] | None = None,
     db_alias: str | None = None,
+    max_row_group_size: int | None = None,
 ) -> list[tuple[int, str]]:
     """
     Archive a partition to cold storage as per-org Parquet files.
@@ -729,6 +767,7 @@ def archive_partition_per_org(
                                     total_rows,
                                     buf_rows,
                                     dictionary_columns=dictionary_columns,
+                                    max_row_group_size=max_row_group_size,
                                 )
                                 csv_buf = bytearray(header)
                                 buf_rows = 0
@@ -748,6 +787,7 @@ def archive_partition_per_org(
                         buf_rows,
                         is_final_flush=True,
                         dictionary_columns=dictionary_columns,
+                        max_row_group_size=max_row_group_size,
                     )
                 del csv_buf
 
@@ -889,6 +929,7 @@ def archive_and_swap_partition(
     select_sql: str,
     db_alias: str | None = None,
     dictionary_columns: set[str] | None = None,
+    max_row_group_size: int | None = None,
 ) -> bool:
     """
     Full archival workflow: Export per-org files -> Detach -> Drop partition.
@@ -927,6 +968,7 @@ def archive_and_swap_partition(
         select_sql,
         dictionary_columns=dictionary_columns,
         db_alias=db_alias,
+        max_row_group_size=max_row_group_size,
     )
     if not archived_files:
         logger.info(f"No data archived from {partition_name}")
@@ -1203,14 +1245,21 @@ def query_cold_parquet_files(
                 all_rows.extend(result.fetchall())
                 if limit is not None and len(all_rows) >= limit:
                     break
-            except Exception:
+            except Exception as exc:
+                if not is_parquet_corruption_error(exc):
+                    # OOM / S3 / unknown — surface the error so the underlying
+                    # problem (memory limit, network) is visible. Deleting the
+                    # file here would be data loss for any error that wasn't
+                    # actual parquet damage.
+                    raise
                 logger.error(
                     "Corrupt parquet file skipped: %s",
                     relative_path,
                     exc_info=True,
                 )
-                # Delete corrupt files so they don't cause repeated failures.
-                # The data is unrecoverable and each failed read wastes memory.
+                # Delete confirmed-corrupt files so they don't cause repeated
+                # failures. The data is unrecoverable and each failed read
+                # wastes memory.
                 try:
                     storage.delete(relative_path)
                     logger.info("Deleted corrupt parquet file: %s", relative_path)
@@ -1234,6 +1283,22 @@ def is_missing_file_error(exc: Exception) -> bool:
         msg in error_str
         for msg in ("No files found", "Could not open", "404", "Not Found")
     )
+
+
+def is_parquet_corruption_error(exc: Exception) -> bool:
+    """Check if a DuckDB exception indicates a structurally corrupt Parquet file.
+
+    DuckDB raises ``InvalidInputException`` when the basic Parquet structure
+    is damaged — truncated file, empty file, bad magic bytes, unreadable
+    footer. Other failures (``OutOfMemoryException``, ``HTTPException``,
+    ``IOException`` for missing files, type mismatches) use different types
+    and must NOT trigger deletion — that would be data loss.
+    """
+    try:
+        import duckdb
+    except ImportError:
+        return False
+    return isinstance(exc, duckdb.InvalidInputException)
 
 
 def parse_json_field(val) -> dict:
@@ -1272,6 +1337,7 @@ def archive_and_cleanup_partitions(
     retention_days: int | None = None,
     db_alias: str | None = None,
     dictionary_columns: set[str] | None = None,
+    max_row_group_size: int | None = None,
 ) -> tuple[int, int, int]:
     """
     Archive old hot partitions to cold storage and clean up expired cold files.
@@ -1314,6 +1380,7 @@ def archive_and_cleanup_partitions(
                     select_sql,
                     db_alias=db_alias,
                     dictionary_columns=dictionary_columns,
+                    max_row_group_size=max_row_group_size,
                 ):
                     archived += 1
                     logger.info(f"Archived partition {name}")
