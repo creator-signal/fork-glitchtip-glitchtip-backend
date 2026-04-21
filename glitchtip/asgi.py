@@ -80,10 +80,12 @@ class MCPDjangoDispatcher:
             suffix = path[len(self.mcp_prefix) :]
             if suffix in self._OAUTH_SUFFIXES:
                 return suffix
-        # Strip /mcp suffix from well-known paths (RFC 8414 path-aware discovery)
-        for prefix in self._WELL_KNOWN_PREFIXES:
-            if path == f"{prefix}{self.mcp_prefix}":
-                return prefix
+        # Strip /mcp suffix from authorization server well-known path only.
+        # RFC 8414: the SDK registers oauth-authorization-server WITHOUT the suffix.
+        # RFC 9728: the SDK registers oauth-protected-resource WITH the /mcp suffix,
+        # so it must NOT be rewritten.
+        if path == f"/.well-known/oauth-authorization-server{self.mcp_prefix}":
+            return "/.well-known/oauth-authorization-server"
         return path
 
     async def __call__(self, scope, receive, send):
