@@ -16,6 +16,7 @@ from model_bakery import baker
 
 from apps.mcp.server import mcp
 from apps.oauth.provider import _access_cache_key
+from glitchtip.asgi import MCPDjangoDispatcher
 
 INITIALIZE_PARAMS = {
     "protocolVersion": "2025-03-26",
@@ -237,6 +238,28 @@ class MCPHttpIntegrationTest(TestCase):
             self.assertIn("result", payload)
             self.assertIn("serverInfo", payload["result"])
 
+    async def test_well_known_protected_resource_not_rewritten(self):
+        """RFC 9728: /.well-known/oauth-protected-resource/mcp must NOT be rewritten.
+
+        The MCP SDK registers the protected resource route WITH the /mcp
+        suffix, so stripping it causes a 404 during OAuth discovery.
+        """
+        app = self._fresh_app()
+        async with _run_lifespan(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            ) as client:
+                resp = await client.get(
+                    "/.well-known/oauth-protected-resource/mcp",
+                    headers={
+                        "Accept": "application/json",
+                        "Host": "localhost:8000",
+                    },
+                )
+            # Should reach the handler (200) rather than 404
+            self.assertNotEqual(resp.status_code, 404)
+
     async def test_non_localhost_host_header(self):
         """Non-localhost Host header should NOT trigger 421.
 
@@ -262,3 +285,43 @@ class MCPHttpIntegrationTest(TestCase):
                 )
             self.assertNotEqual(resp.status_code, 421)
             self.assertEqual(resp.status_code, 200)
+
+
+class MCPDjangoDispatcherRewriteTest(TestCase):
+    """Unit tests for MCPDjangoDispatcher._rewrite_path()."""
+
+    def setUp(self):
+        self.dispatcher = MCPDjangoDispatcher(
+            django_app=None, mcp_app=None, mcp_prefix="/mcp"
+        )
+
+    def test_rewrite_oauth_authorization_server(self):
+        """RFC 8414: authorization server well-known path has /mcp suffix stripped."""
+        result = self.dispatcher._rewrite_path(
+            "/.well-known/oauth-authorization-server/mcp"
+        )
+        self.assertEqual(result, "/.well-known/oauth-authorization-server")
+
+    def test_no_rewrite_oauth_protected_resource(self):
+        """RFC 9728: protected resource metadata path includes the /mcp suffix."""
+        result = self.dispatcher._rewrite_path(
+            "/.well-known/oauth-protected-resource/mcp"
+        )
+        self.assertEqual(result, "/.well-known/oauth-protected-resource/mcp")
+
+    def test_rewrite_oauth_subpaths(self):
+        """OAuth endpoints under /mcp are rewritten to root level."""
+        self.assertEqual(self.dispatcher._rewrite_path("/mcp/authorize"), "/authorize")
+        self.assertEqual(self.dispatcher._rewrite_path("/mcp/token"), "/token")
+        self.assertEqual(self.dispatcher._rewrite_path("/mcp/register"), "/register")
+        self.assertEqual(self.dispatcher._rewrite_path("/mcp/revoke"), "/revoke")
+
+    def test_no_rewrite_mcp_root(self):
+        """The MCP endpoint itself should not be rewritten."""
+        self.assertEqual(self.dispatcher._rewrite_path("/mcp"), "/mcp")
+
+    def test_no_rewrite_unrelated_path(self):
+        """Paths outside MCP scope pass through unchanged."""
+        self.assertEqual(
+            self.dispatcher._rewrite_path("/api/0/issues/"), "/api/0/issues/"
+        )
