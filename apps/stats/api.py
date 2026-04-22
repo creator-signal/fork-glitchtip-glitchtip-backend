@@ -1,8 +1,7 @@
 from datetime import timedelta
 
-from asgiref.sync import sync_to_async
-from django.db import connection
 from django.http import Http404
+from django_async_backend.db import async_connections
 from ninja import Query, Router
 
 from apps.projects.models import Project
@@ -31,22 +30,12 @@ GROUP BY gs.ts ORDER BY gs.ts;
 """
 
 
-@sync_to_async
-def get_timeseries(category, start, end, interval, project_ids):
-    if category == "error":
-        with connection.cursor() as cursor:
-            cursor.execute(
-                EVENT_TIME_SERIES_SQL,
-                [start, end, interval, project_ids],
-            )
-            return cursor.fetchall()
-    else:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                TRANSACTION_TIME_SERIES_SQL,
-                [start, end, interval, project_ids],
-            )
-            return cursor.fetchall()
+async def get_timeseries(category, start, end, interval, project_ids):
+    sql = EVENT_TIME_SERIES_SQL if category == "error" else TRANSACTION_TIME_SERIES_SQL
+    connection = async_connections["default"]
+    async with await connection.cursor() as cursor:
+        await cursor.execute(sql, [start, end, interval, project_ids])
+        return await cursor.fetchall()
 
 
 @router.get("organizations/{slug:organization_slug}/stats_v2/")
