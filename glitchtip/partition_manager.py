@@ -17,6 +17,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import connection, connections, transaction
+from psycopg import sql as pg_sql
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ class PartitionManager:
         hash_column: str = "organization_id",
         key_type: Literal["uuid7", "datetime"] = "datetime",
         partition_column: str = "date",
-    ) -> list[str]:
+    ) -> list[pg_sql.Composed]:
         """
         Create a time-range parent partition with HASH sub-partitions.
 
@@ -261,7 +262,7 @@ class PartitionManager:
         Returns:
             List of SQL statements to execute
         """
-        sqls = []
+        sqls: list[pg_sql.Composed] = []
 
         if hash_buckets is None:
             # Hash buckets are used to distribute data across multiple tables
@@ -274,39 +275,69 @@ class PartitionManager:
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=timezone.utc)
 
-        # Calculate range bounds based on key type
+        # Calculate range bound literals based on key type. Using Literal
+        # pushes quoting/adaptation into psycopg so identifiers and values
+        # can never be confused with SQL syntax.
         if key_type == "uuid7":
             start_val, end_val = UUID7Helper.get_range_for_date(start_date, end_date)
-            range_from = f"'{start_val}'"
-            range_to = f"'{end_val}'"
+            range_from = pg_sql.Literal(str(start_val))
+            range_to = pg_sql.Literal(str(end_val))
         else:  # datetime
-            # Use ISO format with timezone
-            range_from = f"'{start_date.isoformat()}'"
-            range_to = f"'{end_date.isoformat()}'"
+            range_from = pg_sql.Literal(start_date)
+            range_to = pg_sql.Literal(end_date)
+
+        partition_ident = pg_sql.Identifier(partition_name)
+        parent_ident = pg_sql.Identifier(parent_table)
+        hash_ident = pg_sql.Identifier(hash_column)
 
         # Create parent time partition
         if hash_buckets > 0:
             # Nested Partitioning: TIME -> HASH
-            parent_sql = f"""CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {parent_table}
-FOR VALUES FROM ({range_from}) TO ({range_to})
-PARTITION BY HASH ({hash_column});"""
-            sqls.append(parent_sql)
+            sqls.append(
+                pg_sql.SQL(
+                    "CREATE TABLE IF NOT EXISTS {partition} PARTITION OF {parent} "
+                    "FOR VALUES FROM ({range_from}) TO ({range_to}) "
+                    "PARTITION BY HASH ({hash_col})"
+                ).format(
+                    partition=partition_ident,
+                    parent=parent_ident,
+                    range_from=range_from,
+                    range_to=range_to,
+                    hash_col=hash_ident,
+                )
+            )
 
             # Create HASH child partitions
             for i in range(hash_buckets):
-                child_name = f"{partition_name}_h{i}"
-                child_sql = f"""CREATE TABLE IF NOT EXISTS {child_name} PARTITION OF {partition_name}
-FOR VALUES WITH (MODULUS {hash_buckets}, REMAINDER {i});"""
-                sqls.append(child_sql)
+                child_ident = pg_sql.Identifier(f"{partition_name}_h{i}")
+                sqls.append(
+                    pg_sql.SQL(
+                        "CREATE TABLE IF NOT EXISTS {child} PARTITION OF {partition} "
+                        "FOR VALUES WITH (MODULUS {modulus}, REMAINDER {remainder})"
+                    ).format(
+                        child=child_ident,
+                        partition=partition_ident,
+                        modulus=pg_sql.Literal(hash_buckets),
+                        remainder=pg_sql.Literal(i),
+                    )
+                )
         else:
             # Simple Range Partitioning (Leaf Node)
-            parent_sql = f"""CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {parent_table}
-FOR VALUES FROM ({range_from}) TO ({range_to});"""
-            sqls.append(parent_sql)
+            sqls.append(
+                pg_sql.SQL(
+                    "CREATE TABLE IF NOT EXISTS {partition} PARTITION OF {parent} "
+                    "FOR VALUES FROM ({range_from}) TO ({range_to})"
+                ).format(
+                    partition=partition_ident,
+                    parent=parent_ident,
+                    range_from=range_from,
+                    range_to=range_to,
+                )
+            )
 
         return sqls
 
-    def drop_partition(self, partition_name: str) -> str:
+    def drop_partition(self, partition_name: str) -> pg_sql.Composed:
         """
         Generate SQL to drop a partition (and all sub-partitions).
 
@@ -314,9 +345,11 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             partition_name: Name of partition to drop
 
         Returns:
-            SQL statement
+            Composed SQL statement
         """
-        return f"DROP TABLE IF EXISTS {partition_name} CASCADE;"
+        return pg_sql.SQL("DROP TABLE IF EXISTS {partition} CASCADE").format(
+            partition=pg_sql.Identifier(partition_name),
+        )
 
     def list_partitions(self, parent_table: str) -> list[dict]:
         """
@@ -540,9 +573,11 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
 
         with transaction.atomic(using=self.db_connection.alias):
             with self.db_connection.cursor() as cursor:
-                for sql in sqls_to_execute:
-                    logger.debug(f"Executing partition SQL: {sql[:100]}...")
-                    cursor.execute(sql)
+                for stmt in sqls_to_execute:
+                    logger.debug(
+                        "Executing partition SQL: %s", stmt.as_string(cursor)[:100]
+                    )
+                    cursor.execute(stmt)
 
         logger.debug(
             f"Verified partition {partition_name} with {hash_buckets} hash buckets "

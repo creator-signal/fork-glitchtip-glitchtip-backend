@@ -9,9 +9,11 @@ from unittest.mock import patch
 from uuid import UUID
 
 from django.conf import settings
+from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
+from psycopg import sql as pg_sql
 
 from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
@@ -237,6 +239,11 @@ class UUID7HelperTestCase(TestCase):
 class PartitionManagerTestCase(TestCase):
     """Test partition SQL generation"""
 
+    @staticmethod
+    def _render(stmt: pg_sql.Composed) -> str:
+        with connection.cursor() as cursor:
+            return stmt.as_string(cursor)
+
     def test_create_time_partition_datetime_mode(self):
         """DateTime mode generates correct SQL"""
         manager = PartitionManager()
@@ -253,24 +260,26 @@ class PartitionManagerTestCase(TestCase):
         )
 
         # Verify parent partition SQL
-        parent_sql = sqls[0]
+        parent_sql = self._render(sqls[0])
         self.assertIn("CREATE TABLE IF NOT EXISTS", parent_sql)
-        self.assertIn("issue_events_issueaggregate_20250115", parent_sql)
-        self.assertIn("PARTITION OF issue_events_issueaggregate", parent_sql)
-        self.assertIn("FOR VALUES FROM ('2025-01-15", parent_sql)
-        self.assertIn("TO ('2025-01-16", parent_sql)
-        self.assertIn("PARTITION BY HASH (organization_id)", parent_sql)
+        self.assertIn('"issue_events_issueaggregate_20250115"', parent_sql)
+        self.assertIn('PARTITION OF "issue_events_issueaggregate"', parent_sql)
+        self.assertIn("'2025-01-15", parent_sql)
+        self.assertIn("'2025-01-16", parent_sql)
+        self.assertIn('PARTITION BY HASH ("organization_id")', parent_sql)
 
         # Verify hash children (4 buckets)
         self.assertEqual(len(sqls), 5)  # 1 parent + 4 children
 
         # Check first hash partition
-        self.assertIn("issue_events_issueaggregate_20250115_h0", sqls[1])
-        self.assertIn("MODULUS 4, REMAINDER 0", sqls[1])
+        first_child = self._render(sqls[1])
+        self.assertIn('"issue_events_issueaggregate_20250115_h0"', first_child)
+        self.assertIn("MODULUS 4, REMAINDER 0", first_child)
 
         # Check last hash partition
-        self.assertIn("issue_events_issueaggregate_20250115_h3", sqls[4])
-        self.assertIn("MODULUS 4, REMAINDER 3", sqls[4])
+        last_child = self._render(sqls[4])
+        self.assertIn('"issue_events_issueaggregate_20250115_h3"', last_child)
+        self.assertIn("MODULUS 4, REMAINDER 3", last_child)
 
     def test_create_time_partition_uuid7_mode(self):
         """UUID7 mode generates correct SQL with UUID ranges"""
@@ -287,17 +296,16 @@ class PartitionManagerTestCase(TestCase):
             partition_column="id",
         )
 
-        parent_sql = sqls[0]
+        parent_sql = self._render(sqls[0])
 
         # Verify UUID range format (should have UUID strings, not datetimes)
         self.assertIn("FOR VALUES FROM ('", parent_sql)
-        self.assertIn("TO ('", parent_sql)
+        self.assertIn(") TO ('", parent_sql)
 
         # Should NOT contain datetime strings
         self.assertNotIn("2025-01-15T", parent_sql)
 
         # Should contain UUID-like strings (hex with dashes)
-        # UUIDs are 36 chars: 8-4-4-4-12
         import re
 
         uuid_pattern = r"'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'"
@@ -320,8 +328,8 @@ class PartitionManagerTestCase(TestCase):
         )
 
         # All statements should be idempotent
-        for sql in sqls:
-            self.assertIn("IF NOT EXISTS", sql)
+        for stmt in sqls:
+            self.assertIn("IF NOT EXISTS", self._render(stmt))
 
     def test_configurable_hash_buckets(self):
         """Hash bucket count is configurable"""
@@ -341,8 +349,9 @@ class PartitionManagerTestCase(TestCase):
 
             # Verify MODULUS matches bucket count
             for i in range(bucket_count):
-                self.assertIn(f"MODULUS {bucket_count}", sqls[i + 1])
-                self.assertIn(f"REMAINDER {i}", sqls[i + 1])
+                child_sql = self._render(sqls[i + 1])
+                self.assertIn(f"MODULUS {bucket_count}", child_sql)
+                self.assertIn(f"REMAINDER {i}", child_sql)
 
     def test_configurable_hash_column(self):
         """Hash column is configurable"""
@@ -358,17 +367,17 @@ class PartitionManagerTestCase(TestCase):
         )
 
         # Parent should partition by custom column
-        self.assertIn("PARTITION BY HASH (project_id)", sqls[0])
+        self.assertIn('PARTITION BY HASH ("project_id")', self._render(sqls[0]))
 
     def test_drop_partition(self):
         """Generate DROP TABLE SQL"""
         manager = PartitionManager()
 
-        sql = manager.drop_partition("test_partition_20250115")
+        rendered = self._render(manager.drop_partition("test_partition_20250115"))
 
-        self.assertIn("DROP TABLE IF EXISTS", sql)
-        self.assertIn("test_partition_20250115", sql)
-        self.assertIn("CASCADE", sql)
+        self.assertIn("DROP TABLE IF EXISTS", rendered)
+        self.assertIn('"test_partition_20250115"', rendered)
+        self.assertIn("CASCADE", rendered)
 
     def test_datetime_timezone_handling(self):
         """Naive datetimes are treated as UTC"""
@@ -395,8 +404,8 @@ class PartitionManagerTestCase(TestCase):
         )
 
         # Both should produce valid SQL with timezone info
-        self.assertIn("2025-01-15", sqls_naive[0])
-        self.assertIn("2025-01-15", sqls_aware[0])
+        self.assertIn("2025-01-15", self._render(sqls_naive[0]))
+        self.assertIn("2025-01-15", self._render(sqls_aware[0]))
 
     def test_partition_naming_convention(self):
         """Partition names follow expected convention"""
@@ -411,12 +420,33 @@ class PartitionManagerTestCase(TestCase):
         )
 
         # Parent partition
-        self.assertIn("issue_events_issueaggregate_20250115", sqls[0])
+        self.assertIn('"issue_events_issueaggregate_20250115"', self._render(sqls[0]))
 
         # Hash children: parent_name + _hN
         for i in range(4):
-            expected_name = f"issue_events_issueaggregate_20250115_h{i}"
-            self.assertIn(expected_name, sqls[i + 1])
+            expected_name = f'"issue_events_issueaggregate_20250115_h{i}"'
+            self.assertIn(expected_name, self._render(sqls[i + 1]))
+
+    def test_adversarial_identifiers_are_quoted(self):
+        """Identifiers containing SQL metacharacters are safely quoted."""
+        manager = PartitionManager()
+
+        sqls = manager.create_time_partition(
+            parent_table='evil"; DROP TABLE users; --',
+            partition_name='foo"; DROP TABLE partitions; --',
+            start_date=datetime(2025, 1, 15, tzinfo=timezone.utc),
+            end_date=datetime(2025, 1, 16, tzinfo=timezone.utc),
+            hash_buckets=0,
+            key_type="datetime",
+        )
+        rendered = self._render(sqls[0])
+        # Double-quoting escapes embedded quotes; the injection is neutralised.
+        self.assertNotIn("DROP TABLE users", rendered.upper().replace('""', ""))
+        self.assertIn('"evil""; DROP TABLE users; --"', rendered)
+        self.assertIn('"foo""; DROP TABLE partitions; --"', rendered)
+
+        drop_sql = self._render(manager.drop_partition('x"; TRUNCATE y; --'))
+        self.assertIn('"x""; TRUNCATE y; --"', drop_sql)
 
 
 class DecompressBodyMiddlewareCancelledErrorTestCase(TestCase):
@@ -920,7 +950,9 @@ class CacheConfigTestCase(TestCase):
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "redis://valkey:6379/0")
         self.assertEqual(info["task_backend"], self.VTASKS_VALKEY)
-        self.assertEqual(info["session_engine"], "django.contrib.sessions.backends.cache")
+        self.assertEqual(
+            info["session_engine"], "django.contrib.sessions.backends.cache"
+        )
 
     def test_redis_url_fallback(self):
         """REDIS_URL works as a fallback for VALKEY_URL."""
@@ -930,37 +962,43 @@ class CacheConfigTestCase(TestCase):
 
     def test_valkey_host_components(self):
         """VALKEY_HOST + VALKEY_PORT + VALKEY_PASSWORD builds a redis:// URL."""
-        info = self._probe({
-            "VALKEY_HOST": "myhost",
-            "VALKEY_PORT": "6380",
-            "VALKEY_DATABASE": "2",
-        })
+        info = self._probe(
+            {
+                "VALKEY_HOST": "myhost",
+                "VALKEY_PORT": "6380",
+                "VALKEY_DATABASE": "2",
+            }
+        )
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "redis://myhost:6380/2")
 
     def test_valkey_host_with_password(self):
         """VALKEY_PASSWORD is embedded in the URL."""
-        info = self._probe({
-            "VALKEY_HOST": "myhost",
-            "VALKEY_PASSWORD": "s3cret",
-        })
+        info = self._probe(
+            {
+                "VALKEY_HOST": "myhost",
+                "VALKEY_PASSWORD": "s3cret",
+            }
+        )
         self.assertEqual(info["cache_location"], "redis://:s3cret@myhost:6379/0")
 
     def test_sentinel_url(self):
         """VALKEY_URL=sentinel://... is passed through to vcache."""
-        info = self._probe({
-            "VALKEY_URL": "sentinel://sentinel:26379/mymaster/0",
-        })
-        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
-        self.assertEqual(
-            info["cache_location"], "sentinel://sentinel:26379/mymaster/0"
+        info = self._probe(
+            {
+                "VALKEY_URL": "sentinel://sentinel:26379/mymaster/0",
+            }
         )
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "sentinel://sentinel:26379/mymaster/0")
 
     def test_sentinel_url_with_password(self):
         """Sentinel URL with embedded credentials."""
-        info = self._probe({
-            "VALKEY_URL": "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
+            }
+        )
         self.assertEqual(
             info["cache_location"],
             "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
@@ -974,30 +1012,36 @@ class CacheConfigTestCase(TestCase):
 
     def test_tls_with_ca_cert(self):
         """VALKEY_SSL_CA_CERTS populates OPTIONS."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
 
     def test_tls_mtls(self):
         """VALKEY_SSL_CERTFILE + VALKEY_SSL_KEYFILE for mTLS."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
-            "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
-            "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+                "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
+                "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
         self.assertEqual(info["cache_options"]["ssl_certfile"], "/etc/ssl/client.crt")
         self.assertEqual(info["cache_options"]["ssl_keyfile"], "/etc/ssl/client.key")
 
     def test_tls_skip_verification(self):
         """VALKEY_SSL_CERT_REQS=none to skip certificate verification."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CERT_REQS": "none",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CERT_REQS": "none",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_cert_reqs"], "none")
 
     def test_no_tls_options_means_no_options_key(self):
