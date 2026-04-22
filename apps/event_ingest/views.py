@@ -27,6 +27,7 @@ from .minidump_event import minidump_to_event
 from .schema import (
     SUPPORTED_ITEMS,
     EnvelopeHeaderSchema,
+    EventUser,
     FeedbackPayload,
     ItemHeaderSchema,
     LogEnvelopePayload,
@@ -190,15 +191,11 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         else IssueEventType.DEFAULT
                     )
 
-                    if hasattr(item, "user") and item.user:  # Check if user attr exists
-                        # Assuming item.user is mutable or replace it
-                        # Simplest: item.user = item.user.copy(update={'ip_address': client_ip}) if using Pydantic models properly
-                        # Or if just dict: item.user['ip_address'] = client_ip
-                        # Let's assume LaxIngestSchema works like a dict for now
-                        if isinstance(item.user, dict):
-                            item.user["ip_address"] = client_ip
-                        # Else if Pydantic model: Need a way to update immutable field or ensure mutable schema
-                        # item.user.ip_address = client_ip
+                    if client_ip:
+                        if item.user:
+                            item.user.ip_address = client_ip
+                        else:
+                            item.user = EventUser(ip_address=client_ip)
 
                     # Prefer event item uuid, then enveloper header uuid, then if all else fails, generate one
                     if item.event_id is None:
