@@ -166,6 +166,12 @@ GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS = env.bool(
     "GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS", False
 )
 
+# Allow alert webhooks (Discord, Slack-style, Teams, ntfy, Zulip, generic) to target
+# private/internal IPs. Kept separate from the uptime flag: a user may legitimately
+# want to monitor an internal service without also permitting webhook-triggered
+# fetches to internal addresses, which are an exfiltration channel.
+GLITCHTIP_ALLOW_PRIVATE_IPS = env.bool("GLITCHTIP_ALLOW_PRIVATE_IPS", False)
+
 
 # Hot storage (PostgreSQL retention before archival to cold)
 GLITCHTIP_EVENT_HOT_DAYS = env.int(
