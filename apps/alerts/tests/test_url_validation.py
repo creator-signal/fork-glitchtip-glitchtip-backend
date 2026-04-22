@@ -85,7 +85,7 @@ class CheckURLSafeAsyncTests(SimpleTestCase):
         )
 
     def test_rebind_still_blocked_via_dns(self):
-        async def fake_getaddrinfo(self_, host, port, *args, **kwargs):
+        async def fake_getaddrinfo(*_, **__):
             return [(0, 0, 0, "", ("10.0.0.1", 0))]
 
         with mock.patch(
