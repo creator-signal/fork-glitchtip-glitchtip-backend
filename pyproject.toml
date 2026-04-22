@@ -46,6 +46,7 @@ dependencies = [
     "minidump>=0.0.24",
     "arro3-core~=0.8",
     "arro3-io~=0.8",
+    "django-async-backend==0.0.4",
 ]
 
 [dependency-groups]
