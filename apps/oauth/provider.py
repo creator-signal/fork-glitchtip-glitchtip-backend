@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import time
 
@@ -21,6 +23,8 @@ from .models import OAuthApplication, OAuthRefreshToken
 ACCESS_TOKEN_LIFETIME = 28800  # 8 hours
 REFRESH_TOKEN_LIFETIME = 30 * 86400  # 30 days
 AUTH_CODE_LIFETIME = 300  # 5 minutes
+
+TOKEN_PREFIX_LENGTH = 8
 
 VALID_SCOPES = [
     "project:read",
@@ -51,12 +55,39 @@ DEFAULT_SCOPES = [
 ]
 
 
+def _hash_token(token: str) -> str:
+    """Hash a high-entropy OAuth secret for at-rest storage.
+
+    SHA-256 is appropriate here because inputs are 256-bit random strings
+    from ``generate_token()``; a password-style KDF adds no value.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _token_prefix(token: str) -> str:
+    return token[:TOKEN_PREFIX_LENGTH]
+
+
 def _grant_cache_key(code: str) -> str:
-    return f"oauth_grant:{code}"
+    return f"oauth_grant:{_hash_token(code)}"
 
 
 def _access_cache_key(token: str) -> str:
-    return f"oauth_access:{token}"
+    return f"oauth_access:{_hash_token(token)}"
+
+
+async def _find_refresh_token(
+    plaintext: str, **extra_filters
+) -> OAuthRefreshToken | None:
+    """Look up a refresh token by prefix, verify via constant-time digest compare."""
+    prefix = _token_prefix(plaintext)
+    expected = _hash_token(plaintext)
+    async for rt in OAuthRefreshToken.objects.filter(
+        token_prefix=prefix, **extra_filters
+    ):
+        if hmac.compare_digest(rt.token_digest, expected):
+            return rt
+    return None
 
 
 class GlitchTipOAuthProvider(
@@ -168,13 +199,14 @@ class GlitchTipOAuthProvider(
             ACCESS_TOKEN_LIFETIME,
         )
 
-        # Create refresh token in DB
+        # Create refresh token in DB (hashed at rest)
         refresh_token_str = generate_token()
         await OAuthRefreshToken.objects.acreate(
-            token=refresh_token_str,
+            token_prefix=_token_prefix(refresh_token_str),
+            token_digest=_hash_token(refresh_token_str),
             application_id=client.client_id,
             user_id=user_id,
-            access_token_key=access_token_str,
+            access_token_digest=_hash_token(access_token_str),
             scopes=" ".join(authorization_code.scopes),
             expires_at=now + REFRESH_TOKEN_LIFETIME,
         )
@@ -192,18 +224,17 @@ class GlitchTipOAuthProvider(
         client: OAuthClientInformationFull,
         refresh_token: str,
     ) -> RefreshToken | None:
-        try:
-            rt = await OAuthRefreshToken.objects.aget(
-                token=refresh_token,
-                application_id=client.client_id,
-                is_revoked=False,
-            )
-        except OAuthRefreshToken.DoesNotExist:
+        rt = await _find_refresh_token(
+            refresh_token,
+            application_id=client.client_id,
+            is_revoked=False,
+        )
+        if rt is None:
             return None
         if rt.expires_at and rt.expires_at < int(time.time()):
             return None
         return RefreshToken(
-            token=rt.token,
+            token=refresh_token,
             client_id=rt.application_id,
             scopes=rt.scopes.split() if rt.scopes else [],
             expires_at=rt.expires_at,
@@ -215,14 +246,22 @@ class GlitchTipOAuthProvider(
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        old_rt = await OAuthRefreshToken.objects.aget(
-            token=refresh_token.token, is_revoked=False
-        )
+        old_rt = await _find_refresh_token(refresh_token.token, is_revoked=False)
+        if old_rt is None:
+            from mcp.server.auth.provider import TokenError
 
-        # Revoke old refresh token and delete old access token from cache
+            raise TokenError(
+                error="invalid_grant",
+                error_description="Refresh token not found",
+            )
+
+        # Revoke old refresh token. The paired access token expires within
+        # ACCESS_TOKEN_LIFETIME; we no longer store its plaintext so we can
+        # not proactively purge its cache entry here. Client-initiated
+        # revocation via revoke_token(AccessToken) still deletes the cache
+        # key because the caller provides the plaintext.
         old_rt.is_revoked = True
         await old_rt.asave(update_fields=["is_revoked"])
-        await cache.adelete(_access_cache_key(old_rt.access_token_key))
 
         # Create new access token in cache
         now = int(time.time())
@@ -243,13 +282,14 @@ class GlitchTipOAuthProvider(
             ACCESS_TOKEN_LIFETIME,
         )
 
-        # Create new refresh token in DB
+        # Create new refresh token in DB (hashed at rest)
         new_refresh_token_str = generate_token()
         await OAuthRefreshToken.objects.acreate(
-            token=new_refresh_token_str,
+            token_prefix=_token_prefix(new_refresh_token_str),
+            token_digest=_hash_token(new_refresh_token_str),
             application_id=client.client_id,
             user_id=old_rt.user_id,
-            access_token_key=new_access_token_str,
+            access_token_digest=_hash_token(new_access_token_str),
             scopes=" ".join(effective_scopes),
             expires_at=now + REFRESH_TOKEN_LIFETIME,
         )
@@ -264,7 +304,8 @@ class GlitchTipOAuthProvider(
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         # Check cache for OAuth access token
-        data = await cache.aget(_access_cache_key(token))
+        cache_key = _access_cache_key(token)
+        data = await cache.aget(cache_key)
         if data is not None:
             parsed = json.loads(data)
             now = int(time.time())
@@ -276,7 +317,7 @@ class GlitchTipOAuthProvider(
                     expires_at=parsed["expires_at"],
                     resource=parsed.get("resource"),
                 )
-            await cache.adelete(_access_cache_key(token))
+            await cache.adelete(cache_key)
 
         # Fallback: check regular API tokens (e.g. for MCP clients using
         # Bearer auth instead of the full OAuth flow)
@@ -293,18 +334,17 @@ class GlitchTipOAuthProvider(
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         if isinstance(token, AccessToken):
             await cache.adelete(_access_cache_key(token.token))
+            access_digest = _hash_token(token.token)
             async for rt in OAuthRefreshToken.objects.filter(
-                access_token_key=token.token, is_revoked=False
+                access_token_digest=access_digest, is_revoked=False
             ):
                 rt.is_revoked = True
                 await rt.asave(update_fields=["is_revoked"])
         elif isinstance(token, RefreshToken):
-            try:
-                rt = await OAuthRefreshToken.objects.aget(
-                    token=token.token, is_revoked=False
-                )
+            rt = await _find_refresh_token(token.token, is_revoked=False)
+            if rt is not None:
                 rt.is_revoked = True
                 await rt.asave(update_fields=["is_revoked"])
-                await cache.adelete(_access_cache_key(rt.access_token_key))
-            except OAuthRefreshToken.DoesNotExist:
-                pass
+                # Paired access cache key cannot be reconstructed from the
+                # row alone (digest is one-way). It expires naturally within
+                # ACCESS_TOKEN_LIFETIME.
