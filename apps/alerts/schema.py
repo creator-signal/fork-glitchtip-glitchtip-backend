@@ -1,12 +1,24 @@
 from typing import Annotated, Literal
 
+from django.conf import settings
 from ninja import Field, ModelSchema
-from pydantic import HttpUrl
+from pydantic import HttpUrl, field_validator
 
 from glitchtip.schema import CamelSchema
+from glitchtip.url_validation import validate_public_url
 
 from .constants import RecipientType
 from .models import AlertRecipient, ProjectAlert
+
+
+def _validate_recipient_url(url: HttpUrl) -> HttpUrl:
+    try:
+        validate_public_url(
+            str(url), allow_private=settings.GLITCHTIP_ALLOW_PRIVATE_IPS
+        )
+    except ValueError as err:
+        raise ValueError(str(err)) from err
+    return url
 
 
 class EmailAlertRecipientIn(CamelSchema):
@@ -26,6 +38,11 @@ class WebhookAlertRecipientIn(CamelSchema):
     url: HttpUrl
     tags_to_add: list[str] | None = Field(default_factory=list)
 
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: HttpUrl) -> HttpUrl:
+        return _validate_recipient_url(v)
+
 
 class ZulipAlertRecipientIn(CamelSchema):
     recipient_type: Literal[RecipientType.ZULIP]
@@ -35,6 +52,11 @@ class ZulipAlertRecipientIn(CamelSchema):
     channel: str
     topic: str = "GlitchTip Alerts"
     tags_to_add: list[str] | None = Field(default_factory=list)
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: HttpUrl) -> HttpUrl:
+        return _validate_recipient_url(v)
 
 
 AlertRecipientIn = Annotated[
