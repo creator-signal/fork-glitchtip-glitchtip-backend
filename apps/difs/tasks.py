@@ -1,4 +1,5 @@
 import contextlib
+import json
 import logging
 import tempfile
 from hashlib import sha1
@@ -106,7 +107,14 @@ def _update_source_context_on_event(event: ErrorIssueEventSchema, event_json: di
 def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int):
     # Serialize once for is_android check; native/proguard resolution may
     # mutate this dict but we re-serialize from the Pydantic event below.
+    fname = "event_difs_resolve_stacktrace"
+    print(f"FUNC {fname} start")
+
     event_json = event.model_dump(mode="json")
+
+    with open("/tmp/event.json", "w", encoding="utf-8") as file:
+        json.dump(event_json, file, indent=2, ensure_ascii=False)
+
     is_android = StacktraceProcessor.is_android_event(event_json)
     native_frames = StacktraceProcessor.has_native_frames(event_json)
 
@@ -148,23 +156,49 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
             continue
         blobs = [dif.file.blob]
         with difs_concat_file_blobs_to_disk(blobs) as symbol_file:
+            print(f"FUNC {fname} processing file {symbol_file.name}")
             remapped_stacktrace = StacktraceProcessor.resolve_stacktrace(
                 event_json,
                 symbol_file.name,
                 project_id=project_id,
                 debug_id=dif.data.get("debug_id"),
             )
+
             if remapped_stacktrace is not None and remapped_stacktrace.score > 0:
                 resolved_stracktrackes.append(remapped_stacktrace)
 
     if len(resolved_stracktrackes) > 0:
+        print(f"FUNC {fname} resolved_stracktrackes:")
+        for i, remapped_stacktrace in enumerate(resolved_stracktrackes):
+            print(
+                f"FUNC {fname} resolved_stracktrackes_score ({i}): {remapped_stacktrace.score}"
+            )
+            for frame in remapped_stacktrace.frames:
+                if frame is not None and frame.get("pre_context"):
+                    print(f"FUNC {fname} pre_context_frame {frame}")
+
         best_remapped_stacktrace = max(
             resolved_stracktrackes,
             key=lambda item: (
-                item.score,
-                sum(1 for f in item.frames if f and f.get("filename")),
+                # item.score, # TODO: decide if we need score at all
+                sum(
+                    1
+                    for f in item.frames
+                    if f
+                    and f.get("filename")
+                    and f.get("pre_context")
+                    and f.get("post_context")
+                ),
             ),
         )
+
+        print(
+            f"FUNC {fname} best_remapped_stacktrace (score {best_remapped_stacktrace.score}):"
+        )
+        for frame in best_remapped_stacktrace.frames:
+            if frame is not None and frame.get("pre_context"):
+                print(f"FUNC {fname} pre_context_frame {frame}")
+
         update_frames(event, best_remapped_stacktrace.frames)
 
     # JVM source context (runs after proguard deobfuscation if applicable).

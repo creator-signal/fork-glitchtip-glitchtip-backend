@@ -1506,3 +1506,76 @@ class SentryCompatTestCase(EventIngestTestCase):
         for key, value in event.tags.items():
             self.assertNotIn("\x00", key)
             self.assertNotIn("\x00", value)
+
+
+class IssueEventIosContextTestCase(EventIngestTestCase):
+    def test_ios_event_context(self):
+        from symbolic import Archive, normalize_debug_id
+
+        from apps.difs.tasks import event_difs_resolve_stacktrace
+        from apps.files.models import FileBlob
+
+        blobs_path = f"{COMPAT_TEST_DATA_DIR}/ios_event/uploads/file_blobs"
+
+        for filename in os.listdir(blobs_path):
+            blob_path = os.path.join(blobs_path, filename)
+
+            if not os.path.isfile(blob_path):
+                assert False, f"Blob path {blob_path} does not exist or is not a file"
+
+            with open(blob_path, "rb") as f:
+                try:
+                    archive = Archive.open(blob_path)
+                    metadatalist = [
+                        {
+                            "arch": obj.arch,
+                            "debug_id": normalize_debug_id(str(obj.debug_id)),
+                            "kind": obj.kind,
+                            "features": list(obj.features),
+                            "symbol_type": "native",
+                        }
+                        for obj in archive.iter_objects()
+                    ]
+
+                    content = f.read()
+                    checksum = sha1(content).hexdigest()
+                    django_file = DjangoFile(f)
+                    fileblob = FileBlob.from_file(django_file)
+
+                    file = baker.make("files.File", checksum=checksum, blob=fileblob)
+
+                    for metadata in metadatalist:
+                        print(f"Extracted metadata for {blob_path}: {metadata}")
+                        dif = baker.make(
+                            "difs.DebugInformationFile",
+                            project=self.project,
+                            file=file,
+                            name=filename,
+                            data={
+                                "arch": metadata["arch"],
+                                "debug_id": metadata["debug_id"],
+                                "kind": metadata["kind"],
+                                "features": metadata["features"],
+                                "symbol_type": metadata["symbol_type"],
+                            },
+                        )
+                        dif.save()
+                except Exception as err:
+                    assert False, f"Error while processing file '{blob_path}': {err}"
+
+        payload = self.get_json_data("events/test_data/ios_event/event.json")
+        event_schema = ErrorIssueEventSchema(**payload)
+
+        event_difs_resolve_stacktrace(event_schema, self.project.id)
+
+        has_pre_context_and_post_context = False
+
+        for frame in event_schema.exception.values[0].stacktrace.frames:
+            if frame.pre_context and frame.post_context:
+                has_pre_context_and_post_context = True
+                break
+
+        self.assertTrue(
+            has_pre_context_and_post_context,
+            "At least one frame should have both pre_context and post_context",
+        )
