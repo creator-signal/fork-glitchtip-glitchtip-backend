@@ -547,6 +547,61 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(report.issue_id, event.issue_id)
         self.assertEqual(report.comments, "This error is annoying")
 
+    def _post_envelope_with_user(
+        self, user_payload: dict | None, remote_addr: str = "142.255.29.14"
+    ) -> IssueEvent:
+        event_id = uuid.uuid4().hex
+        event_body: dict = {
+            "event_id": event_id,
+            "platform": "python",
+            "exception": {"values": [{"type": "X", "value": "y"}]},
+        }
+        if user_payload is not None:
+            event_body["user"] = user_payload
+        data = "\n".join(
+            [
+                json.dumps({"event_id": event_id}),
+                json.dumps({"type": "event"}),
+                json.dumps(event_body),
+            ]
+        )
+        res = self.client.post(
+            self.url,
+            data,
+            content_type="application/x-sentry-envelope",
+            REMOTE_ADDR=remote_addr,
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200, res.content)
+        return IssueEvent.objects.get_event(event_id)
+
+    def test_envelope_overwrites_payload_ip_when_scrubbing_off(self):
+        self.project.scrub_ip_addresses = False
+        self.project.organization.scrub_ip_addresses = False
+        self.project.organization.save()
+        self.project.save()
+        event = self._post_envelope_with_user(
+            {"id": "u1", "ip_address": "8.8.8.8"}, remote_addr="142.255.29.14"
+        )
+        self.assertEqual(event.data["user"]["ip_address"], "142.255.29.14")
+
+    def test_envelope_anonymizes_payload_ip_when_scrubbing_on(self):
+        self.project.scrub_ip_addresses = True
+        self.project.save()
+        event = self._post_envelope_with_user(
+            {"id": "u1", "ip_address": "8.8.8.8"}, remote_addr="142.255.29.14"
+        )
+        self.assertNotEqual(event.data["user"]["ip_address"], "8.8.8.8")
+        self.assertTrue(event.data["user"]["ip_address"].startswith("142.255.29."))
+
+    def test_envelope_sets_ip_when_payload_has_no_user(self):
+        self.project.scrub_ip_addresses = False
+        self.project.organization.scrub_ip_addresses = False
+        self.project.organization.save()
+        self.project.save()
+        event = self._post_envelope_with_user(None, remote_addr="142.255.29.14")
+        self.assertEqual(event.data["user"]["ip_address"], "142.255.29.14")
+
     def test_feedback_without_contact_info(self):
         """Feedback with no name/email should still be accepted."""
         feedback_id = uuid.uuid4().hex
