@@ -1545,7 +1545,6 @@ class IssueEventIosContextTestCase(EventIngestTestCase):
                     file = baker.make("files.File", checksum=checksum, blob=fileblob)
 
                     for metadata in metadatalist:
-                        print(f"Extracted metadata for {blob_path}: {metadata}")
                         dif = baker.make(
                             "difs.DebugInformationFile",
                             project=self.project,
