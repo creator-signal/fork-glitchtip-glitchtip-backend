@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
@@ -920,7 +921,9 @@ class CacheConfigTestCase(TestCase):
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "redis://valkey:6379/0")
         self.assertEqual(info["task_backend"], self.VTASKS_VALKEY)
-        self.assertEqual(info["session_engine"], "django.contrib.sessions.backends.cache")
+        self.assertEqual(
+            info["session_engine"], "django.contrib.sessions.backends.cache"
+        )
 
     def test_redis_url_fallback(self):
         """REDIS_URL works as a fallback for VALKEY_URL."""
@@ -930,37 +933,43 @@ class CacheConfigTestCase(TestCase):
 
     def test_valkey_host_components(self):
         """VALKEY_HOST + VALKEY_PORT + VALKEY_PASSWORD builds a redis:// URL."""
-        info = self._probe({
-            "VALKEY_HOST": "myhost",
-            "VALKEY_PORT": "6380",
-            "VALKEY_DATABASE": "2",
-        })
+        info = self._probe(
+            {
+                "VALKEY_HOST": "myhost",
+                "VALKEY_PORT": "6380",
+                "VALKEY_DATABASE": "2",
+            }
+        )
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "redis://myhost:6380/2")
 
     def test_valkey_host_with_password(self):
         """VALKEY_PASSWORD is embedded in the URL."""
-        info = self._probe({
-            "VALKEY_HOST": "myhost",
-            "VALKEY_PASSWORD": "s3cret",
-        })
+        info = self._probe(
+            {
+                "VALKEY_HOST": "myhost",
+                "VALKEY_PASSWORD": "s3cret",
+            }
+        )
         self.assertEqual(info["cache_location"], "redis://:s3cret@myhost:6379/0")
 
     def test_sentinel_url(self):
         """VALKEY_URL=sentinel://... is passed through to vcache."""
-        info = self._probe({
-            "VALKEY_URL": "sentinel://sentinel:26379/mymaster/0",
-        })
-        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
-        self.assertEqual(
-            info["cache_location"], "sentinel://sentinel:26379/mymaster/0"
+        info = self._probe(
+            {
+                "VALKEY_URL": "sentinel://sentinel:26379/mymaster/0",
+            }
         )
+        self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
+        self.assertEqual(info["cache_location"], "sentinel://sentinel:26379/mymaster/0")
 
     def test_sentinel_url_with_password(self):
         """Sentinel URL with embedded credentials."""
-        info = self._probe({
-            "VALKEY_URL": "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
+            }
+        )
         self.assertEqual(
             info["cache_location"],
             "sentinel://:s3cret@s1:26379,s2:26379/mymaster/0",
@@ -974,30 +983,36 @@ class CacheConfigTestCase(TestCase):
 
     def test_tls_with_ca_cert(self):
         """VALKEY_SSL_CA_CERTS populates OPTIONS."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
 
     def test_tls_mtls(self):
         """VALKEY_SSL_CERTFILE + VALKEY_SSL_KEYFILE for mTLS."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
-            "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
-            "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CA_CERTS": "/etc/ssl/ca.crt",
+                "VALKEY_SSL_CERTFILE": "/etc/ssl/client.crt",
+                "VALKEY_SSL_KEYFILE": "/etc/ssl/client.key",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_ca_certs"], "/etc/ssl/ca.crt")
         self.assertEqual(info["cache_options"]["ssl_certfile"], "/etc/ssl/client.crt")
         self.assertEqual(info["cache_options"]["ssl_keyfile"], "/etc/ssl/client.key")
 
     def test_tls_skip_verification(self):
         """VALKEY_SSL_CERT_REQS=none to skip certificate verification."""
-        info = self._probe({
-            "VALKEY_URL": "rediss://secure-host:6380/0",
-            "VALKEY_SSL_CERT_REQS": "none",
-        })
+        info = self._probe(
+            {
+                "VALKEY_URL": "rediss://secure-host:6380/0",
+                "VALKEY_SSL_CERT_REQS": "none",
+            }
+        )
         self.assertEqual(info["cache_options"]["ssl_cert_reqs"], "none")
 
     def test_no_tls_options_means_no_options_key(self):
@@ -1034,3 +1049,115 @@ class CacheConfigTestCase(TestCase):
         info = json.loads(lines[-1])
         self.assertEqual(info["cache_backend"], self.VCACHE_BACKEND)
         self.assertEqual(info["cache_location"], "redis://redis:6379/0")
+
+
+# ----------------------------------------------------------------------------
+# Settings-import-time behaviour (cookie derivation, production warnings).
+#
+# These assertions run against `glitchtip/settings.py` as loaded from a fresh
+# subprocess so that module-level side effects (warnings, env-driven defaults)
+# are observed cleanly, independent of the test runner's own settings import.
+# ----------------------------------------------------------------------------
+
+
+def _load_deploy_settings(
+    env_overrides: dict[str, str],
+) -> subprocess.CompletedProcess:
+    """Run a subprocess that imports Django settings under the given env and
+    emits a short report on stdout (settings values) and stderr (warnings).
+    """
+    code = (
+        "import django; django.setup();"
+        "from django.conf import settings;"
+        "print('SESSION_COOKIE_SECURE', settings.SESSION_COOKIE_SECURE);"
+        "print('CSRF_COOKIE_SECURE', settings.CSRF_COOKIE_SECURE);"
+        "print('SECRET_KEY_IS_DEFAULT', settings.SECRET_KEY == 'change_me');"
+        "print('ALLOWED_HOSTS', settings.ALLOWED_HOSTS);"
+    )
+    env = {
+        **os.environ,
+        "DJANGO_SETTINGS_MODULE": "glitchtip.settings",
+        # Minimum viable env. Subclasses override via env_overrides.
+        "DEBUG": "false",
+        "SECRET_KEY": "test-secret-key-not-default",
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/postgres",
+        "GLITCHTIP_URL": "https://example.com",
+        "ALLOWED_HOSTS": "example.com",
+        **env_overrides,
+    }
+    return subprocess.run(
+        [sys.executable, "-W", "always", "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _parse_deploy_report(stdout: str) -> dict[str, str]:
+    return dict(line.split(" ", 1) for line in stdout.strip().splitlines() if line)
+
+
+class CookieSecureDefaultsTests(SimpleTestCase):
+    def test_https_url_defaults_cookies_to_secure(self):
+        r = _load_deploy_settings({"GLITCHTIP_URL": "https://example.com"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        parsed = _parse_deploy_report(r.stdout)
+        self.assertEqual(parsed["SESSION_COOKIE_SECURE"], "True")
+        self.assertEqual(parsed["CSRF_COOKIE_SECURE"], "True")
+
+    def test_http_url_defaults_cookies_to_insecure(self):
+        r = _load_deploy_settings({"GLITCHTIP_URL": "http://localhost:8000"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        parsed = _parse_deploy_report(r.stdout)
+        self.assertEqual(parsed["SESSION_COOKIE_SECURE"], "False")
+        self.assertEqual(parsed["CSRF_COOKIE_SECURE"], "False")
+
+    def test_env_override_wins_over_derived_default(self):
+        r = _load_deploy_settings(
+            {
+                "GLITCHTIP_URL": "https://example.com",
+                "SESSION_COOKIE_SECURE": "false",
+                "CSRF_COOKIE_SECURE": "false",
+            }
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        parsed = _parse_deploy_report(r.stdout)
+        self.assertEqual(parsed["SESSION_COOKIE_SECURE"], "False")
+        self.assertEqual(parsed["CSRF_COOKIE_SECURE"], "False")
+
+
+class ProductionWarningTests(SimpleTestCase):
+    def test_default_secret_key_warns_in_production(self):
+        r = _load_deploy_settings({"SECRET_KEY": "change_me", "DEBUG": "false"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("SECRET_KEY is still the placeholder default", r.stderr)
+
+    def test_default_secret_key_silent_in_debug(self):
+        r = _load_deploy_settings({"SECRET_KEY": "change_me", "DEBUG": "true"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("SECRET_KEY is still the placeholder default", r.stderr)
+
+    def test_real_secret_key_silent(self):
+        r = _load_deploy_settings(
+            {"SECRET_KEY": "real-secret-abc123xyz789", "DEBUG": "false"}
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("SECRET_KEY is still the placeholder default", r.stderr)
+
+    def test_wildcard_allowed_hosts_warns_in_production(self):
+        r = _load_deploy_settings({"ALLOWED_HOSTS": "*", "DEBUG": "false"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ALLOWED_HOSTS is the wildcard default", r.stderr)
+
+    def test_wildcard_allowed_hosts_silent_in_debug(self):
+        r = _load_deploy_settings({"ALLOWED_HOSTS": "*", "DEBUG": "true"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ALLOWED_HOSTS is the wildcard default", r.stderr)
+
+    def test_scoped_allowed_hosts_silent(self):
+        r = _load_deploy_settings(
+            {"ALLOWED_HOSTS": "glitchtip.example.com", "DEBUG": "false"}
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ALLOWED_HOSTS is the wildcard default", r.stderr)

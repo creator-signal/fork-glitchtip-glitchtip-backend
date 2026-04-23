@@ -98,6 +98,30 @@ GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL = env.bool(
 # Is running unit test
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 
+# Warn (but don't refuse to boot) about unsafe defaults when running outside
+# development. A forced failure here would break existing self-hosters on
+# upgrade, so escalation to a hard check is deferred to a major release.
+# Operators who miss these in logs end up with forgeable signed cookies /
+# password-reset tokens and host-header attacks respectively.
+if not DEBUG and not TESTING:
+    if SECRET_KEY == "change_me":
+        warnings.warn(
+            "SECRET_KEY is still the placeholder default 'change_me'. "
+            "Set SECRET_KEY to a unique random secret before running in "
+            "production. Generate one with: "
+            "python -c 'import secrets; print(secrets.token_urlsafe(50))'",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if ALLOWED_HOSTS == ["*"]:
+        warnings.warn(
+            "ALLOWED_HOSTS is the wildcard default. Restrict to known "
+            "hostnames via the ALLOWED_HOSTS env var (comma-separated) in "
+            "production deployments.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
 # Enforced at decompression time by DecompressBodyMiddleware and is the source
 # of truth for ingest body size. DATA_UPLOAD_MAX_MEMORY_SIZE below sits just
@@ -677,7 +701,13 @@ else:
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
 SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", False)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
-SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", False)
+# Cookie Secure flags default to True when GLITCHTIP_URL is https so typical
+# production deploys get secure cookies out of the box. Keep False for http
+# so a local/internal-LAN deploy (no TLS) still lets users log in without
+# manual config. Both are env-overridable in either direction.
+_cookie_secure_default = GLITCHTIP_URL.scheme == "https"
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", _cookie_secure_default)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", _cookie_secure_default)
 SESSION_COOKIE_SAMESITE = env.str("SESSION_COOKIE_SAMESITE", "Lax")
 
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", "webmaster@localhost")
