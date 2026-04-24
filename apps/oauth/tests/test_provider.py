@@ -237,6 +237,9 @@ class OAuthProviderRefreshTokenTest(TestCase):
         await old_rt.arefresh_from_db()
         self.assertTrue(old_rt.is_revoked)
 
+        # Old access token should be removed from cache
+        self.assertIsNone(await cache.aget(_access_cache_key(old_access)))
+
         # New tokens should exist and differ from the old ones
         self.assertIsNotNone(new_token.access_token)
         self.assertIsNotNone(new_token.refresh_token)
@@ -396,10 +399,7 @@ class OAuthProviderRevokeTokenTest(TestCase):
 
         await rt.arefresh_from_db()
         self.assertTrue(rt.is_revoked)
-        # The paired access cache key cannot be reconstructed from the
-        # revoked row (digest is one-way), so the cache entry remains
-        # until it naturally expires.
-        self.assertIsNotNone(await cache.aget(_access_cache_key(access_str)))
+        self.assertIsNone(await cache.aget(_access_cache_key(access_str)))
 
     async def test_revoke_nonexistent_refresh_token(self):
         """Revoking a nonexistent token should be a no-op."""

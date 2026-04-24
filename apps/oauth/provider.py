@@ -72,8 +72,12 @@ def _grant_cache_key(code: str) -> str:
     return f"oauth_grant:{_hash_token(code)}"
 
 
+def _access_cache_key_from_digest(digest: str) -> str:
+    return f"oauth_access:{digest}"
+
+
 def _access_cache_key(token: str) -> str:
-    return f"oauth_access:{_hash_token(token)}"
+    return _access_cache_key_from_digest(_hash_token(token))
 
 
 async def _find_refresh_token(
@@ -255,13 +259,11 @@ class GlitchTipOAuthProvider(
                 error_description="Refresh token not found",
             )
 
-        # Revoke old refresh token. The paired access token expires within
-        # ACCESS_TOKEN_LIFETIME; we no longer store its plaintext so we can
-        # not proactively purge its cache entry here. Client-initiated
-        # revocation via revoke_token(AccessToken) still deletes the cache
-        # key because the caller provides the plaintext.
+        # Revoke old refresh token and delete old access token from cache.
+        # The cache is keyed by digest, which matches the stored column.
         old_rt.is_revoked = True
         await old_rt.asave(update_fields=["is_revoked"])
+        await cache.adelete(_access_cache_key_from_digest(old_rt.access_token_digest))
 
         # Create new access token in cache
         now = int(time.time())
@@ -345,6 +347,6 @@ class GlitchTipOAuthProvider(
             if rt is not None:
                 rt.is_revoked = True
                 await rt.asave(update_fields=["is_revoked"])
-                # Paired access cache key cannot be reconstructed from the
-                # row alone (digest is one-way). It expires naturally within
-                # ACCESS_TOKEN_LIFETIME.
+                await cache.adelete(
+                    _access_cache_key_from_digest(rt.access_token_digest)
+                )
