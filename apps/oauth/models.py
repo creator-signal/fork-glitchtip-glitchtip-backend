@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
 
-from apps.api_tokens.models import generate_token
 from glitchtip.base_models import CreatedModel
 
 
@@ -21,9 +20,22 @@ class OAuthApplication(CreatedModel):
 
 
 class OAuthRefreshToken(CreatedModel):
-    """Refresh token paired with a cached access token."""
+    """Refresh token paired with a cached access token.
 
-    token = models.CharField(max_length=64, unique=True, default=generate_token)
+    The refresh token and its paired access token are both stored hashed:
+    the plaintext is only ever returned to the client in the token
+    exchange response.
+    """
+
+    token_prefix = models.CharField(
+        max_length=8,
+        db_index=True,
+        help_text="First 8 chars of the plaintext refresh token, for lookup",
+    )
+    token_digest = models.CharField(
+        max_length=64,
+        help_text="SHA-256 hex digest of the plaintext refresh token",
+    )
     application = models.ForeignKey(
         OAuthApplication,
         on_delete=models.CASCADE,
@@ -31,13 +43,13 @@ class OAuthRefreshToken(CreatedModel):
         related_name="refresh_tokens",
     )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    access_token_key = models.CharField(
+    access_token_digest = models.CharField(
         max_length=64,
-        help_text="The access token string, for paired revocation",
+        help_text="SHA-256 hex digest of the paired access token, for revocation",
     )
     scopes = models.TextField(blank=True, help_text="Space-separated scopes")
     expires_at = models.IntegerField(null=True, blank=True)
     is_revoked = models.BooleanField(default=False)
 
     def __str__(self):
-        return self.token
+        return f"OAuthRefreshToken(prefix={self.token_prefix}…)"

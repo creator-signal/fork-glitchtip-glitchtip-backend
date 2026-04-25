@@ -16,6 +16,8 @@ from apps.oauth.provider import (
     GlitchTipOAuthProvider,
     _access_cache_key,
     _grant_cache_key,
+    _hash_token,
+    _token_prefix,
 )
 
 
@@ -155,10 +157,13 @@ class OAuthProviderAuthCodeFlowTest(TestCase):
         parsed = json.loads(cached)
         self.assertEqual(parsed["user_id"], self.user.id)
 
-        # Refresh token should be in DB
-        rt = await OAuthRefreshToken.objects.aget(token=token.refresh_token)
+        # Refresh token should be in DB, identifiable only by digest
+        rt = await OAuthRefreshToken.objects.aget(
+            token_prefix=_token_prefix(token.refresh_token),
+            token_digest=_hash_token(token.refresh_token),
+        )
         self.assertEqual(rt.user_id, self.user.id)
-        self.assertEqual(rt.access_token_key, token.access_token)
+        self.assertEqual(rt.access_token_digest, _hash_token(token.access_token))
 
 
 class OAuthProviderRefreshTokenTest(TestCase):
@@ -176,22 +181,26 @@ class OAuthProviderRefreshTokenTest(TestCase):
 
     async def test_load_refresh_token_revoked(self):
         await self.provider.register_client(self.info)
+        plaintext = "revoked-token"
         await OAuthRefreshToken.objects.acreate(
-            token="revoked-token",
+            token_prefix=_token_prefix(plaintext),
+            token_digest=_hash_token(plaintext),
             application_id="test-client-id",
             user_id=self.user.id,
-            access_token_key="old-access",
+            access_token_digest=_hash_token("old-access"),
             scopes="org:read",
             is_revoked=True,
         )
-        result = await self.provider.load_refresh_token(self.info, "revoked-token")
+        result = await self.provider.load_refresh_token(self.info, plaintext)
         self.assertIsNone(result)
 
     async def test_refresh_token_rotation(self):
         await self.provider.register_client(self.info)
 
-        # Set up initial tokens
+        # Set up initial tokens. We have to keep the plaintext refresh
+        # string around locally because the DB only stores its digest.
         old_access = generate_token()
+        old_refresh = generate_token()
         access_data = json.dumps(
             {
                 "user_id": self.user.id,
@@ -206,15 +215,17 @@ class OAuthProviderRefreshTokenTest(TestCase):
         )
 
         old_rt = await OAuthRefreshToken.objects.acreate(
+            token_prefix=_token_prefix(old_refresh),
+            token_digest=_hash_token(old_refresh),
             application_id="test-client-id",
             user_id=self.user.id,
-            access_token_key=old_access,
+            access_token_digest=_hash_token(old_access),
             scopes="org:read",
             expires_at=int(time.time()) + 86400,
         )
 
         refresh = RefreshToken(
-            token=old_rt.token,
+            token=old_refresh,
             client_id="test-client-id",
             scopes=["org:read"],
             expires_at=old_rt.expires_at,
@@ -229,11 +240,11 @@ class OAuthProviderRefreshTokenTest(TestCase):
         # Old access token should be removed from cache
         self.assertIsNone(await cache.aget(_access_cache_key(old_access)))
 
-        # New tokens should exist
+        # New tokens should exist and differ from the old ones
         self.assertIsNotNone(new_token.access_token)
         self.assertIsNotNone(new_token.refresh_token)
         self.assertNotEqual(new_token.access_token, old_access)
-        self.assertNotEqual(new_token.refresh_token, old_rt.token)
+        self.assertNotEqual(new_token.refresh_token, old_refresh)
 
         # New access token should be in cache
         self.assertIsNotNone(
@@ -241,7 +252,10 @@ class OAuthProviderRefreshTokenTest(TestCase):
         )
 
         # New refresh token should be in DB
-        new_rt = await OAuthRefreshToken.objects.aget(token=new_token.refresh_token)
+        new_rt = await OAuthRefreshToken.objects.aget(
+            token_prefix=_token_prefix(new_token.refresh_token),
+            token_digest=_hash_token(new_token.refresh_token),
+        )
         self.assertFalse(new_rt.is_revoked)
         self.assertEqual(new_rt.user_id, self.user.id)
 
@@ -333,12 +347,15 @@ class OAuthProviderRevokeTokenTest(TestCase):
             client_info={},
         )
         access_str = generate_token()
+        refresh_str = generate_token()
         await cache.aset(_access_cache_key(access_str), "data", 3600)
 
         rt = await OAuthRefreshToken.objects.acreate(
+            token_prefix=_token_prefix(refresh_str),
+            token_digest=_hash_token(refresh_str),
             application=app,
             user=self.user,
-            access_token_key=access_str,
+            access_token_digest=_hash_token(access_str),
             scopes="org:read",
         )
 
@@ -361,17 +378,20 @@ class OAuthProviderRevokeTokenTest(TestCase):
             client_info={},
         )
         access_str = generate_token()
+        refresh_str = generate_token()
         await cache.aset(_access_cache_key(access_str), "data", 3600)
 
         rt = await OAuthRefreshToken.objects.acreate(
+            token_prefix=_token_prefix(refresh_str),
+            token_digest=_hash_token(refresh_str),
             application=app,
             user=self.user,
-            access_token_key=access_str,
+            access_token_digest=_hash_token(access_str),
             scopes="org:read",
         )
 
         token = RefreshToken(
-            token=rt.token,
+            token=refresh_str,
             client_id="test-client",
             scopes=["org:read"],
         )
@@ -389,3 +409,64 @@ class OAuthProviderRevokeTokenTest(TestCase):
             scopes=["org:read"],
         )
         await self.provider.revoke_token(token)
+
+
+class OAuthTokenHashingAtRestTest(TestCase):
+    """The plaintext refresh / access token values must never land on disk."""
+
+    def setUp(self):
+        self.provider = GlitchTipOAuthProvider()
+        self.user = baker.make("users.user", is_active=True)
+        self.info = _make_client_info()
+
+    def tearDown(self):
+        cache.clear()
+
+    async def test_refresh_row_stores_only_digest_not_plaintext(self):
+        await self.provider.register_client(self.info)
+        code = generate_token()
+        now = int(time.time())
+        grant = json.dumps(
+            {
+                "client_id": "test-client-id",
+                "user_id": self.user.id,
+                "scopes": ["org:read"],
+                "expires_at": now + AUTH_CODE_LIFETIME,
+                "code_challenge": "c",
+                "redirect_uri": "http://localhost:3000/callback",
+                "redirect_uri_provided_explicitly": True,
+                "resource": None,
+            }
+        )
+        await cache.aset(_grant_cache_key(code), grant, AUTH_CODE_LIFETIME)
+        auth_code = await self.provider.load_authorization_code(self.info, code)
+        token = await self.provider.exchange_authorization_code(self.info, auth_code)
+
+        rt = await OAuthRefreshToken.objects.aget(
+            token_prefix=_token_prefix(token.refresh_token)
+        )
+        # Plaintext fields no longer exist on the model; verify the row
+        # holds only the digest-shaped values.
+        self.assertEqual(rt.token_digest, _hash_token(token.refresh_token))
+        self.assertEqual(rt.access_token_digest, _hash_token(token.access_token))
+        self.assertNotIn(token.refresh_token, rt.token_digest)
+        self.assertNotIn(token.access_token, rt.access_token_digest)
+
+    async def test_cache_key_does_not_leak_access_token_plaintext(self):
+        token_str = generate_token()
+        await cache.aset(
+            _access_cache_key(token_str),
+            json.dumps(
+                {
+                    "user_id": self.user.id,
+                    "client_id": "x",
+                    "scopes": [],
+                    "expires_at": int(time.time()) + 3600,
+                    "resource": None,
+                }
+            ),
+            3600,
+        )
+        # The key the cache actually sees is the hash, not the plaintext.
+        self.assertNotIn(token_str, _access_cache_key(token_str))
+        self.assertTrue(_access_cache_key(token_str).startswith("oauth_access:"))
