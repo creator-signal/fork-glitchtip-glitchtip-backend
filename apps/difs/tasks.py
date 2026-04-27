@@ -163,7 +163,6 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
         best_remapped_stacktrace = max(
             resolved_stracktrackes,
             key=lambda item: (
-                # item.score, # TODO: decide if we need score at all
                 sum(
                     1
                     for f in item.frames
@@ -172,6 +171,8 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
                     and f.get("pre_context")
                     and f.get("post_context")
                 ),
+                item.score,
+                sum(1 for f in item.frames if f and f.get("filename")),
             ),
         )
 
