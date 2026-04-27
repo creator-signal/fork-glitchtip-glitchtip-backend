@@ -13,8 +13,11 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from model_bakery import baker
+from symbolic import Archive, normalize_debug_id
 
+from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.event_ingest.tests.utils import generate_event
+from apps.files.models import FileBlob
 from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueHash
 from apps.projects.models import IssueEventProjectHourlyStatistic
@@ -1510,11 +1513,6 @@ class SentryCompatTestCase(EventIngestTestCase):
 
 class IssueEventIosContextTestCase(EventIngestTestCase):
     def test_ios_event_context(self):
-        from symbolic import Archive, normalize_debug_id
-
-        from apps.difs.tasks import event_difs_resolve_stacktrace
-        from apps.files.models import FileBlob
-
         blobs_path = f"{COMPAT_TEST_DATA_DIR}/ios_event/uploads/file_blobs"
 
         for filename in os.listdir(blobs_path):
