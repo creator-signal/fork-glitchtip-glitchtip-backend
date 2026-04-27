@@ -1512,6 +1512,12 @@ class SentryCompatTestCase(EventIngestTestCase):
 
 
 class IssueEventIosContextTestCase(EventIngestTestCase):
+    fileblobs = []
+
+    def tearDown(self):
+        for fileblob in self.fileblobs:
+            fileblob.blob.delete()
+
     def test_ios_event_context(self):
         blobs_path = f"{COMPAT_TEST_DATA_DIR}/ios_event/uploads/file_blobs"
 
@@ -1539,6 +1545,7 @@ class IssueEventIosContextTestCase(EventIngestTestCase):
                     checksum = sha1(content).hexdigest()
                     django_file = DjangoFile(f)
                     fileblob = FileBlob.from_file(django_file)
+                    self.fileblobs.append(fileblob)
 
                     file = baker.make("files.File", checksum=checksum, blob=fileblob)
 
