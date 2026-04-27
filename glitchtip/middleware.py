@@ -309,9 +309,14 @@ class DecompressBodyMiddleware(object):
             try:
                 # Wrap the original stream with the appropriate decoder
                 request._stream = decoder_class(request._stream)
-                # Workaround for streaming transformations: Set large dummy CONTENT_LENGTH
-                # to indicate unknown length after replacing request._stream.
-                request.META["CONTENT_LENGTH"] = "4294967295"
+                # The decompressed stream length isn't known up front, but the
+                # decoder enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE at read
+                # time. Advertise that cap as CONTENT_LENGTH so Django's
+                # DATA_UPLOAD_MAX_MEMORY_SIZE check sees a realistic ceiling
+                # instead of rejecting with 413.
+                request.META["CONTENT_LENGTH"] = str(
+                    settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE
+                )
                 # Remove encoding header as stream is now decompressed
                 request.META.pop("HTTP_CONTENT_ENCODING", None)
             except Exception as e:

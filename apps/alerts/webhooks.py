@@ -1,13 +1,31 @@
+import logging
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import aiohttp
 from django.conf import settings
 
+from glitchtip.url_validation import check_url_safe
+
 from .constants import RecipientType
 
 if TYPE_CHECKING:
     from .models import Notification
+
+logger = logging.getLogger(__name__)
+
+
+async def _is_url_allowed(url: str) -> bool:
+    """Runtime SSRF guard for outbound webhook URLs.
+
+    Schema-level validation already rejects private IPs at alert-creation time
+    when `GLITCHTIP_ALLOW_PRIVATE_IPS` is False, but this is checked again at
+    send time to cover DNS rebinding and config changes between create and fire.
+    """
+    if await check_url_safe(url, allow_private=settings.GLITCHTIP_ALLOW_PRIVATE_IPS):
+        return True
+    logger.warning("webhook delivery blocked: URL resolves to a private/internal IP")
+    return False
 
 
 @dataclass
@@ -80,15 +98,15 @@ async def send_webhook(
     message: str,
     attachments: list[WebhookAttachment] | None = None,
 ):
+    if not await _is_url_allowed(url):
+        return None
     if not attachments:
         attachments = []
     data = WebhookPayload(text=message, attachments=attachments)
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.post(
-                url, json=asdict(data), timeout=timeout
-            ) as resp:
+            async with session.post(url, json=asdict(data), timeout=timeout) as resp:
                 return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
@@ -211,13 +229,13 @@ async def send_issue_as_discord_webhook(
 
 
 async def send_discord_webhook(url: str, message: str, embeds: list[DiscordEmbed]):
+    if not await _is_url_allowed(url):
+        return None
     payload = DiscordWebhookPayload(content=message, embeds=embeds)
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.post(
-                url, json=asdict(payload), timeout=timeout
-            ) as resp:
+            async with session.post(url, json=asdict(payload), timeout=timeout) as resp:
                 return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
@@ -289,14 +307,14 @@ async def send_googlechat_webhook(url: str, cards: list[GoogleChatCard]):
     Send Google Chat compatible message as documented in
     https://developers.google.com/chat/messages-overview
     """
+    if not await _is_url_allowed(url):
+        return None
     payload = GoogleChatWebhookPayload()
     [payload.add_card(card) for card in cards]
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.post(
-                url, json=asdict(payload), timeout=timeout
-            ) as resp:
+            async with session.post(url, json=asdict(payload), timeout=timeout) as resp:
                 return resp
     except (TimeoutError, aiohttp.ClientError):
         return None
@@ -329,6 +347,8 @@ async def send_ntfy(
     tags: list[str] | None = None,
 ):
     """Send a notification via ntfy (https://ntfy.sh)."""
+    if not await _is_url_allowed(url):
+        return None
     headers = {
         "Title": title,
         "Markdown": "yes",
@@ -382,6 +402,8 @@ async def send_teams_webhook(
     url: str, card_body: list[dict], actions: list[dict] | None = None
 ):
     """Send an Adaptive Card to a Microsoft Teams Workflows webhook."""
+    if not await _is_url_allowed(url):
+        return None
     payload = {
         "type": "message",
         "attachments": [
@@ -454,6 +476,8 @@ async def send_issue_as_teams_webhook(
 
 async def send_zulip_message(server_url, bot_email, api_key, channel, topic, content):
     """Send a message to a Zulip channel via the native API."""
+    if not await _is_url_allowed(server_url):
+        return None
     url = f"{server_url.rstrip('/')}/api/v1/messages"
     data = {"type": "channel", "to": channel, "topic": topic, "content": content}
     timeout = aiohttp.ClientTimeout(total=10)

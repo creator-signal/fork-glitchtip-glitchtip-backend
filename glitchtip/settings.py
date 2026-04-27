@@ -98,15 +98,58 @@ GLITCHTIP_CHUNK_UPLOAD_USE_RELATIVE_URL = env.bool(
 # Is running unit test
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 4294967295  # TMP REMOVE THIS
-DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
-    "DATA_UPLOAD_MAX_NUMBER_FIELDS",
-    default=global_settings.DATA_UPLOAD_MAX_NUMBER_FIELDS,
-)
+# Warn (but don't refuse to boot) about unsafe defaults when running outside
+# development. A forced failure here would break existing self-hosters on
+# upgrade, so escalation to a hard check is deferred to a major release.
+# Operators who miss these in logs end up with forgeable signed cookies /
+# password-reset tokens and host-header attacks respectively.
+if not DEBUG and not TESTING:
+    if SECRET_KEY == "change_me":
+        warnings.warn(
+            "SECRET_KEY is still the placeholder default 'change_me'. "
+            "Set SECRET_KEY to a unique random secret before running in "
+            "production. Generate one with: "
+            "python -c 'import secrets; print(secrets.token_urlsafe(50))'",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if ALLOWED_HOSTS == ["*"]:
+        warnings.warn(
+            "ALLOWED_HOSTS is the wildcard default. Restrict to known "
+            "hostnames via the ALLOWED_HOSTS env var (comma-separated) in "
+            "production deployments.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
+# Enforced at decompression time by DecompressBodyMiddleware and is the source
+# of truth for ingest body size. DATA_UPLOAD_MAX_MEMORY_SIZE below sits just
+# above this to give Django's own check a matching ceiling.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
     5 * 1024 * 1024,  # 5 MB
+)
+
+# Raw request body cap before view handling. For ingest endpoints the
+# DecompressBodyMiddleware enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the
+# decompressed stream and sets CONTENT_LENGTH to that cap, so this setting
+# must be at least as large. Multipart file uploads (minidumps, source-map
+# chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk, so this
+# does not need to cover them.
+#
+# 15 MB default gives plenty of headroom over the 5 MB ingest cap for any
+# non-ingest JSON bodies (webhooks, bulk invites, assemble manifests) while
+# still killing the pre-existing 4 GB DoS vector. Operators can raise via env;
+# if GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE is itself raised above 15 MB, this
+# default scales with it so the two stay coherent.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
+    "DATA_UPLOAD_MAX_MEMORY_SIZE",
+    default=max(15 * 1024 * 1024, GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE + 1024 * 1024),
+)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
+    "DATA_UPLOAD_MAX_NUMBER_FIELDS",
+    default=global_settings.DATA_UPLOAD_MAX_NUMBER_FIELDS,
 )
 
 PARTITION_HASH_BUCKETS = env.int("PARTITION_HASH_BUCKETS", 4)
@@ -165,6 +208,12 @@ GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
 GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS = env.bool(
     "GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS", False
 )
+
+# Allow alert webhooks (Discord, Slack-style, Teams, ntfy, Zulip, generic) to target
+# private/internal IPs. Kept separate from the uptime flag: a user may legitimately
+# want to monitor an internal service without also permitting webhook-triggered
+# fetches to internal addresses, which are an exfiltration channel.
+GLITCHTIP_ALLOW_PRIVATE_IPS = env.bool("GLITCHTIP_ALLOW_PRIVATE_IPS", False)
 
 
 # Hot storage (PostgreSQL retention before archival to cold)
@@ -652,7 +701,13 @@ else:
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", 0)
 SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", False)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
-SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", False)
+# Cookie Secure flags default to True when GLITCHTIP_URL is https so typical
+# production deploys get secure cookies out of the box. Keep False for http
+# so a local/internal-LAN deploy (no TLS) still lets users log in without
+# manual config. Both are env-overridable in either direction.
+_cookie_secure_default = GLITCHTIP_URL.scheme == "https"
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", _cookie_secure_default)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", _cookie_secure_default)
 SESSION_COOKIE_SAMESITE = env.str("SESSION_COOKIE_SAMESITE", "Lax")
 
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", "webmaster@localhost")

@@ -33,6 +33,9 @@ async def update_issues_task(
 
     status = update_params.get("status")
     merge_id = update_params.get("merge")
+    assignee_org_user_id = update_params.get("assigned_to_org_user_id")
+    assignee_team_id = update_params.get("assigned_to_team_id")
+    apply_assignment = "assigned_to_org_user_id" in update_params
 
     if status:
         event_status = EventStatus.from_string(status)
@@ -47,6 +50,17 @@ async def update_issues_task(
                 break
 
             await Issue.objects.filter(id__in=batch_ids).aupdate(status=event_status)
+
+    if apply_assignment:
+        chunk_size = 1000
+        while True:
+            batch_ids = [i async for i in qs.values_list("id", flat=True)[:chunk_size]]
+            if not batch_ids:
+                break
+            await Issue.objects.filter(id__in=batch_ids).aupdate(
+                assigned_to_org_user_id=assignee_org_user_id,
+                assigned_to_team_id=assignee_team_id,
+            )
 
     if merge_id:
         try:

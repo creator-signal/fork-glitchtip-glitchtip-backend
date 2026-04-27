@@ -5,6 +5,7 @@ DuckDB runs in-process (no PostgreSQL extension required).
 Tests that need S3 access are skipped when no bucket is configured.
 """
 
+import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -568,6 +569,81 @@ class CorruptParquetTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             self.assertTrue(
                 any("20250501.parquet" in msg for msg in cm.output),
                 f"Expected ERROR log mentioning corrupt file, got: {cm.output}",
+            )
+
+    @override_settings(
+        GLITCHTIP_ENABLE_DUCKDB="true",
+        GLITCHTIP_COLD_STORAGE_BUCKET=None,
+        AWS_STORAGE_BUCKET_NAME=None,
+        BILLING_ENABLED=False,
+    )
+    def test_oom_does_not_delete_file(self):
+        """An OOM during read must NOT be treated as corruption.
+
+        Regression for a data-loss bug where any exception from
+        ``duck_conn.execute`` deleted the parquet file. A transient
+        ``OutOfMemoryException`` would silently destroy valid data.
+        """
+        import duckdb
+
+        from glitchtip import cold_storage as cs
+        from glitchtip.cold_storage import (
+            archive_and_swap_partition,
+            get_cold_storage_backend,
+            get_duckdb_parquet_path,
+            get_org_cold_storage_path,
+        )
+
+        from ..api import query_cold_storage
+
+        with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
+            org_id = self.organization.id
+            proj_id = self.project.id
+
+            _bulk_insert_logs(self.day1, 30, org_id, proj_id)
+            archive_and_swap_partition(
+                self.part1, "logs_logevent", EXPORT_COLUMN_TYPES, LOGS_SELECT_SQL
+            )
+
+            storage = get_cold_storage_backend()
+            day1_path = get_org_cold_storage_path("logs_logevent", org_id, "20250501")
+            full_path = get_duckdb_parquet_path(storage, day1_path)
+            self.assertTrue(os.path.exists(full_path))
+
+            real_get_conn = cs.get_duckdb_read_connection
+
+            class _OOMConnProxy:
+                def __init__(self, real):
+                    self._real = real
+
+                def execute(self, sql, *args, **kwargs):
+                    if "read_parquet" in sql:
+                        raise duckdb.OutOfMemoryException(
+                            "Out of Memory Error: simulated"
+                        )
+                    return self._real.execute(sql, *args, **kwargs)
+
+                def __getattr__(self, name):
+                    return getattr(self._real, name)
+
+            def patched_get_conn(storage=None):
+                return _OOMConnProxy(real_get_conn(storage))
+
+            with mock.patch.object(
+                cs, "get_duckdb_read_connection", side_effect=patched_get_conn
+            ):
+                with self.assertRaises(duckdb.OutOfMemoryException):
+                    query_cold_storage(
+                        organization_id=org_id,
+                        start_dt=self.day1,
+                        end_dt=self.day1 + timedelta(days=1),
+                        limit=200,
+                    )
+
+            # File must still exist — OOM is not corruption.
+            self.assertTrue(
+                os.path.exists(full_path),
+                "Parquet file was deleted on OOM — that's data loss",
             )
 
 

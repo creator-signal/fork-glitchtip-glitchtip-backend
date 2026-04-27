@@ -150,6 +150,16 @@ def _row_to_issue_event(row: tuple) -> IssueEventRow:
 
 DICTIONARY_COLUMNS: set[str] = set()
 
+# Cap row groups so a reader can decompress one within DuckDB's memory_limit
+# (256 MB by default) and so point lookups by id prune most of a chunk file.
+# Issue events carry large JSON payloads in `data` (~30 KB/row uncompressed
+# for high-volume orgs); 500 rows/RG keeps worst-case decompression around
+# ~15 MB and, per benchmarks/bench_row_group_size.py, cuts p50 latency from
+# ~19 ms (rg=1000) to ~6 ms (rg=500) via row-group statistics pruning.
+# File-size cost is within 1% of larger row groups under ZSTD + dictionary
+# encoding.
+MAX_ROW_GROUP_SIZE = 500
+
 
 def archive_partition_per_org(
     partition_name: str,
@@ -163,6 +173,7 @@ def archive_partition_per_org(
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
         dictionary_columns=DICTIONARY_COLUMNS,
+        max_row_group_size=MAX_ROW_GROUP_SIZE,
     )
 
 
@@ -176,6 +187,7 @@ def archive_and_swap_partition(
         ISSUE_EVENT_EXPORT_COLUMN_TYPES,
         ISSUE_EVENT_SELECT_SQL,
         dictionary_columns=DICTIONARY_COLUMNS,
+        max_row_group_size=MAX_ROW_GROUP_SIZE,
     )
 
 
