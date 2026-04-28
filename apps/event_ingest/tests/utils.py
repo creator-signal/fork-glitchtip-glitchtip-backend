@@ -5,11 +5,11 @@ import uuid
 from typing import Union
 
 from asgiref.sync import async_to_sync
-from django.test import TestCase
 from django.utils import timezone
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..process_event import process_issue_events
@@ -121,9 +121,15 @@ def generate_event(
         return events
 
 
-class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
+class EventIngestTestCase(GlitchTipTestCaseMixin, AsyncioRollbackTestCase):
     """
-    Base class for event ingest tests with helper functions
+    Base class for event ingest tests with helper functions.
+
+    Uses :class:`AsyncioRollbackTestCase` so the per-test transaction
+    covers writes done via ``async_connections`` from the ingest hot
+    paths (``process_event``, ``process_logs``, etc.) — those use a
+    real async cursor, and without the bridge they'd commit out-of-band
+    and survive Django's TestCase rollback.
     """
 
     def setUp(self):

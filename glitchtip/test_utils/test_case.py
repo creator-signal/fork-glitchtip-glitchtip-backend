@@ -4,9 +4,10 @@ from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 
 
-class GlitchTestCase(TestCase):
+class GlitchTestCase(AsyncioRollbackTestCase):
     """
     Usage:
 
@@ -74,7 +75,7 @@ class GlitchTipTestCaseMixin:
         self.project.teams.add(self.team)
 
 
-class GlitchTipTestCase(GlitchTipTestCaseMixin, TestCase):
+class GlitchTipTestCase(GlitchTipTestCaseMixin, AsyncioRollbackTestCase):
     """Use GlitchTestCase instead."""
 
     def create_user_and_project(self):

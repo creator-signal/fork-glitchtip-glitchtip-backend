@@ -4,7 +4,7 @@ Sync-bridged async DatabaseWrapper used by AsyncioRollbackTestCase.
 Vendored from django-async-backend PR #20:
 https://github.com/Arfey/django-async-backend/pull/20
 
-Copied verbatim from upstream commit 6e9d8fe (branch
+Copied verbatim from upstream commit ea07ec8 (branch
 ``feat/asyncio-rollback-testcase``). Remove this file and import from
 ``django_async_backend.db.sync_bridge`` once upstream merges.
 
@@ -132,6 +132,9 @@ class SyncBridgedAsyncWrapper:
         # Required by code that introspects task ownership.
         self._task = None
 
+        # Lazy ``_BridgedOps`` proxy — see the ``ops`` property below.
+        self._ops_proxy = None
+
     # ----- Attributes that defer to the sync connection -----
 
     @property
@@ -152,7 +155,16 @@ class SyncBridgedAsyncWrapper:
 
     @property
     def ops(self):
-        return self._sync.ops
+        # Real ``AsyncDatabaseOperations`` exposes an async ``compose_sql``;
+        # callers in async-only code paths ``await`` it. The sync ops
+        # only has a sync version that internally opens a cursor — calling
+        # it from inside an async context trips Django's
+        # ``SynchronousOnlyOperation`` guard. Wrap with a thin proxy that
+        # offers the async surface (compose_sql) and falls back to sync
+        # ops for everything else.
+        if self._ops_proxy is None:
+            self._ops_proxy = _BridgedOps(self._sync.ops)
+        return self._ops_proxy
 
     @property
     def Database(self):
@@ -358,6 +370,30 @@ class SyncBridgedAsyncWrapper:
             raise TypeError("on_commit()'s callback must be a callable.")
         if self.in_atomic_block:
             self.run_on_commit.append((set(self.savepoint_ids), func, robust))
+
+
+class _BridgedOps:
+    """Proxies sync ``DatabaseOperations`` and exposes an async ``compose_sql``.
+
+    Real ``AsyncDatabaseOperations`` from ``django_async_backend.db.backends.postgresql``
+    has ``async def compose_sql`` so callers do
+    ``await conn.ops.compose_sql(sql, params)``. The sync postgres ops
+    only has a sync version that opens a cursor inline; calling it from
+    an async context raises ``SynchronousOnlyOperation``. This proxy
+    wraps the sync method in ``sync_to_async`` so the async-only code
+    paths in user code don't have to special-case the bridge.
+    """
+
+    def __init__(self, sync_ops):
+        self._sync_ops = sync_ops
+
+    async def compose_sql(self, sql, params):
+        return await sync_to_async(self._sync_ops.compose_sql, thread_sensitive=True)(
+            sql, params
+        )
+
+    def __getattr__(self, name):
+        return getattr(self._sync_ops, name)
 
 
 class _NoopErrorWrapper:

@@ -5,8 +5,8 @@ from operator import itemgetter
 from uuid import UUID
 
 import orjson
-from django.db import connection
 
+from apps.shared.async_db import aexecute_mogrified_values
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_TIMESTAMP_DRIFT = timedelta(days=1)
 
 
-def update_log_statistics(
+async def update_log_statistics(
     stats_data: defaultdict[datetime, defaultdict[tuple[int, int, int, int], dict]],
 ) -> None:
     """
@@ -52,18 +52,20 @@ def update_log_statistics(
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4, 5))
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s,%s,%s,%s,%s)", x) for x in data)
-        sql = (
-            "INSERT INTO projects_logprojecthourlystatistic (date, project_id, organization_id, level, service_bucket, environment_bucket, count)\n"
-            f"VALUES {args_str}\n"
-            "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment_bucket)\n"
-            "DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count;"
-        )
-        cursor.execute(sql)
+    await aexecute_mogrified_values(
+        sql_template=(
+            "INSERT INTO projects_logprojecthourlystatistic "
+            "(date, project_id, organization_id, level, service_bucket, environment_bucket, count) "
+            "VALUES {values} "
+            "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment_bucket) "
+            "DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count"
+        ),
+        values_fragment="(%s,%s,%s,%s,%s,%s,%s)",
+        value_params=data,
+    )
 
 
-def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> None:
+async def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> None:
     """
     Bulk upsert unique resource names to the lookup table.
 
@@ -73,23 +75,23 @@ def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> None:
         return
 
     data = sorted(
-        [org_id, name, res_type]
-        for org_id, name, res_type in resource_data
-        if name
+        [org_id, name, res_type] for org_id, name, res_type in resource_data if name
     )
 
     if not data:
         return
 
-    with connection.cursor() as cursor:
-        args_str = ",".join(cursor.mogrify("(%s,%s,%s, NOW(), NOW())", x) for x in data)
-        sql = (
-            "INSERT INTO logs_logresource (organization_id, name, type, first_seen, last_seen)\n"
-            f"VALUES {args_str}\n"
-            "ON CONFLICT (organization_id, name, type)\n"
-            "DO UPDATE SET last_seen = NOW();"
-        )
-        cursor.execute(sql)
+    await aexecute_mogrified_values(
+        sql_template=(
+            "INSERT INTO logs_logresource "
+            "(organization_id, name, type, first_seen, last_seen) "
+            "VALUES {values} "
+            "ON CONFLICT (organization_id, name, type) "
+            "DO UPDATE SET last_seen = NOW()"
+        ),
+        values_fragment="(%s,%s,%s, NOW(), NOW())",
+        value_params=data,
+    )
 
 
 def validate_timestamp(client_timestamp: datetime, server_time: datetime) -> bool:
@@ -128,7 +130,7 @@ def parse_span_id(span_id_str: str | None) -> int | None:
         return None
 
 
-def process_log_events(messages: list) -> int:
+async def process_log_events(messages: list) -> int:
     """
     Process and bulk insert log events.
 
@@ -276,26 +278,24 @@ def process_log_events(messages: list) -> int:
     if not log_rows:
         return 0
 
-    # Bulk insert using raw SQL for performance
-    # Column order matches new schema (no timestamp column)
-    insert_sql = """
-        INSERT INTO logs_logevent (
-            id, trace_id,
-            organization_id, project_id, span_id,
-            level, severity_number,
-            body, service, environment, host, data
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT DO NOTHING;
-    """
+    # Bulk insert using a single VALUES list — one round-trip vs. one
+    # per-row that ``executemany`` would do. ``ON CONFLICT DO NOTHING``
+    # tolerates the rare duplicate id when two clients emit the same
+    # UUIDv7 timestamp+random in the same microsecond.
+    await aexecute_mogrified_values(
+        sql_template=(
+            "INSERT INTO logs_logevent "
+            "(id, trace_id, organization_id, project_id, span_id, level, "
+            "severity_number, body, service, environment, host, data) "
+            "VALUES {values} "
+            "ON CONFLICT DO NOTHING"
+        ),
+        values_fragment="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        value_params=log_rows,
+    )
 
-    with connection.cursor() as cursor:
-        cursor.executemany(insert_sql, log_rows)
-
-    # Update hourly statistics
-    update_log_statistics(project_hourly_stats)
-
-    # Update resource name lookup table
-    update_resource_lookup(unique_resources)
+    await update_log_statistics(project_hourly_stats)
+    await update_resource_lookup(unique_resources)
 
     logger.info(f"Inserted {len(log_rows)} log events")
     return len(log_rows)

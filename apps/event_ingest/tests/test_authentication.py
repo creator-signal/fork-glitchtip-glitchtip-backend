@@ -5,6 +5,7 @@ from model_bakery import baker
 from ninja.errors import AuthenticationError
 
 from apps.event_ingest.authentication import auth_from_request
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 
 
 class AuthFromRequestTestCase(TestCase):
@@ -16,7 +17,7 @@ class AuthFromRequestTestCase(TestCase):
         self.assertIsInstance(ctx.exception.status_code, int)
 
 
-class AuthenticationTestCase(TestCase):
+class AuthenticationTestCase(AsyncioRollbackTestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = baker.make("users.User")

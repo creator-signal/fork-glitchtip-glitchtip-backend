@@ -3,7 +3,7 @@
 Vendored from django-async-backend PR #20:
 https://github.com/Arfey/django-async-backend/pull/20
 
-Copied from upstream commit 6e9d8fe (branch
+Copied from upstream commit ea07ec8 (branch
 ``feat/asyncio-rollback-testcase`` in https://github.com/bufke/django-async-backend).
 
 Remove this module and import directly from

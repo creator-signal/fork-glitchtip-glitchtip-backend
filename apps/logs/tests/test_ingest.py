@@ -8,15 +8,17 @@ from datetime import datetime, timezone
 
 from django.core.cache import cache
 from django.tasks import task_backends
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import LogLevel
 from ..models import LogEvent
-from ..process_logs import LEVEL_MAP, parse_span_id, process_log_events
+from ..process_logs import LEVEL_MAP, parse_span_id
+from ..process_logs import process_log_events as _aprocess_log_events
 from ..tasks import LogTaskMessage
 
 
@@ -124,8 +126,16 @@ class LogItemSchemaCompatTestCase(TestCase):
         self.assertEqual(item.timestamp, 1775203281.699)
 
 
-class LogIngestProcessingTestCase(TestCase):
-    """Test log processing function"""
+class LogIngestProcessingTestCase(AsyncioRollbackTestCase):
+    """Test log processing function.
+
+    Uses ``AsyncioRollbackTestCase`` so that, when running under
+    ``glitchtip.settings_async`` (USE_ASYNC_DB_CURSOR=True),
+    ``process_log_events``'s real async cursor shares the same
+    transaction as the sync ``setUp`` fixtures. Under default
+    settings the helpers fall back to ``sync_to_async`` and behave
+    identically to a plain ``TestCase``.
+    """
 
     def setUp(self):
         self.project = baker.make(
@@ -133,7 +143,7 @@ class LogIngestProcessingTestCase(TestCase):
         )
         self.organization = self.project.organization
 
-    def test_process_single_log(self):
+    async def test_process_single_log(self):
         """Test processing a single log event"""
         now = datetime.now(timezone.utc)
         timestamp = now.timestamp()
@@ -154,12 +164,12 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 1)
-        self.assertEqual(LogEvent.objects.count(), 1)
+        self.assertEqual(await LogEvent.objects.acount(), 1)
 
-        log = LogEvent.objects.first()
+        log = await LogEvent.objects.afirst()
         self.assertEqual(log.body, "Test log message")
         self.assertEqual(log.level, LogLevel.INFO)
         self.assertEqual(log.organization_id, self.organization.id)
@@ -168,7 +178,7 @@ class LogIngestProcessingTestCase(TestCase):
         self.assertEqual(log.environment, "prod")
         self.assertEqual(log.host, "web-1")
 
-    def test_process_multiple_logs(self):
+    async def test_process_multiple_logs(self):
         """Test processing multiple log events in one batch"""
         now = datetime.now(timezone.utc)
         timestamp = now.timestamp()
@@ -184,12 +194,12 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 3)
-        self.assertEqual(LogEvent.objects.count(), 3)
+        self.assertEqual(await LogEvent.objects.acount(), 3)
 
-    def test_process_log_with_trace_id(self):
+    async def test_process_log_with_trace_id(self):
         """Test processing log with trace ID"""
         now = datetime.now(timezone.utc)
         timestamp = now.timestamp()
@@ -209,10 +219,10 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 1)
-        log = LogEvent.objects.first()
+        log = await LogEvent.objects.afirst()
         self.assertEqual(str(log.trace_id), trace_id)
 
     def test_level_mapping(self):
@@ -225,7 +235,7 @@ class LogIngestProcessingTestCase(TestCase):
         self.assertEqual(LEVEL_MAP["error"], LogLevel.ERROR)
         self.assertEqual(LEVEL_MAP["fatal"], LogLevel.FATAL)
 
-    def test_process_log_with_severity_number(self):
+    async def test_process_log_with_severity_number(self):
         """Test processing log with OpenTelemetry severity number"""
         now = datetime.now(timezone.utc)
         timestamp = now.timestamp()
@@ -244,10 +254,10 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 1)
-        log = LogEvent.objects.first()
+        log = await LogEvent.objects.afirst()
         self.assertEqual(log.severity_number, 9)
 
     def test_parse_span_id_high_bit(self):
@@ -259,7 +269,7 @@ class LogIngestProcessingTestCase(TestCase):
         self.assertGreaterEqual(result, -(1 << 63))
         self.assertLess(result, 1 << 63)
 
-    def test_process_log_with_high_bit_span_id(self):
+    async def test_process_log_with_high_bit_span_id(self):
         """Logs with high-bit span_id should insert without overflow."""
         now = datetime.now(timezone.utc)
         message = LogTaskMessage(
@@ -276,13 +286,13 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 1)
-        log = LogEvent.objects.first()
+        log = await LogEvent.objects.afirst()
         self.assertIsNotNone(log.span_id)
 
-    def test_process_log_preserves_extra_data(self):
+    async def test_process_log_preserves_extra_data(self):
         """Test that extra fields are preserved in data"""
         now = datetime.now(timezone.utc)
         timestamp = now.timestamp()
@@ -302,16 +312,16 @@ class LogIngestProcessingTestCase(TestCase):
             ],
         )
 
-        count = process_log_events([message])
+        count = await _aprocess_log_events([message])
 
         self.assertEqual(count, 1)
-        log = LogEvent.objects.first()
+        log = await LogEvent.objects.afirst()
         self.assertEqual(log.data["custom_field"], "custom_value")
         self.assertEqual(log.data["request_id"], "abc-123")
 
 
 @override_settings(GLITCHTIP_ENABLE_LOGS=True)
-class LogEnvelopeAPITestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+class LogEnvelopeAPITestCase(GlitchTipTestCaseMixin, AsyncioRollbackTestCase):
     """Test log ingestion via envelope API"""
 
     def setUp(self):

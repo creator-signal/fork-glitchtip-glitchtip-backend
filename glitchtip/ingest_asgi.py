@@ -48,6 +48,10 @@ class IngestDispatcher:
                 @classmethod
                 def _get_middleware_setting(cls):
                     return [
+                        # First in the chain — release async pool
+                        # connections at end-of-request so the ingest
+                        # path doesn't saturate ``OPTIONS["pool"]``.
+                        "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
                         "glitchtip.middleware.DecompressBodyMiddleware",
