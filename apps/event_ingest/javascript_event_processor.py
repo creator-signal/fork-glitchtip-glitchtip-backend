@@ -9,7 +9,6 @@ from urllib.parse import urlsplit
 from symbolic import SourceMapCache
 
 from apps.sourcecode.models import DebugSymbolBundle
-from sentry.utils.safe import get_path
 
 if TYPE_CHECKING:
     from .schema import IssueEventSchema, StackTrace, StackTraceFrame
@@ -176,10 +175,10 @@ class JavascriptEventProcessor:
             return
 
         # Copy original stacktrace before modifying them
-        for exception in get_path(
-            self.data, "exception", "values", filter=True, default=()
-        ):
-            exception["raw_stacktrace"] = copy.deepcopy(exception["stacktrace"])
+        if self.data.exception and not isinstance(self.data.exception, list):
+            for exception in self.data.exception.values:
+                if exception.stacktrace:
+                    exception.raw_stacktrace = copy.deepcopy(exception.stacktrace)
 
         # Map minified filenames to debug_ids from debug_meta
         debug_id_map = {}

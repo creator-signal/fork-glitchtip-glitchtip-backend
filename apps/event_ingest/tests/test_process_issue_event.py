@@ -503,6 +503,12 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ][0]["colno"],
             13,
         )
+        self.assertEqual(
+            IssueEvent.objects.first().data["exception"]["values"][0]["raw_stacktrace"][
+                "frames"
+            ][0]["colno"],
+            74016,
+        )
         # Show that pre and post context is included
         self.assertEqual(
             len(
