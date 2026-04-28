@@ -531,6 +531,7 @@ INSTALLED_APPS = [
     "anymail",
     "corsheaders",
     "django_extensions",
+    "django_async_backend",
 ]
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")

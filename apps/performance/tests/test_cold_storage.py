@@ -32,6 +32,7 @@ from apps.performance.promotion import (
 )
 from glitchtip.cold_storage import enumerate_org_parquet_files
 from glitchtip.partition_manager import UUID7Helper
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 
 
 def _make_span_staging_row(
@@ -101,7 +102,13 @@ class ColdStorageTestMixin:
         super().tearDown()
 
 
-class PromoteSpansTestCase(ColdStorageTestMixin, TestCase):
+class PromoteSpansTestCase(ColdStorageTestMixin, AsyncioRollbackTestCase):
+    """Converted to ``AsyncioRollbackTestCase`` to validate the inlined
+    framework against an existing async-hot-path test. The previous base
+    (``django.test.TestCase``) ran async test methods through Django's
+    own async wrapper without rolling back ``async_connections`` writes;
+    converting here exercises the bridge on a real test body."""
+
     def setUp(self):
         super().setUp()
         self.project = baker.make(
