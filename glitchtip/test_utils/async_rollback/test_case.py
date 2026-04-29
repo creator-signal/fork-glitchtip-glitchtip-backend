@@ -4,7 +4,7 @@ AsyncioRollbackTestCase — Django TestCase that also rolls back async writes.
 Vendored from django-async-backend PR #20:
 https://github.com/Arfey/django-async-backend/pull/20
 
-Copied from upstream commit ea07ec8 (branch
+Copied from upstream commit 9933f6b (branch
 ``feat/asyncio-rollback-testcase``). Remove this file and import from
 ``django_async_backend.test`` once upstream merges.
 
