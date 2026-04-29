@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
-from unittest import mock
 from unittest.mock import patch
 from uuid import UUID
 
@@ -47,13 +46,22 @@ class SettingsTestCase(TestCase):
                 "socialaccount.socialapp",
                 provider=provider,
             )
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response.headers = {"Content-Type": "application/json"}
-        mock_response.json.return_value = {"authorization_endpoint": ""}
-        with mock.patch("requests.Session.send", return_value=mock_response):
+        # OIDC discovery is cached; pre-populate to avoid a real outbound
+        # request and to assert the cached value is consumed.
+        from django.core.cache import cache
+
+        from glitchtip.oidc_discovery import _cache_key
+
+        cache.set(
+            _cache_key("https://example.com"),
+            {"authorization_endpoint": "https://example.com/authorize"},
+        )
+        try:
             res = self.client.get(self.url)
+        finally:
+            cache.delete(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
+        self.assertContains(res, "https://example.com/authorize")
 
 
 class APIRootTestCase(TestCase):
