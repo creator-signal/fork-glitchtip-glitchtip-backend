@@ -4,7 +4,6 @@ End-to-end tests for transaction ingest → TransactionGroup stats + SpanStaging
 
 from datetime import datetime, timedelta
 
-from asgiref.sync import async_to_sync
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker

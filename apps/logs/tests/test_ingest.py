@@ -6,7 +6,6 @@ import json
 import time
 from datetime import datetime, timezone
 
-from asgiref.sync import async_to_sync
 from django.core.cache import cache
 from django.tasks import task_backends
 from django.test import TestCase, TransactionTestCase, override_settings

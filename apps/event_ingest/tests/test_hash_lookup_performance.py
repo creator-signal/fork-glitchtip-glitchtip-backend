@@ -11,7 +11,6 @@ replication lag.
 import uuid
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
 from django.db import connection, connections
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone

@@ -6,7 +6,6 @@ import uuid
 import zipfile
 from hashlib import sha1
 
-from asgiref.sync import async_to_sync
 from django.core.files import File as DjangoFile
 from django.tasks import task_backends
 from django.test import override_settings
