@@ -15,6 +15,7 @@ from asgiref.sync import async_to_sync
 from django.db import connection, connections
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django_async_backend.db import async_connections
 
 from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
@@ -128,12 +129,18 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
         ]
 
         original_getitem = type(connections).__getitem__
+        original_async_getitem = type(async_connections).__getitem__
         original_ih_using = IssueHash.objects.using
 
         def mock_getitem(self_conn, alias):
             if alias == "read_only":
                 return original_getitem(self_conn, "default")
             return original_getitem(self_conn, alias)
+
+        def mock_async_getitem(self_conn, alias):
+            if alias == "read_only":
+                return original_async_getitem(self_conn, "default")
+            return original_async_getitem(self_conn, alias)
 
         def mock_ih_using(alias):
             if alias == "read_only":
@@ -142,6 +149,7 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
 
         with (
             patch.object(type(connections), "__getitem__", mock_getitem),
+            patch.object(type(async_connections), "__getitem__", mock_async_getitem),
             patch.object(IssueHash.objects, "using", mock_ih_using),
         ):
             _process_issue_events(events, read_only_db="read_only")

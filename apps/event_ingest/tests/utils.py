@@ -5,8 +5,9 @@ import uuid
 from typing import Union
 
 from asgiref.sync import async_to_sync
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
+from django_async_backend.db import async_connections
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
@@ -121,10 +122,23 @@ def generate_event(
         return events
 
 
-class EventIngestTestCase(GlitchTipTestCaseMixin, TestCase):
+async def _close_async_connections():
+    for alias in async_connections.settings.keys():
+        await async_connections[alias].close()
+
+
+class EventIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     """
     Base class for event ingest tests with helper functions
     """
+
+    def tearDown(self):
+        # Close async-backend connections so we don't exhaust Postgres'
+        # ``max_connections`` over a long suite. Each test class otherwise
+        # accumulates a fresh task-local connection per cursor that never
+        # closes until process exit.
+        async_to_sync(_close_async_connections)()
+        super().tearDown()
 
     def setUp(self):
         from django.tasks import task_backends

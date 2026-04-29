@@ -6,6 +6,7 @@ import json
 import time
 from datetime import datetime, timezone
 
+from asgiref.sync import async_to_sync
 from django.core.cache import cache
 from django.tasks import task_backends
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -16,8 +17,14 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import LogLevel
 from ..models import LogEvent
-from ..process_logs import LEVEL_MAP, parse_span_id, process_log_events
+from ..process_logs import LEVEL_MAP, parse_span_id
+from ..process_logs import process_log_events as _aprocess_log_events
 from ..tasks import LogTaskMessage
+
+# ``process_log_events`` became async in the django-async-backend
+# integration. Tests still drive it synchronously via ``async_to_sync``;
+# the worker calls it directly with ``await``.
+process_log_events = async_to_sync(_aprocess_log_events)
 
 
 def list_to_envelope(data: list[dict]) -> str:
@@ -124,7 +131,7 @@ class LogItemSchemaCompatTestCase(TestCase):
         self.assertEqual(item.timestamp, 1775203281.699)
 
 
-class LogIngestProcessingTestCase(TestCase):
+class LogIngestProcessingTestCase(TransactionTestCase):
     """Test log processing function"""
 
     def setUp(self):

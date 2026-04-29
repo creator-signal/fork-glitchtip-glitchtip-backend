@@ -76,3 +76,25 @@ class TimedTestRunner(DiscoverRunner):
         finally:
             post_migrate.disconnect(create_test_partitions)
         return result
+
+    def teardown_databases(self, old_config, **kwargs):
+        # async-backend connections are task-local; we can't close them
+        # from a different event loop, and any connections opened from
+        # tasks that have already finished are orphaned. Forcibly
+        # terminate every backend session on the test DBs so DROP DATABASE
+        # doesn't hit "being accessed by other users".
+
+        for entry in old_config or []:
+            try:
+                wrapper = entry[0]
+                test_db = wrapper.settings_dict["NAME"]
+                with wrapper.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = %s AND pid <> pg_backend_pid()",
+                        [test_db],
+                    )
+            except Exception:
+                # Don't let teardown failures mask the real test result.
+                pass
+        return super().teardown_databases(old_config, **kwargs)

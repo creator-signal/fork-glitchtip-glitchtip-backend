@@ -24,6 +24,14 @@ services:
     image: postgres:18
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
+    # Headroom for the test runner: each TransactionTestCase class can leak
+    # a few task-local async-backend connections that don't close until
+    # process exit. 300 keeps us well clear of the default 100 over a full
+    # 1000+ test suite.
+    command:
+      - postgres
+      - -c
+      - max_connections=300
   valkey:
     image: valkey/valkey:9
   web:

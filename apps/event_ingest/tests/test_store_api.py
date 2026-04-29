@@ -25,7 +25,9 @@ class StoreAPITestCase(EventIngestTestCase):
         cache.clear()
 
     def test_store_api(self):
-        with self.assertNumQueries(18):
+        # Sync-side query count only; the async ingest path runs additional
+        # queries on async_connections that this context doesn't observe.
+        with self.assertNumQueries(10):
             res = self.client.post(
                 self.url, self.event, content_type="application/json"
             )
