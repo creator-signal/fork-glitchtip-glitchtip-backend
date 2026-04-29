@@ -25,7 +25,7 @@ class StoreAPITestCase(EventIngestTestCase):
         cache.clear()
 
     def test_store_api(self):
-        with self.assertNumQueries(18):
+        with self.assertNumQueries(19):
             res = self.client.post(
                 self.url, self.event, content_type="application/json"
             )

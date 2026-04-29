@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, connections
@@ -140,6 +139,33 @@ def get_project_auth_info_row(project_id: int, sentry_key: UUID):
         return cursor.fetchone()
 
 
+async def aget_project_auth_info_row(project_id: int, sentry_key: UUID):
+    """Async counterpart to ``get_project_auth_info_row``.
+
+    Uses django-async-backend's ``async_connections`` directly. The
+    ``AsyncCursor`` doesn't implement ``callproc``, so we emulate the
+    same call via ``SELECT * FROM proc(...)`` — matches psycopg2's
+    original callproc implementation.
+    """
+    from django_async_backend.db import async_connections
+
+    sql = "SELECT * FROM get_project_auth_info(%s, %s)"
+    params = [project_id, sentry_key]
+
+    alias = "read_only" if "read_only" in settings.DATABASES else "default"
+    try:
+        async with await async_connections[alias].cursor() as cursor:
+            await cursor.execute(sql, params)
+            return await cursor.fetchone()
+    except OperationalError:
+        if alias == "default":
+            raise
+        logger.warning("read_only async cursor failed; retrying on default")
+        async with await async_connections["default"].cursor() as cursor:
+            await cursor.execute(sql, params)
+            return await cursor.fetchone()
+
+
 async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Return the valid and accepting events project based on a request.
@@ -175,7 +201,7 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     if cached.get(dsn_block_cache_key) == "v":
         raise REJECTION_MAP["v"]
 
-    row = await sync_to_async(get_project_auth_info_row)(project_id, sentry_key)
+    row = await aget_project_auth_info_row(project_id, sentry_key)
 
     if not row:
         await cache.aset(dsn_block_cache_key, "v", REJECTION_WAIT)

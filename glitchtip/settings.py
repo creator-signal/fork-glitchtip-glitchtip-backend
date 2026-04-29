@@ -531,6 +531,7 @@ INSTALLED_APPS = [
     "anymail",
     "corsheaders",
     "django_extensions",
+    "django_async_backend",
 ]
 if DEBUG_TOOLBAR:
     INSTALLED_APPS.append("debug_toolbar")
@@ -577,6 +578,10 @@ if ENABLE_OBSERVABILITY_API:
 PROMETHEUS_EXPORT_MIGRATIONS = False
 
 MIDDLEWARE = [
+    # First in the chain so async pool connections are returned to the
+    # pool at end-of-request. Without it the pool saturates after
+    # ``OPTIONS["pool"]["max_size"]`` requests and stalls.
+    "django_async_backend.middleware.close_async_connections",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -772,6 +777,13 @@ if env.str("DATABASE_HOST", None):
             "PORT": env.str("DATABASE_PORT", "5432"),
         }
     )
+# All DB I/O goes through django-async-backend. The async ENGINE
+# extends Django's stock postgres backend, so the sync ORM keeps
+# working unchanged; tasks that ``await async_connections[...]``
+# additionally get a real async cursor.
+for db_config in DATABASES.values():
+    db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
+
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
