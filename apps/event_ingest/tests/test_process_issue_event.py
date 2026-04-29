@@ -32,9 +32,11 @@ from ..schema import (
     IssueTaskMessage,
     SecuritySchema,
 )
-from .utils import EventIngestTestCase
+from .utils import EventIngestTestCase, run_async_closing
 
-_process_issue_events = async_to_sync(process_issue_events)
+
+def _process_issue_events(*args, **kwargs):
+    return run_async_closing(process_issue_events, *args, **kwargs)
 
 COMPAT_TEST_DATA_DIR = "events/test_data"
 

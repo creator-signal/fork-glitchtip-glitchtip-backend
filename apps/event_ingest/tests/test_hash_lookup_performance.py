@@ -22,9 +22,11 @@ from apps.issue_events.models import Issue, IssueEvent, IssueHash
 
 from ..process_event import process_issue_events
 from ..schema import IssueEventSchema, IssueTaskMessage
-from .utils import EventIngestTestCase, generate_event
+from .utils import EventIngestTestCase, generate_event, run_async_closing
 
-_process_issue_events = async_to_sync(process_issue_events)
+
+def _process_issue_events(*args, **kwargs):
+    return run_async_closing(process_issue_events, *args, **kwargs)
 
 
 class HashLookupBatchTestCase(EventIngestTestCase):

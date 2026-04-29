@@ -1,8 +1,6 @@
-from asgiref.sync import async_to_sync
 from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
-from django_async_backend.db import async_connections
 from model_bakery import baker
 from ninja.errors import AuthenticationError
 
@@ -19,14 +17,6 @@ class AuthFromRequestTestCase(TestCase):
 
 
 class AuthenticationTestCase(TransactionTestCase):
-    def tearDown(self):
-        async def _close():
-            for alias in async_connections.settings.keys():
-                await async_connections[alias].close()
-
-        async_to_sync(_close)()
-        super().tearDown()
-
     def setUp(self):
         # Async ingest path reads project auth via async_connections, which
         # only sees committed data — TransactionTestCase commits per-test

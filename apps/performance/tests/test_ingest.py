@@ -11,9 +11,12 @@ from model_bakery import baker
 
 from apps.event_ingest.process_event import process_transaction_events
 from apps.event_ingest.schema import InterchangeTransactionEvent, TransactionEventSchema
+from apps.event_ingest.tests.utils import run_async_closing
 from apps.performance.models import SpanStaging, TransactionGroup
 
-_process_transaction_events = async_to_sync(process_transaction_events)
+
+def _process_transaction_events(*args, **kwargs):
+    return run_async_closing(process_transaction_events, *args, **kwargs)
 
 
 def _make_transaction_payload(

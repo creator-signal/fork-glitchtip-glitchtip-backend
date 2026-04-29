@@ -24,10 +24,13 @@ services:
     image: postgres:18
     environment:
       POSTGRES_HOST_AUTH_METHOD: "trust"
-    # Headroom for the test runner: each TransactionTestCase class can leak
-    # a few task-local async-backend connections that don't close until
-    # process exit. 300 keeps us well clear of the default 100 over a full
-    # 1000+ test suite.
+    # Test-suite headroom: ``psycopg.AsyncConnection.close()`` is async, so
+    # connections opened in a task that goes out of scope (e.g. via Django's
+    # test client invoking async views) leak the underlying socket until
+    # process exit. Test code closes connections in-task where it can
+    # (see ``run_async_closing`` in apps/event_ingest/tests/utils.py); the
+    # rest gets absorbed by raising ``max_connections`` over Postgres' 100
+    # default. Production traffic doesn't have this pattern.
     command:
       - postgres
       - -c

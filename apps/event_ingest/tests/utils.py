@@ -122,23 +122,32 @@ def generate_event(
         return events
 
 
-async def _close_async_connections():
-    for alias in async_connections.settings.keys():
-        await async_connections[alias].close()
+def run_async_closing(coro_func, *args, **kwargs):
+    """``async_to_sync`` for tests that opens a fresh task and closes the
+    task's async-backend connections before the task ends.
+
+    Each ``async_to_sync`` invocation runs in a new task, which gets its
+    own task-local async-DB wrapper. ``psycopg.AsyncConnection`` can't
+    close synchronously from ``__del__``, so the socket leaks until
+    process exit. Closing inside the task — same context that opened it —
+    avoids exhausting Postgres' ``max_connections`` over a full suite.
+    """
+
+    async def _wrapper():
+        try:
+            return await coro_func(*args, **kwargs)
+        finally:
+            for alias in async_connections.settings.keys():
+                if hasattr(async_connections._connections, alias):
+                    await async_connections[alias].close()
+
+    return async_to_sync(_wrapper)()
 
 
 class EventIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     """
     Base class for event ingest tests with helper functions
     """
-
-    def tearDown(self):
-        # Close async-backend connections so we don't exhaust Postgres'
-        # ``max_connections`` over a long suite. Each test class otherwise
-        # accumulates a fresh task-local connection per cursor that never
-        # closes until process exit.
-        async_to_sync(_close_async_connections)()
-        super().tearDown()
 
     def setUp(self):
         from django.tasks import task_backends
@@ -181,5 +190,5 @@ class EventIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             )
             for dat in data
         ]
-        async_to_sync(process_issue_events)(events)
+        run_async_closing(process_issue_events, events)
         return events
