@@ -6,7 +6,7 @@ from uuid import UUID
 
 import orjson
 
-from apps.shared.async_db import aexecute_mogrified_values
+from apps.shared.async_db import execute_mogrified_values
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -52,7 +52,7 @@ async def update_log_statistics(
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4, 5))
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             "INSERT INTO projects_logprojecthourlystatistic "
             "(date, project_id, organization_id, level, service_bucket, environment_bucket, count) "
@@ -81,7 +81,7 @@ async def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> No
     if not data:
         return
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             "INSERT INTO logs_logresource "
             "(organization_id, name, type, first_seen, last_seen) "
@@ -282,7 +282,7 @@ async def process_log_events(messages: list) -> int:
     # per-row that ``executemany`` would do. ``ON CONFLICT DO NOTHING``
     # tolerates the rare duplicate id when two clients emit the same
     # UUIDv7 timestamp+random in the same microsecond.
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             "INSERT INTO logs_logevent "
             "(id, trace_id, organization_id, project_id, span_id, level, "

@@ -1,52 +1,16 @@
-"""Async raw-SQL helpers for the ingest hot paths (events, logs, spans).
+"""Async raw-SQL helpers used by the ingest hot paths.
 
-Uses django-async-backend's ``async_connections`` directly. The DB
-ENGINE is set to async-backend's postgres backend in
-:mod:`glitchtip.settings`, so this is the only path.
-
-Tests cover these helpers via
-:class:`glitchtip.test_utils.async_rollback.AsyncioRollbackTestCase`,
-which routes ``async_connections[alias]`` through Django's sync conn
-inside a TestCase so the per-test transaction rolls back writes from
-both pools together.
+The multi-row ``VALUES`` insert pattern needs ``compose_sql`` per row
+and a final ``str.format`` substitution before execute. Two helpers
+for that — read variant and write variant. Plain
+``await async_connections[alias].cursor()`` is preferred everywhere
+else.
 """
-
-from __future__ import annotations
-
-from typing import Any
 
 from django_async_backend.db import async_connections
 
 
-async def afetchall(
-    sql: str,
-    params: Any | None = None,
-    db_alias: str = "default",
-) -> tuple[list[str], list[tuple]]:
-    """Execute ``sql`` with ``params`` and return ``(columns, rows)``."""
-    async with await async_connections[db_alias].cursor() as cursor:
-        await cursor.execute(sql, params)
-        columns = [c[0] for c in cursor.description]
-        rows = await cursor.fetchall()
-        return columns, rows
-
-
-async def aexecute(
-    sql: str,
-    params: Any | None = None,
-    db_alias: str = "default",
-) -> int:
-    """Execute ``sql`` with ``params`` and return ``cursor.rowcount``.
-
-    For UPDATE/INSERT/DELETE that doesn't need rows back. Use
-    :func:`afetchall` for SELECT.
-    """
-    async with await async_connections[db_alias].cursor() as cursor:
-        await cursor.execute(sql, params)
-        return cursor.rowcount
-
-
-async def afetchall_mogrified_values(
+async def fetchall_mogrified_values(
     sql_template: str,
     values_fragment: str,
     value_params: list[tuple],
@@ -54,7 +18,10 @@ async def afetchall_mogrified_values(
 ) -> tuple[list[str], list[tuple]]:
     """Mogrify ``value_params`` into ``values_fragment`` (one row each),
     substitute the joined literals into ``sql_template`` where
-    ``{values}`` appears, then execute."""
+    ``{values}`` appears, then execute and return ``(columns, rows)``.
+
+    One round-trip vs. ``executemany``'s one-per-row.
+    """
     conn = async_connections[db_alias]
     parts: list[str] = []
     for row in value_params:
@@ -72,13 +39,13 @@ async def afetchall_mogrified_values(
         return columns, rows
 
 
-async def aexecute_mogrified_values(
+async def execute_mogrified_values(
     sql_template: str,
     values_fragment: str,
     value_params: list[tuple],
     db_alias: str = "default",
 ) -> int:
-    """Like :func:`afetchall_mogrified_values` but for UPDATE/INSERT —
+    """Like :func:`fetchall_mogrified_values` but for UPDATE/INSERT —
     discards any result rows and returns ``cursor.rowcount``."""
     conn = async_connections[db_alias]
     parts: list[str] = []

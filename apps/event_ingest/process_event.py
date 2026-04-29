@@ -13,6 +13,7 @@ from django.db import connection, transaction
 from django.db.models import Q, Value
 from django.db.utils import IntegrityError
 from django.utils import timezone
+from django_async_backend.db import async_connections
 from ninja import Schema
 from psycopg.types.json import Jsonb
 from user_agents import parse
@@ -40,6 +41,10 @@ from apps.performance.models import TransactionGroup
 from apps.performance.parameterize import parameterize_description
 from apps.projects.models import Project
 from apps.releases.models import Release
+from apps.shared.async_db import (
+    execute_mogrified_values,
+    fetchall_mogrified_values,
+)
 from apps.sourcecode.models import DebugSymbolBundle
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
@@ -113,36 +118,37 @@ async def _get_or_create_related_models(
     if not project_set or not release_version_set or not environment_name_set:
         projects_with_data: list[dict] = []
     else:
-        from apps.shared.async_db import afetchall
-
         project_ids = list(project_set)
         release_versions = list(release_version_set)
         environment_names = list(environment_name_set)
-        columns, rows = await afetchall(
-            """
-            SELECT
-                p.id,
-                rp.release_id,
-                r.version AS release_name,
-                ep.environment_id,
-                e.name AS environment_name,
-                EXISTS(
-                    SELECT 1 FROM difs_debuginformationfile dif
-                    WHERE dif.project_id = p.id LIMIT 1
-                ) AS has_difs
-            FROM projects_project p
-            LEFT JOIN releases_release_projects rp ON p.id = rp.project_id
-            LEFT JOIN releases_release r ON rp.release_id = r.id
-            LEFT JOIN environments_environmentproject ep ON p.id = ep.project_id
-            LEFT JOIN environments_environment e ON ep.environment_id = e.id
-            WHERE p.id = ANY(%s)
-              AND r.version = ANY(%s)
-              AND (e.name = ANY(%s) OR e.name IS NULL)
-            """,
-            [project_ids, release_versions, environment_names],
-            db_alias=read_only_db,
-        )
-        projects_with_data = [dict(zip(columns, row)) for row in rows]
+        async with await async_connections[read_only_db].cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT
+                    p.id,
+                    rp.release_id,
+                    r.version AS release_name,
+                    ep.environment_id,
+                    e.name AS environment_name,
+                    EXISTS(
+                        SELECT 1 FROM difs_debuginformationfile dif
+                        WHERE dif.project_id = p.id LIMIT 1
+                    ) AS has_difs
+                FROM projects_project p
+                LEFT JOIN releases_release_projects rp ON p.id = rp.project_id
+                LEFT JOIN releases_release r ON rp.release_id = r.id
+                LEFT JOIN environments_environmentproject ep ON p.id = ep.project_id
+                LEFT JOIN environments_environment e ON ep.environment_id = e.id
+                WHERE p.id = ANY(%s)
+                  AND r.version = ANY(%s)
+                  AND (e.name = ANY(%s) OR e.name IS NULL)
+                """,
+                [project_ids, release_versions, environment_names],
+            )
+            columns = [c[0] for c in cursor.description]
+            projects_with_data = [
+                dict(zip(columns, row)) for row in await cursor.fetchall()
+            ]
 
     releases = await get_and_create_releases(release_set, projects_with_data)
     await create_environments(environment_set, projects_with_data)
@@ -282,7 +288,6 @@ async def update_issues(processing_events: list[ProcessingEvent]):
         key=itemgetter(0),
     )
 
-    from apps.shared.async_db import aexecute_mogrified_values
 
     max_lexemes = settings.SEARCH_MAX_LEXEMES
     sql_template = (
@@ -294,7 +299,7 @@ async def update_issues(processing_events: list[ProcessingEvent]):
         "FROM (VALUES {values}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
         "WHERE issue_events_issue.id = v.id"
     )
-    await aexecute_mogrified_values(sql_template, "(%s,%s,%s,%s,%s)", list(data))
+    await execute_mogrified_values(sql_template, "(%s,%s,%s,%s,%s)", list(data))
 
 
 def generate_contexts(event: TaskIssueEvent) -> Contexts:
@@ -424,9 +429,8 @@ async def create_environments(
         )
         env_pairs = [(e.name, e.organization_id) for e in environments_to_create]
 
-        from apps.shared.async_db import afetchall_mogrified_values
 
-        _, env_rows = await afetchall_mogrified_values(
+        _, env_rows = await fetchall_mogrified_values(
             "SELECT id, name, organization_id FROM environments_environment "
             "WHERE (name, organization_id) IN (VALUES {values})",
             "(%s,%s)",
@@ -475,9 +479,8 @@ async def get_and_create_releases(
         await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
         rel_pairs = [(r.version, r.organization_id) for r in releases_to_create]
 
-        from apps.shared.async_db import afetchall_mogrified_values
 
-        _, release_rows = await afetchall_mogrified_values(
+        _, release_rows = await fetchall_mogrified_values(
             "SELECT id, version, organization_id FROM releases_release "
             "WHERE (version, organization_id) IN (VALUES {values})",
             "(%s,%s)",
@@ -564,7 +567,6 @@ async def _fetch_issue_hashes_raw(
     if not pairs:
         return {}
 
-    from apps.shared.async_db import afetchall_mogrified_values
 
     sql_template = """
         SELECT ih.project_id, ih.value, ih.issue_id,
@@ -574,7 +576,7 @@ async def _fetch_issue_hashes_raw(
         INNER JOIN issue_events_issue i ON i.id = ih.issue_id
         WHERE (ih.project_id, ih.value) IN (VALUES {values})
     """
-    columns, rows = await afetchall_mogrified_values(
+    columns, rows = await fetchall_mogrified_values(
         sql_template, "(%s,%s::uuid)", list(pairs), db_alias=db_alias
     )
     dicts = [dict(zip(columns, row)) for row in rows]
@@ -1012,9 +1014,8 @@ async def process_issue_events(
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
     if issue_events:
-        from apps.shared.async_db import aexecute_mogrified_values
 
-        await aexecute_mogrified_values(
+        await execute_mogrified_values(
             sql_template=(
                 "INSERT INTO issue_events_issueevent "
                 "(id, event_id, timestamp, issue_id, organization_id, release_id, "
@@ -1077,9 +1078,8 @@ async def update_statistics(
 
     data.sort(key=itemgetter(0, 1, 2))
 
-    from apps.shared.async_db import aexecute_mogrified_values
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             f"INSERT INTO {table_name} "
             f"(date, {id_column_name}, organization_id, count) "
@@ -1118,9 +1118,8 @@ async def update_org_statistics(
     # Sort by all key components to avoid deadlocks on concurrent writes
     data.sort(key=itemgetter(0, 1, 2))
 
-    from apps.shared.async_db import aexecute_mogrified_values
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             f"INSERT INTO {table_name} "
             f"(date, organization_id, {id_column_name}, count) "
@@ -1191,9 +1190,8 @@ async def _update_transaction_group_stats(
     # Phase 1: Atomically merge count, error_count, avg_duration,
     # and duration_histogram via a single UPDATE ... FROM (VALUES ...).
     # Row locks are held only for the duration of this statement.
-    from apps.shared.async_db import aexecute_mogrified_values, afetchall
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template="""
             UPDATE performance_transactiongroup AS tg
             SET count = tg.count + v.batch_count,
@@ -1225,12 +1223,14 @@ async def _update_transaction_group_stats(
     org_ids = list({row[1] for row in values_data})
     group_ids = [row[0] for row in values_data]
 
-    _, rows = await afetchall(
-        "SELECT id, organization_id, count, duration_histogram "
-        "FROM performance_transactiongroup "
-        "WHERE id = ANY(%s) AND organization_id = ANY(%s)",
-        [group_ids, org_ids],
-    )
+    async with await async_connections["default"].cursor() as cursor:
+        await cursor.execute(
+            "SELECT id, organization_id, count, duration_histogram "
+            "FROM performance_transactiongroup "
+            "WHERE id = ANY(%s) AND organization_id = ANY(%s)",
+            [group_ids, org_ids],
+        )
+        rows = await cursor.fetchall()
     p_updates = []
     for row in rows:
         gid, oid, count, histogram = row
@@ -1241,7 +1241,7 @@ async def _update_transaction_group_stats(
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
 
-        await aexecute_mogrified_values(
+        await execute_mogrified_values(
             sql_template="""
                 UPDATE performance_transactiongroup AS tg
                 SET p50 = v.p50, p95 = v.p95
@@ -1285,18 +1285,17 @@ async def update_tags(processing_events: list[ProcessingEvent]):
     )
 
     # Postgres cannot return ids with ignore_conflicts
-    from apps.shared.async_db import afetchall
-
-    _, tk_rows = await afetchall(
-        "SELECT id, key FROM issue_events_tagkey WHERE key = ANY(%s)",
-        [keys],
-    )
-    tag_keys = {row[1]: row[0] for row in tk_rows}
-    _, tv_rows = await afetchall(
-        "SELECT id, value FROM issue_events_tagvalue WHERE value = ANY(%s)",
-        [values],
-    )
-    tag_values = {row[1]: row[0] for row in tv_rows}
+    async with await async_connections["default"].cursor() as cursor:
+        await cursor.execute(
+            "SELECT id, key FROM issue_events_tagkey WHERE key = ANY(%s)",
+            [keys],
+        )
+        tag_keys = {row[1]: row[0] for row in await cursor.fetchall()}
+        await cursor.execute(
+            "SELECT id, value FROM issue_events_tagvalue WHERE value = ANY(%s)",
+            [values],
+        )
+        tag_values = {row[1]: row[0] for row in await cursor.fetchall()}
 
     tag_stats: TagStats = defaultdict(
         lambda: defaultdict(
@@ -1344,9 +1343,8 @@ async def update_tags(processing_events: list[ProcessingEvent]):
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4))
 
-    from apps.shared.async_db import aexecute_mogrified_values
 
-    await aexecute_mogrified_values(
+    await execute_mogrified_values(
         sql_template=(
             "INSERT INTO issue_events_issuetag "
             "(date, issue_id, organization_id, tag_key_id, tag_value_id, count) "
@@ -1379,9 +1377,8 @@ async def _fetch_transaction_groups(
     if not keys:
         return {}
 
-    from apps.shared.async_db import afetchall_mogrified_values
 
-    _, rows = await afetchall_mogrified_values(
+    _, rows = await fetchall_mogrified_values(
         sql_template=(
             "SELECT id, organization_id, project_id, transaction, op, method "
             "FROM performance_transactiongroup "
