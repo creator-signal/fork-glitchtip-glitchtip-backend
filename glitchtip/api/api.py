@@ -36,7 +36,7 @@ from apps.users.models import User
 from apps.users.schema import UserSchema
 from apps.wizard.api import router as wizard_router
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
-from glitchtip.oidc_discovery import aget_authorize_url
+from glitchtip.oidc_discovery import get_authorize_url
 
 from ..schema import CamelSchema
 from .authentication import SessionAuth, TokenAuth
@@ -162,7 +162,7 @@ async def get_settings(request: HttpRequest):
             # discovery document. Use the async cached helper so the public
             # /api/0/settings/ endpoint never blocks on a synchronous outbound
             # request to the IdP.
-            social_app.authorize_url = await aget_authorize_url(
+            social_app.authorize_url = await get_authorize_url(
                 social_app.settings.get("server_url", "")
             )
         elif adapter_cls:

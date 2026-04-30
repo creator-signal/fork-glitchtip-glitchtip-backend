@@ -32,7 +32,7 @@ def _cache_key(server_url: str) -> str:
     return f"oidc_discovery:{digest}"
 
 
-async def aget_openid_config(server_url: str) -> dict[str, Any] | None:
+async def get_openid_config(server_url: str) -> dict[str, Any] | None:
     """Return the OpenID discovery document, cached on first fetch.
 
     Returns ``None`` on network or parse error so callers can degrade
@@ -60,8 +60,8 @@ async def aget_openid_config(server_url: str) -> dict[str, Any] | None:
     return config
 
 
-async def aget_authorize_url(server_url: str) -> str | None:
-    config = await aget_openid_config(server_url)
+async def get_authorize_url(server_url: str) -> str | None:
+    config = await get_openid_config(server_url)
     if config is None:
         return None
     return config.get("authorization_endpoint")
