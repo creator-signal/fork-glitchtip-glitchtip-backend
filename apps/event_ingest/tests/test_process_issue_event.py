@@ -1521,51 +1521,54 @@ class IssueEventIosContextTestCase(EventIngestTestCase):
     def test_ios_event_context(self):
         blobs_path = f"{COMPAT_TEST_DATA_DIR}/ios_event/uploads/file_blobs"
 
-        for filename in os.listdir(blobs_path):
+        filenames = [
+            "82b270920467dac0c92e05e5fc06ece9bfe1499c",
+            "4239f11a3846b08d5f3d1fa5229f2a316a86fcf0",
+            "fd43cf8ad36ebbf3ad6f38474f916585a59a47b8",
+        ]
+
+        for filename in filenames:
             blob_path = os.path.join(blobs_path, filename)
 
             if not os.path.isfile(blob_path):
                 assert False, f"Blob path {blob_path} does not exist or is not a file"
 
             with open(blob_path, "rb") as f:
-                try:
-                    archive = Archive.open(blob_path)
-                    metadatalist = [
-                        {
-                            "arch": obj.arch,
-                            "debug_id": normalize_debug_id(str(obj.debug_id)),
-                            "kind": obj.kind,
-                            "features": list(obj.features),
-                            "symbol_type": "native",
-                        }
-                        for obj in archive.iter_objects()
-                    ]
+                archive = Archive.open(blob_path)
+                metadatalist = [
+                    {
+                        "arch": obj.arch,
+                        "debug_id": normalize_debug_id(str(obj.debug_id)),
+                        "kind": obj.kind,
+                        "features": list(obj.features),
+                        "symbol_type": "native",
+                    }
+                    for obj in archive.iter_objects()
+                ]
 
-                    content = f.read()
-                    checksum = sha1(content).hexdigest()
-                    django_file = DjangoFile(f)
-                    fileblob = FileBlob.from_file(django_file)
-                    self.fileblobs.append(fileblob)
+                content = f.read()
+                checksum = sha1(content).hexdigest()
+                django_file = DjangoFile(f)
+                fileblob = FileBlob.from_file(django_file)
+                self.fileblobs.append(fileblob)
 
-                    file = baker.make("files.File", checksum=checksum, blob=fileblob)
+                file = baker.make("files.File", checksum=checksum, blob=fileblob)
 
-                    for metadata in metadatalist:
-                        dif = baker.make(
-                            "difs.DebugInformationFile",
-                            project=self.project,
-                            file=file,
-                            name=filename,
-                            data={
-                                "arch": metadata["arch"],
-                                "debug_id": metadata["debug_id"],
-                                "kind": metadata["kind"],
-                                "features": metadata["features"],
-                                "symbol_type": metadata["symbol_type"],
-                            },
-                        )
-                        dif.save()
-                except Exception as err:
-                    assert False, f"Error while processing file '{blob_path}': {err}"
+                for metadata in metadatalist:
+                    dif = baker.make(
+                        "difs.DebugInformationFile",
+                        project=self.project,
+                        file=file,
+                        name=filename,
+                        data={
+                            "arch": metadata["arch"],
+                            "debug_id": metadata["debug_id"],
+                            "kind": metadata["kind"],
+                            "features": metadata["features"],
+                            "symbol_type": metadata["symbol_type"],
+                        },
+                    )
+                    dif.save()
 
         payload = self.get_json_data("events/test_data/ios_event/event.json")
         event_schema = ErrorIssueEventSchema(**payload)
