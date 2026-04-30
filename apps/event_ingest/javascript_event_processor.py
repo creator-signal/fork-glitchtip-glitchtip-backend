@@ -1,5 +1,4 @@
 import copy
-import itertools
 import logging
 import re
 from os.path import splitext
@@ -11,7 +10,7 @@ from symbolic import SourceMapCache
 from apps.sourcecode.models import DebugSymbolBundle
 
 if TYPE_CHECKING:
-    from .schema import IssueEventSchema, StackTrace, StackTraceFrame
+    from .schema import EventException, IssueEventSchema, StackTraceFrame
 
 logger = logging.getLogger(__name__)
 
@@ -75,22 +74,22 @@ class JavascriptEventProcessor:
         self.data = data
         self.debug_bundles = debug_bundles
 
-    def get_stacktraces(self) -> list["StackTrace"]:
+    def get_stacktrace_exceptions(self) -> list["EventException"]:
         data = self.data
         if data.exception and not isinstance(data.exception, list):
-            return [e.stacktrace for e in data.exception.values if e.stacktrace]
+            return [exception for exception in data.exception.values if exception.stacktrace]
         return []
 
-    def get_valid_frames(self, stacktraces) -> list["StackTraceFrame"]:
-        frames = [stacktrace.frames for stacktrace in stacktraces]
+    def get_valid_frames(self, exception: "EventException") -> list["StackTraceFrame"]:
+        stacktrace = exception.stacktrace
+        if not stacktrace:
+            return []
+        return [frame for frame in stacktrace.frames if frame is not None and frame.lineno is not None]
 
-        merged = list(itertools.chain(*frames))
-        return [f for f in merged if f is not None and f.lineno is not None]
-
-    def process_frame(self, frame, map_file, minified_source):
+    def lookup_token(self, frame, map_file, minified_source):
         # Required to determine source
         if not frame.abs_path or not frame.lineno or not frame.colno:
-            return
+            return None
 
         minified_source.blob.blob.seek(0)
         map_file.blob.blob.seek(0)
@@ -103,9 +102,9 @@ class JavascriptEventProcessor:
             frame.colno - 1,
             5,  # context_lines
         )
+        return token
 
-        if not token:
-            return
+    def process_frame(self, frame, token):
         frame.lineno = token.line
         frame.colno = token.col
         if token.function_name:
@@ -168,56 +167,67 @@ class JavascriptEventProcessor:
                 line.rstrip("\n") for line in token.post_context if line != ""
             ]
 
-    def transform(self):
-        stacktraces = self.get_stacktraces()
-        frames = self.get_valid_frames(stacktraces)
-        if not self.debug_bundles:
-            return
-
-        # Copy original stacktrace before modifying them
-        if self.data.exception and not isinstance(self.data.exception, list):
-            for exception in self.data.exception.values:
-                if exception.stacktrace:
-                    exception.raw_stacktrace = copy.deepcopy(exception.stacktrace)
-
-        # Map minified filenames to debug_ids from debug_meta
+    def build_debug_id_map(self) -> dict[str, str]:
         debug_id_map = {}
         if self.data.debug_meta and self.data.debug_meta.images:
             for image in self.data.debug_meta.images:
                 if image.type == "sourcemap" and image.code_file:
                     filename = image.code_file.split("/")[-1]
                     debug_id_map[filename] = str(image.debug_id)
+        return debug_id_map
 
-        frames_with_source = []
-        for frame in frames:
-            minified_filename = frame.abs_path.split("/")[-1] if frame.abs_path else ""
-            debug_id = debug_id_map.get(minified_filename)
-            minified_file = None
-            map_file = None
-            for debug_bundle in self.debug_bundles:
-                # Match by debug_id if both have it
-                if (
-                    debug_id
-                    and debug_bundle.debug_id
-                    and str(debug_id) == str(debug_bundle.debug_id)
-                ):
-                    minified_file = debug_bundle.file
-                    map_file = debug_bundle.sourcemap_file
-                    break
+    def find_source_files(self, frame, debug_id_map):
+        minified_filename = frame.abs_path.split("/")[-1] if frame.abs_path else ""
+        debug_id = debug_id_map.get(minified_filename)
+        for debug_bundle in self.debug_bundles:
+            # Match by debug_id if both have it
+            if (
+                debug_id
+                and debug_bundle.debug_id
+                and str(debug_id) == str(debug_bundle.debug_id)
+            ):
+                return debug_bundle.file, debug_bundle.sourcemap_file
 
-                # Fallback to matching by filename
-                file_name = debug_bundle.file.name
-                code_file = debug_bundle.data.get("code_file")
-                if code_file:  # Get name, not full path
-                    code_file = code_file.split("/")[-1]
+            # Fallback to matching by filename
+            file_name = debug_bundle.file.name
+            code_file = debug_bundle.data.get("code_file")
+            if code_file:  # Get name, not full path
+                code_file = code_file.split("/")[-1]
 
-                if minified_filename in [file_name, code_file]:
-                    minified_file = debug_bundle.file
-                    map_file = debug_bundle.sourcemap_file
-                    break
+            if minified_filename in [file_name, code_file]:
+                return debug_bundle.file, debug_bundle.sourcemap_file
+        return None
 
-            if map_file:
-                frames_with_source.append((frame, map_file, minified_file))
+    def remap_exception(self, exception: "EventException", debug_id_map):
+        raw_stacktrace = None
+        for frame in self.get_valid_frames(exception):
+            source_files = self.find_source_files(frame, debug_id_map)
+            if source_files is None:
+                continue
 
-        for frame_with_source in frames_with_source:
-            self.process_frame(*frame_with_source)
+            minified_source, map_file = source_files
+            if not map_file:
+                continue
+
+            token = self.lookup_token(frame, map_file, minified_source)
+            if token is None:
+                continue
+
+            # Copy original stacktrace before modifying them
+            if raw_stacktrace is None and exception.stacktrace:
+                raw_stacktrace = copy.deepcopy(exception.stacktrace)
+
+            self.process_frame(frame, token)
+
+        if raw_stacktrace is not None:
+            exception.raw_stacktrace = raw_stacktrace
+
+    def transform(self):
+        exceptions = self.get_stacktrace_exceptions()
+        if not exceptions or not self.debug_bundles:
+            return
+
+        # Map minified filenames to debug_ids from debug_meta
+        debug_id_map = self.build_debug_id_map()
+        for exception in exceptions:
+            self.remap_exception(exception, debug_id_map)
