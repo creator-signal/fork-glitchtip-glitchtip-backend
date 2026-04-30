@@ -57,7 +57,11 @@ class StripeTestCase(TestCase):
                 images=[],
                 livemode=False,
                 marketing_features=[],
-                metadata={"events": "123", "is_public": "true"},
+                metadata={
+                    "events": "123",
+                    "is_public": "true",
+                    "product_type": "hosted",
+                },
                 name="Product 1",
                 package_dimensions=None,
                 shippable=None,
