@@ -163,7 +163,11 @@ async def list_stripe_products(request: AuthHttpRequest):
         StripeProduct.objects.filter(is_public=True, events__gt=0)
         .select_related("default_price")
         .prefetch_related(
-            Prefetch("stripeprice_set", queryset=StripePrice.objects.all(), to_attr="prices_list")
+            Prefetch(
+                "stripeprice_set",
+                queryset=StripePrice.objects.filter(is_public=True),
+                to_attr="prices_list",
+            )
         )
     )
     result = []

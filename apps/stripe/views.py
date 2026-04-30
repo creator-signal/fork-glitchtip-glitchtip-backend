@@ -57,6 +57,7 @@ async def update_price(price: Price):
 
     metadata = price.metadata or {}
     no_throttle = metadata.get("no_throttle", "").lower() == "true"
+    is_public = metadata.get("is_public", "").lower() == "true"
 
     await StripePrice.objects.aupdate_or_create(
         stripe_id=price.id,
@@ -65,6 +66,7 @@ async def update_price(price: Price):
             "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
             "no_throttle": no_throttle,
+            "is_public": is_public,
             "interval": (
                 price.recurring.get("interval", "month") if price.recurring else "month"
             ),
