@@ -13,8 +13,6 @@ the JSON in the Django cache (Valkey in production), keyed by the
 provider's server URL.
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
 from typing import Any
