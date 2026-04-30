@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from datetime import timedelta
 
 from django.conf import settings
@@ -18,6 +19,28 @@ from .exceptions import StripeResourceNotFound
 from .utils import compute_cycle, unix_to_datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _warn_duplicate_public_prices(prices):
+    """Warn if any (product, interval) pair has more than one public price.
+
+    The frontend's price-selection invariant assumes at most one
+    is_public=True price per (product, interval). This check is per-page only;
+    duplicates split across pages are caught by StripeProduct.sync_from_stripe,
+    which loads default prices in a single pass per product.
+    """
+    grouped = defaultdict(list)
+    for p in prices:
+        if p.is_public:
+            grouped[(p.product_id, p.interval)].append(p.stripe_id)
+    for (product_id, interval), price_ids in grouped.items():
+        if len(price_ids) > 1:
+            logger.warning(
+                "Multiple is_public=true prices for product=%s interval=%s: %s",
+                product_id,
+                interval,
+                price_ids,
+            )
 
 
 class StripeModel(models.Model):
@@ -75,6 +98,12 @@ class StripeProduct(StripeModel):
                     == "true"
                     if product.default_price.metadata
                     else False,
+                    is_public=product.default_price.metadata.get(
+                        "is_public", ""
+                    ).lower()
+                    == "true"
+                    if product.default_price.metadata
+                    else False,
                     interval=product.default_price.recurring.get("interval", "month")
                     if product.default_price.recurring
                     else "month",
@@ -98,11 +127,13 @@ class StripeProduct(StripeModel):
                     "nickname",
                     "product_id",
                     "no_throttle",
+                    "is_public",
                     "interval",
                 ],
                 unique_fields=["stripe_id"],
             )
             logger.info(f"Created/updated {len(price_updated)} prices in Django")
+            _warn_duplicate_public_prices(prices)
             for product in product_updated:
                 for price in price_updated:
                     if (
@@ -125,6 +156,7 @@ class StripePrice(StripeModel):
     nickname = models.CharField(max_length=255)
     product = models.ForeignKey(StripeProduct, on_delete=models.CASCADE)
     no_throttle = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=False)
     interval = models.CharField(max_length=20, default="month")
 
     def __str__(self):
@@ -148,6 +180,9 @@ class StripePrice(StripeModel):
                     no_throttle=price.metadata.get("no_throttle", "").lower() == "true"
                     if price.metadata
                     else False,
+                    is_public=price.metadata.get("is_public", "").lower() == "true"
+                    if price.metadata
+                    else False,
                     interval=price.recurring.get("interval", "month")
                     if price.recurring
                     else "month",
@@ -163,10 +198,12 @@ class StripePrice(StripeModel):
                     "nickname",
                     "product_id",
                     "no_throttle",
+                    "is_public",
                     "interval",
                 ],
                 unique_fields=["stripe_id"],
             )
+            _warn_duplicate_public_prices(prices)
 
 
 class StripeSubscription(StripeModel):

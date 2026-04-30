@@ -34,6 +34,27 @@ class StripeAPITestCase(TestCase):
         res = self.client.get(url)
         self.assertContains(res, self.product.name)
 
+    def test_list_stripe_products_excludes_non_public_prices(self):
+        public_price = baker.make(
+            "stripe.StripePrice",
+            product=self.product,
+            price=10,
+            is_public=True,
+            interval="month",
+        )
+        private_price = baker.make(
+            "stripe.StripePrice",
+            product=self.product,
+            price=8,
+            is_public=False,
+            interval="month",
+        )
+        url = reverse("api:list_stripe_products")
+        res = self.client.get(url)
+        body = res.content.decode()
+        self.assertIn(public_price.stripe_id, body)
+        self.assertNotIn(private_price.stripe_id, body)
+
     def test_get_stripe_subscription(self):
         sub = baker.make(
             "stripe.StripeSubscription",
