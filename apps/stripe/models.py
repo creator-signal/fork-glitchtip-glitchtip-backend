@@ -69,7 +69,10 @@ class StripeProduct(StripeModel):
         async for products_page in list_products():
             logger.info(f"Found {len(products_page)} products in Stripe")
             products_page = [
-                product for product in products_page if "events" in product.metadata
+                product
+                for product in products_page
+                if "events" in product.metadata
+                and product.metadata.get("product_type", "").lower() == "hosted"
             ]
             products = [
                 StripeProduct(
@@ -79,9 +82,7 @@ class StripeProduct(StripeModel):
                     events=product.metadata["events"],
                     is_public=product.metadata.get("is_public", "").lower() == "true",
                     marketing_features=[
-                        f["name"]
-                        for f in product.marketing_features
-                        if f.get("name")
+                        f["name"] for f in product.marketing_features if f.get("name")
                     ],
                 )
                 for product in products_page
@@ -115,7 +116,13 @@ class StripeProduct(StripeModel):
             product_updated = await StripeProduct.objects.abulk_create(
                 products,
                 update_conflicts=True,
-                update_fields=["name", "description", "events", "is_public", "marketing_features"],
+                update_fields=[
+                    "name",
+                    "description",
+                    "events",
+                    "is_public",
+                    "marketing_features",
+                ],
                 unique_fields=["stripe_id"],
             )
             logger.info(f"Created/updated {len(product_updated)} products in Django")
