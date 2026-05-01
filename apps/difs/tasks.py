@@ -161,10 +161,19 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
         best_remapped_stacktrace = max(
             resolved_stracktrackes,
             key=lambda item: (
+                sum(
+                    1
+                    for f in item.frames
+                    if f
+                    and f.get("filename")
+                    and f.get("pre_context")
+                    and f.get("post_context")
+                ),
                 item.score,
                 sum(1 for f in item.frames if f and f.get("filename")),
             ),
         )
+        
         update_frames(event, best_remapped_stacktrace.frames)
 
     # JVM source context (runs after proguard deobfuscation if applicable).
