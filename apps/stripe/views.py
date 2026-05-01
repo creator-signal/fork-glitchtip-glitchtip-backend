@@ -31,6 +31,8 @@ async def update_product(product: Product):
     metadata = product.metadata
     if "events" not in metadata:
         return
+    if metadata.get("product_type", "").lower() != "hosted":
+        return
 
     await StripeProduct.objects.aupdate_or_create(
         stripe_id=product.id,
@@ -40,9 +42,7 @@ async def update_product(product: Product):
             "events": metadata["events"],
             "is_public": metadata.get("is_public") == "true",
             "marketing_features": [
-                f["name"]
-                for f in product.marketing_features
-                if f.get("name")
+                f["name"] for f in product.marketing_features if f.get("name")
             ],
         },
     )
@@ -57,6 +57,7 @@ async def update_price(price: Price):
 
     metadata = price.metadata or {}
     no_throttle = metadata.get("no_throttle", "").lower() == "true"
+    is_public = metadata.get("is_public", "").lower() == "true"
 
     await StripePrice.objects.aupdate_or_create(
         stripe_id=price.id,
@@ -65,6 +66,7 @@ async def update_price(price: Price):
             "nickname": price.nickname or "",
             "price": price.unit_amount / 100,
             "no_throttle": no_throttle,
+            "is_public": is_public,
             "interval": (
                 price.recurring.get("interval", "month") if price.recurring else "month"
             ),
@@ -128,9 +130,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
     )
     current_period_end = unix_to_datetime(subscription.items.data[0].current_period_end)
     price = subscription.items.data[0].price
-    is_annual = bool(
-        price.recurring and price.recurring.get("interval") == "year"
-    )
+    is_annual = bool(price.recurring and price.recurring.get("interval") == "year")
     cycle_start, cycle_end = compute_cycle(
         current_period_start, current_period_end, is_annual
     )

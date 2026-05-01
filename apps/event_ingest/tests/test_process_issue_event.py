@@ -506,6 +506,12 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             ][0]["colno"],
             13,
         )
+        self.assertEqual(
+            IssueEvent.objects.first().data["exception"]["values"][0]["raw_stacktrace"][
+                "frames"
+            ][0]["colno"],
+            74016,
+        )
         # Show that pre and post context is included
         self.assertEqual(
             len(
@@ -525,6 +531,53 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         )
 
         self.assertTrue(IssueEvent.objects.filter(release=release).exists())
+
+    def test_process_sourcemap_skips_raw_stacktrace_when_nothing_remaps(self):
+        sample_event = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "Error",
+                        "value": "The error",
+                        "stacktrace": {
+                            "frames": [
+                                {
+                                    "filename": "http://localhost:8080/dist/bundle.js",
+                                    "function": "?",
+                                    "in_app": True,
+                                    "lineno": 2,
+                                    "colno": 74016,
+                                }
+                            ]
+                        },
+                        "mechanism": {"type": "onerror", "handled": False},
+                    }
+                ]
+            },
+            "level": "error",
+            "platform": "javascript",
+            "event_id": "0691751a89db419994efac8ac9b00a5e",
+            "timestamp": 1648414309.82,
+            "environment": "production",
+            "request": {
+                "url": "http://localhost:8080/",
+                "headers": {
+                    "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:98.0) Gecko/20100101 Firefox/98.0"
+                },
+            },
+        }
+        baker.make(
+            "sourcecode.DebugSymbolBundle",
+            organization=self.organization,
+            release=baker.make("releases.Release", organization=self.organization),
+            file__name="other.js",
+            sourcemap_file__name="other.js.map",
+        )
+        self.process_events(sample_event)
+        self.assertNotIn(
+            "raw_stacktrace",
+            IssueEvent.objects.first().data["exception"]["values"][0],
+        )
 
     def test_search_vector(self):
         word = "orange"

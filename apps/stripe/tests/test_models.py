@@ -7,7 +7,7 @@ from django.utils import timezone
 from model_bakery import baker
 
 from ..constants import SubscriptionStatus
-from ..models import StripeProduct, StripeSubscription
+from ..models import StripePrice, StripeProduct, StripeSubscription
 from ..schema import (
     Customer,
     Price,
@@ -57,7 +57,11 @@ class StripeTestCase(TestCase):
                 images=[],
                 livemode=False,
                 marketing_features=[],
-                metadata={"events": "123", "is_public": "true"},
+                metadata={
+                    "events": "123",
+                    "is_public": "true",
+                    "product_type": "hosted",
+                },
                 name="Product 1",
                 package_dimensions=None,
                 shippable=None,
@@ -79,6 +83,156 @@ class StripeTestCase(TestCase):
         self.assertEqual(
             await StripeProduct.objects.acount(), len(mock_products_page_1)
         )
+
+    @patch("apps.stripe.models.list_products")
+    async def test_sync_product_round_trips_price_is_public(self, mock_list_products):
+        public_price = test_price.model_copy(
+            update={"id": "price_pub", "metadata": {"is_public": "true"}}
+        )
+        private_price = test_price.model_copy(
+            update={"id": "price_priv", "metadata": {}}
+        )
+
+        async def mock_products_generator():
+            yield [
+                ProductExpandedPrice(
+                    object="product",
+                    id="prod_pub",
+                    active=True,
+                    attributes=[],
+                    created=1678886400,
+                    default_price=public_price,
+                    description="",
+                    images=[],
+                    livemode=False,
+                    marketing_features=[],
+                    metadata={
+                        "events": "123",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
+                    name="Public",
+                    package_dimensions=None,
+                    shippable=None,
+                    statement_descriptor=None,
+                    tax_code=None,
+                    type="service",
+                    unit_label=None,
+                    updated=1678886400,
+                    url=None,
+                ),
+                ProductExpandedPrice(
+                    object="product",
+                    id="prod_priv",
+                    active=True,
+                    attributes=[],
+                    created=1678886400,
+                    default_price=private_price,
+                    description="",
+                    images=[],
+                    livemode=False,
+                    marketing_features=[],
+                    metadata={
+                        "events": "123",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
+                    name="Has Private Default",
+                    package_dimensions=None,
+                    shippable=None,
+                    statement_descriptor=None,
+                    tax_code=None,
+                    type="service",
+                    unit_label=None,
+                    updated=1678886400,
+                    url=None,
+                ),
+            ]
+
+        mock_list_products.return_value = mock_products_generator()
+        await StripeProduct.sync_from_stripe()
+
+        self.assertTrue(
+            (await StripePrice.objects.aget(stripe_id="price_pub")).is_public
+        )
+        self.assertFalse(
+            (await StripePrice.objects.aget(stripe_id="price_priv")).is_public
+        )
+
+    @patch("apps.stripe.models.list_prices")
+    async def test_sync_price_round_trips_is_public(self, mock_list_prices):
+        await sync_to_async(baker.make)("stripe.StripeProduct", stripe_id="prod_1")
+
+        async def mock_prices_generator():
+            yield [
+                test_price.model_copy(
+                    update={"id": "price_pub", "metadata": {"is_public": "true"}}
+                ),
+                test_price.model_copy(
+                    update={"id": "price_mixed_case", "metadata": {"is_public": "True"}}
+                ),
+                test_price.model_copy(update={"id": "price_priv", "metadata": {}}),
+                test_price.model_copy(
+                    update={"id": "price_other", "metadata": {"no_throttle": "true"}}
+                ),
+                test_price.model_copy(
+                    update={"id": "price_one", "metadata": {"is_public": "1"}}
+                ),
+            ]
+
+        mock_list_prices.return_value = mock_prices_generator()
+        await StripePrice.sync_from_stripe()
+
+        self.assertTrue(
+            (await StripePrice.objects.aget(stripe_id="price_pub")).is_public
+        )
+        # Case-insensitive predicate, mirrors no_throttle behavior
+        self.assertTrue(
+            (await StripePrice.objects.aget(stripe_id="price_mixed_case")).is_public
+        )
+        self.assertFalse(
+            (await StripePrice.objects.aget(stripe_id="price_priv")).is_public
+        )
+        self.assertFalse(
+            (await StripePrice.objects.aget(stripe_id="price_other")).is_public
+        )
+        # Only literal "true" counts — "1" must not be treated as truthy
+        self.assertFalse(
+            (await StripePrice.objects.aget(stripe_id="price_one")).is_public
+        )
+
+    @patch("apps.stripe.models.logger")
+    @patch("apps.stripe.models.list_prices")
+    async def test_sync_price_warns_on_duplicate_public_prices(
+        self, mock_list_prices, mock_logger
+    ):
+        await sync_to_async(baker.make)("stripe.StripeProduct", stripe_id="prod_1")
+
+        async def mock_prices_generator():
+            yield [
+                test_price.model_copy(
+                    update={
+                        "id": "price_a",
+                        "metadata": {"is_public": "true"},
+                        "recurring": {"interval": "month"},
+                    }
+                ),
+                test_price.model_copy(
+                    update={
+                        "id": "price_b",
+                        "metadata": {"is_public": "true"},
+                        "recurring": {"interval": "month"},
+                    }
+                ),
+            ]
+
+        mock_list_prices.return_value = mock_prices_generator()
+        await StripePrice.sync_from_stripe()
+
+        mock_logger.warning.assert_called_once()
+        warning_args = mock_logger.warning.call_args.args
+        self.assertIn("prod_1", warning_args)
+        self.assertIn("month", warning_args)
 
     @override_settings(
         STRIPE_WEBHOOK_SECRET="test_webhook_secret",

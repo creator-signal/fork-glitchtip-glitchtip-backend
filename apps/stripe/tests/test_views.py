@@ -192,7 +192,11 @@ class TestStripeWebhookView(TestCase):
                     "images": [],
                     "livemode": False,
                     "marketing_features": [],
-                    "metadata": {"events": "1", "is_public": "true"},
+                    "metadata": {
+                        "events": "1",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
                     "name": "Test Product",
                     "statement_descriptor": None,
                     "tax_code": None,
@@ -256,7 +260,7 @@ class TestStripeWebhookView(TestCase):
                     "type": "one_time",
                     "unit_amount": 2000,  # $20.00
                     "unit_amount_decimal": "2000",
-                    "metadata": {"no_throttle": "true"},
+                    "metadata": {"no_throttle": "true", "is_public": "true"},
                 }
             },
             "api_version": "",
@@ -277,6 +281,7 @@ class TestStripeWebhookView(TestCase):
         self.assertEqual(price.nickname, "Test Price")
         self.assertEqual(price.interval, "year")
         self.assertTrue(price.no_throttle)
+        self.assertTrue(price.is_public)
 
     @override_settings(
         STRIPE_WEBHOOK_SECRET="test_webhook_secret",
