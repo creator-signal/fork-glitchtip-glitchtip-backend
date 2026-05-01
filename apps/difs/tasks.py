@@ -107,6 +107,7 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
     # Serialize once for is_android check; native/proguard resolution may
     # mutate this dict but we re-serialize from the Pydantic event below.
     event_json = event.model_dump(mode="json")
+
     is_android = StacktraceProcessor.is_android_event(event_json)
     native_frames = StacktraceProcessor.has_native_frames(event_json)
 
@@ -154,6 +155,7 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
                 project_id=project_id,
                 debug_id=dif.data.get("debug_id"),
             )
+
             if remapped_stacktrace is not None and remapped_stacktrace.score > 0:
                 resolved_stracktrackes.append(remapped_stacktrace)
 
@@ -161,10 +163,19 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
         best_remapped_stacktrace = max(
             resolved_stracktrackes,
             key=lambda item: (
+                sum(
+                    1
+                    for f in item.frames
+                    if f
+                    and f.get("filename")
+                    and f.get("pre_context")
+                    and f.get("post_context")
+                ),
                 item.score,
                 sum(1 for f in item.frames if f and f.get("filename")),
             ),
         )
+
         update_frames(event, best_remapped_stacktrace.frames)
 
     # JVM source context (runs after proguard deobfuscation if applicable).
