@@ -21,8 +21,6 @@ cursors; sync queries (test ``setUp`` fixtures, middleware, ORM calls
 that haven't been ported yet) are invisible.
 """
 
-from __future__ import annotations
-
 from django_async_backend.db.backends.utils import AsyncCursorWrapper
 
 
@@ -40,7 +38,7 @@ class AsyncQueryCounter:
     def __init__(self) -> None:
         self.count = 0
 
-    def __enter__(self) -> AsyncQueryCounter:
+    def __enter__(self) -> "AsyncQueryCounter":
         self._orig_execute = AsyncCursorWrapper.execute
         self._orig_executemany = AsyncCursorWrapper.executemany
         counter = self
