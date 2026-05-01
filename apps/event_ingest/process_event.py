@@ -7,40 +7,28 @@ from urllib.parse import ParseResult, urlparse
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.contrib.postgres.search import SearchVector
 from django.core.cache import caches
-from django.db import connection, transaction
-from django.db.models import Q, Value
+from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.utils import timezone
+from django_async_backend.db.models.query import QuerySet as AsyncQuerySet
+from django_async_backend.db.transaction import async_atomic
 from ninja import Schema
 from psycopg.types.json import Jsonb
 from user_agents import parse
 
 from apps.alerts.constants import ISSUE_IDS_KEY
-from apps.alerts.models import Notification
-from apps.difs.models import DebugInformationFile
 from apps.difs.tasks import event_difs_resolve_stacktrace
-from apps.environments.models import Environment, EnvironmentProject
 from apps.issue_events.constants import MAX_TAG_LENGTH, EventStatus, LogLevel
-from apps.issue_events.models import (
-    Issue,
-    IssueEvent,
-    IssueEventType,
-    IssueHash,
-    TagKey,
-    TagValue,
-)
+from apps.issue_events.models import IssueEvent, IssueEventType
 from apps.performance.histogram import (
     merge_durations,
     new_histogram,
     percentile_from_histogram,
 )
-from apps.performance.models import TransactionGroup
 from apps.performance.parameterize import parameterize_description
-from apps.projects.models import Project
-from apps.releases.models import Release
 from apps.shared.async_db import (
+    execute,
     execute_mogrified_values,
     fetchall,
     fetchall_mogrified_values,
@@ -406,8 +394,8 @@ async def create_environments(
     Functions determines which, if any, environments are present in event data
     but not the database. Optimized to do a much work in python and reduce queries.
     """
-    environments_to_create = [
-        Environment(name=name, organization_id=organization_id)
+    env_to_create = [
+        (name, organization_id)
         for name, project_id, organization_id in environment_set
         if not next(
             (
@@ -419,17 +407,22 @@ async def create_environments(
         )
     ]
 
-    if environments_to_create:
-        await Environment.objects.abulk_create(
-            environments_to_create, ignore_conflicts=True
+    if env_to_create:
+        await execute_mogrified_values(
+            sql_template=(
+                "INSERT INTO environments_environment (name, organization_id, created) "
+                "VALUES {values} "
+                "ON CONFLICT (organization_id, name) DO NOTHING"
+            ),
+            values_fragment="(%s,%s,NOW())",
+            value_params=list(env_to_create),
         )
-        env_pairs = [(e.name, e.organization_id) for e in environments_to_create]
 
         _, env_rows = await fetchall_mogrified_values(
             "SELECT id, name, organization_id FROM environments_environment "
             "WHERE (name, organization_id) IN (VALUES {values})",
             "(%s,%s)",
-            list(env_pairs),
+            list(env_to_create),
             db_alias="default",
         )
         environment_projects = []
@@ -439,12 +432,18 @@ async def create_environments(
                 for (name, project_id, organization_id) in environment_set
                 if env_name == name and env_org_id == organization_id
             )
-            environment_projects.append(
-                EnvironmentProject(project_id=pid, environment_id=env_id)
+            environment_projects.append((pid, env_id))
+        if environment_projects:
+            await execute_mogrified_values(
+                sql_template=(
+                    "INSERT INTO environments_environmentproject "
+                    "(project_id, environment_id, is_hidden, created) "
+                    "VALUES {values} "
+                    "ON CONFLICT (project_id, environment_id) DO NOTHING"
+                ),
+                values_fragment="(%s,%s,false,NOW())",
+                value_params=environment_projects,
             )
-        await EnvironmentProject.objects.abulk_create(
-            environment_projects, ignore_conflicts=True
-        )
 
 
 async def get_and_create_releases(
@@ -457,7 +456,7 @@ async def get_and_create_releases(
     Return list of tuples: Release version, project_id, release_id
     """
     releases_to_create = [
-        Release(version=release_name, organization_id=organization_id)
+        (release_name, organization_id)
         for release_name, project_id, organization_id in release_set
         if not next(
             (
@@ -470,22 +469,31 @@ async def get_and_create_releases(
     ]
     release_rows: list[tuple] = []
     if releases_to_create:
-        # Create database records for any release that doesn't exist
-        await Release.objects.abulk_create(releases_to_create, ignore_conflicts=True)
-        rel_pairs = [(r.version, r.organization_id) for r in releases_to_create]
+        # Create database records for any release that doesn't exist.
+        # data='{}' satisfies the NOT NULL JSONB column; commit_count and
+        # deploy_count default to 0 in the model and are required NOT NULL.
+        await execute_mogrified_values(
+            sql_template=(
+                "INSERT INTO releases_release "
+                "(version, organization_id, created, data, commit_count, deploy_count) "
+                "VALUES {values} "
+                "ON CONFLICT (organization_id, version) DO NOTHING"
+            ),
+            values_fragment="(%s,%s,NOW(),'{}'::jsonb,0,0)",
+            value_params=list(releases_to_create),
+        )
 
         _, release_rows = await fetchall_mogrified_values(
             "SELECT id, version, organization_id FROM releases_release "
             "WHERE (version, organization_id) IN (VALUES {values})",
             "(%s,%s)",
-            list(rel_pairs),
+            list(releases_to_create),
             db_alias="default",
         )
-        ReleaseProject = Release.projects.through
-        release_projects = [
-            ReleaseProject(
-                release_id=rel_id,
-                project_id=next(
+        release_project_pairs = [
+            (
+                rel_id,
+                next(
                     project_id
                     for (version, project_id, organization_id) in release_set
                     if rel_version == version and rel_org_id == organization_id
@@ -493,9 +501,16 @@ async def get_and_create_releases(
             )
             for rel_id, rel_version, rel_org_id in release_rows
         ]
-        await ReleaseProject.objects.abulk_create(
-            release_projects, ignore_conflicts=True
-        )
+        if release_project_pairs:
+            await execute_mogrified_values(
+                sql_template=(
+                    "INSERT INTO releases_release_projects (release_id, project_id) "
+                    "VALUES {values} "
+                    "ON CONFLICT (release_id, project_id) DO NOTHING"
+                ),
+                values_fragment="(%s,%s)",
+                value_params=release_project_pairs,
+            )
     return [
         (
             version,
@@ -586,6 +601,99 @@ async def _fetch_issue_hashes(
     return await _fetch_issue_hashes_raw(pairs, db_alias)
 
 
+async def _create_issue_and_hash(
+    project_id: int,
+    issue_defaults: dict,
+    processing_event: ProcessingEvent,
+    processing_events: list[ProcessingEvent],
+) -> tuple[int, bool]:
+    """Atomically create an Issue + IssueHash and return ``(issue_id, created)``.
+
+    Two writes wrapped in :func:`async_atomic`:
+    Issue (with ``to_tsvector('english', ...)`` for search_vector) then
+    IssueHash. The unique on ``(project_id, value)`` lets concurrent ingest
+    of the same hash race; the loser catches IntegrityError, reads back the
+    winner's id, and returns ``created=False``.
+
+    The project counter upsert (one round-trip) runs before the atomic
+    block so its value is visible even on the IntegrityError path.
+    """
+    _, counter_rows = await fetchall(
+        """
+        INSERT INTO projects_projectcounter (project_id, value)
+        VALUES (%s, 1)
+        ON CONFLICT (project_id) DO UPDATE
+        SET value = projects_projectcounter.value + 1
+        RETURNING value
+        """,
+        [project_id],
+    )
+    short_id = counter_rows[0][0]
+
+    search_vector_str = get_search_vector(processing_event)
+
+    try:
+        async with async_atomic():
+            _, issue_rows = await fetchall(
+                """
+                INSERT INTO issue_events_issue (
+                    project_id, type, title, metadata,
+                    first_seen, last_seen,
+                    first_release_id, last_release_id,
+                    level, short_id, search_vector,
+                    count, status, is_public, is_deleted, culprit
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s, to_tsvector('english', %s),
+                    1, %s, false, false, NULL
+                )
+                RETURNING id
+                """,
+                [
+                    project_id,
+                    issue_defaults["type"],
+                    issue_defaults["title"],
+                    Jsonb(issue_defaults["metadata"]),
+                    issue_defaults["first_seen"],
+                    issue_defaults["last_seen"],
+                    issue_defaults.get("first_release_id"),
+                    issue_defaults.get("last_release_id"),
+                    issue_defaults.get("level", LogLevel.ERROR),
+                    short_id,
+                    search_vector_str,
+                    EventStatus.UNRESOLVED,
+                ],
+            )
+            issue_id = issue_rows[0][0]
+            await execute(
+                """
+                INSERT INTO issue_events_issuehash (issue_id, project_id, value)
+                VALUES (%s, %s, %s::uuid)
+                """,
+                [issue_id, project_id, processing_event.issue_hash],
+            )
+            check_set_issue_id(
+                processing_events,
+                project_id,
+                processing_event.issue_hash,
+                issue_id,
+            )
+        return issue_id, True
+    except IntegrityError:
+        # Concurrent writer won the (project_id, value) race; read its issue_id.
+        _, hash_rows = await fetchall(
+            """
+            SELECT issue_id FROM issue_events_issuehash
+            WHERE project_id = %s AND value = %s::uuid
+            """,
+            [project_id, processing_event.issue_hash],
+        )
+        return hash_rows[0][0], False
+
+
 async def process_issue_events(
     messages: list[IssueTaskMessage], read_only_db: str = "default"
 ):
@@ -601,9 +709,13 @@ async def process_issue_events(
     """
     projects_to_update = {msg.project_id for msg in messages if msg.update_first_event}
     if projects_to_update:
-        await Project.objects.filter(
-            id__in=projects_to_update, first_event__isnull=True
-        ).aupdate(first_event=timezone.now())
+        await execute(
+            """
+            UPDATE projects_project SET first_event = %s
+            WHERE id = ANY(%s) AND first_event IS NULL
+            """,
+            [timezone.now(), list(projects_to_update)],
+        )
 
     # Fetch any needed releases, environments, and whether there is a dif file association
     # Get unique release/environment for each project_id
@@ -653,7 +765,7 @@ async def process_issue_events(
     }
 
     debug_files_qs = (
-        DebugSymbolBundle.objects.using(read_only_db)
+        AsyncQuerySet(model=DebugSymbolBundle, using=read_only_db)
         .filter(organization__in={event.organization_id for event in messages})
         .filter(
             Q(
@@ -674,8 +786,10 @@ async def process_issue_events(
         update_threshold = now - timedelta(days=1)
         ids_to_update = [df.pk for df in debug_files if df.last_used < update_threshold]
         if ids_to_update:
-            await DebugSymbolBundle.objects.filter(pk__in=ids_to_update).aupdate(
-                last_used=now
+            await execute(
+                "UPDATE sourcecode_debugsymbolbundle SET last_used = %s "
+                "WHERE id = ANY(%s)",
+                [now, ids_to_update],
             )
 
     # Collected/calculated event data while processing
@@ -741,9 +855,13 @@ async def process_issue_events(
                 None,
             )
             if _has_difs is None:
-                _has_difs = await DebugInformationFile.objects.filter(
-                    project_id=ingest_event.project_id
-                ).aexists()
+                _, exists_rows = await fetchall(
+                    "SELECT EXISTS("
+                    "SELECT 1 FROM difs_debuginformationfile WHERE project_id = %s"
+                    ")",
+                    [ingest_event.project_id],
+                )
+                _has_difs = exists_rows[0][0]
             if _has_difs:
                 await sync_to_async(event_difs_resolve_stacktrace)(
                     event, ingest_event.project_id
@@ -894,54 +1012,7 @@ async def process_issue_events(
                     issues_to_reopen.append(hash_obj["issue_id"])
 
         if not processing_event.issue_id:
-            # Project counter + atomic Issue/IssueHash creation needs sync_to_async
-            # because Django doesn't support async transaction.atomic() yet
-            def _create_issue_and_hash(
-                _project_id, _issue_defaults, _processing_event, _processing_events
-            ):
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        INSERT INTO projects_projectcounter (project_id, value)
-                        VALUES (%s, 1)
-                        ON CONFLICT (project_id) DO UPDATE
-                        SET value = projects_projectcounter.value + 1
-                        RETURNING value;
-                        """,
-                        [_project_id],
-                    )
-                    _issue_defaults["short_id"] = cursor.fetchone()[0]
-                try:
-                    with transaction.atomic():
-                        issue = Issue.objects.create(
-                            project_id=_project_id,
-                            search_vector=SearchVector(
-                                Value(get_search_vector(_processing_event))
-                            ),
-                            **_issue_defaults,
-                        )
-                        new_issue_hash = IssueHash.objects.create(
-                            issue=issue,
-                            value=_processing_event.issue_hash,
-                            project_id=_project_id,
-                        )
-                        check_set_issue_id(
-                            _processing_events,
-                            issue.project_id,
-                            new_issue_hash.value,
-                            issue.id,
-                        )
-                    return issue.id, True
-                except IntegrityError:
-                    return (
-                        IssueHash.objects.get(
-                            project_id=_project_id,
-                            value=_processing_event.issue_hash,
-                        ).issue_id,
-                        False,
-                    )
-
-            issue_id, created = await sync_to_async(_create_issue_and_hash)(
+            issue_id, created = await _create_issue_and_hash(
                 project_id, issue_defaults, processing_event, processing_events
             )
             processing_event.issue_id = issue_id
@@ -999,11 +1070,33 @@ async def process_issue_events(
         )
 
     if issues_to_reopen:
-        await Issue.objects.filter(id__in=issues_to_reopen).aupdate(
-            status=EventStatus.UNRESOLVED,
-            resolved_in_release=None,
+        await execute(
+            "UPDATE issue_events_issue "
+            "SET status = %s, resolved_in_release_id = NULL "
+            "WHERE id = ANY(%s)",
+            [EventStatus.UNRESOLVED, list(issues_to_reopen)],
         )
-        await Notification.objects.filter(issues__in=issues_to_reopen).adelete()
+        # Notification.issues is a Django ManyToManyField; the through-table
+        # FKs aren't ON DELETE CASCADE in Postgres (Django emulates that in
+        # ORM-land), so do the cascade ourselves in a single CTE round-trip:
+        # snapshot the matching notification ids, drop the through rows,
+        # then drop the notifications.
+        await execute(
+            """
+            WITH notification_ids AS (
+                SELECT DISTINCT notification_id
+                FROM alerts_notification_issues
+                WHERE issue_id = ANY(%s)
+            ),
+            deleted_through AS (
+                DELETE FROM alerts_notification_issues
+                WHERE notification_id IN (SELECT notification_id FROM notification_ids)
+            )
+            DELETE FROM alerts_notification
+            WHERE id IN (SELECT notification_id FROM notification_ids)
+            """,
+            [list(issues_to_reopen)],
+        )
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
     if issue_events:
@@ -1265,11 +1358,15 @@ async def update_tags(processing_events: list[ProcessingEvent]):
     if not keys:
         return
 
-    await TagKey.objects.abulk_create(
-        [TagKey(key=key) for key in keys], ignore_conflicts=True
+    await execute(
+        "INSERT INTO issue_events_tagkey (key) "
+        "SELECT * FROM UNNEST(%s::varchar[]) ON CONFLICT DO NOTHING",
+        [keys],
     )
-    await TagValue.objects.abulk_create(
-        [TagValue(value=value) for value in values], ignore_conflicts=True
+    await execute(
+        "INSERT INTO issue_events_tagvalue (value) "
+        "SELECT * FROM UNNEST(%s::varchar[]) ON CONFLICT DO NOTHING",
+        [values],
     )
 
     # Postgres cannot return ids with ignore_conflicts
@@ -1391,9 +1488,11 @@ async def process_transaction_events(
         msg.project_id for msg in ingest_events if msg.update_first_event
     }
     if projects_to_update:
-        await Project.objects.filter(
-            id__in=projects_to_update, first_event__isnull=True
-        ).aupdate(first_event=now)
+        await execute(
+            "UPDATE projects_project SET first_event = %s "
+            "WHERE id = ANY(%s) AND first_event IS NULL",
+            [now, list(projects_to_update)],
+        )
 
     release_set = {
         (event.payload.release, event.project_id, event.organization_id)
@@ -1449,28 +1548,37 @@ async def process_transaction_events(
     # Batch create any missing groups
     missing_keys = [k for k in unique_keys if k not in existing]
     if missing_keys:
-        new_groups = [
-            TransactionGroup(
-                project_id=k[0],
-                transaction=k[1],
-                op=k[2],
-                method=k[3],
-                organization_id=unique_keys[k],
-                first_seen=now,
-                last_seen=now,
+        new_group_rows = [
+            (
+                k[0],  # project_id
+                k[1],  # transaction
+                k[2],  # op
+                k[3],  # method
+                unique_keys[k],  # organization_id
+                now,  # first_seen
+                now,  # last_seen
             )
             for k in missing_keys
         ]
-        await TransactionGroup.objects.abulk_create(new_groups, ignore_conflicts=True)
-        # Re-fetch to get IDs (bulk_create with ignore_conflicts doesn't set PKs)
-        if missing_keys:
-            refetched = await _fetch_transaction_groups(missing_keys, "default")
-            existing.update(refetched)
+        await execute_mogrified_values(
+            sql_template=(
+                "INSERT INTO performance_transactiongroup "
+                "(project_id, transaction, op, method, organization_id, "
+                "first_seen, last_seen) "
+                "VALUES {values} "
+                "ON CONFLICT (transaction, project_id, op, method, organization_id) "
+                "DO NOTHING"
+            ),
+            values_fragment="(%s,%s,%s,%s,%s,%s,%s)",
+            value_params=new_group_rows,
+        )
+        # Re-fetch to get IDs (the INSERT above can't return ids when
+        # rows are skipped via ON CONFLICT)
+        refetched = await _fetch_transaction_groups(missing_keys, "default")
+        existing.update(refetched)
 
     # 3. Collect durations, error counts, and spans per group
     collect_spans = is_duckdb_available()
-    if collect_spans:
-        from apps.performance.models import SpanStaging
     group_durations: dict[int, list[float]] = defaultdict(list)
     group_error_counts: dict[int, int] = defaultdict(int)
     group_org_ids: dict[int, int] = {}
@@ -1517,18 +1625,21 @@ async def process_transaction_events(
                     span_duration_ms = max(0.0, span_delta.total_seconds() * 1000)
 
                 description = parameterize_description(span.op, span.description)
-
+                span_timestamp = span.start_timestamp or event.start_timestamp
+                # SpanStaging.id is UUIDv7 from the span's timestamp (matches
+                # the table's RANGE-partition key on id)
                 span_rows.append(
-                    SpanStaging(
-                        organization_id=ingest_event.organization_id,
-                        project_id=ingest_event.project_id,
-                        transaction_name=remove_bad_chars(transaction_name),
-                        span_id=span.span_id[:32],
-                        transaction_id=event_id_hex[:32],
-                        op=remove_bad_chars(span.op[:255]),
-                        description=remove_bad_chars(description),
-                        duration=span_duration_ms,
-                        timestamp=span.start_timestamp or event.start_timestamp,
+                    (
+                        UUID7Helper.from_datetime(span_timestamp),
+                        ingest_event.organization_id,
+                        ingest_event.project_id,
+                        span_duration_ms,
+                        span_timestamp,
+                        remove_bad_chars(transaction_name),
+                        span.span_id[:32],
+                        event_id_hex[:32],
+                        remove_bad_chars(span.op[:255]),
+                        remove_bad_chars(description),
                     )
                 )
 
@@ -1539,7 +1650,16 @@ async def process_transaction_events(
 
     # 5. Bulk insert span staging rows
     if span_rows:
-        await SpanStaging.objects.abulk_create(span_rows, batch_size=1000)
+        await execute_mogrified_values(
+            sql_template=(
+                "INSERT INTO performance_spanstaging "
+                "(id, organization_id, project_id, duration, timestamp, "
+                "transaction_name, span_id, transaction_id, op, description) "
+                "VALUES {values}"
+            ),
+            values_fragment="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            value_params=span_rows,
+        )
 
     # 6. Update hourly project statistics
     await update_statistics(

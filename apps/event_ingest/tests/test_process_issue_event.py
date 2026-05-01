@@ -21,6 +21,7 @@ from apps.issue_events.constants import EventStatus, LogLevel
 from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueHash
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
+from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 from glitchtip.utils import get_random_string
 
 from ..process_event import process_issue_events
@@ -55,8 +56,9 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(5):
+        with AsyncQueryCounter() as q:
             self.process_events([{}, {}])
+        self.assertEqual(len(q), 8)
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 2)
@@ -142,8 +144,9 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(7):
+        with AsyncQueryCounter() as q:
             self.process_events([event1, {}])
+        self.assertEqual(len(q), 14)
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)
         self.assertEqual(self.project.environment_set.count(), 3)

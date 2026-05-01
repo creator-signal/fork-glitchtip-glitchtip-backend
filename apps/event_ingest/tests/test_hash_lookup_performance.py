@@ -11,13 +11,13 @@ replication lag.
 import uuid
 from unittest.mock import patch
 
-from django.db import connection, connections
-from django.test.utils import CaptureQueriesContext
+from django.db import connections
 from django.utils import timezone
 from django_async_backend.db import async_connections
 
 from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
+from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 
 from ..process_event import process_issue_events
 from ..schema import IssueEventSchema, IssueTaskMessage
@@ -57,11 +57,11 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         self.assertEqual(Issue.objects.count(), 5)
 
         # Batch of 10
-        with CaptureQueriesContext(connection) as ctx_10:
+        with AsyncQueryCounter() as ctx_10:
             self.process_events(self._make_batch(seed_msgs, 10))
 
         # Batch of 30 — 3x larger
-        with CaptureQueriesContext(connection) as ctx_30:
+        with AsyncQueryCounter() as ctx_30:
             self.process_events(self._make_batch(seed_msgs, 30))
 
         self.assertEqual(
@@ -84,12 +84,12 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         self.process_events([generate_event(event={"message": m}) for m in seed_msgs])
 
         # Batch matching existing issues
-        with CaptureQueriesContext(connection) as ctx_existing:
+        with AsyncQueryCounter() as ctx_existing:
             self.process_events(self._make_batch(seed_msgs, 5))
 
         # Batch creating new issues
         new_msgs = [f"brand-new-error-{i}" for i in range(5)]
-        with CaptureQueriesContext(connection) as ctx_new:
+        with AsyncQueryCounter() as ctx_new:
             self.process_events(self._make_batch(new_msgs, 5))
 
         self.assertGreater(
