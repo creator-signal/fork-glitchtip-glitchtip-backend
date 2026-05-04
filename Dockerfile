@@ -5,12 +5,34 @@ ENV PYTHONUNBUFFERED=1 \
   UV_SYSTEM_PYTHON=true \
   UV_PYTHON_DOWNLOADS=never \
   UV_PROJECT_ENVIRONMENT=/usr/local \
-  PIP_DISABLE_PIP_VERSION_CHECK=on
+  PIP_DISABLE_PIP_VERSION_CHECK=on \
+  CARGO_HOME=/usr/local/cargo \
+  RUSTUP_HOME=/usr/local/rustup \
+  PATH=/usr/local/cargo/bin:$PATH
+
+# Rust toolchain (needed to build the gt_rust PyO3 extension).
+# DRAFT: this adds ~200 MB and a few minutes to image build. Before merge,
+# decide whether gt_rust ships in the default image or is a separate
+# variant — see CI/build follow-ups in the MR description.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustc --version
 
 WORKDIR /code
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock /code/
+COPY gt_rust /code/gt_rust
 RUN uv sync --frozen --no-install-project $(test "$IS_CI" = "True" && echo "--no-dev")
+
+# uv sync with --no-install-project registers gt_rust as an editable install
+# but the maturin build backend does not populate the compiled _rust.so into
+# the source tree, so ``import gt_rust._rust`` fails at runtime. Build the
+# wheel explicitly and reinstall it non-editably to land the .so in
+# site-packages.
+RUN uv pip install --system maturin \
+    && cd /code/gt_rust && maturin build --release --out /tmp/wheels \
+    && uv pip install --system --no-deps --reinstall /tmp/wheels/gt_rust-*.whl \
+    && python -c "from gt_rust import RustPgDriver; print('gt_rust._rust OK')"
 
 FROM python:3.14-slim
 ARG GLITCHTIP_VERSION=local

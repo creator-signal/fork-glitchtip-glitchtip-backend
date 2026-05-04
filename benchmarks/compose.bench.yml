@@ -15,8 +15,9 @@ x-environment: &bench-environment
   GLITCHTIP_ENABLE_LOGS: "true"
   MALLOC_TRIM_INTERVAL: "${MALLOC_TRIM_INTERVAL:-0}"
   MEMRAY_ENABLED: "${MEMRAY_ENABLED:-0}"
-  # Backend selector — see run_concurrency_bench.sh.
-  #   async (default) → django-async-backend's postgresql backend
+  # Backend selector — see run_concurrency_bench.sh. One of:
+  #   async (default) → glitchtip.settings (psycopg3 + django-async-backend)
+  #   rust            → GLITCHTIP_USE_RUST_PG=true on top of glitchtip.settings
   BACKEND_VARIANT: "${BACKEND_VARIANT:-async}"
   # Pool sizing — a realistic prod-size pool per worker. Tune via env.
   DATABASE_POOL_MIN_SIZE: "${DATABASE_POOL_MIN_SIZE:-5}"
@@ -70,6 +71,11 @@ services:
         echo \"malloc: ARENA_MAX=$$MALLOC_ARENA_MAX MMAP_THRESHOLD=$${MALLOC_MMAP_THRESHOLD_:-default} TRIM_THRESHOLD=$${MALLOC_TRIM_THRESHOLD_:-default}\";
         echo \"backend variant: $${BACKEND_VARIANT:-async}\";
         export DJANGO_SETTINGS_MODULE=glitchtip.settings;
+        case \"$${BACKEND_VARIANT:-async}\" in
+          async) ;;
+          rust)  export GLITCHTIP_USE_RUST_PG=true ;;
+          *) echo \"unknown BACKEND_VARIANT: $$BACKEND_VARIANT\"; exit 2 ;;
+        esac;
         python manage.py migrate --no-input --skip-checks &&
         python manage.py maintain_partitions &&
         DEBUG=true python manage.py bootstrap_dev &&

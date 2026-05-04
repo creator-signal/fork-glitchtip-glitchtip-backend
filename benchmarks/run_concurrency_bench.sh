@@ -23,7 +23,8 @@ set -euo pipefail
 #   DB_LATENCY_MS           One-way latency (default: 2)
 #   DB_JITTER_MS            Jitter (default: 0)
 #   DATABASE_POOL_MAX_SIZE  PG pool upper bound (default: 40)
-#   BACKENDS                Backend variants to run (default: "async")
+#   BACKENDS                Backend variants to run (default: "async";
+#                           also accepted: "rust", or "async rust")
 # ──────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

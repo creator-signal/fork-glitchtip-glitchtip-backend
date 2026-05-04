@@ -460,11 +460,15 @@ class DatabaseSettingsTestCase(TestCase):
         self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
-        # Default ENGINE is async-backend's postgresql; assertion guards
-        # against a typo or accidental SQLite fallback.
-        self.assertEqual(
+        # ENGINE is async-backend's postgresql by default, or
+        # gt_rust.django_backend when GLITCHTIP_USE_RUST_PG is set.
+        # Assertion guards against a typo or accidental SQLite fallback.
+        self.assertIn(
             db_settings.get("ENGINE"),
-            "django_async_backend.db.backends.postgresql",
+            (
+                "django_async_backend.db.backends.postgresql",
+                "gt_rust.django_backend",
+            ),
         )
 
 

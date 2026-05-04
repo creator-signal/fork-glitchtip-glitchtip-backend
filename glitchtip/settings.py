@@ -75,6 +75,13 @@ if DEBUG and ENABLE_TEST_API:
 # DEBUG / ENABLE_TEST_API because realistic benches need DEBUG=False.
 ASYNC_PROBE_ENABLED = env.bool("ASYNC_PROBE_ENABLED", False)
 
+# Opt into the experimental gt_rust PostgreSQL backend. When enabled,
+# the DB ENGINE is swapped to ``gt_rust.django_backend`` and the native
+# async cursor path is turned on. psycopg3 remains a hard dependency
+# regardless (cold-storage and a few raw-SQL paths use it directly) so
+# this flag is purely additive.
+GLITCHTIP_USE_RUST_PG = env.bool("GLITCHTIP_USE_RUST_PG", False)
+
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Necessary for kubernetes health checks
 POD_IP = env.str("POD_IP", default=None)
@@ -808,6 +815,13 @@ for db_config in DATABASES.values():
             "max_size": env.int("DATABASE_POOL_MAX_SIZE", 20),
             "timeout": env.int("DATABASE_POOL_TIMEOUT", 30),
         }
+
+if GLITCHTIP_USE_RUST_PG:
+    # gt_rust ships its own AsyncDatabaseWrapper that plugs into
+    # django-async-backend, so the existing ``async_connections[alias]``
+    # callsites in ingest just route through Rust without code changes.
+    for _alias in DATABASES:
+        DATABASES[_alias]["ENGINE"] = "gt_rust.django_backend"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
