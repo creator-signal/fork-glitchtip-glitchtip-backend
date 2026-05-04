@@ -6,19 +6,35 @@ classes, separate ``queries_log`` deques, and separate per-task wrappers.
 So once the ingest hot path moved to ``async_connections``, the existing
 assertions silently stopped seeing the queries they were meant to count.
 
-``AsyncCaptureQueriesContext`` from django-async-backend solves this for
-async test methods, but our hot-path tests are sync (they POST through
-the test client, which dispatches to async views via ``async_to_sync``).
-The async wrapper that actually executes the queries lives on a different
-task than the test thread, so reading its ``queries_log`` from outside
-isn't reliable.
+``AsyncCaptureQueriesContext`` from django-async-backend is the natural
+replacement, but two things block adopting it today:
+
+1. The hot-path API tests POST through the Django test client. Django
+   bridges its sync-only middleware (e.g. ``DecompressBodyMiddleware``,
+   ``AuthenticationMiddleware``) with ``sync_to_async``, which dispatches
+   to a worker thread. ``async_connections`` is ``thread_critical=True``,
+   so the bridge thread gets its own wrapper instance — distinct
+   ``queries_log``, distinct ``force_debug_cursor`` flag. The test
+   thread's ``AsyncCaptureQueriesContext`` ends up watching the wrong
+   wrapper and sees almost nothing.
+2. Even on direct-ingest paths (``await process_issue_events(...)``)
+   where there is no middleware bridge, ``queries_log`` captures
+   ``BEGIN``/``COMMIT`` statements that the cursor-level patch here
+   does not. Switching the counter would shift every test's expected
+   number, producing churn that doesn't reflect a real change.
 
 Patching ``AsyncCursorWrapper.execute`` / ``executemany`` at the class
-level sidesteps the per-task storage entirely. The patch is shared by
-every wrapper in every task, so the counter sees queries no matter where
-they ran. This intentionally counts only queries that go through async
-cursors; sync queries (test ``setUp`` fixtures, middleware, ORM calls
-that haven't been ported yet) are invisible.
+level sidesteps the per-wrapper storage entirely. The patch is shared
+by every wrapper in every thread, so the counter sees queries no matter
+where they ran. This intentionally counts only queries that go through
+async cursors; sync queries (test ``setUp`` fixtures, middleware, ORM
+calls that haven't been ported yet) are invisible.
+
+TODO: replace with ``AsyncCaptureQueriesContext`` once every entry in
+``MIDDLEWARE`` is ``async_capable``. With the chain fully async, the
+view runs in the test's task, the wrapper is shared, and the upstream
+context manager becomes viable. That migration also needs a recalibration
+pass on the expected query counts to absorb the BEGIN/COMMIT delta.
 """
 
 from django_async_backend.db.backends.utils import AsyncCursorWrapper
@@ -57,7 +73,7 @@ class AsyncQueryCounter:
         AsyncCursorWrapper.executemany = executemany
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(self, *_exc_info) -> None:
         AsyncCursorWrapper.execute = self._orig_execute
         AsyncCursorWrapper.executemany = self._orig_executemany
 
