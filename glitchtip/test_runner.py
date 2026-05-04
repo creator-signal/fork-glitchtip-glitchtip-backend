@@ -76,3 +76,27 @@ class TimedTestRunner(DiscoverRunner):
         finally:
             post_migrate.disconnect(create_test_partitions)
         return result
+
+    def teardown_databases(self, old_config, **kwargs):
+        # ``psycopg.AsyncConnection`` can't close synchronously from
+        # ``__del__``, so async-backend connections opened in tasks that
+        # have since ended still hold the socket open. Forcibly terminate
+        # them so ``DROP DATABASE`` doesn't fail with "being accessed by
+        # other users".
+        from django.db import connections as sync_connections
+
+        for entry in old_config or []:
+            try:
+                wrapper = entry[0]
+                test_db = wrapper.settings_dict["NAME"]
+                with sync_connections[wrapper.alias].cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = %s AND pid <> pg_backend_pid()",
+                        [test_db],
+                    )
+            except Exception:
+                # Don't let teardown failures mask the real test result.
+                pass
+        return super().teardown_databases(old_config, **kwargs)
+

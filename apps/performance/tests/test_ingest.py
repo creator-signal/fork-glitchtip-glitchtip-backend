@@ -4,16 +4,18 @@ End-to-end tests for transaction ingest → TransactionGroup stats + SpanStaging
 
 from datetime import datetime, timedelta
 
-from asgiref.sync import async_to_sync
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
 
 from apps.event_ingest.process_event import process_transaction_events
 from apps.event_ingest.schema import InterchangeTransactionEvent, TransactionEventSchema
+from apps.event_ingest.tests.utils import run_async_closing
 from apps.performance.models import SpanStaging, TransactionGroup
 
-_process_transaction_events = async_to_sync(process_transaction_events)
+
+def _process_transaction_events(*args, **kwargs):
+    return run_async_closing(process_transaction_events, *args, **kwargs)
 
 
 def _make_transaction_payload(
@@ -77,7 +79,7 @@ def _make_interchange_event(
     )
 
 
-class TransactionIngestTestCase(TestCase):
+class TransactionIngestTestCase(TransactionTestCase):
     def setUp(self):
         self.project = baker.make(
             "projects.Project", organization__scrub_ip_addresses=False
@@ -185,9 +187,7 @@ class TransactionIngestTestCase(TestCase):
         )
         self.assertEqual(TransactionGroup.objects.count(), 2)
 
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true"
-    )
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_spans_written_to_staging(self):
         """Spans from the transaction are written to SpanStaging."""
         base = timezone.now() - timedelta(minutes=1)
@@ -227,9 +227,7 @@ class TransactionIngestTestCase(TestCase):
         # SQL should be parameterized
         self.assertIn("%s", db_span.description)
 
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true"
-    )
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_span_description_parameterized(self):
         """SQL literals in span descriptions are replaced with %s."""
         base = timezone.now() - timedelta(minutes=1)

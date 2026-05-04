@@ -68,6 +68,13 @@ if DEBUG is False:
 if DEBUG and ENABLE_TEST_API:
     ACCOUNT_RATE_LIMITS = False  # Disable for e2e tests
 
+# Enables a synthetic /api/_probe/async/ endpoint (see glitchtip.urls)
+# that runs a small fixed sequence of raw-SQL queries via the async-DB
+# helper. Used by the concurrency benchmarks to measure async-cursor
+# throughput in isolation from the full ingest pipeline. Independent of
+# DEBUG / ENABLE_TEST_API because realistic benches need DEBUG=False.
+ASYNC_PROBE_ENABLED = env.bool("ASYNC_PROBE_ENABLED", False)
+
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Necessary for kubernetes health checks
 POD_IP = env.str("POD_IP", default=None)
@@ -604,6 +611,11 @@ if ENABLE_OBSERVABILITY_API:
     MIDDLEWARE.insert(0, "django_prometheus.middleware.PrometheusBeforeMiddleware")
     MIDDLEWARE.append("django_prometheus.middleware.PrometheusAfterMiddleware")
 
+# All DB I/O goes through django-async-backend. Inserted at the head of
+# the chain so async cursors are returned to the pool before any other
+# middleware finalises the response.
+MIDDLEWARE.insert(0, "django_async_backend.middleware.close_async_connections")
+
 ROOT_URLCONF = "glitchtip.urls"
 
 TEMPLATES = [
@@ -774,6 +786,11 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
+    # async-backend's postgresql backend extends Django's stock postgresql
+    # and adds an AsyncDatabaseWrapper that ``async_connections`` discovers
+    # via load_backend. Sync paths (ORM, migrations, admin) still go through
+    # psycopg unchanged.
+    db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)

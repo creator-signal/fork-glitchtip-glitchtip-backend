@@ -8,7 +8,16 @@ Non-ingest requests pass through to the full Django application unchanged.
 
 import re
 
-_INGEST_PATH_RE = re.compile(r"^/api/\d+/(envelope|store|minidump|security)/")
+_INGEST_PATH_RE = re.compile(
+    r"^/api/("
+    r"\d+/(envelope|store|minidump|security)|"
+    # Async-DB benchmark endpoints, see glitchtip.async_probe. Routed
+    # through the minimal middleware chain so the bench measures the
+    # async-cursor wire I/O and (for /realistic/) the in-handler Python
+    # CPU between awaits — not AuthenticationMiddleware etc.
+    r"_probe/(async|realistic)"
+    r")/"
+)
 
 
 class IngestDispatcher:
@@ -48,6 +57,10 @@ class IngestDispatcher:
                 @classmethod
                 def _get_middleware_setting(cls):
                     return [
+                        # django-async-backend needs explicit per-request
+                        # cleanup to return pool connections; without it the
+                        # pool saturates after max_size requests.
+                        "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
                         "glitchtip.middleware.DecompressBodyMiddleware",

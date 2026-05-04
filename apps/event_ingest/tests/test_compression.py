@@ -11,6 +11,8 @@ except ImportError:
 from django.tasks import task_backends
 from django.urls import reverse
 
+from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
+
 from .utils import EventIngestTestCase
 
 
@@ -24,7 +26,7 @@ class CompressionTestCase(EventIngestTestCase):
         json_data = json.dumps(self.event).encode("utf-8")
         compressed_data = zstd.compress(json_data)
 
-        with self.assertNumQueries(18):
+        with AsyncQueryCounter() as q:
             res = self.client.post(
                 self.url,
                 compressed_data,
@@ -32,6 +34,7 @@ class CompressionTestCase(EventIngestTestCase):
                 HTTP_CONTENT_ENCODING="zstd",
             )
             task_backends["default"].flush_batches()
+        self.assertEqual(len(q), 17)
 
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.event["event_id"])

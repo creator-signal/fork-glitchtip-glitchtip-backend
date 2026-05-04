@@ -1,4 +1,4 @@
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from model_bakery import baker
@@ -16,17 +16,17 @@ class AuthFromRequestTestCase(TestCase):
         self.assertIsInstance(ctx.exception.status_code, int)
 
 
-class AuthenticationTestCase(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = baker.make("users.User")
-        cls.project = baker.make("projects.Project")
-        cls.project_key = cls.project.projectkey_set.first()
-        cls.organization = cls.project.organization
-        # Add user to organization to create OrganizationOwner (billing contact)
-        cls.organization.add_user(cls.user)
-
+class AuthenticationTestCase(TransactionTestCase):
     def setUp(self):
+        # Async ingest path reads project auth via async_connections, which
+        # only sees committed data — TransactionTestCase commits per-test
+        # fixtures, then truncates between tests.
+        self.user = baker.make("users.User")
+        self.project = baker.make("projects.Project")
+        self.project_key = self.project.projectkey_set.first()
+        self.organization = self.project.organization
+        # Add user to organization to create OrganizationOwner (billing contact)
+        self.organization.add_user(self.user)
         self.url = (
             reverse("event_envelope", args=[self.project.id])
             + f"?sentry_key={self.project_key.public_key}"

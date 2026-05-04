@@ -12,12 +12,23 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.event_ingest.tests.utils import run_async_closing
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import LogLevel
 from ..models import LogEvent
-from ..process_logs import LEVEL_MAP, parse_span_id, process_log_events
+from ..process_logs import LEVEL_MAP, parse_span_id
+from ..process_logs import process_log_events as _aprocess_log_events
 from ..tasks import LogTaskMessage
+
+
+# ``process_log_events`` became async in the django-async-backend
+# integration. Tests still drive it synchronously; ``run_async_closing``
+# wraps async_to_sync with a teardown that closes the task-local async
+# DB connection before the task ends, so we don't leak sockets across
+# tests.
+def process_log_events(*args, **kwargs):
+    return run_async_closing(_aprocess_log_events, *args, **kwargs)
 
 
 def list_to_envelope(data: list[dict]) -> str:
@@ -124,7 +135,7 @@ class LogItemSchemaCompatTestCase(TestCase):
         self.assertEqual(item.timestamp, 1775203281.699)
 
 
-class LogIngestProcessingTestCase(TestCase):
+class LogIngestProcessingTestCase(TransactionTestCase):
     """Test log processing function"""
 
     def setUp(self):

@@ -2,7 +2,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from asgiref.sync import sync_to_async
 from django_vtasks import task
 
 from .process_logs import process_log_events
@@ -37,4 +36,4 @@ async def ingest_logs(tasks: list):
             )
         )
 
-    await sync_to_async(process_log_events)(messages)
+    await process_log_events(messages)

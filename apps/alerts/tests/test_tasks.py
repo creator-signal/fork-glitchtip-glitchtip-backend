@@ -12,13 +12,16 @@ from model_bakery import baker
 from apps.issue_events.models import EventStatus, Issue
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
-from glitchtip.test_utils.test_case import GlitchTipTestCase
+from glitchtip.test_utils.test_case import (
+    GlitchTipTestCase,
+    GlitchTipTransactionTestCase,
+)
 
 from ..models import Notification
 from ..tasks import process_event_alerts
 
 
-class AlertTestCase(GlitchTipTestCase):
+class AlertTestCase(GlitchTipTransactionTestCase):
     def setUp(self):
         super().setUp()
         self.create_user_and_project()

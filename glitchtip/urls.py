@@ -43,6 +43,22 @@ urlpatterns = [
     ),
 ]
 
+# Synthetic async-DB benchmark endpoint. Mounted only when the flag is
+# set so it doesn't appear in the URL conf for normal deployments. The
+# IngestDispatcher routes /api/_probe/ through the minimal middleware
+# chain — see glitchtip/ingest_asgi.py.
+if getattr(settings, "ASYNC_PROBE_ENABLED", False):
+    from .async_probe import async_probe, realistic_probe
+
+    urlpatterns += [
+        path("api/_probe/async/", async_probe, name="async_probe"),
+        path(
+            "api/_probe/realistic/",
+            realistic_probe,
+            name="realistic_probe",
+        ),
+    ]
+
 if "django.contrib.admin" in settings.INSTALLED_APPS:
     if settings.GLITCHTIP_INSTANCE_NAME:
         admin.site.site_header = settings.GLITCHTIP_INSTANCE_NAME
