@@ -1,5 +1,5 @@
 # pylint: disable=attribute-defined-outside-init,invalid-name
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
@@ -76,6 +76,18 @@ class GlitchTipTestCaseMixin:
 
 class GlitchTipTestCase(GlitchTipTestCaseMixin, TestCase):
     """Use GlitchTestCase instead."""
+
+    def create_user_and_project(self):
+        self.create_logged_in_user()
+
+
+class GlitchTipTransactionTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
+    """For tests whose code path reads via ``async_connections``.
+
+    The async sessions only see committed rows; ``TransactionTestCase``
+    truncates between tests rather than rolling back, so fixtures created
+    via sync bakery in ``setUp`` are visible to the async path under test.
+    """
 
     def create_user_and_project(self):
         self.create_logged_in_user()

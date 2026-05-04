@@ -13,7 +13,7 @@ from django.urls import reverse
 from apps.event_ingest.tests.utils import generate_event, list_to_envelope
 from apps.files.models import File, FileBlob
 from apps.issue_events.models import Issue
-from glitchtip.test_utils.test_case import GlitchTestCase
+from glitchtip.test_utils.test_case import GlitchTipTransactionTestCase
 
 debug_id = str(uuid.uuid4())
 minified_js = "function a(n,t){return n+t}"
@@ -32,12 +32,17 @@ original_js = """function calculateSum(firstNumber, secondNumber) {
 }"""
 
 
-class SourceCodeTestCase(GlitchTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.create_user()
-
+class SourceCodeTestCase(GlitchTipTransactionTestCase):
     def setUp(self):
+        # ``create_project`` sets self.project + self.projectkey on the same
+        # Project (matters for the envelope URL below). The default
+        # ``create_logged_in_user`` then creates a second project, which
+        # would mismatch self.projectkey — bypass it.
+        self.create_project()
+        from model_bakery import baker
+
+        self.user = baker.make("users.user")
+        self.organization.add_user(self.user)
         self.client.force_login(self.user)
 
     def upload_chunk(

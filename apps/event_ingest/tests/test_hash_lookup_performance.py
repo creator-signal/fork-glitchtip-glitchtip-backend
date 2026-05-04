@@ -11,19 +11,21 @@ replication lag.
 import uuid
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
-from django.db import connection, connections
-from django.test.utils import CaptureQueriesContext
+from django.db import connections
 from django.utils import timezone
+from django_async_backend.db import async_connections
 
 from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
+from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 
 from ..process_event import process_issue_events
 from ..schema import IssueEventSchema, IssueTaskMessage
-from .utils import EventIngestTestCase, generate_event
+from .utils import EventIngestTestCase, generate_event, run_async_closing
 
-_process_issue_events = async_to_sync(process_issue_events)
+
+def _process_issue_events(*args, **kwargs):
+    return run_async_closing(process_issue_events, *args, **kwargs)
 
 
 class HashLookupBatchTestCase(EventIngestTestCase):
@@ -55,11 +57,11 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         self.assertEqual(Issue.objects.count(), 5)
 
         # Batch of 10
-        with CaptureQueriesContext(connection) as ctx_10:
+        with AsyncQueryCounter() as ctx_10:
             self.process_events(self._make_batch(seed_msgs, 10))
 
         # Batch of 30 — 3x larger
-        with CaptureQueriesContext(connection) as ctx_30:
+        with AsyncQueryCounter() as ctx_30:
             self.process_events(self._make_batch(seed_msgs, 30))
 
         self.assertEqual(
@@ -82,12 +84,12 @@ class HashLookupBatchTestCase(EventIngestTestCase):
         self.process_events([generate_event(event={"message": m}) for m in seed_msgs])
 
         # Batch matching existing issues
-        with CaptureQueriesContext(connection) as ctx_existing:
+        with AsyncQueryCounter() as ctx_existing:
             self.process_events(self._make_batch(seed_msgs, 5))
 
         # Batch creating new issues
         new_msgs = [f"brand-new-error-{i}" for i in range(5)]
-        with CaptureQueriesContext(connection) as ctx_new:
+        with AsyncQueryCounter() as ctx_new:
             self.process_events(self._make_batch(new_msgs, 5))
 
         self.assertGreater(
@@ -128,12 +130,18 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
         ]
 
         original_getitem = type(connections).__getitem__
+        original_async_getitem = type(async_connections).__getitem__
         original_ih_using = IssueHash.objects.using
 
         def mock_getitem(self_conn, alias):
             if alias == "read_only":
                 return original_getitem(self_conn, "default")
             return original_getitem(self_conn, alias)
+
+        def mock_async_getitem(self_conn, alias):
+            if alias == "read_only":
+                return original_async_getitem(self_conn, "default")
+            return original_async_getitem(self_conn, alias)
 
         def mock_ih_using(alias):
             if alias == "read_only":
@@ -142,6 +150,7 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
 
         with (
             patch.object(type(connections), "__getitem__", mock_getitem),
+            patch.object(type(async_connections), "__getitem__", mock_async_getitem),
             patch.object(IssueHash.objects, "using", mock_ih_using),
         ):
             _process_issue_events(events, read_only_db="read_only")

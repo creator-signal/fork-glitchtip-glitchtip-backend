@@ -183,18 +183,22 @@ def timed_request(
 # ---------------------------------------------------------------------------
 
 
-def run_ingest_wave(
+def run_ingest_wave_into(
     client: httpx.Client,
     sentry_key: str,
     host: str,
     project_id: int,
     count: int,
     concurrency: int,
-) -> dict:
-    """Send `count` envelope events at `concurrency` parallelism."""
+    stats: "Stats",
+) -> None:
+    """Send `count` envelope events at `concurrency` parallelism.
+
+    Records results into the externally-supplied ``stats`` so the caller
+    can keep per-wave and cumulative collectors separate.
+    """
     endpoint = f"{host}/api/{project_id}/envelope/?sentry_key={sentry_key}"
     payloads = [make_envelope(sentry_key) for _ in range(count)]
-    stats = Stats()
 
     def send(payload: bytes):
         elapsed, ok = timed_request(
@@ -211,7 +215,60 @@ def run_ingest_wave(
         for f in as_completed(futures):
             f.result()
 
+
+def run_ingest_wave(
+    client: httpx.Client,
+    sentry_key: str,
+    host: str,
+    project_id: int,
+    count: int,
+    concurrency: int,
+) -> dict:
+    """Backwards-compatible wrapper that returns a summary dict."""
+    stats = Stats()
+    run_ingest_wave_into(
+        client, sentry_key, host, project_id, count, concurrency, stats
+    )
     return stats.summary()
+
+
+# ---------------------------------------------------------------------------
+# Workload: probe (synthetic async-DB endpoint)
+# ---------------------------------------------------------------------------
+
+
+def run_probe_wave_into(
+    client: httpx.Client,
+    host: str,
+    count: int,
+    concurrency: int,
+    stats: "Stats",
+    probe_path: str = "/api/_probe/async/",
+) -> None:
+    """Hammer one of the async-DB probe endpoints (see
+    :mod:`glitchtip.async_probe`).
+
+    ``/api/_probe/async/`` — three trivial SELECTs back to back. Pure
+    async-cursor synthetic.
+
+    ``/api/_probe/realistic/`` — fast SELECT, ~0.5 ms Python CPU,
+    async-backend ORM ``aget``, ~0.5 ms Python CPU, ``pg_sleep(0.01)``.
+    Better target for "does async + Rust actually beat psycopg3 in a
+    realistic shape?".
+
+    Both bypass the ingest pipeline; every request goes through the
+    IngestDispatcher minimal-middleware chain.
+    """
+    endpoint = f"{host}{probe_path}"
+
+    def send(_):
+        elapsed, ok = timed_request(client, "GET", endpoint)
+        stats.record(elapsed, ok)
+
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(send, i) for i in range(count)]
+        for f in as_completed(futures):
+            f.result()
 
 
 # ---------------------------------------------------------------------------
@@ -245,22 +302,22 @@ def build_mixed_request_list(count: int) -> list[str]:
     return types[:count]
 
 
-def run_mixed_wave(
+def run_mixed_wave_into(
     client: httpx.Client,
     sentry_key: str,
     host: str,
     project_id: int,
     count: int,
     concurrency: int,
-) -> dict[str, dict]:
-    """Run a mixed workload wave. Returns per-type stats."""
+    per_type_stats: dict[str, "Stats"],
+) -> None:
+    """Run a mixed workload wave, recording into the supplied stats dict."""
     endpoint_ingest = f"{host}/api/{project_id}/envelope/?sentry_key={sentry_key}"
     auth_headers = {"Authorization": f"Bearer {API_TOKEN}"}
 
     request_types = build_mixed_request_list(count)
-    per_type_stats: dict[str, Stats] = {}
     for rt in set(request_types):
-        per_type_stats[rt] = Stats()
+        per_type_stats.setdefault(rt, Stats())
 
     # Pre-build ingest payloads
     ingest_payloads = iter(
@@ -326,6 +383,22 @@ def run_mixed_wave(
         for f in as_completed(futures):
             f.result()
 
+
+def run_mixed_wave(
+    client: httpx.Client,
+    sentry_key: str,
+    host: str,
+    project_id: int,
+    count: int,
+    concurrency: int,
+) -> dict[str, dict]:
+    """Backwards-compatible wrapper returning a per-type summary dict."""
+    per_type_stats: dict[str, Stats] = {
+        rt: Stats() for rt in MIXED_WEIGHTS.keys()
+    }
+    run_mixed_wave_into(
+        client, sentry_key, host, project_id, count, concurrency, per_type_stats
+    )
     return {rt: s.summary() for rt, s in per_type_stats.items()}
 
 
@@ -392,9 +465,14 @@ Examples:
     )
     parser.add_argument(
         "--mode",
-        choices=["ingest", "mixed"],
+        choices=["ingest", "mixed", "probe", "probe-realistic"],
         default="ingest",
-        help="Workload mode: ingest-only or mixed (default: ingest)",
+        help=(
+            "Workload mode: ingest-only, mixed (events+API+uptime), probe "
+            "(synthetic /api/_probe/async/ — 3 raw async SELECTs), or "
+            "probe-realistic (/api/_probe/realistic/ — raw SQL + Python "
+            "CPU + async ORM + Python CPU + pg_sleep)"
+        ),
     )
     parser.add_argument(
         "-c",
@@ -435,16 +513,30 @@ Examples:
         default=1,
         help="Project ID for ingest (default: 1)",
     )
+    parser.add_argument(
+        "--json-out",
+        type=str,
+        default=None,
+        help="Write aggregated results as JSON to this path (for compare scripts)",
+    )
     args = parser.parse_args()
 
     host = args.host
     wait_for_server(host)
 
-    print("Discovering DSN key...", flush=True)
-    sentry_key = discover_dsn_key(host, args.project_id)
-    print(f"  Key: {sentry_key[:8]}...{sentry_key[-4:]}", flush=True)
+    if args.mode in ("probe", "probe-realistic"):
+        sentry_key = ""  # not used by the probe endpoints
+    else:
+        print("Discovering DSN key...", flush=True)
+        sentry_key = discover_dsn_key(host, args.project_id)
+        print(f"  Key: {sentry_key[:8]}...{sentry_key[-4:]}", flush=True)
 
-    mode_label = "INGEST-ONLY" if args.mode == "ingest" else "MIXED WORKLOAD"
+    mode_label = {
+        "ingest": "INGEST-ONLY",
+        "mixed": "MIXED WORKLOAD",
+        "probe": "ASYNC-DB PROBE",
+        "probe-realistic": "ASYNC-DB PROBE (realistic)",
+    }[args.mode]
     print()
     print("=" * 70)
     print(f"MEMORY BENCHMARK — {mode_label}")
@@ -458,6 +550,11 @@ Examples:
     print("=" * 70)
     print()
 
+    # Aggregated stats across every wave — the JSON output consumer
+    # (run_concurrency_bench.sh) uses these to compare backends.
+    overall = Stats()
+    wall_t0 = time.monotonic()
+
     transport = httpx.HTTPTransport(retries=0)
     with httpx.Client(timeout=60, transport=transport) as client:
         if args.mode == "ingest":
@@ -466,38 +563,118 @@ Examples:
             print("-" * len(header))
 
             for wave in range(1, args.waves + 1):
-                stats = run_ingest_wave(
+                wave_stats = Stats()
+                run_ingest_wave_into(
                     client,
                     sentry_key,
                     host,
                     args.project_id,
                     args.requests_per_wave,
                     args.concurrency,
+                    wave_stats,
                 )
-                print_stats_row(wave, stats)
+                with overall._lock:
+                    overall.success += wave_stats.success
+                    overall.error += wave_stats.error
+                    overall.latencies.extend(wave_stats.latencies)
+                print_stats_row(wave, wave_stats.summary())
+                if wave < args.waves:
+                    print(f"  ... pausing {args.pause}s ...", flush=True)
+                    time.sleep(args.pause)
+
+        elif args.mode in ("probe", "probe-realistic"):
+            probe_path = (
+                "/api/_probe/realistic/"
+                if args.mode == "probe-realistic"
+                else "/api/_probe/async/"
+            )
+            header = (
+                f"{'Wave':<8} {'Success':>8} {'Error':>8} "
+                f"{'p50ms':>8} {'p95ms':>8} {'p99ms':>8}"
+            )
+            print(header)
+            print("-" * len(header))
+
+            for wave in range(1, args.waves + 1):
+                wave_stats = Stats()
+                run_probe_wave_into(
+                    client,
+                    host,
+                    args.requests_per_wave,
+                    args.concurrency,
+                    wave_stats,
+                    probe_path=probe_path,
+                )
+                with overall._lock:
+                    overall.success += wave_stats.success
+                    overall.error += wave_stats.error
+                    overall.latencies.extend(wave_stats.latencies)
+                print_stats_row(wave, wave_stats.summary())
                 if wave < args.waves:
                     print(f"  ... pausing {args.pause}s ...", flush=True)
                     time.sleep(args.pause)
 
         else:  # mixed
             for wave in range(1, args.waves + 1):
-                per_type = run_mixed_wave(
+                per_type = {
+                    rt: Stats() for rt in MIXED_WEIGHTS.keys()
+                }
+                run_mixed_wave_into(
                     client,
                     sentry_key,
                     host,
                     args.project_id,
                     args.requests_per_wave,
                     args.concurrency,
+                    per_type,
                 )
-                print_mixed_stats(wave, per_type)
+                with overall._lock:
+                    for s in per_type.values():
+                        overall.success += s.success
+                        overall.error += s.error
+                        overall.latencies.extend(s.latencies)
+                print_mixed_stats(wave, {rt: s.summary() for rt, s in per_type.items()})
                 if wave < args.waves:
                     print(f"  ... pausing {args.pause}s ...", flush=True)
                     time.sleep(args.pause)
+
+    wall_elapsed = time.monotonic() - wall_t0
 
     print()
     print("=" * 70)
     print("BENCHMARK COMPLETE")
     print("=" * 70)
+
+    if args.json_out:
+        import json as _json
+
+        s = overall.summary()
+        total = s["success"] + s["error"]
+        lats_sorted = sorted(overall.latencies)
+        n = len(lats_sorted)
+        out = {
+            "mode": args.mode,
+            "concurrency": args.concurrency,
+            "requests_per_wave": args.requests_per_wave,
+            "waves": args.waves,
+            "wall_elapsed_s": wall_elapsed,
+            "overall": {
+                "total": total,
+                "success": s["success"],
+                "error": s["error"],
+                "error_rate": (s["error"] / total) if total else 0.0,
+                "req_per_s": (total / wall_elapsed) if wall_elapsed > 0 else 0.0,
+                "p50_ms": s["p50_ms"],
+                "p95_ms": s["p95_ms"],
+                "p99_ms": s["p99_ms"],
+                "p999_ms": (
+                    lats_sorted[int(n * 0.999)] * 1000 if n else 0.0
+                ),
+            },
+        }
+        with open(args.json_out, "w") as f:
+            _json.dump(out, f, indent=2)
+        print(f"  wrote {args.json_out}")
 
 
 if __name__ == "__main__":
