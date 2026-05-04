@@ -89,6 +89,55 @@ psycopg's pool object directly via `connection.pool`, which we
 deliberately return as `None` (our pool lives in Rust and isn't
 psycopg-shaped).
 
+## `executemany` benchmark gap vs psycopg3 (~13× on per-row INSERTs)
+
+`benchmarks/bench_rust_pg.py --workload param_ins` (200 same-SQL
+single-row INSERTs at 0 ms loopback) shows gt_rust at ~0.08× of
+psycopg3 (≈ 13× slower). The cause is structural and benchmark-only:
+
+- **psycopg3's `cursor.executemany`** uses Postgres pipeline mode for
+  same-SQL batches: one `Parse`, N × `Bind+Execute`, one `Sync`. The
+  server processes the whole batch as a single extended-query
+  transaction with one `ReadyForQuery` handshake, regardless of N.
+- **tokio-postgres' public `client.query`** API emits its own `Sync`
+  per call, so N executions become N independent extended-query
+  transactions on the wire — N × the protocol overhead psycopg pays.
+  No primitive in the public API exposes batched-Bind-Execute with a
+  single trailing `Sync`.
+
+We tried both approaches against this benchmark:
+
+- ``try_join_all`` over N futures sharing one client (current code in
+  ``do_query_batch``): 467 ms for 200 INSERTs.
+- Plain serial ``for-await``: 675 ms — worse, because serial loses
+  the partial pipelining that ``try_join_all`` does get from
+  tokio-postgres' connection task.
+- For reference, psycopg3's pipelined `executemany`: 41 ms.
+
+So the existing ``try_join_all`` is the right choice for this code
+path; the 13× gap to psycopg is the missing single-Sync primitive,
+not a code-shape issue we can fix at this level.
+
+### Production impact: none
+
+`query_many` is currently exercised only by the bench script:
+
+- Django's gt_rust async cursor's ``executemany`` is a serial
+  ``for-await`` (``django_backend/async_base.py``), not a batch
+  call into ``query_many``.
+- Django's ``bulk_create`` on PG 14+ emits ``INSERT ... SELECT FROM
+  UNNEST(...)`` — a single statement. gt_rust matches or beats
+  psycopg3 on that workload (`bulk_unnest`: gt_rust 8–11 ms,
+  psycopg 9–14 ms).
+- GlitchTip's hot ingest paths use the same UNNEST pattern.
+
+Closing the gap would require either auto-rewriting same-SQL same-
+shape batches into a multi-VALUES INSERT in ``do_query_batch``
+(SQL-parsing brittleness around `RETURNING` / `ON CONFLICT`), or
+vendoring tokio-postgres / using private APIs to emit a real
+single-Sync pipeline. Neither is justified by the benchmark of an
+unused code path; revisit if a real workload surfaces it.
+
 ## Cascade artefacts (4 errors)
 
 - `tearDownClass`, `test_can_reference_existent`,
