@@ -51,7 +51,7 @@ class StripeNestedPriceSchema(StripeIDSchema, ModelSchema):
 
     class Meta:
         model = StripePrice
-        fields = ["price", "interval"]
+        fields = ["price", "interval", "is_public"]
 
     @staticmethod
     def resolve_price(obj: StripePrice):
