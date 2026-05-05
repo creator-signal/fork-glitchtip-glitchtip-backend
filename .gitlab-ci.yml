@@ -156,47 +156,148 @@ build:
     - docker build -t ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-} --build-arg IS_CI="True" .
     - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-}
 
-build_arm_x86:
+# Native per-arch build smoke test on MRs and master, to catch
+# arch-specific build regressions before they reach a release tag.
+.validate_build_base:
   image: docker:29
   services:
     - docker:29-dind
-  before_script:
-    - docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
   script:
-    - wget https://gitlab.com/api/v4/projects/15449363/jobs/artifacts/$CI_COMMIT_TAG/download?job=build-assets -O assets.zip
+    - docker buildx create --use
+    - >-
+      docker buildx build --platform ${BUILD_PLATFORM} --load
+      -t glitchtip-validate:${CI_COMMIT_SHORT_SHA}-${BUILD_ARCH}
+      --build-arg IS_CI="True" .
+    # Smoke test: import Django + glitchtip to verify the Python and
+    # native deps stack loads on the built arch.
+    - >-
+      docker run --rm --platform ${BUILD_PLATFORM}
+      -e SECRET_KEY=ci -e DATABASE_URL=sqlite:///tmp/ci.sqlite3
+      glitchtip-validate:${CI_COMMIT_SHORT_SHA}-${BUILD_ARCH}
+      python -c "import django, glitchtip; print('django', django.get_version()); print('glitchtip OK')"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+validate_build_amd64:
+  extends: .validate_build_base
+  variables:
+    BUILD_PLATFORM: linux/amd64
+    BUILD_ARCH: amd64
+
+validate_build_arm64:
+  extends: .validate_build_base
+  tags:
+    - saas-linux-medium-arm64
+  variables:
+    BUILD_PLATFORM: linux/arm64
+    BUILD_ARCH: arm64
+
+# Release multi-arch build. Per-arch jobs run in parallel and push
+# arch-suffixed tags; the manifest-merge job publishes the user-facing
+# tags (latest, X.Y.Z, X.Y, X) as manifest lists. Triggered only on
+# protected vX.Y.Z tags.
+
+# Pull frontend assets once and share them with both arch builds via job artifact.
+release_prepare_assets:
+  image: docker:29
+  script:
+    - apk add --no-cache wget unzip
+    - wget "https://gitlab.com/api/v4/projects/15449363/jobs/artifacts/$CI_COMMIT_TAG/download?job=build-assets" -O assets.zip
     - unzip assets.zip
     - rm assets.zip
     - mv dist/glitchtip-frontend/browser/* dist/
     - rmdir dist/glitchtip-frontend/browser/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/ && $CI_COMMIT_REF_PROTECTED == "true"'
 
+.release_build_base:
+  image: docker:29
+  services:
+    - docker:29-dind
+  needs:
+    - job: release_prepare_assets
+      artifacts: true
+  script:
     # Version parsing (e.g., v5.0.1 -> 5.0.1, 5.0, 5)
     - VERSION_FULL=${CI_COMMIT_REF_NAME#*v}
     - VERSION_MINOR=${VERSION_FULL%.*}
     - VERSION_MAJOR=${VERSION_FULL%%.*}
 
-    - 'echo "Building tags: latest, ${VERSION_FULL}, ${VERSION_MINOR}, ${VERSION_MAJOR}"'
+    - 'echo "Building ${BUILD_ARCH} layer for tags: ${VERSION_FULL}"'
 
     - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
     - docker login -u ${GITLAB_DEPLOY_USER} -p ${GITLAB_DEPLOY_TOKEN} registry.gitlab.com
     - docker login -u ${QUAY_USER} -p ${QUAY_TOKEN} quay.io
     - docker buildx create --use
     - >-
-      docker buildx build --platform linux/arm64/v8,linux/amd64 --push
-      -t ${DOCKER_CI_REGISTRY_IMAGE}:latest
-      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL}
-      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MINOR}
-      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_MAJOR}
-      -t registry.gitlab.com/glitchtip/glitchtip:latest
-      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_FULL}
-      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_MINOR}
-      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_MAJOR}
-      -t quay.io/glitchtip/glitchtip:latest
-      -t quay.io/glitchtip/glitchtip:${VERSION_FULL}
-      -t quay.io/glitchtip/glitchtip:${VERSION_MINOR}
-      -t quay.io/glitchtip/glitchtip:${VERSION_MAJOR}
+      docker buildx build --platform ${BUILD_PLATFORM} --push
+      -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL}-${BUILD_ARCH}
+      -t registry.gitlab.com/glitchtip/glitchtip:${VERSION_FULL}-${BUILD_ARCH}
+      -t quay.io/glitchtip/glitchtip:${VERSION_FULL}-${BUILD_ARCH}
       --build-arg IS_CI="True"
       --build-arg GLITCHTIP_VERSION=${VERSION_FULL}
       --build-arg COLLECT_STATIC="True" .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/ && $CI_COMMIT_REF_PROTECTED == "true"'
+
+release_build_amd64:
+  extends: .release_build_base
+  variables:
+    BUILD_PLATFORM: linux/amd64
+    BUILD_ARCH: amd64
+
+release_build_arm64:
+  extends: .release_build_base
+  tags:
+    - saas-linux-medium-arm64
+  variables:
+    BUILD_PLATFORM: linux/arm64
+    BUILD_ARCH: arm64
+
+# `imagetools create` works registry-side, so no DinD is needed here.
+release_manifest_merge:
+  image: docker:29
+  needs:
+    - job: release_build_amd64
+      artifacts: false
+    - job: release_build_arm64
+      artifacts: false
+  script:
+    - VERSION_FULL=${CI_COMMIT_REF_NAME#*v}
+    - VERSION_MINOR=${VERSION_FULL%.*}
+    - VERSION_MAJOR=${VERSION_FULL%%.*}
+
+    - 'echo "Publishing manifest tags: latest, ${VERSION_FULL}, ${VERSION_MINOR}, ${VERSION_MAJOR}"'
+
+    - docker login -u ${DOCKER_CI_REGISTRY_USER} -p ${DOCKER_CI_REGISTRY_PASSWORD}
+    - docker login -u ${GITLAB_DEPLOY_USER} -p ${GITLAB_DEPLOY_TOKEN} registry.gitlab.com
+    - docker login -u ${QUAY_USER} -p ${QUAY_TOKEN} quay.io
+    - |
+      for REGISTRY in \
+        "${DOCKER_CI_REGISTRY_IMAGE}" \
+        "registry.gitlab.com/glitchtip/glitchtip" \
+        "quay.io/glitchtip/glitchtip"; do
+        for TAG in "latest" "${VERSION_FULL}" "${VERSION_MINOR}" "${VERSION_MAJOR}"; do
+          echo "Creating manifest ${REGISTRY}:${TAG}"
+          docker buildx imagetools create \
+            -t "${REGISTRY}:${TAG}" \
+            "${REGISTRY}:${VERSION_FULL}-amd64" \
+            "${REGISTRY}:${VERSION_FULL}-arm64"
+        done
+      done
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
