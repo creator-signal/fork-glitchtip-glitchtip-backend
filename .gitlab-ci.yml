@@ -156,13 +156,8 @@ build:
     - docker build -t ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-} --build-arg IS_CI="True" .
     - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_NAME//\//-}
 
-# --- Per-MR / master build validation -----------------------------------
-#
-# Builds the production Docker image natively for both supported
-# architectures on every MR into the default branch and on master pushes,
-# then runs a cheap smoke test against the resulting image. Catches
-# "build succeeds but image won't run on this arch" regressions before
-# they reach a release tag. Does not push to any registry.
+# Native per-arch build smoke test on MRs and master, to catch
+# arch-specific build regressions before they reach a release tag.
 .validate_build_base:
   image: docker:29
   services:
@@ -173,9 +168,8 @@ build:
       docker buildx build --platform ${BUILD_PLATFORM} --load
       -t glitchtip-validate:${CI_COMMIT_SHORT_SHA}-${BUILD_ARCH}
       --build-arg IS_CI="True" .
-    # Smoke test: image must be able to import Django + glitchtip and pass
-    # `manage.py check`. This exercises the Python+native deps stack on
-    # the actual built arch.
+    # Smoke test: import Django + glitchtip to verify the Python and
+    # native deps stack loads on the built arch.
     - >-
       docker run --rm --platform ${BUILD_PLATFORM}
       -e SECRET_KEY=ci -e DATABASE_URL=sqlite:///tmp/ci.sqlite3
@@ -203,16 +197,12 @@ validate_build_arm64:
     BUILD_PLATFORM: linux/arm64
     BUILD_ARCH: arm64
 
-# --- Release: native multi-arch build -----------------------------------
-#
-# Replaces the previous QEMU-emulated multi-arch build with a parallel
-# pair of native jobs, one per architecture. Each per-arch job pushes an
-# arch-suffixed tag to all three registries; a final manifest-merge job
-# stitches the two arches together under the human-friendly tags
-# (latest, X.Y.Z, X.Y, X). Triggered only on protected vX.Y.Z tags,
-# matching the behaviour of the legacy `build_arm_x86` job.
+# Release multi-arch build. Per-arch jobs run in parallel and push
+# arch-suffixed tags; the manifest-merge job publishes the user-facing
+# tags (latest, X.Y.Z, X.Y, X) as manifest lists. Triggered only on
+# protected vX.Y.Z tags.
 
-# Pull frontend assets once and pass to both arch builds via job artifact.
+# Pull frontend assets once and share them with both arch builds via job artifact.
 release_prepare_assets:
   image: docker:29
   script:
@@ -250,9 +240,6 @@ release_prepare_assets:
     - docker login -u ${GITLAB_DEPLOY_USER} -p ${GITLAB_DEPLOY_TOKEN} registry.gitlab.com
     - docker login -u ${QUAY_USER} -p ${QUAY_TOKEN} quay.io
     - docker buildx create --use
-    # Build native single-arch and push arch-suffixed tags to every
-    # registry. The manifest-merge job will fan these out under the
-    # human-friendly tags.
     - >-
       docker buildx build --platform ${BUILD_PLATFORM} --push
       -t ${DOCKER_CI_REGISTRY_IMAGE}:${VERSION_FULL}-${BUILD_ARCH}
@@ -280,10 +267,7 @@ release_build_arm64:
     BUILD_PLATFORM: linux/arm64
     BUILD_ARCH: arm64
 
-# Stitch the two per-arch images into a multi-arch manifest list under
-# the human-friendly tags. `imagetools create` operates entirely on the
-# registry side (no local image pulls), so a plain docker:29 image is
-# enough -- no DinD required.
+# `imagetools create` works registry-side, so no DinD is needed here.
 release_manifest_merge:
   image: docker:29
   needs:
