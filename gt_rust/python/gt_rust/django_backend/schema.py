@@ -8,8 +8,6 @@ just for this step, so we provide a minimal quote-and-inline path that
 covers the value shapes Django actually emits during migrations.
 """
 
-from __future__ import annotations
-
 import datetime
 import decimal
 import json

@@ -18,8 +18,6 @@ lifecycle, autocommit/transaction handling — is inherited from
 ``BaseDatabaseWrapper`` and ``postgresql.DatabaseWrapper``.
 """
 
-from __future__ import annotations
-
 from contextlib import contextmanager
 
 from django.db.backends.postgresql.base import (

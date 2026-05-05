@@ -16,8 +16,6 @@ Requires ``django-async-backend`` to be installed. gt_rust depends on
 it — there is no standalone-sync story.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from django.db.backends.postgresql.base import (

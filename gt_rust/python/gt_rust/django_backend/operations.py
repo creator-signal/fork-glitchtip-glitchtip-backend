@@ -8,8 +8,6 @@ Django's query introspection (CaptureQueriesContext, CursorDebugWrapper,
 parameters substituted.
 """
 
-from __future__ import annotations
-
 from django.db.backends.postgresql.operations import (
     DatabaseOperations as PgDatabaseOperations,
 )

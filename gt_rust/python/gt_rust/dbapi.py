@@ -23,8 +23,6 @@ SQL bytes), ``cursor.mogrify``, ``callproc``, ``compose_sql`` /
 ``last_executed_query`` Django operations hooks. Binary params and async
 prepared-statement pipelining are not exposed."""
 
-from __future__ import annotations
-
 import re
 import threading as _threading
 from typing import Any, Iterable

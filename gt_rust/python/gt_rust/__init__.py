@@ -4,8 +4,6 @@ Thin Python shim over the compiled ``gt_rust._rust`` extension. Exposes the
 driver plus a helper that builds one from Django's DATABASES settings.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from gt_rust._rust import RustAwaitable, RustPgDriver, RustTransaction
