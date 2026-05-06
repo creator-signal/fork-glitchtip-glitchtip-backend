@@ -88,3 +88,34 @@ async def execute_mogrified_values(
     async with await conn.cursor() as cursor:
         await cursor.execute(final)
         return cursor.rowcount
+
+
+async def execute_unnest(
+    sql: str,
+    value_params: list[tuple],
+    db_alias: str = "default",
+) -> int:
+    """Transpose row-major ``value_params`` to per-column arrays and execute.
+
+    ``sql`` is expected to call ``unnest(%s::T[], %s::T[], ...)`` with one
+    ``%s`` per column. This avoids the per-row mogrify round-trip and the
+    65535 bind-parameter cap that ``execute_mogrified_values`` hits with
+    wide schemas, and gives Postgres a single statement shape for the
+    plan cache regardless of batch size.
+    """
+    if not value_params:
+        return 0
+    columns = [list(c) for c in zip(*value_params)]
+    return await execute(sql, columns, db_alias=db_alias)
+
+
+async def fetchall_unnest(
+    sql: str,
+    value_params: list[tuple],
+    db_alias: str = "default",
+) -> tuple[list[str], list[tuple]]:
+    """Like :func:`execute_unnest` but returns ``(columns, rows)``."""
+    if not value_params:
+        return [], []
+    columns = [list(c) for c in zip(*value_params)]
+    return await fetchall(sql, columns, db_alias=db_alias)
