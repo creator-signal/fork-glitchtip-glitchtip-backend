@@ -8,14 +8,16 @@ import aiohttp
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError
 from django.db.models import F, Q
 from django.tasks import task
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django_async_backend.db.transaction import async_atomic
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
+from apps.shared.async_db import execute_unnest
 
 from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType
@@ -71,27 +73,22 @@ async def update_uptime_statistics(org_counts: dict[int, int], check_time):
     if not data:
         return
 
-    def _execute():
-        with connection.cursor() as cursor:
-            args_str = ",".join(cursor.mogrify("(%s,%s,%s)", row) for row in data)
-            try:
-                with transaction.atomic():
-                    cursor.execute(
-                        "INSERT INTO uptime_uptimecheckhourlystatistic"
-                        " (organization_id, date, count)"
-                        f" VALUES {args_str}"
-                        " ON CONFLICT (organization_id, date)"
-                        " DO UPDATE SET count ="
-                        " uptime_uptimecheckhourlystatistic.count + EXCLUDED.count;"
-                    )
-            except IntegrityError:
-                logger.warning(
-                    "Failed to update uptime statistics for hour %s"
-                    " (missing partition)",
-                    hour,
-                )
-
-    await sync_to_async(_execute)()
+    try:
+        async with async_atomic():
+            await execute_unnest(
+                "INSERT INTO uptime_uptimecheckhourlystatistic "
+                "(organization_id, date, count) "
+                "SELECT * FROM unnest(%s::int[], %s::timestamptz[], %s::int[]) "
+                "ON CONFLICT (organization_id, date) "
+                "DO UPDATE SET count = "
+                "uptime_uptimecheckhourlystatistic.count + EXCLUDED.count",
+                list(data),
+            )
+    except IntegrityError:
+        logger.warning(
+            "Failed to update uptime statistics for hour %s (missing partition)",
+            hour,
+        )
 
 
 async def save_monitor_checks(results, now):
@@ -118,7 +115,9 @@ async def save_monitor_checks(results, now):
     # Bulk update cached fields on Monitor
     monitors_to_update = []
     for result in results:
-        is_change = result["latest_is_up"] != result["is_up"] or result["last_change"] is None
+        is_change = (
+            result["latest_is_up"] != result["is_up"] or result["last_change"] is None
+        )
         monitor = Monitor(
             pk=result["id"],
             cached_is_up=result["is_up"],
