@@ -1532,7 +1532,110 @@ impl ToSql for PgParam {
                 }
                 _ => v.to_sql(ty, out),
             },
-            PgParam::TextArray(v) => v.to_sql(ty, out),
+            PgParam::TextArray(v) => match *ty {
+                // String elements bound for a typed array column.
+                // Mirrors the scalar Uuid/Decimal/Timestamp pattern: when
+                // the SQL hints the destination type, parse the strings
+                // here so the wire bytes match what PG expects. Without
+                // this, we'd ship a binary text[] payload and PG would
+                // reject it as "improper binary format" because text[] and
+                // uuid[] / timestamptz[] / etc. don't share a binary
+                // representation. psycopg accepts string-typed elements in
+                // these arrays via the same coercion.
+                Type::UUID_ARRAY => {
+                    let parsed: Result<Vec<Option<uuid::Uuid>>, _> = v
+                        .iter()
+                        .map(|opt| {
+                            opt.as_ref()
+                                .map(|s| uuid::Uuid::parse_str(s))
+                                .transpose()
+                        })
+                        .collect();
+                    match parsed {
+                        Ok(uuids) => uuids.to_sql(ty, out),
+                        Err(e) => Err(format!(
+                            "invalid UUID in text[]→uuid[] coercion: {e}"
+                        )
+                        .into()),
+                    }
+                }
+                Type::TIMESTAMPTZ_ARRAY => {
+                    let parsed: Result<Vec<Option<chrono::DateTime<chrono::Utc>>>, _> = v
+                        .iter()
+                        .map(|opt| {
+                            opt.as_ref()
+                                .map(|s| {
+                                    chrono::DateTime::parse_from_rfc3339(s)
+                                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                                })
+                                .transpose()
+                        })
+                        .collect();
+                    match parsed {
+                        Ok(ts) => ts.to_sql(ty, out),
+                        Err(e) => Err(format!(
+                            "invalid timestamp in text[]→timestamptz[] coercion: {e}"
+                        )
+                        .into()),
+                    }
+                }
+                Type::TIMESTAMP_ARRAY => {
+                    let parsed: Result<Vec<Option<chrono::NaiveDateTime>>, _> = v
+                        .iter()
+                        .map(|opt| {
+                            opt.as_ref()
+                                .map(|s| {
+                                    // Accept both "T" and " " separators
+                                    // and an optional trailing offset (which
+                                    // is dropped — TIMESTAMP is naive).
+                                    let trimmed = s.trim();
+                                    chrono::DateTime::parse_from_rfc3339(trimmed)
+                                        .map(|dt| dt.naive_utc())
+                                        .or_else(|_| {
+                                            chrono::NaiveDateTime::parse_from_str(
+                                                trimmed,
+                                                "%Y-%m-%dT%H:%M:%S%.f",
+                                            )
+                                        })
+                                        .or_else(|_| {
+                                            chrono::NaiveDateTime::parse_from_str(
+                                                trimmed,
+                                                "%Y-%m-%d %H:%M:%S%.f",
+                                            )
+                                        })
+                                })
+                                .transpose()
+                        })
+                        .collect();
+                    match parsed {
+                        Ok(ts) => ts.to_sql(ty, out),
+                        Err(e) => Err(format!(
+                            "invalid timestamp in text[]→timestamp[] coercion: {e}"
+                        )
+                        .into()),
+                    }
+                }
+                Type::DATE_ARRAY => {
+                    let parsed: Result<Vec<Option<chrono::NaiveDate>>, _> = v
+                        .iter()
+                        .map(|opt| {
+                            opt.as_ref()
+                                .map(|s| {
+                                    chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+                                })
+                                .transpose()
+                        })
+                        .collect();
+                    match parsed {
+                        Ok(d) => d.to_sql(ty, out),
+                        Err(e) => Err(format!(
+                            "invalid date in text[]→date[] coercion: {e}"
+                        )
+                        .into()),
+                    }
+                }
+                _ => v.to_sql(ty, out),
+            },
             PgParam::BoolArray(v) => v.to_sql(ty, out),
             PgParam::UuidArray(v) => v.to_sql(ty, out),
             PgParam::TimestampTzArray(v) => v.to_sql(ty, out),
