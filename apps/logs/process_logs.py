@@ -6,7 +6,7 @@ from uuid import UUID
 
 import orjson
 
-from apps.shared.async_db import execute_mogrified_values
+from apps.shared.async_db import execute_unnest
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -52,15 +52,17 @@ async def update_log_statistics(
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4, 5))
 
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             "INSERT INTO projects_logprojecthourlystatistic "
             "(date, project_id, organization_id, level, service_bucket, environment_bucket, count) "
-            "VALUES {values} "
+            "SELECT * FROM unnest("
+            "%s::timestamptz[], %s::bigint[], %s::bigint[], "
+            "%s::smallint[], %s::smallint[], %s::smallint[], %s::int[]"
+            ") "
             "ON CONFLICT (project_id, organization_id, date, level, service_bucket, environment_bucket) "
             "DO UPDATE SET count = projects_logprojecthourlystatistic.count + EXCLUDED.count"
         ),
-        values_fragment="(%s,%s,%s,%s,%s,%s,%s)",
         value_params=data,
     )
 
@@ -81,15 +83,16 @@ async def update_resource_lookup(resource_data: set[tuple[int, str, str]]) -> No
     if not data:
         return
 
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             "INSERT INTO logs_logresource "
             "(organization_id, name, type, first_seen, last_seen) "
-            "VALUES {values} "
+            "SELECT organization_id, name, type, NOW(), NOW() "
+            "FROM unnest(%s::int[], %s::text[], %s::text[]) "
+            "    AS t(organization_id, name, type) "
             "ON CONFLICT (organization_id, name, type) "
             "DO UPDATE SET last_seen = NOW()"
         ),
-        values_fragment="(%s,%s,%s, NOW(), NOW())",
         value_params=data,
     )
 
@@ -278,19 +281,23 @@ async def process_log_events(messages: list) -> int:
     if not log_rows:
         return 0
 
-    # Bulk insert using a single VALUES list — one round-trip vs. one
-    # per-row that ``executemany`` would do. ``ON CONFLICT DO NOTHING``
+    # Bulk insert via column-major UNNEST — one round-trip, one statement
+    # shape regardless of batch size, and avoids the 65535 bind-param cap
+    # that VALUES would hit on wide schemas. ``ON CONFLICT DO NOTHING``
     # tolerates the rare duplicate id when two clients emit the same
     # UUIDv7 timestamp+random in the same microsecond.
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             "INSERT INTO logs_logevent "
             "(id, trace_id, organization_id, project_id, span_id, level, "
             "severity_number, body, service, environment, host, data) "
-            "VALUES {values} "
+            "SELECT * FROM unnest("
+            "%s::uuid[], %s::uuid[], %s::bigint[], %s::bigint[], "
+            "%s::bigint[], %s::smallint[], %s::smallint[], %s::text[], "
+            "%s::text[], %s::text[], %s::text[], %s::jsonb[]"
+            ") "
             "ON CONFLICT DO NOTHING"
         ),
-        values_fragment="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         value_params=log_rows,
     )
 

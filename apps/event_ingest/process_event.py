@@ -30,8 +30,10 @@ from apps.performance.parameterize import parameterize_description
 from apps.shared.async_db import (
     execute,
     execute_mogrified_values,
+    execute_unnest,
     fetchall,
     fetchall_mogrified_values,
+    fetchall_unnest,
 )
 from apps.sourcecode.models import DebugSymbolBundle
 from glitchtip.cold_storage import is_duckdb_available
@@ -274,16 +276,17 @@ async def update_issues(processing_events: list[ProcessingEvent]):
     )
 
     max_lexemes = settings.SEARCH_MAX_LEXEMES
-    sql_template = (
+    sql = (
         "UPDATE issue_events_issue SET "
         "count = issue_events_issue.count + v.added_count, "
         f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
         "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
-        "last_release_id = COALESCE(v.last_release_id::bigint, issue_events_issue.last_release_id) "
-        "FROM (VALUES {values}) AS v(id, added_count, new_vector, last_seen, last_release_id) "
+        "last_release_id = COALESCE(v.last_release_id, issue_events_issue.last_release_id) "
+        "FROM unnest(%s::bigint[], %s::int[], %s::text[], %s::timestamptz[], %s::bigint[]) "
+        "AS v(id, added_count, new_vector, last_seen, last_release_id) "
         "WHERE issue_events_issue.id = v.id"
     )
-    await execute_mogrified_values(sql_template, "(%s,%s,%s,%s,%s)", list(data))
+    await execute_unnest(sql, list(data))
 
 
 def generate_contexts(event: TaskIssueEvent) -> Contexts:
@@ -572,21 +575,20 @@ def hydrate_stacktrace(event: TaskIssueEvent):
 async def _fetch_issue_hashes_raw(
     pairs: list[tuple[int, str]], db_alias: str
 ) -> dict[tuple[int, str], dict]:
-    """Fetch IssueHash rows with issue status via raw SQL VALUES lookup."""
+    """Fetch IssueHash rows with issue status via JOIN unnest lookup."""
     if not pairs:
         return {}
 
-    sql_template = """
+    sql = """
         SELECT ih.project_id, ih.value, ih.issue_id,
                i.status AS issue__status,
                i.resolved_in_release_id AS issue__resolved_in_release_id
-        FROM issue_events_issuehash ih
-        INNER JOIN issue_events_issue i ON i.id = ih.issue_id
-        WHERE (ih.project_id, ih.value) IN (VALUES {values})
+        FROM unnest(%s::bigint[], %s::uuid[]) AS k(project_id, value)
+        JOIN issue_events_issuehash ih
+            ON ih.project_id = k.project_id AND ih.value = k.value
+        JOIN issue_events_issue i ON i.id = ih.issue_id
     """
-    columns, rows = await fetchall_mogrified_values(
-        sql_template, "(%s,%s::uuid)", list(pairs), db_alias=db_alias
-    )
+    columns, rows = await fetchall_unnest(sql, list(pairs), db_alias=db_alias)
     dicts = [dict(zip(columns, row)) for row in rows]
     return {(h["project_id"], h["value"].hex): h for h in dicts}
 
@@ -1100,14 +1102,25 @@ async def process_issue_events(
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received
     if issue_events:
-        await execute_mogrified_values(
-            sql_template=(
+        # IssueEvent.hashes is text[] but each row carries exactly one hash
+        # (built at line 1049 above), so unnest a flat text[] and wrap with
+        # ARRAY[hash] in the SELECT — the column-major form sidesteps the
+        # 65535 bind-param cap and skips per-row mogrify.
+        await execute_unnest(
+            sql=(
                 "INSERT INTO issue_events_issueevent "
                 "(id, event_id, timestamp, issue_id, organization_id, release_id, "
                 "type, level, title, transaction, data, tags, hashes) "
-                "VALUES {values} ON CONFLICT DO NOTHING"
+                "SELECT id, event_id, ts, issue_id, organization_id, release_id, "
+                "type, level, title, transaction, data, tags, ARRAY[hash] "
+                "FROM unnest("
+                "%s::uuid[], %s::uuid[], %s::timestamptz[], %s::bigint[], "
+                "%s::bigint[], %s::bigint[], %s::smallint[], %s::smallint[], "
+                "%s::text[], %s::text[], %s::jsonb[], %s::jsonb[], %s::text[]"
+                ") AS t(id, event_id, ts, issue_id, organization_id, release_id, "
+                "type, level, title, transaction, data, tags, hash) "
+                "ON CONFLICT DO NOTHING"
             ),
-            values_fragment="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::text[])",
             value_params=[
                 (
                     e.id,
@@ -1122,7 +1135,7 @@ async def process_issue_events(
                     e.transaction,
                     Jsonb(e.data),
                     Jsonb(e.tags),
-                    e.hashes,
+                    e.hashes[0] if e.hashes else "",
                 )
                 for e in issue_events
             ],
@@ -1163,15 +1176,14 @@ async def update_statistics(
 
     data.sort(key=itemgetter(0, 1, 2))
 
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             f"INSERT INTO {table_name} "
             f"(date, {id_column_name}, organization_id, count) "
-            "VALUES {values} "
+            "SELECT * FROM unnest(%s::timestamptz[], %s::bigint[], %s::bigint[], %s::int[]) "
             f"ON CONFLICT ({id_column_name}, organization_id, date) "
             f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count"
         ),
-        values_fragment="(%s,%s,%s,%s)",
         value_params=data,
     )
 
@@ -1202,15 +1214,14 @@ async def update_org_statistics(
     # Sort by all key components to avoid deadlocks on concurrent writes
     data.sort(key=itemgetter(0, 1, 2))
 
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             f"INSERT INTO {table_name} "
             f"(date, organization_id, {id_column_name}, count) "
-            "VALUES {values} "
+            "SELECT * FROM unnest(%s::timestamptz[], %s::bigint[], %s::bigint[], %s::int[]) "
             f"ON CONFLICT ({id_column_name}, organization_id, date) "
             f"DO UPDATE SET count = {table_name}.count + EXCLUDED.count"
         ),
-        values_fragment="(%s,%s,%s,%s)",
         value_params=data,
     )
 
@@ -1322,15 +1333,16 @@ async def _update_transaction_group_stats(
     if p_updates:
         p_updates.sort(key=lambda x: (x[3], x[2]))
 
-        await execute_mogrified_values(
-            sql_template="""
+        await execute_unnest(
+            sql="""
                 UPDATE performance_transactiongroup AS tg
                 SET p50 = v.p50, p95 = v.p95
-                FROM (VALUES {values}) AS v(p50, p95, group_id, org_id)
+                FROM unnest(%s::double precision[], %s::double precision[],
+                            %s::bigint[], %s::int[])
+                    AS v(p50, p95, group_id, org_id)
                 WHERE tg.id = v.group_id
                   AND tg.organization_id = v.org_id
             """,
-            values_fragment="(%s::double precision,%s::double precision,%s,%s)",
             value_params=p_updates,
         )
 
@@ -1428,15 +1440,17 @@ async def update_tags(processing_events: list[ProcessingEvent]):
 
     data.sort(key=itemgetter(0, 1, 2, 3, 4))
 
-    await execute_mogrified_values(
-        sql_template=(
+    await execute_unnest(
+        sql=(
             "INSERT INTO issue_events_issuetag "
             "(date, issue_id, organization_id, tag_key_id, tag_value_id, count) "
-            "VALUES {values} "
+            "SELECT * FROM unnest("
+            "%s::timestamptz[], %s::bigint[], %s::bigint[], "
+            "%s::int[], %s::int[], %s::int[]"
+            ") "
             "ON CONFLICT (issue_id, organization_id, tag_key_id, tag_value_id, date) "
             "DO UPDATE SET count = issue_events_issuetag.count + EXCLUDED.count;"
         ),
-        values_fragment="(%s,%s,%s,%s,%s,%s)",
         value_params=data,
     )
 
@@ -1457,17 +1471,21 @@ class _TxnGroupRef:
 async def _fetch_transaction_groups(
     keys: list[tuple[int, str, str, str]], db_alias: str
 ) -> dict[tuple[int, str, str, str], _TxnGroupRef]:
-    """Fetch TransactionGroup id/organization_id via raw SQL VALUES lookup."""
+    """Fetch TransactionGroup id/organization_id via JOIN unnest lookup."""
     if not keys:
         return {}
 
-    _, rows = await fetchall_mogrified_values(
-        sql_template=(
-            "SELECT id, organization_id, project_id, transaction, op, method "
-            "FROM performance_transactiongroup "
-            "WHERE (project_id, transaction, op, method) IN (VALUES {values})"
+    _, rows = await fetchall_unnest(
+        sql=(
+            "SELECT tg.id, tg.organization_id, tg.project_id, tg.transaction, tg.op, tg.method "
+            "FROM unnest(%s::int[], %s::text[], %s::text[], %s::text[]) "
+            "    AS k(project_id, transaction, op, method) "
+            "JOIN performance_transactiongroup tg "
+            "    ON tg.project_id = k.project_id "
+            "   AND tg.transaction = k.transaction "
+            "   AND tg.op = k.op "
+            "   AND tg.method = k.method"
         ),
-        values_fragment="(%s,%s,%s,%s)",
         value_params=keys,
         db_alias=db_alias,
     )
@@ -1560,16 +1578,18 @@ async def process_transaction_events(
             )
             for k in missing_keys
         ]
-        await execute_mogrified_values(
-            sql_template=(
+        await execute_unnest(
+            sql=(
                 "INSERT INTO performance_transactiongroup "
                 "(project_id, transaction, op, method, organization_id, "
                 "first_seen, last_seen) "
-                "VALUES {values} "
+                "SELECT * FROM unnest("
+                "%s::int[], %s::text[], %s::text[], %s::text[], "
+                "%s::int[], %s::timestamptz[], %s::timestamptz[]"
+                ") "
                 "ON CONFLICT (transaction, project_id, op, method, organization_id) "
                 "DO NOTHING"
             ),
-            values_fragment="(%s,%s,%s,%s,%s,%s,%s)",
             value_params=new_group_rows,
         )
         # Re-fetch to get IDs (the INSERT above can't return ids when
@@ -1650,14 +1670,17 @@ async def process_transaction_events(
 
     # 5. Bulk insert span staging rows
     if span_rows:
-        await execute_mogrified_values(
-            sql_template=(
+        await execute_unnest(
+            sql=(
                 "INSERT INTO performance_spanstaging "
                 "(id, organization_id, project_id, duration, timestamp, "
                 "transaction_name, span_id, transaction_id, op, description) "
-                "VALUES {values}"
+                "SELECT * FROM unnest("
+                "%s::uuid[], %s::int[], %s::int[], %s::double precision[], "
+                "%s::timestamptz[], %s::text[], %s::text[], %s::text[], "
+                "%s::text[], %s::text[]"
+                ")"
             ),
-            values_fragment="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             value_params=span_rows,
         )
 
