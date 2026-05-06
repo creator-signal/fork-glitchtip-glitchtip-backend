@@ -4,8 +4,6 @@ Uses django-async-backend's native async cursor so the event loop keeps
 running while Postgres does its work.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from django_async_backend.db import async_connections

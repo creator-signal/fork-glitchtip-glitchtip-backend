@@ -11,9 +11,6 @@ one calls the async ORM). Both wrappers share the same underlying
 ``RustPgDriver`` via the process-wide driver cache in
 ``gt_rust.dbapi._shared_driver``, so there is exactly one pool per
 process per alias regardless of how many Django-side wrappers live.
-
-Requires ``django-async-backend`` to be installed. gt_rust depends on
-it — there is no standalone-sync story.
 """
 
 from typing import Any

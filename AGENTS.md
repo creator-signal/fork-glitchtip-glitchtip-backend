@@ -15,6 +15,15 @@
 - **Commits:** Use conventional commits (e.g., `fix:`, `feat:`, `refactor:`).
 - **Merge requests:** GlitchTip is open source. Write MR titles and descriptions for an outside contributor reading them cold — describe the problem in terms anyone can verify from the code, not from private infra. Don't paste internal issue IDs, staging/prod URLs, API tokens, or snapshots from a personal install; if a bug was found via an error tracker, describe the symptom and reproduction, not the dashboard link.
 
+## Committed content is evergreen
+Committed files (code, comments, docstrings, READMEs, docs) are read by people in the future who don't share today's context. Write them for that reader.
+
+- **Don't talk about "today" in committed text.** No "currently", "recently added", "for now", "this MR introduces", "we just switched from X to Y", "Wanted but not yet built". The reader doesn't know which day "today" was.
+- **Don't restate hard dependencies.** "Requires `foo` to be installed" is noise when `foo` is a hard dep in `pyproject.toml` — the same way we don't say "requires Django" before every ORM call. Only call out *runtime opt-ins* (env vars, feature flags) where the reader needs to know what to flip.
+- **Don't tie comments to the change that introduced them.** "Used by the X flow", "added for the Y migration", "fixes issue #123", "this used to be Z" — that history belongs in the commit message and MR description, not the file. Comments should explain *why the code looks the way it does for any reader*, not why it changed last Tuesday.
+- **Where transient context goes:** MR descriptions, commit messages, chat with the user, scratch files outside the repo. All of those are appropriate places to talk about the change-of-the-day.
+- **Bench scripts and one-off comparison code are often "today" content.** Methodology and reusable infrastructure (compose stacks, calibration tools) are evergreen and worth committing; specific A/B comparisons (driver X vs Y, before/after of a single optimization) usually aren't. Keep them locally via `.git/info/exclude` and re-run when needed.
+
 ## File Structure
 - `apps/`: Django apps (feature modules).
 - `glitchtip/`: Core project settings and configuration.

@@ -21,8 +21,6 @@ Both are gated independently of ``DEBUG``/``ENABLE_TEST_API`` because
 realistic concurrency benches run with ``DEBUG=False``.
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import os

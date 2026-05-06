@@ -2,7 +2,7 @@
 
 This directory holds the throughput / memory benches for the ingest path
 and DB drivers, plus the methodology we apply when interpreting them.
-Benchmark results decide architectural questions (Rust driver, GIL
+Benchmark results decide architectural questions (driver choice, GIL
 release, batching changes), so the methodology matters at least as much
 as the scripts.
 
@@ -49,13 +49,10 @@ and never returned to the OS. Mitigations we already apply:
 - Periodic `gc.collect()` + `malloc_trim(0)` after maintenance steps.
 - granian worker restart on a schedule (blunt, but effective).
 
-We have not found further wins inside Python. **The remaining lever is
-moving hot-path code to Rust** — Rust uses jemalloc/mimalloc and
-returns memory to the OS predictably, so work that today produces
-fragmentation in Python's heap stops producing fragmentation at all.
-
-This is the strategic motivation behind the `gt_rust` driver and,
-later, a Rust ingest binary that reuses the same pool.
+Mitigations inside Python have largely been exhausted. The remaining
+lever is moving hot-path work out of the glibc/Python heap entirely —
+into a runtime whose allocator returns pages to the OS predictably.
+That choice is what these benches exist to evaluate.
 
 ## What we measure — and why both
 
@@ -111,9 +108,8 @@ combination so the result is a table you can diff.
 
 | axis | values |
 |------|--------|
-| backend | `psycopg3 + django-async-backend` (baseline), `gt_rust` |
-| DB latency | 0 ms, 2 ms (10 ms only for stress) |
-| workload | driver-only (`bench_rust_pg.py`), realistic probe (`probe-realistic`), mixed ingest (`bench_ingest_memory.py --mode mixed`) |
+| DB latency | 0 ms (single-VPS), 2 ms (k8s with managed PG) |
+| workload | realistic probe (`probe-realistic`), mixed ingest (`bench_ingest_memory.py --mode mixed`) |
 | concurrency | 50, 200, 500, 1000 |
 
 ## Methodology
@@ -153,36 +149,26 @@ A measured "win" is suspect when any of these hold:
 - Wins at p50 but not p95/p99 — best-case improvement, tail still
   drives user perception.
 
-## Acceptance bar for `gt_rust`
+## Acceptance bar for hot-path changes
 
-To advance the Rust driver out of draft and replace `psycopg3 +
-django-async-backend` as the default, all of the following must hold
-on the 2 ms latency, mixed-ingest, saturated workload (the closest
-proxy to k8s production):
+A change to the ingest hot path or DB driver is acceptable only if all
+of the following hold on the 2 ms latency, mixed-ingest, saturated
+workload (the closest proxy to k8s production):
 
-- **req/s ≥ psycopg parity** (within noise floor).
-- **RSS peak ≤ psycopg + 5 %.** Strict — the whole point is to fix
-  fragmentation.
-- **req/s per MB RSS strictly higher** than psycopg.
-- **30-min soak: RSS slope strictly lower** than psycopg. This is the
-  acceptance criterion that maps directly to the production pain.
+- **req/s ≥ baseline parity** within the noise floor.
+- **RSS peak ≤ baseline + 5 %.** Strict — fragmentation is the
+  long-tail pain.
+- **req/s per MB RSS strictly higher** than baseline.
+- **30-min soak: RSS slope no worse** than baseline.
 
 Secondary checks at 0 ms loopback (single-VPS):
 
-- req/s within −5 % of psycopg.
+- req/s within −5 % of baseline.
 - RSS peak no higher.
 
-Driver-only `roundtrip` and `int_rows` benches inform diagnosis but
-are not gates: at 0 ms the FFI cost dominates and rust loses; at 2 ms
-the gap closes. The gate is the realistic workload.
-
-## Future direction: Rust calls Rust
-
-Once the driver clears the bar, the next step is reusing the same
-`gt_rust` pool from a Rust ingest binary — no Python in the hot
-path. Bench: Rust ingest end-to-end vs Python ingest end-to-end,
-identical pool, identical DB. That's a separate MR; the gate to start
-it is the driver acceptance bar above.
+Microbenches (driver round-trip, single-row read) inform diagnosis but
+are not gates: at 0 ms FFI cost dominates and any cross-language path
+loses; at 2 ms the gap closes. The gate is the realistic workload.
 
 ---
 
@@ -263,13 +249,6 @@ The `--mode mixed` option distributes requests across endpoint types:
 - Per-pod memory limits are in `compose.bench.yml`. Adjust if you want
   longer soak runs.
 
-## `run_concurrency_bench.sh` — back-to-back backend comparison
-
-Wraps `bench_ingest_memory.py` with `tc netem` and runs the same
-workload across each backend variant in `BACKENDS` (default: `async`).
-Single-shot per backend — for one-off looks. Use `bench_compare.py`
-(see below; not yet built) for statistical comparisons.
-
 ## `run_thermal_check.sh` — noise floor / throttling calibration
 
 Runs the same workload N times back-to-back against the bench stack
@@ -285,19 +264,6 @@ this:
 ITERS=10 bash benchmarks/run_thermal_check.sh
 ```
 
-## `bench_rust_pg.py` — driver-only
-
-Compares the gt_rust driver against psycopg3 (async) at the protocol
-level only. No Django, no ORM. Useful for diagnosis ("is the regression
-in the driver or in our usage?"), not a gate — see the acceptance bar
-above.
-
-## `bench_django_orm.py` — ORM dispatch overhead
-
-Identical ORM workloads against the same DB via different ENGINEs.
-The "more work for less resources" number you can bring into a
-discussion with someone who cares about Django specifically.
-
 ## `bench_cold_storage.py` — archive/cleanup at various volumes
 
 ```bash
@@ -309,13 +275,13 @@ docker compose run --rm web python manage.py shell \
 
 In priority order:
 
-1. **`bench_compare.py`** — multi-iteration runner (median + IQR,
-   RSS peak, req/s-per-MB) across the full bench matrix. Replaces
-   single-shot interpretation. This is the gate-quality tool.
-2. **`bench_compare.py --plot`** — 2D scatter (RSS peak × req/s) per
-   backend per latency. Visual fragmentation/efficiency picture.
+1. **Multi-iteration runner** — median + IQR, RSS peak, req/s-per-MB
+   across the full bench matrix. Replaces single-shot interpretation.
+   This is the gate-quality tool.
+2. **`--plot` mode for the runner** — 2D scatter (RSS peak × req/s)
+   per cell. Visual fragmentation/efficiency picture.
 3. **Soak runner** — 30-minute sustained load, RSS over time, slope
-   reported. The fragmentation gate for the gt_rust acceptance bar.
+   reported. The fragmentation gate.
 
 ## Reproducing a baseline
 
@@ -323,13 +289,9 @@ Always paste the runner banner (CPU caps, latency, pool sizing) into
 any result you share so future readers can reproduce.
 
 ```sh
-# Quick sanity (single-shot, no statistics)
-bash benchmarks/run_concurrency_bench.sh
+# Memory growth under sustained load
+bash benchmarks/run_ingest_bench.sh
 
 # Thermal / noise-floor calibration
 ITERS=10 bash benchmarks/run_thermal_check.sh
-
-# Once bench_compare.py exists:
-#   bash benchmarks/bench_compare.py --backends async,rust \
-#       --latencies 0,2 --concurrency 50,200,500 --iters 7
 ```
