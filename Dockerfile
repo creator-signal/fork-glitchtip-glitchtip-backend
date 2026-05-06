@@ -10,10 +10,10 @@ ENV PYTHONUNBUFFERED=1 \
   RUSTUP_HOME=/usr/local/rustup \
   PATH=/usr/local/cargo/bin:$PATH
 
-# Rust toolchain (needed to build the gt_rust PyO3 extension).
-# DRAFT: this adds ~200 MB and a few minutes to image build. Before merge,
-# decide whether gt_rust ships in the default image or is a separate
-# variant — see CI/build follow-ups in the MR description.
+# Rust toolchain — needed to build the gt_rust PyO3 extension.
+# Build-stage only; the toolchain is not copied into the runtime image,
+# so it does not affect deployed image size. Channel and components are
+# pinned in gt_rust/rust-toolchain.toml.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal \
     && rustc --version
