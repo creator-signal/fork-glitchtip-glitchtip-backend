@@ -7,6 +7,7 @@ parameters do, so callsites that pass hex digests or ISO timestamps
 work under any driver behind ``django_async_backend``.
 """
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -118,9 +119,13 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
             [['{"a": 1}', '{"b": [2, 3]}', "{}"]],
         )
         self.assertEqual(len(rows), 3)
-        self.assertEqual(rows[0][0], {"a": 1})
-        self.assertEqual(rows[1][0], {"b": [2, 3]})
-        self.assertEqual(rows[2][0], {})
+        # Drivers differ on whether jsonb columns come back as parsed
+        # objects (rust ENGINE) or raw strings (psycopg without the
+        # default JSON loader installed on the connection). Compare the
+        # parsed form so the contract is "JSON round-trips intact".
+        self.assertEqual(_as_json(rows[0][0]), {"a": 1})
+        self.assertEqual(_as_json(rows[1][0]), {"b": [2, 3]})
+        self.assertEqual(_as_json(rows[2][0]), {})
 
     async def test_jsonb_array_with_nulls(self):
         rows = await self._one(
@@ -128,6 +133,10 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
             [['{"x": 1}', None, "{}"]],
         )
         self.assertEqual(len(rows), 3)
-        self.assertEqual(rows[0][0], {"x": 1})
+        self.assertEqual(_as_json(rows[0][0]), {"x": 1})
         self.assertIsNone(rows[1][0])
-        self.assertEqual(rows[2][0], {})
+        self.assertEqual(_as_json(rows[2][0]), {})
+
+
+def _as_json(value):
+    return json.loads(value) if isinstance(value, (str, bytes)) else value
