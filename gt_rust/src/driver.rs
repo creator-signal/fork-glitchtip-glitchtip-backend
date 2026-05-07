@@ -103,7 +103,22 @@ fn classify_pg_error(e: &tokio_postgres::Error) -> (PgErrorKind, String) {
         // including our own "invalid JSON in text[]→jsonb[] coercion: …"
         // text — lives in Error::source(). Walk the chain so the message
         // tells the on-caller what went wrong, not just which step.
-        (PgErrorKind::Operational, format_with_sources("", e))
+        let chained = format_with_sources("", e);
+        let outer = e.to_string();
+        // ToSql/FromSql failures are caller bad-data, not network/operational.
+        // tokio-postgres' Display prefix has been stable across 0.7.x;
+        // synthesize SQLSTATE 22P02 (invalid_text_representation) so the
+        // Python shim's class-code matcher routes to DataError.
+        // ``test_async_array_params.test_jsonb_array_malformed_raises_data_error``
+        // exercises this end-to-end and will fail loudly if upstream
+        // renames either prefix.
+        if outer.starts_with("error serializing parameter")
+            || outer.starts_with("error deserializing column")
+        {
+            (PgErrorKind::Database, format!("[22P02] {chained}"))
+        } else {
+            (PgErrorKind::Operational, chained)
+        }
     }
 }
 

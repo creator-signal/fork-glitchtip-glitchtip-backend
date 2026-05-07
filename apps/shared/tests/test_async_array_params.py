@@ -11,6 +11,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from django.conf import settings
 from django.test import TransactionTestCase
 from django_async_backend.db import async_connections
 
@@ -140,3 +141,37 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
 
 def _as_json(value):
     return json.loads(value) if isinstance(value, (str, bytes)) else value
+
+
+def _rust_engine_active() -> bool:
+    return "gt_rust" in settings.DATABASES["default"]["ENGINE"]
+
+
+class GtRustErrorClassificationTests(TransactionTestCase):
+    """Driver-specific: ToSql failures must surface as DataError.
+
+    The rust ENGINE wraps tokio-postgres ``ToSql`` failures by synthesizing
+    SQLSTATE ``22P02`` so the dbapi shim routes them to ``DataError``
+    (psycopg already does this natively). The detection in
+    ``classify_pg_error`` keys off tokio-postgres' Display prefix
+    (``"error serializing parameter N"``); if upstream ever renames it,
+    the synthesized SQLSTATE goes missing and this test fails loudly.
+    """
+
+    async def test_jsonb_array_malformed_raises_data_error(self):
+        if not _rust_engine_active():
+            self.skipTest(
+                "rust-ENGINE only — psycopg parses jsonb at a different layer"
+            )
+        from gt_rust.dbapi import DataError, OperationalError  # type: ignore[import-not-found]
+
+        with self.assertRaises(DataError) as ctx:
+            async with await async_connections["default"].cursor() as cur:
+                await cur.execute(
+                    "SELECT * FROM unnest(%s::jsonb[]) AS k",
+                    [["{'oops'}"]],
+                )
+        # The chained source must reach the user message — the original bug
+        # was that tokio-postgres' Display flattened it away.
+        self.assertIn("invalid JSON", str(ctx.exception))
+        self.assertNotIsInstance(ctx.exception, OperationalError)
