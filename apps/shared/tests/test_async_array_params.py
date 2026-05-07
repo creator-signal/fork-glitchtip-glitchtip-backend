@@ -153,14 +153,19 @@ def _rust_engine_active() -> bool:
 
 
 class GtRustErrorClassificationTests(TransactionTestCase):
-    """Driver-specific: ToSql failures must surface as DataError.
+    """Driver-specific: jsonb[] coercion failures must surface as DataError.
 
-    The rust ENGINE wraps tokio-postgres ``ToSql`` failures by synthesizing
-    SQLSTATE ``22P02`` so the dbapi shim routes them to ``DataError``
-    (psycopg already does this natively). The detection in
-    ``classify_pg_error`` keys off tokio-postgres' Display prefix
-    (``"error serializing parameter N"``); if upstream ever renames it,
-    the synthesized SQLSTATE goes missing and this test fails loudly.
+    The rust ENGINE writes raw JSON bytes for ``jsonb[]`` parameters and
+    lets PG validate (skipping a client-side serde round-trip). PG
+    rejects malformed JSON with SQLSTATE 22P02 (``invalid_text_representation``),
+    which the dbapi shim's class-code matcher routes to ``DataError`` —
+    matching psycopg semantics.
+
+    The classifier in ``classify_pg_error`` also synthesizes [22P02] for
+    tokio-postgres ToSql/FromSql failures (other typed-array arms still
+    parse client-side, e.g. ``::uuid[]``). If upstream renames either
+    Display prefix, that synthesis goes missing and this test fails
+    loudly.
     """
 
     async def test_jsonb_array_malformed_raises_data_error(self):
@@ -174,6 +179,9 @@ class GtRustErrorClassificationTests(TransactionTestCase):
                     "SELECT * FROM unnest(%s::jsonb[]) AS k",
                     [["{'oops'}"]],
                 )
-        # The chained source must reach the user message — the original bug
-        # was that tokio-postgres' Display flattened it away.
-        self.assertIn("invalid JSON", str(ctx.exception))
+        msg = str(ctx.exception)
+        # PG's own "invalid input syntax for type json" must reach the
+        # user; without source-chain walking it would have been a bare
+        # SQLSTATE prefix only.
+        self.assertIn("[22P02]", msg)
+        self.assertIn("invalid input syntax for type json", msg)

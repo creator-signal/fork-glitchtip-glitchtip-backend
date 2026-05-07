@@ -99,10 +99,10 @@ fn classify_pg_error(e: &tokio_postgres::Error) -> (PgErrorKind, String) {
     } else {
         // Not a DB error (network, protocol, ToSql/FromSql conversion).
         // tokio_postgres::Error's Display only renders the outer wrapper
-        // (e.g. "error serializing parameter 0"); the actual cause —
-        // including our own "invalid JSON in text[]→jsonb[] coercion: …"
-        // text — lives in Error::source(). Walk the chain so the message
-        // tells the on-caller what went wrong, not just which step.
+        // (e.g. "error serializing parameter 0"); the underlying cause
+        // (e.g. a typed-array coercion error from our types.rs arms)
+        // lives in Error::source(). Walk the chain so the message tells
+        // the on-caller what went wrong, not just which step failed.
         let chained = format_with_sources("", e);
         let outer = e.to_string();
         // ToSql/FromSql failures are caller bad-data, not network/operational.

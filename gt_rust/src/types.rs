@@ -220,6 +220,36 @@ fn parse_text_array_literal(s: &str) -> Result<Vec<Option<String>>, String> {
 /// Returns ``(microseconds, days, months)``. Returns an error if the
 /// string doesn't match any recognised form; the caller propagates,
 /// matching psycopg's rejection of unparseable interval input.
+/// Borrowed JSON text that emits as PG ``json``/``jsonb`` directly,
+/// without an intermediate ``serde_json::Value`` AST. The ``jsonb``
+/// wire format is ``0x01`` (version byte) + raw JSON text; ``json``
+/// is just the text. Validation is left to PG — malformed input
+/// surfaces as SQLSTATE 22P02 and ``classify_pg_error`` routes that
+/// to ``DataError`` the same way our former client-side check did.
+#[derive(Debug)]
+struct RawJsonText<'a>(&'a str);
+
+impl ToSql for RawJsonText<'_> {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        use bytes::BufMut;
+        if *ty == Type::JSONB {
+            out.put_u8(1);
+        }
+        out.extend_from_slice(self.0.as_bytes());
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::JSON | Type::JSONB)
+    }
+
+    tokio_postgres::types::to_sql_checked!();
+}
+
 fn parse_interval_text(s: &str) -> Result<(i64, i32, i32), String> {
     let s = s.trim();
     if s.is_empty() {
@@ -1634,27 +1664,22 @@ impl ToSql for PgParam {
                     }
                 }
                 Type::JSONB_ARRAY | Type::JSON_ARRAY => {
-                    // JSONB binary format begins with a version byte
-                    // (currently 0x01); shipping raw text bytes makes PG
-                    // read the leading character as a version number and
-                    // reject ("unsupported jsonb version number 123" for
-                    // a leading '{'). Parse each element so tokio-postgres
-                    // emits the correct wire payload.
-                    let parsed: Result<Vec<Option<serde_json::Value>>, _> = v
+                    // JSONB binary wire format is ``0x01`` (version byte)
+                    // followed by the JSON text. JSON's binary wire format
+                    // is just the JSON text. Skip the
+                    // ``serde_json::from_str → Value tree → re-serialize``
+                    // round-trip that ``Vec<Value>::to_sql`` would do —
+                    // for the hot ingest path (orjson.dumps output, valid
+                    // by construction) the parse + AST allocation is pure
+                    // waste. Malformed JSON now fails server-side as PG
+                    // SQLSTATE 22P02; ``classify_pg_error`` already maps
+                    // that to ``DataError``, so the user-visible
+                    // classification is identical.
+                    let wrapped: Vec<Option<RawJsonText<'_>>> = v
                         .iter()
-                        .map(|opt| {
-                            opt.as_ref()
-                                .map(|s| serde_json::from_str(s))
-                                .transpose()
-                        })
+                        .map(|opt| opt.as_deref().map(RawJsonText))
                         .collect();
-                    match parsed {
-                        Ok(j) => j.to_sql(ty, out),
-                        Err(e) => Err(format!(
-                            "invalid JSON in text[]→jsonb[] coercion: {e}"
-                        )
-                        .into()),
-                    }
+                    wrapped.to_sql(ty, out)
                 }
                 _ => v.to_sql(ty, out),
             },
