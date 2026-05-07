@@ -15,6 +15,11 @@ from django.conf import settings
 from django.test import TransactionTestCase
 from django_async_backend.db import async_connections
 
+try:
+    from gt_rust.dbapi import DataError, OperationalError
+except ImportError:  # rust ENGINE not installed in this environment
+    DataError = OperationalError = None  # type: ignore[assignment,misc]
+
 
 class AsyncArrayParamRoundtripTests(TransactionTestCase):
     """``unnest($1::T[])`` over async cursor for each typed array."""
@@ -163,8 +168,6 @@ class GtRustErrorClassificationTests(TransactionTestCase):
             self.skipTest(
                 "rust-ENGINE only — psycopg parses jsonb at a different layer"
             )
-        from gt_rust.dbapi import DataError, OperationalError  # type: ignore[import-not-found]
-
         with self.assertRaises(DataError) as ctx:
             async with await async_connections["default"].cursor() as cur:
                 await cur.execute(
