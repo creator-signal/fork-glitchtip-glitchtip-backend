@@ -109,7 +109,7 @@ fn classify_pg_error(e: &tokio_postgres::Error) -> (PgErrorKind, String) {
 /// server"); the actual cause (TLS handshake, DNS, EOF mid-startup,
 /// SQLSTATE from auth_failure, …) lives in the ``Error::source()``
 /// chain. Walk that chain so triage doesn't need to attach a debugger.
-fn pool_error(e: impl std::error::Error) -> RawResult {
+fn pool_error(e: impl std::error::Error + 'static) -> RawResult {
     RawResult::Error(PgErrorKind::Operational, format_with_sources("pool error", &e))
 }
 
