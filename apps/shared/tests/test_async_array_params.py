@@ -111,3 +111,23 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
         from datetime import date
 
         self.assertEqual(rows[0][0], date(2026, 1, 15))
+
+    async def test_jsonb_array_from_json_strings(self):
+        rows = await self._one(
+            "SELECT * FROM unnest(%s::jsonb[]) AS k",
+            [['{"a": 1}', '{"b": [2, 3]}', "{}"]],
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0][0], {"a": 1})
+        self.assertEqual(rows[1][0], {"b": [2, 3]})
+        self.assertEqual(rows[2][0], {})
+
+    async def test_jsonb_array_with_nulls(self):
+        rows = await self._one(
+            "SELECT * FROM unnest(%s::jsonb[]) AS k",
+            [['{"x": 1}', None, "{}"]],
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0][0], {"x": 1})
+        self.assertIsNone(rows[1][0])
+        self.assertEqual(rows[2][0], {})

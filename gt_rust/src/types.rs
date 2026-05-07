@@ -1634,6 +1634,29 @@ impl ToSql for PgParam {
                         .into()),
                     }
                 }
+                Type::JSONB_ARRAY | Type::JSON_ARRAY => {
+                    // JSONB binary format begins with a version byte
+                    // (currently 0x01); shipping raw text bytes makes PG
+                    // read the leading character as a version number and
+                    // reject ("unsupported jsonb version number 123" for
+                    // a leading '{'). Parse each element so tokio-postgres
+                    // emits the correct wire payload.
+                    let parsed: Result<Vec<Option<serde_json::Value>>, _> = v
+                        .iter()
+                        .map(|opt| {
+                            opt.as_ref()
+                                .map(|s| serde_json::from_str(s))
+                                .transpose()
+                        })
+                        .collect();
+                    match parsed {
+                        Ok(j) => j.to_sql(ty, out),
+                        Err(e) => Err(format!(
+                            "invalid JSON in text[]→jsonb[] coercion: {e}"
+                        )
+                        .into()),
+                    }
+                }
                 _ => v.to_sql(ty, out),
             },
             PgParam::BoolArray(v) => v.to_sql(ty, out),
