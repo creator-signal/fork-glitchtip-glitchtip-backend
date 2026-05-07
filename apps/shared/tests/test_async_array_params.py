@@ -12,13 +12,9 @@ import uuid
 from datetime import datetime, timezone
 
 from django.conf import settings
+from django.db import DataError
 from django.test import TransactionTestCase
 from django_async_backend.db import async_connections
-
-try:
-    from gt_rust.dbapi import DataError
-except ImportError:  # rust ENGINE not installed in this environment
-    DataError = None  # type: ignore[assignment,misc]
 
 
 class AsyncArrayParamRoundtripTests(TransactionTestCase):
@@ -183,5 +179,20 @@ class GtRustErrorClassificationTests(TransactionTestCase):
         # PG's own "invalid input syntax for type json" must reach the
         # user; without source-chain walking it would have been a bare
         # SQLSTATE prefix only.
+        self.assertIn("[22P02]", msg)
+        self.assertIn("invalid input syntax for type json", msg)
+
+    async def test_jsonb_scalar_malformed_raises_data_error(self):
+        """Scalar ``::jsonb`` goes through ``PgParam::Text`` not the array
+        arm. Same RawJsonText fast-path; PG validates server-side."""
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        with self.assertRaises(DataError) as ctx:
+            async with await async_connections["default"].cursor() as cur:
+                await cur.execute(
+                    "SELECT %s::jsonb",
+                    ["{'oops'}"],
+                )
+        msg = str(ctx.exception)
         self.assertIn("[22P02]", msg)
         self.assertIn("invalid input syntax for type json", msg)

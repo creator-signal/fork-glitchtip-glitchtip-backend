@@ -1413,14 +1413,15 @@ impl ToSql for PgParam {
                 _ => v.to_sql(ty, out),
             },
             PgParam::Text(v) => {
-                // If the user passes a string for a JSONB/JSON column, parse
-                // it and encode as JSONB (tokio-postgres would otherwise send
-                // raw text bytes and PG would reject the first byte as an
-                // invalid JSONB version). Same applies to the JSON_ARRAY /
-                // JSONB_ARRAY target types if we ever hit them.
+                // If the user passes a string for a JSONB/JSON column,
+                // emit it as a raw JSON envelope. tokio-postgres' default
+                // text→JSONB binding would ship bare bytes that PG
+                // rejects as an invalid JSONB version. ``RawJsonText``
+                // prepends the ``0x01`` version byte without round-tripping
+                // through ``serde_json::Value``; PG rejects malformed
+                // input with SQLSTATE 22P02 (DataError).
                 if *ty == Type::JSONB || *ty == Type::JSON {
-                    let val: serde_json::Value = serde_json::from_str(v)?;
-                    val.to_sql(ty, out)
+                    RawJsonText(v.as_str()).to_sql(ty, out)
                 } else if *ty == Type::NUMERIC {
                     // Python Decimal arrives as PgParam::Text. Decode
                     // to rust_decimal so we can write the native binary
