@@ -47,7 +47,7 @@ fn build_datetime_utc(py: Python<'_>, v: chrono::DateTime<chrono::Utc>) -> Optio
     let cls = get_cached(py, &DATETIME_CLS, "datetime", "datetime")?;
     let utc = get_utc(py)?;
     let naive = v.naive_utc();
-    let micros = (naive.and_utc().timestamp_subsec_micros()) as u32;
+    let micros = naive.and_utc().timestamp_subsec_micros();
     cls.call1(
         py,
         (
@@ -218,9 +218,8 @@ fn parse_text_array_literal(s: &str) -> Result<Vec<Option<String>>, String> {
 /// * ``HH:MM:SS`` — 01:30:00 → 1h30m
 ///
 /// Returns ``(microseconds, days, months)``. Returns an error if the
-/// string doesn't match anything we recognise; the caller is expected to
-/// fall back (currently: it errors out, causing the whole execute to
-/// fail, which matches the psycopg behavior of rejecting garbage).
+/// string doesn't match any recognised form; the caller propagates,
+/// matching psycopg's rejection of unparseable interval input.
 fn parse_interval_text(s: &str) -> Result<(i64, i32, i32), String> {
     let s = s.trim();
     if s.is_empty() {
@@ -1148,9 +1147,9 @@ impl PgParam {
                     elem_type = "date";
                 } else if isinstance_cached(&item, &UUID_CLS, "uuid", "UUID") {
                     elem_type = "uuid";
-                } else if item.cast::<PyDict>().is_ok() {
-                    elem_type = "json";
-                } else if {
+                } else if item.cast::<PyDict>().is_ok() || {
+                    // psycopg Jsonb / Json wrappers (no shared base, so
+                    // dispatch on type name).
                     let n = item.get_type().name()?;
                     n == "Jsonb" || n == "Json"
                 } {
