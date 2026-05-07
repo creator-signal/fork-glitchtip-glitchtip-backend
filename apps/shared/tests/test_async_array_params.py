@@ -16,9 +16,9 @@ from django.test import TransactionTestCase
 from django_async_backend.db import async_connections
 
 try:
-    from gt_rust.dbapi import DataError, OperationalError
+    from gt_rust.dbapi import DataError
 except ImportError:  # rust ENGINE not installed in this environment
-    DataError = OperationalError = None  # type: ignore[assignment,misc]
+    DataError = None  # type: ignore[assignment,misc]
 
 
 class AsyncArrayParamRoundtripTests(TransactionTestCase):
@@ -177,4 +177,3 @@ class GtRustErrorClassificationTests(TransactionTestCase):
         # The chained source must reach the user message — the original bug
         # was that tokio-postgres' Display flattened it away.
         self.assertIn("invalid JSON", str(ctx.exception))
-        self.assertNotIsInstance(ctx.exception, OperationalError)

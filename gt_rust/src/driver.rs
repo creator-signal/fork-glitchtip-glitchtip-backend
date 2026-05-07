@@ -134,16 +134,28 @@ fn pool_error(e: impl std::error::Error + 'static) -> RawResult {
 }
 
 /// Render an error plus its full ``source()`` chain on one line.
+///
+/// The walk is bounded because a buggy ``Error::source()`` impl could
+/// return a cycle (the std contract says it shouldn't, but we don't
+/// own every error type in the chain). 16 frames is far past anything
+/// real and stops a runaway loop from OOMing the worker.
 fn format_with_sources(prefix: &str, err: &(dyn std::error::Error + 'static)) -> String {
+    const MAX_DEPTH: usize = 16;
     let mut out = if prefix.is_empty() {
         format!("{err}")
     } else {
         format!("{prefix}: {err}")
     };
     let mut cur = err.source();
+    let mut depth = 0;
     while let Some(src) = cur {
+        if depth >= MAX_DEPTH {
+            out.push_str(" -> …");
+            break;
+        }
         out.push_str(&format!(" -> {src}"));
         cur = src.source();
+        depth += 1;
     }
     out
 }
