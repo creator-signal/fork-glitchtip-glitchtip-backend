@@ -75,6 +75,9 @@ test-latest:
     AWS_SECRET_ACCESS_KEY: minioadmin
     AWS_S3_ENDPOINT_URL: "http://minio:9000"
     GLITCHTIP_USE_RUST_PG: "true"
+    # Gitlab service postgres has no TLS configured. Pin to disable so
+    # gt_rust's rustls path doesn't try to negotiate.
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
     CARGO_HOME: /usr/local/cargo
     RUSTUP_HOME: /usr/local/rustup
     PATH: /usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -112,7 +115,11 @@ test-latest:
     - cd gt_rust && maturin build --release --out /tmp/wheels && cd ..
     - uv pip install --system --no-deps --reinstall /tmp/wheels/gt_rust-*.whl
     - python -c "from gt_rust import RustPgDriver; print('gt_rust._rust OK')"
-    - uv run ./manage.py test
+    # Avoid ``uv run`` here — it re-syncs the project and replaces the wheel
+    # we just installed with an editable install whose maturin .so was
+    # produced by a different invocation. Run python directly so the
+    # site-packages wheel is what gets imported.
+    - python ./manage.py test
     - uv cache prune --ci
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
