@@ -39,8 +39,11 @@ fn init_or_fork_runtime(pid: u32) -> &'static Runtime {
         return rt;
     }
 
-    // Fork detected
-    let mut guard = FORK_RUNTIME.lock().unwrap();
+    // Fork detected. Recover from a poisoned mutex (a previous panic
+    // while holding it) instead of crashing every subsequent fork.
+    let mut guard = FORK_RUNTIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some((stored_pid, rt)) = *guard {
         if stored_pid == pid {
             return rt;
@@ -89,6 +92,26 @@ pub enum RawResult {
     Error(PgErrorKind, String),
 }
 
+fn build_column_descriptors(
+    py: Python<'_>,
+    cols: Vec<(String, u32)>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    cols.into_iter()
+        .map(|(name, oid)| {
+            let elements: Vec<Py<PyAny>> = vec![
+                PyString::new(py, &name).into_any().unbind(),
+                oid.into_pyobject(py)?.into_any().unbind(),
+                py.None(),
+                py.None(),
+                py.None(),
+                py.None(),
+                py.None(),
+            ];
+            Ok(PyTuple::new(py, elements)?.into_any().unbind())
+        })
+        .collect()
+}
+
 impl RawResult {
     pub fn into_py(self, py: Python<'_>) -> Result<Py<PyAny>, PyErr> {
         match self {
@@ -99,26 +122,12 @@ impl RawResult {
                         let vals: Vec<Py<PyAny>> = (0..row.columns().len())
                             .map(|i| extract_value_py(row, i, py))
                             .collect();
-                        PyTuple::new(py, vals).unwrap().into_any().unbind()
+                        Ok::<_, PyErr>(PyTuple::new(py, vals)?.into_any().unbind())
                     })
-                    .collect();
+                    .collect::<PyResult<_>>()?;
                 let py_rows_list = PyList::new(py, py_rows)?.into_any().unbind();
 
-                let py_cols: Vec<Py<PyAny>> = cols
-                    .into_iter()
-                    .map(|(name, oid)| {
-                        let elements: Vec<Py<PyAny>> = vec![
-                            PyString::new(py, &name).into_any().unbind(),
-                            oid.into_pyobject(py).unwrap().into_any().unbind(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                        ];
-                        PyTuple::new(py, elements).unwrap().into_any().unbind()
-                    })
-                    .collect();
+                let py_cols = build_column_descriptors(py, cols)?;
                 let py_cols_list = PyList::new(py, py_cols)?.into_any().unbind();
 
                 Ok(PyTuple::new(py, [py_rows_list, py_cols_list])?
@@ -131,29 +140,12 @@ impl RawResult {
                     .map(|row| {
                         let py_vals: Vec<Py<PyAny>> =
                             row.into_iter().map(|v| v.into_py(py)).collect();
-                        PyTuple::new(py, py_vals)
-                            .unwrap()
-                            .into_any()
-                            .unbind()
+                        Ok::<_, PyErr>(PyTuple::new(py, py_vals)?.into_any().unbind())
                     })
-                    .collect();
+                    .collect::<PyResult<_>>()?;
                 let py_rows_list = PyList::new(py, py_rows)?.into_any().unbind();
 
-                let py_cols: Vec<Py<PyAny>> = cols
-                    .into_iter()
-                    .map(|(name, oid)| {
-                        let elements: Vec<Py<PyAny>> = vec![
-                            PyString::new(py, &name).into_any().unbind(),
-                            oid.into_pyobject(py).unwrap().into_any().unbind(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                            py.None(),
-                        ];
-                        PyTuple::new(py, elements).unwrap().into_any().unbind()
-                    })
-                    .collect();
+                let py_cols = build_column_descriptors(py, cols)?;
                 let py_cols_list = PyList::new(py, py_cols)?.into_any().unbind();
 
                 Ok(PyTuple::new(py, [py_rows_list, py_cols_list])?
@@ -161,9 +153,9 @@ impl RawResult {
                     .unbind())
             }
             RawResult::RowCount(n) => {
-                Ok((n as i64).into_pyobject(py).unwrap().into_any().unbind())
+                Ok((n as i64).into_pyobject(py)?.into_any().unbind())
             }
-            RawResult::Int(n) => Ok(n.into_pyobject(py).unwrap().into_any().unbind()),
+            RawResult::Int(n) => Ok(n.into_pyobject(py)?.into_any().unbind()),
             RawResult::Empty => Ok(py.None()),
             RawResult::Error(kind, msg) => {
                 // Map PG error kinds to Django-compatible Python exceptions.
