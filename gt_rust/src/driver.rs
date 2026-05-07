@@ -97,8 +97,13 @@ fn classify_pg_error(e: &tokio_postgres::Error) -> (PgErrorKind, String) {
         let full_msg = format!("[{code}] {msg}");
         (kind, full_msg)
     } else {
-        // Not a DB error (network, protocol, etc.)
-        (PgErrorKind::Operational, e.to_string())
+        // Not a DB error (network, protocol, ToSql/FromSql conversion).
+        // tokio_postgres::Error's Display only renders the outer wrapper
+        // (e.g. "error serializing parameter 0"); the actual cause —
+        // including our own "invalid JSON in text[]→jsonb[] coercion: …"
+        // text — lives in Error::source(). Walk the chain so the message
+        // tells the on-caller what went wrong, not just which step.
+        (PgErrorKind::Operational, format_with_sources("", e))
     }
 }
 
@@ -115,7 +120,11 @@ fn pool_error(e: impl std::error::Error + 'static) -> RawResult {
 
 /// Render an error plus its full ``source()`` chain on one line.
 fn format_with_sources(prefix: &str, err: &(dyn std::error::Error + 'static)) -> String {
-    let mut out = format!("{prefix}: {err}");
+    let mut out = if prefix.is_empty() {
+        format!("{err}")
+    } else {
+        format!("{prefix}: {err}")
+    };
     let mut cur = err.source();
     while let Some(src) = cur {
         out.push_str(&format!(" -> {src}"));
