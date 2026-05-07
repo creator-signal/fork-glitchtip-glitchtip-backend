@@ -103,8 +103,25 @@ fn classify_pg_error(e: &tokio_postgres::Error) -> (PgErrorKind, String) {
 }
 
 /// Classify a pool error (always operational).
-fn pool_error(e: impl std::fmt::Display) -> RawResult {
-    RawResult::Error(PgErrorKind::Operational, format!("pool error: {e}"))
+///
+/// deadpool's PoolError Display only emits the outermost wrapper
+/// ("Error occurred while creating a new object: error connecting to
+/// server"); the actual cause (TLS handshake, DNS, EOF mid-startup,
+/// SQLSTATE from auth_failure, …) lives in the ``Error::source()``
+/// chain. Walk that chain so triage doesn't need to attach a debugger.
+fn pool_error(e: impl std::error::Error) -> RawResult {
+    RawResult::Error(PgErrorKind::Operational, format_with_sources("pool error", &e))
+}
+
+/// Render an error plus its full ``source()`` chain on one line.
+fn format_with_sources(prefix: &str, err: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = format!("{prefix}: {err}");
+    let mut cur = err.source();
+    while let Some(src) = cur {
+        out.push_str(&format!(" -> {src}"));
+        cur = src.source();
+    }
+    out
 }
 
 /// Classify a tokio-postgres error into a RawResult::Error.
@@ -1093,7 +1110,9 @@ impl RustPgDriver {
         py.detach(|| {
             get_runtime().block_on(async {
                 let client = pool.get().await.map_err(|e| {
-                    pyo3::exceptions::PyConnectionError::new_err(format!("pool error: {e}"))
+                    pyo3::exceptions::PyConnectionError::new_err(
+                        format_with_sources("pool error", &e),
+                    )
                 })?;
 
                 client.simple_query("BEGIN").await.map_err(|e| {
@@ -1128,7 +1147,9 @@ impl RustPgDriver {
         py.detach(|| {
             get_runtime().block_on(async {
                 let client = pool.get().await.map_err(|e| {
-                    pyo3::exceptions::PyConnectionError::new_err(format!("pool error: {e}"))
+                    pyo3::exceptions::PyConnectionError::new_err(
+                        format_with_sources("pool error", &e),
+                    )
                 })?;
                 Ok(RustTransaction {
                     conn: Arc::new(TokioMutex::new(Some(client))),
@@ -1185,7 +1206,7 @@ impl RustPgDriver {
                 let client = pool
                     .get()
                     .await
-                    .map_err(|e| format!("pool error: {e}"))?;
+                    .map_err(|e| format_with_sources("pool error", &e))?;
                 let stream = client
                     .copy_out(sql.as_str())
                     .await

@@ -65,7 +65,11 @@ test-latest:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.14-$BASE_LAYER
   variables:
     SECRET_KEY: testing
-    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres"
+    # GitLab service postgres has no TLS configured; pin sslmode=disable so
+    # gt_rust's rustls path doesn't try to negotiate. django-environ
+    # propagates the query string into OPTIONS where the gt_rust backend
+    # reads it.
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
     VALKEY_URL: "redis://redis:6379"
@@ -75,9 +79,6 @@ test-latest:
     AWS_SECRET_ACCESS_KEY: minioadmin
     AWS_S3_ENDPOINT_URL: "http://minio:9000"
     GLITCHTIP_USE_RUST_PG: "true"
-    # Gitlab service postgres has no TLS configured. Pin to disable so
-    # gt_rust's rustls path doesn't try to negotiate.
-    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
     CARGO_HOME: /usr/local/cargo
     RUSTUP_HOME: /usr/local/rustup
     PATH: /usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
