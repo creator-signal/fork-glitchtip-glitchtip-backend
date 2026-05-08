@@ -344,6 +344,63 @@ class GtRustTransactionDropTests(TransactionTestCase):
     reason — this test is its regression net.
     """
 
+    def test_pin_release_after_begin_rolls_back(self):
+        """Django's autocommit-mode ServerSideCursor wraps DECLARE in
+        ``BEGIN; DECLARE WITH HOLD; COMMIT;`` against a pinned conn.
+        If DECLARE raises, ``release_sync`` runs from ``cursor.close()``
+        with the BEGIN still open. ``release_sync`` must ROLLBACK
+        before returning the connection — otherwise the leaked tx
+        rides into the next pool tenant."""
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        import gc
+        import time
+
+        from gt_rust import RustPgDriver
+
+        db = connection.settings_dict
+        options = db.get("OPTIONS") or {}
+        common = dict(
+            host=db.get("HOST") or "localhost",
+            port=int(db.get("PORT") or 5432),
+            dbname=db["NAME"],
+            user=db["USER"],
+            password=db.get("PASSWORD") or "",
+            sslmode=options.get("sslmode", "prefer"),
+        )
+        drv = RustPgDriver.connect(pool_size=1, pool_wait_timeout=2.0, **common)
+        inspect = RustPgDriver.connect(pool_size=2, pool_wait_timeout=2.0, **common)
+        try:
+            drv.execute_sync("DROP TABLE IF EXISTS _pinrel", [])
+            drv.execute_sync("CREATE TABLE _pinrel (i int)", [])
+
+            pin = drv.pin()
+            pin.execute_sync("BEGIN", [])
+            pin.execute_sync("INSERT INTO _pinrel VALUES (7)", [])
+            # Simulate DECLARE-failed-mid-micro-tx: caller calls release
+            # without a matching COMMIT/ROLLBACK.
+            pin.release_sync()
+            del pin
+            gc.collect()
+            time.sleep(0.3)
+
+            # Same pool, pool_size=1 → next checkout reuses the same
+            # backend. If release_sync didn't ROLLBACK, this query
+            # either runs inside the leaked tx (sees row=1) or
+            # fails on the lock.
+            rows, _ = drv.query_sync("SELECT count(*) FROM _pinrel", [])
+            self.assertEqual(
+                rows[0][0],
+                0,
+                "row from a pinned BEGIN survived release_sync — "
+                "leaked transaction visible to next checkout",
+            )
+        finally:
+            try:
+                inspect.execute_sync("DROP TABLE IF EXISTS _pinrel", [])
+            except Exception:
+                pass
+
     def test_dropped_transaction_does_not_leak_to_next_checkout(self):
         if not _rust_engine_active():
             self.skipTest("rust-ENGINE only")

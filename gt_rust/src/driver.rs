@@ -1636,17 +1636,27 @@ impl RustTransaction {
         raw.into_py(py)
     }
 
-    /// Release the pinned connection without sending COMMIT or
-    /// ROLLBACK. Used when this RustTransaction is acting as an
-    /// autocommit-mode session pin (created via ``RustPgDriver::pin``)
-    /// — there is no transaction to end, just a connection to return.
+    /// Release the pinned connection. Used when this RustTransaction
+    /// is acting as an autocommit-mode session pin (created via
+    /// ``RustPgDriver::pin``).
+    ///
+    /// Always sends ``ROLLBACK`` before returning the connection to the
+    /// pool. The pin path is normally autocommit-only (no BEGIN
+    /// expected), but Django's ServerSideCursor wraps DECLARE in a
+    /// short ``BEGIN; DECLARE WITH HOLD; COMMIT;`` micro-transaction
+    /// against the pin — if the DECLARE raises, BEGIN is open, COMMIT
+    /// never runs, and a bare ``guard.take()`` would put the open
+    /// transaction back into the pool. ROLLBACK on a non-transactional
+    /// connection emits a PG NOTICE only; safe in either case.
     fn release_sync(&self, py: Python<'_>) -> PyResult<()> {
         let conn = self.conn.clone();
         py.detach(|| {
             get_runtime().block_on(async move {
                 let mut guard = conn.lock().await;
-                let _ = guard.take();
-                // PoolObject dropped here → returned to deadpool.
+                if let Some(client) = guard.take() {
+                    let _ = client.simple_query("ROLLBACK").await;
+                    // PoolObject dropped here → returned to pool clean.
+                }
             });
         });
         Ok(())
