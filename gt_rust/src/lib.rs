@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<driver::RustPgDriver>()?;
     m.add_class::<driver::RustTransaction>()?;
+    m.add_class::<driver::RustCopyOut>()?;
     m.add_class::<async_bridge::RustAwaitable>()?;
     Ok(())
 }

@@ -112,6 +112,21 @@ fn build_column_descriptors(
         .collect()
 }
 
+/// Map a classified PG error to the Py exception class the dbapi
+/// shim's ``_translate_rust_error`` uses to route to the right DB-API
+/// type. The SQLSTATE prefix already in ``msg`` (when present) takes
+/// precedence in the Python translator, so this only sets the right
+/// fallback class for messages without a [SQLSTATE] prefix (pool
+/// errors, ToSql failures, etc.).
+pub fn pgerror_to_pyerr(kind: PgErrorKind, msg: String) -> PyErr {
+    match kind {
+        PgErrorKind::Integrity => pyo3::exceptions::PyValueError::new_err(msg),
+        PgErrorKind::Programming => pyo3::exceptions::PyRuntimeError::new_err(msg),
+        PgErrorKind::Operational => pyo3::exceptions::PyConnectionError::new_err(msg),
+        PgErrorKind::Database => pyo3::exceptions::PyRuntimeError::new_err(msg),
+    }
+}
+
 impl RawResult {
     pub fn into_py(self, py: Python<'_>) -> Result<Py<PyAny>, PyErr> {
         match self {
@@ -157,26 +172,7 @@ impl RawResult {
             }
             RawResult::Int(n) => Ok(n.into_pyobject(py)?.into_any().unbind()),
             RawResult::Empty => Ok(py.None()),
-            RawResult::Error(kind, msg) => {
-                // Map PG error kinds to Django-compatible Python exceptions.
-                // Django's db.utils catches these and re-wraps them, so the
-                // exception type matters for things like IntegrityError handling.
-                let exc = match kind {
-                    PgErrorKind::Integrity => {
-                        pyo3::exceptions::PyValueError::new_err(msg)
-                    }
-                    PgErrorKind::Programming => {
-                        pyo3::exceptions::PyRuntimeError::new_err(msg)
-                    }
-                    PgErrorKind::Operational => {
-                        pyo3::exceptions::PyConnectionError::new_err(msg)
-                    }
-                    PgErrorKind::Database => {
-                        pyo3::exceptions::PyRuntimeError::new_err(msg)
-                    }
-                };
-                Err(exc)
-            }
+            RawResult::Error(kind, msg) => Err(pgerror_to_pyerr(kind, msg)),
         }
     }
 }

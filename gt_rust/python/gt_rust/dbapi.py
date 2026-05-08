@@ -535,8 +535,9 @@ class Cursor:
         """psycopg3-style ``cursor.copy()`` context manager.
 
         Only supports ``COPY ... TO STDOUT`` for now — the direction used
-        by GlitchTip's cold-storage archive. Returns an iterable of raw
-        byte chunks split on newlines so callers can buffer rows.
+        by GlitchTip's cold-storage archive. Returns an iterable of
+        newline-delimited row lines, sourced from a streaming Rust
+        iterator so the COPY body never lives fully in memory.
         """
         self._check()
         sql_str = _as_sql_str(sql)
@@ -544,10 +545,10 @@ class Cursor:
         if driver is None:
             raise InterfaceError("connection is closed")
         try:
-            data = driver.copy_out_sync(sql_str)
+            stream = driver.copy_out_sync(sql_str)
         except Exception as e:
             raise _translate_rust_error(e, sql=sql_str) from e
-        return _CopyOut(data)
+        return _CopyOut(stream, sql=sql_str)
 
     def mogrify(self, sql: Any, params: Any | None = None) -> str:
         """psycopg3-style param inlining. Returns str (psycopg3 ClientCursor
@@ -583,39 +584,60 @@ class Cursor:
 
 
 class _CopyOut:
-    """Iterator over newline-delimited byte chunks from ``COPY TO STDOUT``.
+    """psycopg3-shaped iterator over rows from ``COPY ... TO STDOUT``.
 
-    psycopg3 returns a context-manager that yields ``bytes`` for each
-    row line. We buffer the whole body first (the caller's usage in
-    GlitchTip's archive paths is size-bounded per call) and split on
-    ``\\n`` so downstream CSV processing sees one line per iteration.
-    The closing newline is preserved on each line to match psycopg3.
+    Wraps the streaming ``RustCopyOut`` from the extension: pulls one
+    CopyData chunk at a time, line-buffers, and yields one ``bytes``
+    per ``\\n``-terminated row. Memory stays bounded by ``chunk +
+    longest unterminated row``, regardless of total COPY body size.
+    The trailing newline is preserved on each row to match psycopg3
+    semantics. The final row (if PG omits the trailing newline) is
+    yielded as-is.
     """
 
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-        self._pos = 0
+    def __init__(self, stream: Any, *, sql: str | None = None) -> None:
+        self._stream = stream
+        self._sql = sql
+        self._buf = bytearray()
+        self._exhausted = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        # Always release the pinned pool connection, even on exception.
+        try:
+            self._stream.close()
+        except Exception:
+            pass
         return None
 
     def __iter__(self):
         return self
 
     def __next__(self) -> bytes:
-        if self._pos >= len(self._data):
-            raise StopIteration
-        end = self._data.find(b"\n", self._pos)
-        if end == -1:
-            line = self._data[self._pos :]
-            self._pos = len(self._data)
-            return line
-        line = self._data[self._pos : end + 1]
-        self._pos = end + 1
-        return line
+        while True:
+            nl = self._buf.find(b"\n")
+            if nl >= 0:
+                line = bytes(self._buf[: nl + 1])
+                del self._buf[: nl + 1]
+                return line
+            if self._exhausted:
+                if self._buf:
+                    line = bytes(self._buf)
+                    self._buf.clear()
+                    return line
+                raise StopIteration
+            try:
+                chunk = next(self._stream)
+            except StopIteration:
+                self._exhausted = True
+            except Exception as e:
+                # Mid-stream PG/network error — translate so the caller
+                # sees the same exception class shape as the query path.
+                raise _translate_rust_error(e, sql=self._sql) from e
+            else:
+                self._buf.extend(chunk)
 
 
 def _as_sql_str(sql: Any) -> str:

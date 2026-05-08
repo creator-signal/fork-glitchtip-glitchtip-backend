@@ -5,7 +5,9 @@ use tokio::sync::{oneshot, Mutex as TokioMutex};
 use tokio_postgres::types::Type;
 use futures_util::StreamExt;
 
-use crate::async_bridge::{get_runtime, CancelSlot, PgErrorKind, RawResult, RustAwaitable};
+use crate::async_bridge::{
+    get_runtime, pgerror_to_pyerr, CancelSlot, PgErrorKind, RawResult, RustAwaitable,
+};
 use crate::types::{extract_value, PgParam, PgValue};
 
 type TlsConnector = tokio_postgres_rustls::MakeRustlsConnect;
@@ -1263,40 +1265,37 @@ impl RustPgDriver {
         Ok(())
     }
 
-    /// Run ``COPY ... TO STDOUT`` and return all bytes from the stream.
+    /// Start a ``COPY ... TO STDOUT`` and return a streaming iterator
+    /// over the raw byte chunks PG sends.
     ///
-    /// GlitchTip's cold-storage archive uses this to stream CSV out of
-    /// a partition for conversion to Parquet. We buffer the full output
-    /// here because the archive logic already caps per-call size (one
-    /// partition per org at a time, bounded by ``ARCHIVE_CHUNK_ROWS``).
-    fn copy_out_sync(&self, py: Python<'_>, sql: String) -> PyResult<Py<PyBytes>> {
+    /// Each ``__next__`` on the returned ``RustCopyOut`` pulls one
+    /// CopyData frame (typically tens of KB), so the caller sees
+    /// constant memory regardless of the COPY body size. The pinned
+    /// pool connection is released on EOF, on close(), on context
+    /// exit, or when the iterator is dropped.
+    fn copy_out_sync(&self, py: Python<'_>, sql: String) -> PyResult<RustCopyOut> {
         self.check_pid()?;
         let pool = self.pool.clone();
-        let result: Result<Vec<u8>, String> = py.detach(|| {
+        let result: Result<CopyOutSession, PyErr> = py.detach(|| {
             get_runtime().block_on(async move {
-                let client = pool
-                    .get()
-                    .await
-                    .map_err(|e| format_with_sources("pool error", &e))?;
-                let stream = client
-                    .copy_out(sql.as_str())
-                    .await
-                    .map_err(|e| classify_pg_error(&e).1)?;
-                // CopyOutStream is !Unpin, so box+pin for .next().
-                let mut stream = Box::pin(stream);
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(chunk) = stream.next().await {
-                    let chunk =
-                        chunk.map_err(|e| classify_pg_error(&e).1)?;
-                    buf.extend_from_slice(&chunk);
-                }
-                Ok(buf)
+                let client = pool.get().await.map_err(|e| {
+                    pyo3::exceptions::PyConnectionError::new_err(
+                        format_with_sources("pool error", &e),
+                    )
+                })?;
+                let stream = client.copy_out(sql.as_str()).await.map_err(|e| {
+                    let (kind, msg) = classify_pg_error(&e);
+                    pgerror_to_pyerr(kind, msg)
+                })?;
+                Ok(CopyOutSession {
+                    _client: client,
+                    stream: Box::pin(stream),
+                })
             })
         });
-        match result {
-            Ok(buf) => Ok(PyBytes::new(py, &buf).unbind()),
-            Err(msg) => Err(pyo3::exceptions::PyRuntimeError::new_err(msg)),
-        }
+        Ok(RustCopyOut {
+            inner: Arc::new(TokioMutex::new(Some(result?))),
+        })
     }
 
     /// Execute zero-parameter SQL via the simple query protocol.
@@ -1728,5 +1727,99 @@ async fn tx_finish_stmt(conn: &TokioMutex<Option<PoolObject>>, cmd: &str) -> Raw
     match client.simple_query(cmd).await {
         Ok(_) => RawResult::Empty,
         Err(e) => query_error(e),
+    }
+}
+
+// =========================================================================
+// RustCopyOut — streaming iterator over ``COPY ... TO STDOUT``
+// =========================================================================
+
+/// Owns the pinned pool connection together with the in-flight copy
+/// stream. ``CopyOutStream`` is itself ``'static`` (it pulls from a
+/// channel the background ``Connection`` task feeds), so storing both
+/// in one struct is not a self-referential borrow — the ``_client``
+/// field exists only to keep the underlying ``Client`` alive so the
+/// ``Connection`` task keeps producing.
+struct CopyOutSession {
+    _client: PoolObject,
+    stream: std::pin::Pin<Box<tokio_postgres::CopyOutStream>>,
+}
+
+/// Streaming counterpart to ``cursor.copy()``. Each ``__next__`` call
+/// pulls one CopyData chunk; rows aren't aligned to chunk boundaries,
+/// so the Python wrapper handles line-splitting. EOF or close()
+/// drops the inner session, returning the connection to the pool.
+#[pyclass]
+pub struct RustCopyOut {
+    inner: Arc<TokioMutex<Option<CopyOutSession>>>,
+}
+
+#[pymethods]
+impl RustCopyOut {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// Pull the next chunk. Raises ``StopIteration`` at EOF or after
+    /// ``close()``. Errors mid-stream surface through the dbapi shim's
+    /// SQLSTATE-aware translator like any other PG error.
+    fn __next__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let inner = self.inner.clone();
+        let outcome: Result<Option<bytes::Bytes>, PyErr> = py.detach(|| {
+            get_runtime().block_on(async move {
+                let mut guard = inner.lock().await;
+                let session = match guard.as_mut() {
+                    Some(s) => s,
+                    None => return Ok(None),
+                };
+                match session.stream.as_mut().next().await {
+                    Some(Ok(chunk)) => Ok(Some(chunk)),
+                    Some(Err(e)) => {
+                        // Drop the session so the connection is returned;
+                        // a mid-stream PG error invalidates the protocol
+                        // state for any further use.
+                        *guard = None;
+                        let (kind, msg) = classify_pg_error(&e);
+                        Err(pgerror_to_pyerr(kind, msg))
+                    }
+                    None => {
+                        *guard = None;
+                        Ok(None)
+                    }
+                }
+            })
+        });
+        match outcome {
+            Ok(Some(bytes)) => Ok(PyBytes::new(py, &bytes).unbind()),
+            Ok(None) => Err(pyo3::exceptions::PyStopIteration::new_err(())),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &self,
+        py: Python<'_>,
+        _exc_type: Py<PyAny>,
+        _exc: Py<PyAny>,
+        _tb: Py<PyAny>,
+    ) -> PyResult<()> {
+        self.close(py)
+    }
+
+    /// Drop the in-flight stream and return the pool connection. Safe
+    /// to call multiple times; subsequent ``__next__`` calls raise
+    /// ``StopIteration``.
+    fn close(&self, py: Python<'_>) -> PyResult<()> {
+        let inner = self.inner.clone();
+        py.detach(|| {
+            get_runtime().block_on(async move {
+                *inner.lock().await = None;
+            });
+        });
+        Ok(())
     }
 }

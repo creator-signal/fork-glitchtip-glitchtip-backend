@@ -283,3 +283,48 @@ class GtRustForkSafetyTests(TransactionTestCase):
             parent_backend_pid,
             "child got the parent's PG backend — pool was inherited, not rebuilt",
         )
+
+
+class GtRustCopyOutStreamingTests(TransactionTestCase):
+    """``cursor.copy()`` must stream rows from PG instead of buffering
+    the whole COPY body. The cold-storage archive depends on constant
+    Python-side memory regardless of org partition size; if this path
+    ever regresses to buffered semantics, large-org archival OOMs.
+
+    Structural-only assertions (correct line shape, error
+    classification, pool release on early exit). Memory behavior is
+    exercised by ``/tmp/test_copy_streaming.py`` since RSS-based
+    assertions are too flaky for CI.
+    """
+
+    def test_copy_yields_lines_with_trailing_newline(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        # COPY a generated SELECT directly — mirrors the cold-storage
+        # archive's ``COPY (<select>) TO STDOUT`` shape and avoids any
+        # session state (TEMP tables, advisory locks) that the COPY's
+        # fresh pool checkout wouldn't see.
+        sql = (
+            "COPY (SELECT g, 'r-' || g FROM generate_series(1, 25) g) "
+            "TO STDOUT WITH (FORMAT CSV)"
+        )
+        with connection.cursor() as cur:
+            rows = []
+            with cur.copy(sql) as op:
+                for line in op:
+                    rows.append(line)
+        self.assertEqual(len(rows), 25)
+        self.assertEqual(rows[0], b"1,r-1\n")
+        self.assertEqual(rows[-1], b"25,r-25\n")
+
+    def test_copy_against_missing_relation_raises_programming_error(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        from gt_rust.dbapi import ProgrammingError
+
+        with connection.cursor() as cur:
+            with self.assertRaises(ProgrammingError) as ctx:
+                with cur.copy("COPY _no_such_relation_x9 TO STDOUT") as op:
+                    for _ in op:
+                        pass
+        self.assertIn("[42P01]", str(ctx.exception))
