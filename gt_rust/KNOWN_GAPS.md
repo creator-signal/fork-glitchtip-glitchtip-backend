@@ -138,6 +138,32 @@ vendoring tokio-postgres / using private APIs to emit a real
 single-Sync pipeline. Neither is justified by the benchmark of an
 unused code path; revisit if a real workload surfaces it.
 
+## Pool recycler does not reset session GUCs
+
+deadpool-postgres' default recycler only checks `is_closed()`; it does
+not run `RESET ALL` / `DISCARD ALL` between checkouts. The
+`RustTransaction` Drop impl sends `ROLLBACK` on cleanup, so an open
+`BEGIN` cannot leak across pool tenants. But other session-level state
+that survives `ROLLBACK` will:
+
+- Connection-level GUCs set by `SET search_path = ...` (vs.
+  `SET LOCAL`, which scopes to a transaction).
+- `LISTEN`/`NOTIFY` channels.
+- Session-scoped advisory locks taken via `pg_advisory_lock()` (the
+  `_xact_` variants release on `ROLLBACK` and are safe).
+- `CREATE TEMP TABLE` outside `ON COMMIT DROP`.
+
+GlitchTip code does none of these on the gt_rust pool today. If a
+future caller introduces one of the patterns above and forgets the
+matching reset, the next pool tenant inherits it. Reviewers landing
+new raw-SQL paths against the gt_rust backend should clean up explicitly
+or wrap in `BEGIN ... COMMIT` so the per-transaction scope handles it.
+
+If gt_rust is ever spun out as a general Django backend, add a
+`post_recycle` hook calling `RESET ALL; UNLISTEN *` (and decide
+separately whether to `DISCARD PLANS` — that defeats `prepare_cached`
+across checkouts, which is one of the hot-path wins).
+
 ## Cascade artefacts (4 errors)
 
 - `tearDownClass`, `test_can_reference_existent`,
