@@ -328,3 +328,102 @@ class GtRustCopyOutStreamingTests(TransactionTestCase):
                     for _ in op:
                         pass
         self.assertIn("[42P01]", str(ctx.exception))
+
+
+class GtRustTransactionDropTests(TransactionTestCase):
+    """A ``RustTransaction`` dropped without explicit commit/rollback
+    (Python GC, ``asyncio.CancelledError`` tearing down a task, an
+    exception above ``async with``) must rollback before the underlying
+    connection returns to the pool. Otherwise the next checkout
+    inherits the still-open BEGIN and silently sees / commits the
+    previous tenant's writes.
+
+    ``deadpool-postgres``'s default recycler only checks ``is_closed()``;
+    transaction reset has to come from us. The Rust ``Drop`` impl on
+    ``RustTransaction`` spawns a fire-and-forget ROLLBACK for that
+    reason — this test is its regression net.
+    """
+
+    def test_dropped_transaction_does_not_leak_to_next_checkout(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        import gc
+        import time
+
+        from gt_rust import RustPgDriver
+
+        db = connection.settings_dict
+        options = db.get("OPTIONS") or {}
+        # pool_size=1 forces backend reuse so a leaked checkout would be
+        # visible from the same driver. Separate inspect driver gives an
+        # independent session for committed-or-not detection.
+        common = dict(
+            host=db.get("HOST") or "localhost",
+            port=int(db.get("PORT") or 5432),
+            dbname=db["NAME"],
+            user=db["USER"],
+            password=db.get("PASSWORD") or "",
+            sslmode=options.get("sslmode", "prefer"),
+        )
+        drv = RustPgDriver.connect(pool_size=1, pool_wait_timeout=2.0, **common)
+        inspect = RustPgDriver.connect(pool_size=2, pool_wait_timeout=2.0, **common)
+        try:
+            drv.execute_sync("DROP TABLE IF EXISTS _txleak", [])
+            drv.execute_sync("CREATE TABLE _txleak (i int)", [])
+
+            tx = drv.begin()
+            tx.execute_sync("INSERT INTO _txleak VALUES (42)", [])
+            del tx
+            gc.collect()
+            # Drop spawns ROLLBACK on the runtime; give it a beat.
+            time.sleep(0.3)
+
+            rows, _ = inspect.query_sync("SELECT count(*) FROM _txleak", [])
+            self.assertEqual(
+                rows[0][0],
+                0,
+                "row from a dropped (uncommitted) transaction is visible "
+                "from a separate session — Drop is not rolling back",
+            )
+        finally:
+            try:
+                inspect.execute_sync("DROP TABLE IF EXISTS _txleak", [])
+            except Exception:
+                pass
+
+
+class GtRustTsvectorEncodingTests(TransactionTestCase):
+    """``encode_tsvector`` only knows how to write the empty form and
+    bare whitespace-separated lexemes. Strings that look like the
+    decoded text form (``'lex':1A``) cannot be safely re-encoded by
+    splitting on whitespace — silent corruption of positions/weights/
+    quoting. The encoder must reject those inputs loudly so a caller
+    binding a tsvector literal sees a clear failure instead of a
+    quietly-mangled column.
+    """
+
+    def test_empty_tsvector_param_succeeds(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        with connection.cursor() as cur:
+            cur.execute("SELECT (%s::tsvector)::text", [""])
+            self.assertEqual(cur.fetchone()[0], "")
+
+    def test_bare_whitespace_lexemes_succeed(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        with connection.cursor() as cur:
+            cur.execute("SELECT (%s::tsvector)::text", ["foo bar"])
+            # PG canonicalises sort + quote; bare lexemes round-trip.
+            self.assertIn("'foo'", cur.fetchone()[0])
+
+    def test_decoded_text_form_rejected_loudly(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        # Round-trip-style input — apostrophes / colons mean we'd
+        # silently corrupt positions if we tried to whitespace-split.
+        # SQLSTATE 22P02 routes through Django to DataError.
+        with self.assertRaises(DataError) as ctx:
+            with connection.cursor() as cur:
+                cur.execute("SELECT (%s::tsvector)::text", ["'word':1A 'other':3"])
+        self.assertIn("tsvector", str(ctx.exception))

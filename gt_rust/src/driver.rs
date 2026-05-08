@@ -1710,6 +1710,36 @@ impl RustTransaction {
     }
 }
 
+/// Drop guarantees the pinned PoolObject is returned to deadpool in a
+/// clean transaction state.
+///
+/// Without this, dropping a ``RustTransaction`` without an explicit
+/// commit/rollback (Python GC, ``asyncio.CancelledError`` tearing down
+/// the awaiting task, an exception above the ``async with`` block) lets
+/// the still-active BEGIN ride back into the pool: the next checkout
+/// inherits the leaked transaction, sees the previous tenant's
+/// uncommitted writes, and silently commits or rolls back its work
+/// alongside theirs. deadpool-postgres' default recycler only calls
+/// ``is_closed()`` — it does not reset transaction state.
+///
+/// Strategy: spawn a fire-and-forget task that takes the inner Option
+/// and sends ``ROLLBACK`` over the still-pinned connection. ROLLBACK
+/// outside a transaction (the ``pin()`` case) emits a PG NOTICE and
+/// returns success; the connection stays usable. If commit/rollback/
+/// release already ran the Option is None and the task no-ops.
+impl Drop for RustTransaction {
+    fn drop(&mut self) {
+        let conn = self.conn.clone();
+        get_runtime().spawn(async move {
+            let mut guard = conn.lock().await;
+            if let Some(client) = guard.take() {
+                let _ = client.simple_query("ROLLBACK").await;
+                // PoolObject dropped here -> returned to pool clean.
+            }
+        });
+    }
+}
+
 /// Execute a simple statement on the pinned transaction connection
 /// without releasing it back to the pool. Used for SAVEPOINT / RELEASE /
 /// ROLLBACK TO SAVEPOINT so the transaction stays open.

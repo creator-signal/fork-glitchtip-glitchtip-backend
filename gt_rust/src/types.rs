@@ -392,15 +392,32 @@ fn split_num_unit(chunk: &str) -> (&str, &str) {
 /// Django emits INSERT...VALUES for a model with a SearchVectorField —
 /// the default is an empty string, and some migration DDL sets an
 /// explicit empty tsvector. We implement the minimal format here so
-/// those inserts succeed. Real tsvector content (non-empty lexemes) is
-/// rarely bound as a parameter in Django (the ORM typically builds
-/// `to_tsvector(...)` expressions in SQL instead), so we handle:
+/// those inserts succeed:
 ///
 /// * empty string → 4 bytes of zero (no lexemes)
-/// * anything else → split on whitespace, each token becomes a lexeme
-///   with no positions.
-fn encode_tsvector(text: &str, out: &mut BytesMut) {
+/// * whitespace-only bare lexemes (e.g. ``"foo bar"``) → each token
+///   becomes one lexeme with no positions.
+///
+/// We deliberately do **not** parse the round-trip text form
+/// (``'lex':1A 'other':3,5``). FromSql produces that form, but our
+/// whitespace tokenizer would encode each chunk as a single literal
+/// lexeme — silently corrupting positions, weights, and quoting. If
+/// the input looks like the text form, return an error instead so
+/// callers see a clear failure: the right path for non-trivial
+/// content is ``to_tsvector(...)`` in SQL.
+fn encode_tsvector(text: &str, out: &mut BytesMut) -> Result<(), Box<dyn Error + Sync + Send>> {
     use bytes::BufMut;
+    if text.bytes().any(|b| b == b'\'' || b == b':') {
+        let head: String = text.chars().take(80).collect();
+        return Err(format!(
+            "tsvector parameter contains lexeme/position syntax \
+             ({head:?}); the gt_rust driver does not parse the \
+             tsvector text form on the write path. Use \
+             to_tsvector(...) in SQL or pass a text array to a \
+             server-side conversion function."
+        )
+        .into());
+    }
     let lexemes: Vec<&str> = text.split_whitespace().collect();
     out.put_u32(lexemes.len() as u32);
     for lex in lexemes {
@@ -408,6 +425,7 @@ fn encode_tsvector(text: &str, out: &mut BytesMut) {
         out.put_u8(0); // null terminator
         out.put_u16(0); // zero positions
     }
+    Ok(())
 }
 
 
@@ -1494,7 +1512,7 @@ impl ToSql for PgParam {
                     // the body is just the 4-byte zero count, which is
                     // what Django's SearchVector fields insert at
                     // creation time.
-                    encode_tsvector(v, out);
+                    encode_tsvector(v, out)?;
                     Ok(IsNull::No)
                 } else {
                     v.to_sql(ty, out)
