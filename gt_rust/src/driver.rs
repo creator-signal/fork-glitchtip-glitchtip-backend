@@ -175,6 +175,31 @@ pub struct RustPgDriver {
     /// TLS connector — cloned per query to enable PG-level cancel,
     /// which opens a fresh connection to send CancelRequest.
     tls: TlsConnector,
+    /// PID at construction. Pool-bound tokio-postgres ``Client`` handles
+    /// reference background ``Connection`` futures spawned on the
+    /// builder's runtime; ``fork()`` only carries the calling thread,
+    /// so the child inherits the FDs but not the workers driving them
+    /// — any await on an inherited client hangs forever. The
+    /// ``_driver_cache`` in ``dbapi.py`` PID-keys lookups so the
+    /// child always rebuilds, but if a caller bypasses the cache
+    /// (long-lived reference held across fork) this stamp surfaces a
+    /// clear ``OperationalError`` instead of silently deadlocking.
+    created_pid: u32,
+}
+
+impl RustPgDriver {
+    #[inline]
+    fn check_pid(&self) -> PyResult<()> {
+        let now = std::process::id();
+        if now == self.created_pid {
+            return Ok(());
+        }
+        Err(pyo3::exceptions::PyConnectionError::new_err(format!(
+            "gt_rust pool inherited across fork (built in pid={}, used in pid={}); \
+             rebuild the driver in the child process",
+            self.created_pid, now
+        )))
+    }
 }
 
 macro_rules! async_op {
@@ -1016,11 +1041,13 @@ impl RustPgDriver {
             pool,
             use_prepared: prepared_statements,
             tls: tls_for_cancel,
+            created_pid: std::process::id(),
         })
     }
 
     /// Async query — returns RustAwaitable → (list[tuple], description)
     fn query(&self, py: Python<'_>, sql: String, params: Vec<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let rust_params: Vec<PgParam> = params
             .iter()
             .map(|p| PgParam::from_py(p.bind(py)))
@@ -1045,6 +1072,7 @@ impl RustPgDriver {
         py: Python<'_>,
         queries: Vec<(String, Vec<Py<PyAny>>)>,
     ) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let mut rust_queries: Vec<(String, Vec<PgParam>)> = Vec::with_capacity(queries.len());
         for (sql, params) in queries {
             let rust_params: Vec<PgParam> = params
@@ -1073,6 +1101,7 @@ impl RustPgDriver {
         sql: String,
         params: Vec<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let rust_params: Vec<PgParam> = params
             .iter()
             .map(|p| PgParam::from_py(p.bind(py)))
@@ -1095,6 +1124,7 @@ impl RustPgDriver {
 
     /// Async execute — returns RustAwaitable → int (rows affected)
     fn execute(&self, py: Python<'_>, sql: String, params: Vec<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let rust_params: Vec<PgParam> = params
             .iter()
             .map(|p| PgParam::from_py(p.bind(py)))
@@ -1117,6 +1147,7 @@ impl RustPgDriver {
         sql: String,
         params: Vec<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let rust_params: Vec<PgParam> = params
             .iter()
             .map(|p| PgParam::from_py(p.bind(py)))
@@ -1140,6 +1171,7 @@ impl RustPgDriver {
     /// Begin a transaction — checks out a connection, sends BEGIN, returns RustTransaction.
     /// The transaction pins the connection until commit/rollback.
     fn begin(&self, py: Python<'_>) -> PyResult<RustTransaction> {
+        self.check_pid()?;
         let pool = self.pool.clone();
         let use_prepared = self.use_prepared;
 
@@ -1177,6 +1209,7 @@ impl RustPgDriver {
     /// the pool (no COMMIT/ROLLBACK is sent — there is no transaction
     /// to end).
     fn pin(&self, py: Python<'_>) -> PyResult<RustTransaction> {
+        self.check_pid()?;
         let pool = self.pool.clone();
         let use_prepared = self.use_prepared;
 
@@ -1208,6 +1241,7 @@ impl RustPgDriver {
     /// see the sessions attached. Wait until the runtime has processed
     /// the teardown before returning.
     fn close_sync(&self, py: Python<'_>) -> PyResult<()> {
+        self.check_pid()?;
         let pool = self.pool.clone();
         py.detach(|| {
             get_runtime().block_on(async move {
@@ -1236,6 +1270,7 @@ impl RustPgDriver {
     /// here because the archive logic already caps per-call size (one
     /// partition per org at a time, bounded by ``ARCHIVE_CHUNK_ROWS``).
     fn copy_out_sync(&self, py: Python<'_>, sql: String) -> PyResult<Py<PyBytes>> {
+        self.check_pid()?;
         let pool = self.pool.clone();
         let result: Result<Vec<u8>, String> = py.detach(|| {
             get_runtime().block_on(async move {
@@ -1271,6 +1306,7 @@ impl RustPgDriver {
     /// ALTER TABLE ..."). tokio-postgres's extended-protocol query path
     /// refuses multi-statement bodies with SQLSTATE 42601.
     fn batch_execute_sync(&self, py: Python<'_>, sql: String) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let pool = self.pool.clone();
         let raw = py.detach(|| {
             get_runtime().block_on(async move {
@@ -1289,6 +1325,7 @@ impl RustPgDriver {
 
     /// Get server version as integer (e.g., 160001 for 16.1)
     fn server_version(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.check_pid()?;
         let (tx, rx) = oneshot::channel();
         let pool = self.pool.clone();
         get_runtime().spawn(async move {

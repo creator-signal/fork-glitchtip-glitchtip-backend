@@ -23,6 +23,7 @@ SQL bytes), ``cursor.mogrify``, ``callproc``, ``compose_sql`` /
 ``last_executed_query`` Django operations hooks. Binary params and async
 prepared-statement pipelining are not exposed."""
 
+import os
 import re
 import threading as _threading
 from typing import Any, Iterable
@@ -146,9 +147,7 @@ _PCT_RE = re.compile(r"%%|%\(([^)]+)\)s|%s")
 # arbitrary characters that would let a caller inject DML through
 # ``callproc(name, ...)``.
 _PG_IDENT_PART = r'(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")'
-_PG_QUALIFIED_IDENT_RE = re.compile(
-    rf"\A{_PG_IDENT_PART}(?:\.{_PG_IDENT_PART})?\Z"
-)
+_PG_QUALIFIED_IDENT_RE = re.compile(rf"\A{_PG_IDENT_PART}(?:\.{_PG_IDENT_PART})?\Z")
 
 
 def _validate_callable_ident(procname: str) -> str:
@@ -170,9 +169,7 @@ def _validate_callable_ident(procname: str) -> str:
     return procname
 
 
-def convert_paramstyle(
-    sql: str, params: Any
-) -> tuple[str, list[Any]]:
+def convert_paramstyle(sql: str, params: Any) -> tuple[str, list[Any]]:
     """Rewrite %s / %(name)s placeholders to $1..$N and flatten params.
 
     Pre-validated by the outer cursor: ``params`` is either None, a
@@ -755,7 +752,9 @@ class ServerSideCursor(Cursor):
         inlined = _inline_params(new_sql, flat) if flat else new_sql
 
         hold_clause = " WITH HOLD" if self._withhold else ""
-        declare = f"DECLARE {self._quote_ident()} NO SCROLL CURSOR{hold_clause} FOR {inlined}"
+        declare = (
+            f"DECLARE {self._quote_ident()} NO SCROLL CURSOR{hold_clause} FOR {inlined}"
+        )
 
         try:
             if self.connection._autocommit:
@@ -1085,8 +1084,39 @@ def _looks_like_dml_without_returning(sql: str) -> bool:
 # is the only way the gt_rust backend behaves sensibly under realistic
 # multi-worker ASGI load; otherwise each thread hammers Postgres with
 # fresh TCP/TLS handshakes and ``max_connections`` saturates.
+#
+# ``_driver_cache_pid`` tracks the PID this cache was populated for so
+# we can detect ``fork()`` and rebuild drivers in the child. Inherited
+# pools reference tokio-postgres ``Connection`` futures spawned on the
+# parent's runtime; ``fork()`` carries only the calling thread, so any
+# await on an inherited client deadlocks waiting for a worker that no
+# longer exists. ``RustPgDriver`` also PID-stamps itself in Rust for
+# defense in depth (see ``check_pid``); this Python-side eviction is
+# the primary mechanism, the Rust guard catches anything that bypasses
+# the cache.
 _driver_cache: dict[tuple, RustPgDriver] = {}
 _driver_cache_lock = _threading.Lock()
+_driver_cache_pid: int = os.getpid()
+
+
+def _evict_if_forked() -> None:
+    """Drop cached drivers if the process forked since the cache was
+    populated. Caller must hold ``_driver_cache_lock``.
+
+    Inherited driver objects are intentionally NOT closed: their TCP
+    file descriptors are duplicated into the child by ``fork()``, so
+    writing to them would corrupt the wire (the parent still owns the
+    other end of each FD). Clearing the dict drops Python's reference;
+    the kernel reclaims the duplicated FDs at process exit. The Rust
+    ``Drop`` will be invoked too — that signals shutdown over a
+    channel to the dead parent runtime, which silently no-ops, but
+    importantly never writes to the socket.
+    """
+    global _driver_cache_pid
+    pid = os.getpid()
+    if pid != _driver_cache_pid:
+        _driver_cache.clear()
+        _driver_cache_pid = pid
 
 
 def _driver_key(
@@ -1193,6 +1223,7 @@ def _shared_driver(
         alias=alias,
     )
     with _driver_cache_lock:
+        _evict_if_forked()
         drv = _driver_cache.get(key)
         if drv is not None:
             return drv

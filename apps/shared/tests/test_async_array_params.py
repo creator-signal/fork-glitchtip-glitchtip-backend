@@ -8,11 +8,14 @@ work under any driver behind ``django_async_backend``.
 """
 
 import json
+import multiprocessing
+import os
+import sys
 import uuid
 from datetime import datetime, timezone
 
 from django.conf import settings
-from django.db import DataError
+from django.db import DataError, connection
 from django.test import TransactionTestCase
 from django_async_backend.db import async_connections
 
@@ -31,9 +34,7 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
             [["9c895553a08c789e3a29c02a2ba0ae03", "87b2035414c542763dbda05eb69717af"]],
         )
         self.assertEqual(len(rows), 2)
-        self.assertEqual(
-            rows[0][0], uuid.UUID("9c895553a08c789e3a29c02a2ba0ae03")
-        )
+        self.assertEqual(rows[0][0], uuid.UUID("9c895553a08c789e3a29c02a2ba0ae03"))
 
     async def test_uuid_array_from_strings_with_dashes(self):
         rows = await self._one(
@@ -50,7 +51,13 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
     async def test_uuid_array_with_nulls(self):
         rows = await self._one(
             "SELECT * FROM unnest(%s::uuid[]) AS k",
-            [["9c895553a08c789e3a29c02a2ba0ae03", None, "87b2035414c542763dbda05eb69717af"]],
+            [
+                [
+                    "9c895553a08c789e3a29c02a2ba0ae03",
+                    None,
+                    "87b2035414c542763dbda05eb69717af",
+                ]
+            ],
         )
         self.assertEqual(len(rows), 3)
         self.assertIsNotNone(rows[0][0])
@@ -100,9 +107,7 @@ class AsyncArrayParamRoundtripTests(TransactionTestCase):
         self.assertEqual([r[0] for r in rows], ["a", "b", "c"])
 
     async def test_bigint_array(self):
-        rows = await self._one(
-            "SELECT * FROM unnest(%s::bigint[]) AS k", [[1, 2, 3]]
-        )
+        rows = await self._one("SELECT * FROM unnest(%s::bigint[]) AS k", [[1, 2, 3]])
         self.assertEqual([r[0] for r in rows], [1, 2, 3])
 
     async def test_date_array_from_iso_strings(self):
@@ -196,3 +201,85 @@ class GtRustErrorClassificationTests(TransactionTestCase):
         msg = str(ctx.exception)
         self.assertIn("[22P02]", msg)
         self.assertIn("invalid input syntax for type json", msg)
+
+
+# Top-level so the multiprocessing 'fork' context can pickle the target.
+# (fork doesn't strictly need pickling, but a top-level function keeps
+# the test resilient if a future Python version flips the default.)
+def _fork_child_run_query(connect_kwargs, queue):
+    try:
+        from gt_rust import dbapi  # imported in child to mirror real usage
+
+        conn = dbapi.connect(**connect_kwargs)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_backend_pid()", ())
+            backend_pid = cur.fetchone()[0]
+            cur.close()
+        finally:
+            conn.close()
+        queue.put(("ok", os.getpid(), backend_pid))
+    except BaseException as e:  # noqa: BLE001 — surface anything to parent
+        queue.put(("err", os.getpid(), f"{type(e).__name__}: {e}"))
+
+
+class GtRustForkSafetyTests(TransactionTestCase):
+    """Forking after the parent populated the driver cache must not
+    deadlock or corrupt PG sessions in the child.
+
+    Tokio-postgres ``Client`` handles spawned on the parent's runtime
+    have background ``Connection`` futures driving them; ``fork()``
+    only carries the calling thread, so the child inherits the
+    sockets but not the workers. The child either rebuilds (cache
+    eviction in ``dbapi._evict_if_forked``) or surfaces a clear
+    ``OperationalError`` (Rust ``check_pid`` guard) — never hangs.
+    """
+
+    def test_dbapi_connect_survives_fork(self):
+        if not _rust_engine_active():
+            self.skipTest("rust-ENGINE only")
+        if sys.platform != "linux":
+            self.skipTest("fork() semantics tested on Linux only")
+
+        # Parent touches the DB so the driver cache holds a live pool
+        # at fork time. Without that, the child's first connect()
+        # would build a fresh driver naturally (no inherited state).
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_backend_pid()")
+            parent_backend_pid = cur.fetchone()[0]
+
+        # Build connect kwargs that hit the same DB the parent used.
+        db = connection.settings_dict
+        options = db.get("OPTIONS") or {}
+        connect_kwargs = dict(
+            host=db.get("HOST") or "localhost",
+            port=int(db.get("PORT") or 5432),
+            dbname=db["NAME"],
+            user=db["USER"],
+            password=db.get("PASSWORD") or "",
+            sslmode=options.get("sslmode", "prefer"),
+        )
+
+        ctx = multiprocessing.get_context("fork")
+        queue = ctx.Queue()
+        proc = ctx.Process(target=_fork_child_run_query, args=(connect_kwargs, queue))
+        proc.start()
+        proc.join(timeout=30)
+
+        # Hard fail on hang — that's the regression we're guarding against.
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(5)
+            self.fail(
+                "child still running after 30s — fork-safety regression (deadlock)"
+            )
+
+        kind, child_os_pid, value = queue.get(timeout=5)
+        self.assertEqual(proc.exitcode, 0, f"child exitcode={proc.exitcode}")
+        self.assertEqual(kind, "ok", f"child raised: {value}")
+        self.assertNotEqual(child_os_pid, os.getpid())
+        self.assertNotEqual(
+            value,
+            parent_backend_pid,
+            "child got the parent's PG backend — pool was inherited, not rebuilt",
+        )
