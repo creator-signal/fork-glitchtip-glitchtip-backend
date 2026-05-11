@@ -1,4 +1,6 @@
-from typing import AsyncGenerator, Type, TypeAlias, TypeVar
+import asyncio
+import random
+from typing import Any, AsyncGenerator, Type, TypeAlias, TypeVar
 
 import aiohttp
 from django.conf import settings
@@ -28,6 +30,10 @@ HEADERS = {
     "Stripe-Version": "2025-12-15.clover",
 }
 
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3
+BASE_RETRY_DELAY = 0.5
+
 AIOTupleParams: TypeAlias = list[tuple[str, str]]
 AIODictParams: TypeAlias = dict[str, int | str | list[int | str]]
 T = TypeVar("T", bound=BaseModel)
@@ -45,6 +51,45 @@ def param_helper(data: AIODictParams) -> AIOTupleParams:
     return params
 
 
+async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
+    """Issue a Stripe API request, retrying transient failures with backoff.
+
+    Honors Stripe's ``Stripe-Should-Retry`` response header when present; otherwise
+    retries on 429 and 5xx. Each attempt opens its own ``ClientSession`` to avoid
+    reusing a connection that may have been poisoned by the prior failure.
+    """
+    for attempt in range(MAX_RETRIES + 1):
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            async with session.request(
+                method, url, headers=HEADERS, **kwargs
+            ) as response:
+                if response.status == 200:
+                    return await response.text()
+                if response.status == 404:
+                    raise StripeResourceNotFound()
+
+                error_data = await response.json()
+                error_message = error_data.get("error", {}).get(
+                    "message", "Unknown error"
+                )
+
+                should_retry_header = response.headers.get("Stripe-Should-Retry")
+                if should_retry_header is not None:
+                    should_retry = should_retry_header.lower() == "true"
+                else:
+                    should_retry = response.status in RETRY_STATUSES
+
+                if not should_retry or attempt >= MAX_RETRIES:
+                    raise Exception(
+                        f"Stripe API Error: {response.status} - {error_message}"
+                    )
+
+        delay = BASE_RETRY_DELAY * (2**attempt) + random.uniform(0, BASE_RETRY_DELAY)
+        await asyncio.sleep(delay)
+
+    raise Exception("Stripe API Error: exhausted retries")
+
+
 async def stripe_get(
     endpoint: str,
     params: AIODictParams | AIOTupleParams | None = None,
@@ -52,33 +97,12 @@ async def stripe_get(
     """Makes GET requests to the Stripe API."""
     if isinstance(params, dict):
         params = param_helper(params)
-
-    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-        async with session.get(
-            f"{STRIPE_URL}/{endpoint}", headers=HEADERS, params=params
-        ) as response:
-            if response.status != 200:
-                error_data = await response.json()
-                if response.status == 404:
-                    raise StripeResourceNotFound()
-                raise Exception(
-                    f"Stripe API Error: {response.status} - {error_data.get('error', {}).get('message', 'Unknown error')}"
-                )
-            return await response.text()
+    return await _stripe_request("GET", f"{STRIPE_URL}/{endpoint}", params=params)
 
 
 async def stripe_post(endpoint: str, data: dict) -> str:
     """Makes POST requests to the Stripe API. Returns response text"""
-    async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-        async with session.post(
-            f"{STRIPE_URL}/{endpoint}", headers=HEADERS, data=data
-        ) as response:
-            if response.status != 200:
-                error_data = await response.json()
-                raise Exception(
-                    f"Stripe API Error: {response.status} - {error_data.get('error', {}).get('message', 'Unknown error')}"
-                )
-            return await response.text()
+    return await _stripe_request("POST", f"{STRIPE_URL}/{endpoint}", data=data)
 
 
 async def _paginated_stripe_get(
