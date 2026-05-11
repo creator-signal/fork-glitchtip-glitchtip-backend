@@ -459,3 +459,70 @@ class TestStripeWebhookView(TestCase):
                 stripe_id=subscription_id
             )
             self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
+
+    @override_settings(
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
+    )
+    async def test_webhook_retries_after_processing_failure(self):
+        """A failed delivery must release the dedup key so Stripe's retry can reprocess."""
+
+        organization = await Organization.objects.acreate(name="Test Org", id=12345)
+        product = await StripeProduct.objects.acreate(
+            stripe_id="prod_test_sub",
+            name="Test Product",
+            description="Test Description",
+            events=1,
+            is_public=True,
+        )
+        price = await StripePrice.objects.acreate(
+            stripe_id="price_test",
+            product=product,
+            price=10.00,
+            nickname="Test Price",
+        )
+
+        mock_customer_data = {
+            "object": "customer",
+            "id": "cus_test",
+            "email": "test@example.com",
+            "metadata": {"organization_id": str(organization.id)},
+            "name": None,
+        }
+
+        now_timestamp = int(timezone.now().timestamp())
+        subscription_id = "sub_retry_after_failure"
+        payload = self.generate_subscription_event_data(
+            type="customer.subscription.created",
+            event_id="evt_retry_after_failure",
+            subscription_id=subscription_id,
+            current_period_start=now_timestamp,
+            current_period_end=now_timestamp + 2592000,
+            price_id=price.stripe_id,
+            product_id=product.stripe_id,
+        )
+
+        first_request = self.generate_stripe_request(payload)
+        retry_request = self.generate_stripe_request(payload)
+
+        with patch(
+            "apps.stripe.views.stripe_get", new_callable=AsyncMock
+        ) as mock_stripe_get:
+            mock_stripe_get.side_effect = Exception(
+                "Stripe API Error: 429 - lock_timeout"
+            )
+            with self.assertRaises(Exception):
+                await stripe_webhook_view(first_request)
+
+        # The retry of the same event must not be silently deduped.
+        with patch(
+            "apps.stripe.views.stripe_get", new_callable=AsyncMock
+        ) as mock_stripe_get:
+            mock_stripe_get.return_value = json.dumps(mock_customer_data)
+            response = await stripe_webhook_view(retry_request)
+            self.assertEqual(response.status_code, 200)
+            mock_stripe_get.assert_awaited_once_with("customers/cus_test")
+
+        subscription = await StripeSubscription.objects.aget(stripe_id=subscription_id)
+        self.assertEqual(subscription.status, SubscriptionStatus.ACTIVE)
