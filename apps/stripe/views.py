@@ -209,21 +209,27 @@ async def stripe_webhook_view(request: HttpRequest, event_type: str | None = Non
     if event.created < last_event_for_object:
         return HttpResponse(status=200)
 
-    if not await cache.aadd("stripe" + event.id, None, 600):
+    dedup_key = "stripe" + event.id
+    if not await cache.aadd(dedup_key, None, 600):
         return HttpResponse(status=200)
 
-    if event.type in ["product.updated", "product.created"]:
-        await update_product(event.data.object)
-    elif event.type in [
-        "customer.subscription.updated",
-        "customer.subscription.created",
-        "customer.subscription.deleted",
-    ]:
-        await update_subscription(event.data.object, request)
-    elif event.type in ["price.updated", "price.created"]:
-        await update_price(event.data.object)
-    else:
-        logger.info(f"Unhandled Stripe event type: {event.type}")
+    try:
+        if event.type in ["product.updated", "product.created"]:
+            await update_product(event.data.object)
+        elif event.type in [
+            "customer.subscription.updated",
+            "customer.subscription.created",
+            "customer.subscription.deleted",
+        ]:
+            await update_subscription(event.data.object, request)
+        elif event.type in ["price.updated", "price.created"]:
+            await update_price(event.data.object)
+        else:
+            logger.info(f"Unhandled Stripe event type: {event.type}")
+    except Exception:
+        # Release the dedup key so Stripe's webhook retry can reprocess this event
+        await cache.adelete(dedup_key)
+        raise
 
     return HttpResponse(status=200)
 
