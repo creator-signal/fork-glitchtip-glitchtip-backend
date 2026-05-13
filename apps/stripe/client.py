@@ -207,7 +207,7 @@ async def create_session(
         + "/"
         + organization_slug
         + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
-        "cancel_url": domain + "",
+        "cancel_url": domain + "/" + organization_slug + "/settings/subscription",
     }
     response = await stripe_post("checkout/sessions", params)
     return Session.model_validate_json(response)
