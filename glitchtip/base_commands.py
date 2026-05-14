@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.core.management.base import BaseCommand
 from django.db import connection
@@ -12,6 +12,49 @@ class MakeSampleCommand(BaseCommand):
     organization = None
     project = None
     batch_size = 10000
+
+    def _ensure_partitions(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        daily_tables: list[str] | None = None,
+        weekly_tables: list[str] | None = None,
+    ):
+        """Ensure partitions exist for the given time range."""
+        from glitchtip.partition_manager import PartitionManager
+
+        manager = PartitionManager()
+
+        # Align to midnight to avoid overlapping with existing partitions
+        start_date = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = end_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            days=1
+        )
+
+        if daily_tables:
+            for table in daily_tables:
+                manager.create_partitions_for_date_range(
+                    parent_table=table,
+                    start_date=start_date,
+                    end_date=end_date,
+                    partition_interval="DAY",
+                    hash_buckets=None,
+                    hash_column="organization_id",
+                    key_type="uuid7",
+                )
+
+        if weekly_tables:
+            start_of_week = start_date - timedelta(days=start_date.weekday())
+            for table in weekly_tables:
+                manager.create_partitions_for_date_range(
+                    parent_table=table,
+                    start_date=start_of_week,
+                    end_date=end_date + timedelta(weeks=1),
+                    partition_interval="WEEK",
+                    hash_buckets=None,
+                    hash_column="organization_id",
+                    key_type="datetime",
+                )
 
     def add_org_project_arguments(self, parser):
         parser.add_argument("--org", type=str, help="Organization slug")
