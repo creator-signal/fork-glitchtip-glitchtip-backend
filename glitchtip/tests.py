@@ -1174,3 +1174,44 @@ class ProductionWarningTests(SimpleTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("ALLOWED_HOSTS is the wildcard default", r.stderr)
+
+
+class TaskSignalsTestCase(SimpleTestCase):
+    """The worker has no HTTP middleware, so async DB connections opened
+    by an async task would leak. ``glitchtip.task_signals`` connects a
+    receiver to vtasks' ``task_finished`` / ``task_failure`` signals that
+    closes ``async_connections`` the same way the request middleware does."""
+
+    async def _assert_signal_closes_async_connections(self, signal, **payload):
+        from unittest.mock import AsyncMock
+
+        from django_async_backend.db import async_connections
+
+        with patch.object(
+            async_connections, "close_all", new_callable=AsyncMock
+        ) as close_all:
+            await signal.asend(sender=type(self), **payload)
+            close_all.assert_awaited_once()
+
+    async def test_task_finished_closes_async_connections(self):
+        from django_vtasks.signals import task_finished
+
+        await self._assert_signal_closes_async_connections(
+            task_finished,
+            task_id="x",
+            task_ids=None,
+            name="glitchtip.tests.fake_task",
+            duration=0.0,
+        )
+
+    async def test_task_failure_closes_async_connections(self):
+        from django_vtasks.signals import task_failure
+
+        await self._assert_signal_closes_async_connections(
+            task_failure,
+            task_id="x",
+            task_ids=None,
+            name="glitchtip.tests.fake_task",
+            exception=RuntimeError("boom"),
+            traceback="",
+        )
