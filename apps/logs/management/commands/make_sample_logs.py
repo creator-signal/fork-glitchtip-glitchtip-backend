@@ -118,6 +118,18 @@ class Command(MakeSampleCommand):
                 )
             current += timedelta(days=1)
 
+        # Weekly DateTime partitions
+        start_of_week = start_time - timedelta(days=start_time.weekday())
+        manager.create_partitions_for_date_range(
+            parent_table="projects_logprojecthourlystatistic",
+            start_date=start_of_week,
+            end_date=end_time + timedelta(weeks=1),
+            partition_interval="WEEK",
+            hash_buckets=None,
+            hash_column="organization_id",
+            key_type="datetime",
+        )
+
     def _bulk_create_logs(
         self,
         quantity: int,

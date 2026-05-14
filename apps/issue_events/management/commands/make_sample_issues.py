@@ -16,7 +16,7 @@ from apps.issue_events.models import (
     TagValue,
 )
 from glitchtip.base_commands import MakeSampleCommand
-from glitchtip.partition_manager import UUID7Helper
+from glitchtip.partition_manager import PartitionManager, UUID7Helper
 from glitchtip.utils import get_random_string
 
 from .issue_generator import CULPRITS, EXCEPTIONS, SDKS, TITLE_CHOICES, generate_tags
@@ -25,6 +25,45 @@ from .issue_generator import CULPRITS, EXCEPTIONS, SDKS, TITLE_CHOICES, generate
 class Command(MakeSampleCommand):
     help = "Create sample issues and events for dev and demonstration purposes"
     events_quantity_per: int
+
+    def _ensure_partitions(self, start_time: timezone.datetime, end_time: timezone.datetime):
+        """Ensure partitions exist for the given time range."""
+        manager = PartitionManager()
+
+        # Align to midnight to avoid overlapping with existing partitions
+        start_date = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = end_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            days=1
+        )
+
+        # Daily UUIDv7 partitions
+        manager.create_partitions_for_date_range(
+            parent_table="issue_events_issueevent",
+            start_date=start_date,
+            end_date=end_date,
+            partition_interval="DAY",
+            hash_buckets=None,
+            hash_column="organization_id",
+            key_type="uuid7",
+        )
+
+        # Weekly DateTime partitions
+        start_of_week = start_date - timedelta(days=start_date.weekday())
+        weekly_models = [
+            "issue_events_issueaggregate",
+            "issue_events_issuetag",
+            "projects_issueeventprojecthourlystatistic",
+        ]
+        for table in weekly_models:
+            manager.create_partitions_for_date_range(
+                parent_table=table,
+                start_date=start_of_week,
+                end_date=end_date + timedelta(weeks=1),
+                partition_interval="WEEK",
+                hash_buckets=None,
+                hash_column="organization_id",
+                key_type="datetime",
+            )
 
     def add_arguments(self, parser):
         self.add_org_project_arguments(parser)
@@ -154,6 +193,9 @@ class Command(MakeSampleCommand):
 
         now = timezone.now()
         start_time = now - timedelta(days=over_days)
+
+        self._ensure_partitions(start_time, now)
+
         # timedelta between each new issue first_seen
         issue_delta = timedelta(seconds=over_days * 86400 / issue_quantity)
         # timedelta between each event for an issue
