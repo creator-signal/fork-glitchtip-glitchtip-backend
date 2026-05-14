@@ -21,7 +21,7 @@ from django_vtasks.signals import task_failure, task_finished
 logger = logging.getLogger(__name__)
 
 
-async def _close_async_connections(sender, **kwargs):
+async def _close_async_connections(**_kwargs):
     try:
         await asyncio.shield(async_connections.close_all())
     except Exception:
