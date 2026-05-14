@@ -1107,16 +1107,16 @@ wheels = [
 
 [[package]]
 name = "django-vtasks"
-version = "2.1.0"
+version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "croniter" },
     { name = "django" },
     { name = "orjson" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/06/ecf6329f659e7d94e5a4c7619f675f4b5ab0afd7b0396fec40d3b4cf9e4a/django_vtasks-2.1.0.tar.gz", hash = "sha256:38e96a693269131c516c459807be309fe5e63d408d9cb58629e1dbc79466ed0a", size = 31167, upload-time = "2026-04-01T00:53:40.257Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/76/691d61570ae95cbdc09e6524a59623af7928be888fa5585402f0b8e04336/django_vtasks-2.1.1.tar.gz", hash = "sha256:b50916cd6d209de199589ba38e257a7cd47f8779d7c00abaa2bf9940d1d1009d", size = 32468, upload-time = "2026-05-13T18:09:22.279Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/23/877525d20106a41160ebc9af863ca2ed119f31e3fc71627a6d9a95f8bac3/django_vtasks-2.1.0-py3-none-any.whl", hash = "sha256:cc6b2834ccf37bf269bb31f36f99ad703d1f6851930d848110ca73f596a60e5a", size = 43339, upload-time = "2026-04-01T00:53:39.241Z" },
+    { url = "https://files.pythonhosted.org/packages/de/85/83da4afe1bc0dad3d334f389bfa79918854ce73b4b9af4eaa6e31b1b9b0d/django_vtasks-2.1.1-py3-none-any.whl", hash = "sha256:b61ffec129e0610c94137b5060308099919736755b169cf8e390393f9b04cc89", size = 44556, upload-time = "2026-05-13T18:09:21.058Z" },
 ]
 
 [package.optional-dependencies]
@@ -1527,7 +1527,7 @@ requires-dist = [
     { name = "django-prometheus", specifier = "~=2.2" },
     { name = "django-storages", extras = ["boto3", "azure", "google"], specifier = "~=1.12" },
     { name = "django-vcache", specifier = ">=2.1.1" },
-    { name = "django-vtasks", extras = ["valkey"], specifier = "~=2.0" },
+    { name = "django-vtasks", extras = ["valkey"], specifier = "~=2.1.1" },
     { name = "duckdb", specifier = ">=1.2.0" },
     { name = "google-cloud-logging", specifier = "~=3.0" },
     { name = "granian", extras = ["reload", "uvloop"], specifier = ">=2.6.0" },
