@@ -260,18 +260,24 @@ async def list_issues(
     if filters.query:
         try:
             event_id = UUID(filters.query)
+        except ValueError:
+            event_id = None
+        if event_id is not None:
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
-            if not is_uuid7(event_id):
-                org = (
-                    await Organization.objects.filter(slug=organization_slug)
-                    .only("id")
-                    .afirst()
-                )
-                if org:
-                    organization_id = org.id
-        except ValueError:
-            pass
+        if event_id is None or not is_uuid7(event_id):
+            # Both text search (search_index join) and client-SDK UUIDv4
+            # event-id lookups scan org-partitioned tables. Resolve the
+            # org id so Postgres can prune hash partitions instead of
+            # scanning all of them. A UUIDv7 id already prunes by its
+            # time-range id partition, so it skips this extra lookup.
+            org = (
+                await Organization.objects.filter(slug=organization_slug)
+                .only("id")
+                .afirst()
+            )
+            if org:
+                organization_id = org.id
     return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 
@@ -412,18 +418,24 @@ async def list_project_issues(
     if filters.query:
         try:
             event_id = UUID(filters.query)
+        except ValueError:
+            event_id = None
+        if event_id is not None:
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
-            if not is_uuid7(event_id):
-                org = (
-                    await Organization.objects.filter(slug=organization_slug)
-                    .only("id")
-                    .afirst()
-                )
-                if org:
-                    organization_id = org.id
-        except ValueError:
-            pass
+        if event_id is None or not is_uuid7(event_id):
+            # Both text search (search_index join) and client-SDK UUIDv4
+            # event-id lookups scan org-partitioned tables. Resolve the
+            # org id so Postgres can prune hash partitions instead of
+            # scanning all of them. A UUIDv7 id already prunes by its
+            # time-range id partition, so it skips this extra lookup.
+            org = (
+                await Organization.objects.filter(slug=organization_slug)
+                .only("id")
+                .afirst()
+            )
+            if org:
+                organization_id = org.id
     return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 

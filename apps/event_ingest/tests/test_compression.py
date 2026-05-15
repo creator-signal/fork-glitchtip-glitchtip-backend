@@ -24,7 +24,7 @@ class CompressionTestCase(EventIngestTestCase):
         json_data = json.dumps(self.event).encode("utf-8")
         compressed_data = zstd.compress(json_data)
 
-        with self.assertNumQueries(19):
+        with self.assertNumQueries(20):
             res = self.client.post(
                 self.url,
                 compressed_data,

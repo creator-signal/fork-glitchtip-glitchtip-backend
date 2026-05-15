@@ -11,6 +11,7 @@ from apps.issue_events.models import (
     Issue,
     IssueEvent,
     IssueEventType,
+    IssueSearchIndex,
     IssueTag,
     TagKey,
     TagValue,
@@ -56,6 +57,19 @@ class Command(MakeSampleCommand):
         self, issues: list[Issue], issue_events: list[list[IssueEvent]]
     ):
         issues = Issue.objects.bulk_create(issues)
+        # Populate the decoupled search index so sample issues are searchable
+        # (full-text search reads IssueSearchIndex, not the Issue table).
+        IssueSearchIndex.objects.bulk_create(
+            [
+                IssueSearchIndex(
+                    issue=issue,
+                    organization_id=self.project.organization_id,
+                    fts_document=SearchVector(Value(issue.title)),
+                )
+                for issue in issues
+            ],
+            ignore_conflicts=True,
+        )
         # Assign issue to each event
         for i, issue in enumerate(issues):
             events = issue_events[i]
@@ -237,7 +251,6 @@ class Command(MakeSampleCommand):
                     first_seen=first_seen,
                     last_seen=last_seen,
                     project=self.project,
-                    search_vector=SearchVector(Value(title)),
                     count=event_count,
                 ),
             )

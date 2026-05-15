@@ -36,9 +36,9 @@ async def raw_delete_in_batches(
         )
         if not batch_ids:
             break
-        count = await sync_to_async(
-            model.objects.filter(id__in=batch_ids)._raw_delete
-        )(db_alias)
+        count = await sync_to_async(model.objects.filter(id__in=batch_ids)._raw_delete)(
+            db_alias
+        )
         total_deleted += count
 
     return total_deleted
@@ -58,15 +58,22 @@ async def delete_issues_in_batches(
     all partitions.  We pre-delete them per batch so the Issue _raw_delete
     triggers no cascading locks.
 
+    IssueSearchIndex is partitioned with NO DB-level FK, so nothing
+    cascades to it at all — it must be explicitly deleted here or its
+    rows orphan permanently.
+
     Non-partitioned FK tables (IssueHash, Comment, UserReport,
     Notification.issues M2M) are also explicitly deleted per batch.
 
-    If a new FK from a *non-partitioned* table is added to Issue, add it
-    here. The test_cleanup_old_issues test will catch the omission.
+    If a new FK to Issue is added from any table without a DB-level
+    CASCADE to Issue (every partitioned table, plus non-partitioned
+    tables), add it here. test_cleanup_old_issues catches non-partitioned
+    omissions; partitioned-without-FK tables (like IssueSearchIndex) fail
+    silently, so test_cleanup_deletes_search_index guards that case.
 
     Returns the total number of Issues deleted.
     """
-    from .models import IssueAggregate, IssueEvent, IssueTag
+    from .models import IssueAggregate, IssueEvent, IssueSearchIndex, IssueTag
 
     ordered_qs = queryset.using(db_alias).order_by("id")
 
@@ -84,6 +91,15 @@ async def delete_issues_in_batches(
             await sync_to_async(
                 model.objects.filter(issue_id__in=batch_ids)._raw_delete
             )(db_alias)
+        # IssueSearchIndex is partitioned but, unlike the tables above, has
+        # no DB-level FK/CASCADE (partitioned tables can't be FK targets).
+        # The Issue _raw_delete will therefore succeed without touching it,
+        # so this explicit delete is mandatory for correctness — skipping
+        # it silently orphans search rows and re-grows the GIN index this
+        # table exists to shrink.
+        await sync_to_async(
+            IssueSearchIndex.objects.filter(issue_id__in=batch_ids)._raw_delete
+        )(db_alias)
         # Delete from non-partitioned FK tables
         await sync_to_async(
             Notification.issues.through.objects.filter(
@@ -93,9 +109,9 @@ async def delete_issues_in_batches(
         await sync_to_async(
             IssueHash.objects.filter(issue_id__in=batch_ids)._raw_delete
         )(db_alias)
-        await sync_to_async(
-            Comment.objects.filter(issue_id__in=batch_ids)._raw_delete
-        )(db_alias)
+        await sync_to_async(Comment.objects.filter(issue_id__in=batch_ids)._raw_delete)(
+            db_alias
+        )
         await sync_to_async(
             UserReport.objects.filter(issue_id__in=batch_ids)._raw_delete
         )(db_alias)

@@ -5,20 +5,19 @@ from timeit import default_timer as timer
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
-from django.db.models import F, Value
+from django.db.models import Value
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.event_ingest.model_functions import PipeConcat
 from glitchtip.test_utils.test_case import (
     APIPermissionTestCase,
     GlitchTestCase,
 )
 
 from ..constants import EventStatus, LogLevel
-from ..models import Issue
+from ..models import Issue, IssueSearchIndex
 
 logger = logging.getLogger(__name__)
 
@@ -183,12 +182,22 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + "?sort=-priority&environment=env")
         self.assertEqual(res.status_code, 200)
 
-    def test_search(self):
-        issue = baker.make(
-            "issue_events.Issue",
-            project=self.project,
-            search_vector=SearchVector(Value("apple sauce")),
+    def _set_search_document(self, issue, text):
+        """Populate an issue's IssueSearchIndex row (the full-text store).
+
+        Two steps: the SearchVector expression is applied via update() (it does
+        not resolve through Model.save()).
+        """
+        IssueSearchIndex.objects.get_or_create(
+            issue=issue, organization_id=self.organization.id
         )
+        IssueSearchIndex.objects.filter(issue=issue).update(
+            fts_document=SearchVector(Value(text))
+        )
+
+    def test_search(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        self._set_search_document(issue, "apple sauce")
         event = baker.make("issue_events.IssueEvent", issue=issue)
         other_issue = baker.make("issue_events.Issue", project=self.project)
 
@@ -231,16 +240,38 @@ class IssueAPITestCase(GlitchTestCase):
         event3 = baker.make(
             "issue_events.IssueEvent", issue=issue, data={"name": "plum sauce"}
         )
-        Issue.objects.filter(id=issue.id).update(
-            search_vector=SearchVector(
-                PipeConcat(F("search_vector"), SearchVector(Value(event3.data["name"])))
-            )
-        )
-        issue.search_vector = SearchVector(Value("apple sauce plum "))
+        # A later event extends the issue's search document (same as ingest's
+        # append path appending to fts_document).
+        self._set_search_document(issue, "apple sauce plum sauce")
         res = self.client.get(self.list_url + '?query=is:unresolved "plum sauce"')
         self.assertContains(res, event3.issue.title)
         res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
         self.assertContains(res, event.issue.title)
+
+    def test_search_via_decoupled_index(self):
+        """
+        Search resolves through IssueSearchIndex.fts_document, the sole
+        full-text store now that Issue.search_vector is dropped. Guards
+        against the index being populated with a corrupted (re-tokenized)
+        tsvector and against the org-scoped partition-pruning join.
+        """
+        issue = baker.make("issue_events.Issue", project=self.project)
+        IssueSearchIndex.objects.create(
+            issue=issue, organization_id=self.organization.id
+        )
+        IssueSearchIndex.objects.filter(issue=issue).update(
+            fts_document=SearchVector(Value("kangaroo marsupial"))
+        )
+        other_issue = baker.make("issue_events.Issue", project=self.project)
+
+        def ids(query):
+            res = self.client.get(self.list_url + "?query=" + query)
+            self.assertEqual(res.status_code, 200)
+            return {int(row["id"]) for row in res.json()}
+
+        self.assertEqual(ids("is:unresolved kangaroo"), {issue.id})
+        self.assertNotIn(other_issue.id, ids("is:unresolved kangaroo"))
+        self.assertEqual(ids('is:unresolved "kangaroo marsupial"'), {issue.id})
 
     def test_search_unmatched_quote(self):
         """Queries with unmatched quotes should not raise ValueError"""
@@ -256,8 +287,8 @@ class IssueAPITestCase(GlitchTestCase):
             "issue_events.Issue",
             project=self.project,
             title=issue_str,
-            search_vector=SearchVector(Value(issue_str)),
         )
+        self._set_search_document(issue, issue_str)
         res = self.client.get(self.list_url + "?query=is:unresolved f*o")
         self.assertContains(res, issue.title)
         res = self.client.get(self.list_url + "?query=is:unresolved f*x")

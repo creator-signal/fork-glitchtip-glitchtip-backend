@@ -175,13 +175,21 @@ def filter_issue_list(
                     )
             if len(query_part) == 1:
                 search_query = " ".join(queries[i:])
+                # Full-text search reads the decoupled IssueSearchIndex (the
+                # Issue.search_vector column has been dropped). Scoping by
+                # organization_id lets Postgres prune the hash partitions;
+                # without it the join is on issue_id alone and every partition
+                # is scanned, so callers must resolve organization_id on the
+                # text-search path (list_issues / list_project_issues do).
+                index_q = Q(search_index__fts_document=search_query)
+                if organization_id:
+                    index_q &= Q(search_index__organization_id=organization_id)
                 if "*" in search_query:
                     qs = qs.filter(
-                        Q(title__ilike=f"%{search_query.replace('*', '%')}%")
-                        | Q(search_vector=search_query)
+                        Q(title__ilike=f"%{search_query.replace('*', '%')}%") | index_q
                     )
                 else:
-                    qs = qs.filter(search_vector=search_query)
+                    qs = qs.filter(index_q)
                 # Search queries must be at end of query string, finished when parsing
                 break
 

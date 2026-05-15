@@ -20,15 +20,6 @@ def _generate_uuid7():
     return UUID7Helper.from_datetime()
 
 
-class DeferedFieldManager(models.Manager):
-    def __init__(self, defered_fields=[]):
-        super().__init__()
-        self.defered_fields = defered_fields
-
-    def get_queryset(self, *args, **kwargs):
-        return super().get_queryset(*args, **kwargs).defer(*self.defered_fields)
-
-
 class TagKey(models.Model):
     id = models.AutoField(primary_key=True)
     key = models.CharField(max_length=MAX_TAG_LENGTH, unique=True)
@@ -137,9 +128,6 @@ class Issue(SoftDeleteModel):
     culprit = models.CharField(max_length=1024, blank=True, null=True)
     title = models.CharField(max_length=255)
     metadata = models.JSONField()
-    search_vector = SearchVectorField(editable=False, default="")
-
-    objects = DeferedFieldManager(["search_vector"])
 
     class Meta:
         base_manager_name = "objects"
@@ -155,7 +143,6 @@ class Issue(SoftDeleteModel):
             ),
         ]
         indexes = [
-            GinIndex(fields=["search_vector"]),
             GinIndex(
                 fields=["title"],
                 name="issue_title_trgm_idx",
@@ -196,6 +183,44 @@ class Issue(SoftDeleteModel):
         if self.short_id is not None:
             return f"{self.project.slug.upper()}-{base32_encode(self.short_id)}"
         return ""
+
+
+class IssueSearchIndex(models.Model):
+    """
+    Partitioned search index for issues, decoupled from the main Issue table.
+
+    Hash-partitioned by organization_id to enable partition pruning on all
+    org-scoped queries. Holds the tsvector so GIN index maintenance doesn't
+    impact the hot Issue write path (count/last_seen updates).
+    """
+
+    # 8-byte alignment: FKs. db_constraint=False because a partitioned
+    # table can be neither the target nor (without including the partition
+    # key) the source of a DB-level FK; the constraints are intentionally
+    # omitted in SQL. Issue rows are pre-deleted in delete_issues_in_batches.
+    issue = models.OneToOneField(
+        Issue,
+        on_delete=models.CASCADE,
+        related_name="search_index",
+        db_constraint=False,
+    )
+    organization = models.ForeignKey(
+        "organizations_ext.Organization",
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+    )
+
+    pk = models.CompositePrimaryKey("issue", "organization")
+
+    # Variable-width
+    fts_document = SearchVectorField(editable=False, default="")
+
+    class Meta:
+        indexes = [
+            # Name pinned to the index the raw SQL actually creates so
+            # ORM state, migration state, and the DB all agree.
+            GinIndex(fields=["fts_document"], name="issuesearchindex_fts_gin"),
+        ]
 
 
 class IssueHash(models.Model):

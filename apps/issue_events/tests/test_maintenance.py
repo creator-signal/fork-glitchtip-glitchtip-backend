@@ -9,7 +9,7 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from ..maintenance import cleanup_old_issues
-from ..models import Issue, IssueEvent
+from ..models import Issue, IssueEvent, IssueSearchIndex
 
 # cleanup_old_issues adds a 7-day buffer beyond retention
 _BUFFER_DAYS = 7
@@ -29,21 +29,38 @@ class MaintenanceTestCase(TestCase):
         IssueEvent.objects.all().delete()
         with freeze_time(
             now()
-            + timedelta(
-                days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS + 1
-            )
+            + timedelta(days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS + 1)
         ):
             _cleanup_old_issues_sync()
             self.assertEqual(Issue.objects.count(), 0)
+
+    def test_cleanup_deletes_search_index(self):
+        """
+        IssueSearchIndex has no DB-level FK to Issue, so deleting an Issue
+        does not cascade to it. cleanup_old_issues() must delete its rows
+        explicitly or they orphan forever and re-grow the GIN index this
+        table exists to shrink. The generic FK-completeness test cannot
+        catch this (the Issue delete succeeds with no constraint to fail).
+        """
+        issue = baker.make("issue_events.Issue")
+        IssueSearchIndex.objects.create(
+            issue=issue, organization_id=issue.project.organization_id
+        )
+        self.assertEqual(IssueSearchIndex.objects.count(), 1)
+        with freeze_time(
+            now()
+            + timedelta(days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS + 1)
+        ):
+            _cleanup_old_issues_sync()
+            self.assertEqual(Issue.objects.count(), 0)
+            self.assertEqual(IssueSearchIndex.objects.count(), 0)
 
     def test_cleanup_within_buffer_keeps_issues(self):
         """Issues within the buffer window (retention + 7 days) are kept."""
         baker.make("issue_events.Issue")
         with freeze_time(
             now()
-            + timedelta(
-                days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS - 1
-            )
+            + timedelta(days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS - 1)
         ):
             _cleanup_old_issues_sync()
             self.assertEqual(Issue.objects.count(), 1)
@@ -77,9 +94,7 @@ class MaintenanceTestCase(TestCase):
                 with freeze_time(
                     now()
                     + timedelta(
-                        days=settings.GLITCHTIP_EVENT_RETENTION_DAYS
-                        + _BUFFER_DAYS
-                        + 1
+                        days=settings.GLITCHTIP_EVENT_RETENTION_DAYS + _BUFFER_DAYS + 1
                     )
                 ):
                     _cleanup_old_issues_sync()

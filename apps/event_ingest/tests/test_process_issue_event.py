@@ -18,7 +18,13 @@ from apps.difs.tasks import event_difs_resolve_stacktrace
 from apps.event_ingest.tests.utils import generate_event
 from apps.files.models import FileBlob
 from apps.issue_events.constants import EventStatus, LogLevel
-from apps.issue_events.models import Issue, IssueAggregate, IssueEvent, IssueHash
+from apps.issue_events.models import (
+    Issue,
+    IssueAggregate,
+    IssueEvent,
+    IssueHash,
+    IssueSearchIndex,
+)
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
 from glitchtip.utils import get_random_string
@@ -55,7 +61,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(10):
+        with self.assertNumQueries(12):
             self.process_events([{}, {}])
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
@@ -142,7 +148,7 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(16):
+        with self.assertNumQueries(18):
             self.process_events([event1, {}])
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)
@@ -584,9 +590,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         word = "orange"
         for _ in range(2):
             self.process_events([{"message": word}])
-        issue = Issue.objects.filter(search_vector=word).first()
+        # Full-text search now lives in IssueSearchIndex, not Issue.search_vector.
+        issue = Issue.objects.filter(search_index__fts_document=word).first()
         self.assertTrue(issue)
-        self.assertEqual(len(issue.search_vector.split(" ")), 1)
+        document = IssueSearchIndex.objects.get(issue=issue).fts_document
+        self.assertEqual(len(document.split(" ")), 1)
 
     @override_settings(SEARCH_MAX_LEXEMES=3)
     def test_search_vector_truncate(self):
@@ -600,9 +608,8 @@ class IssueEventIngestTestCase(EventIngestTestCase):
         ]
         self.process_events(events)
         issue = Issue.objects.get()
-        self.assertEqual(
-            len(issue.search_vector.split(" ")), 3, "truncate number of lexemes"
-        )
+        document = IssueSearchIndex.objects.get(issue=issue).fts_document
+        self.assertEqual(len(document.split(" ")), 3, "truncate number of lexemes")
 
     def test_search_vector_content(self):
         event_data = generate_event()
@@ -617,10 +624,11 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "filename"
         ]
         issue_event = IssueEvent.objects.get_event(event.payload.event_id)
-        self.assertIn(file_name, issue_event.issue.search_vector)
+        document = IssueSearchIndex.objects.get(issue=issue_event.issue).fts_document
+        self.assertIn(file_name, document)
         self.assertIn(
             event_data["request"]["url"].split("//")[-1],
-            issue_event.issue.search_vector,
+            document,
         )
 
     def test_null_character_event(self):
