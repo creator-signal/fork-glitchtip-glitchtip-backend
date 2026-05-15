@@ -125,7 +125,7 @@ async def update_organization(
     )
     if organization.actor_role < OrganizationUserRole.MANAGER:
         raise HttpError(403, "forbidden")
-    for attr, value in payload.dict().items():
+    for attr, value in payload.dict(exclude_unset=True).items():
         setattr(organization, attr, value)
     await organization.asave()
     return organization

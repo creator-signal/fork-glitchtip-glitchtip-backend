@@ -18,6 +18,8 @@ class OrganizationInSchema(CamelSchema, ModelSchema):
         model = Organization
         fields = [
             "name",
+            "license_key",
+            "license_billing_email",
         ]
 
 

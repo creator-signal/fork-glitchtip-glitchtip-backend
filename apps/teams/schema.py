@@ -61,7 +61,11 @@ class OrganizationDetailSchema(OrganizationSchema, ModelSchema):
     access: list[Scopes]
 
     class Meta(OrganizationSchema.Meta):
-        fields = OrganizationSchema.Meta.fields + ["open_membership"]
+        fields = OrganizationSchema.Meta.fields + [
+            "open_membership",
+            "license_key",
+            "license_billing_email",
+        ]
 
     @staticmethod
     def resolve_access(obj):
