@@ -658,6 +658,12 @@ STRIPE_REGION = env.str("STRIPE_REGION", "")  # Sets stripe customer metadata
 STRIPE_REGION_DOMAINS = env.dict(
     "STRIPE_REGION_DOMAINS", default={}
 )  # Forward webhooks to appropriate domain
+# Fallback URL for the public license-portal endpoint when a customer ID
+# cannot be resolved. Stripe's hosted "login" portal that emails a magic link.
+STRIPE_PORTAL_LOGIN_URL = env.str(
+    "STRIPE_PORTAL_LOGIN_URL",
+    "https://billing.stripe.com/p/login/28E4gA8Eb8ZE6jib97ds400",
+)
 if STRIPE_PUBLIC_KEY and STRIPE_SECRET_KEY:
     BILLING_ENABLED = True
 

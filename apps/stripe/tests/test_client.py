@@ -74,6 +74,23 @@ class StripeClientRetryTests(TestCase):
             with self.assertRaises(StripeResourceNotFound):
                 await stripe_get("customers/cus_test")
 
+    async def test_stripe_post_400_resource_missing_raises_not_found(self):
+        url = f"{STRIPE_URL}/billing_portal/sessions"
+        with aioresponses() as mocked:
+            mocked.post(
+                url,
+                status=400,
+                payload={
+                    "error": {
+                        "code": "resource_missing",
+                        "type": "invalid_request_error",
+                        "message": "No such customer: 'cus_nope'",
+                    }
+                },
+            )
+            with self.assertRaises(StripeResourceNotFound):
+                await stripe_post("billing_portal/sessions", {"customer": "cus_nope"})
+
     async def test_stripe_post_retries_on_429(self):
         url = f"{STRIPE_URL}/customers"
         with aioresponses() as mocked:
