@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.utils import timezone
 
 from apps.performance.test_data import generate_fake_transaction_group

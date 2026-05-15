@@ -1,4 +1,3 @@
-from datetime import timedelta
 from random import randrange
 
 from django.utils import timezone
