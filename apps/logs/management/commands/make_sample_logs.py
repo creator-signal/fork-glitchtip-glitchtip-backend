@@ -7,7 +7,7 @@ from django.db import connection
 from apps.logs.constants import LogLevel
 from apps.logs.models import LogResource, compute_hash_bucket
 from glitchtip.base_commands import MakeSampleCommand
-from glitchtip.partition_manager import PartitionManager, UUID7Helper
+from glitchtip.partition_manager import UUID7Helper
 
 
 class Command(MakeSampleCommand):
@@ -85,38 +85,18 @@ class Command(MakeSampleCommand):
         )
         self.stdout.write(f"Time range: {start_time} to {end_time}")
 
-        self._ensure_partitions(start_time, end_time)
+        self._ensure_partitions(
+            start_time,
+            end_time,
+            daily_tables=["logs_logevent"],
+            weekly_tables=["projects_logprojecthourlystatistic"],
+        )
 
         logs_created, log_stats = self._bulk_create_logs(quantity, start_time, end_time)
         self._upsert_log_stats(log_stats)
         self._ensure_log_resources()
 
         self.success_message(f"Successfully created {logs_created} log events")
-
-    def _ensure_partitions(self, start_time: datetime, end_time: datetime):
-        """Ensure partitions exist for the given time range."""
-        manager = PartitionManager()
-
-        current = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = end_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
-            days=1
-        )
-
-        while current <= end:
-            partition_name = f"logs_logevent_{current.strftime('%Y%m%d')}"
-            if not manager.table_exists(partition_name):
-                self.stdout.write(f"Creating partition {partition_name}")
-                next_day = current + timedelta(days=1)
-                manager.execute_partition_creation(
-                    parent_table="logs_logevent",
-                    partition_name=partition_name,
-                    start_date=current,
-                    end_date=next_day,
-                    hash_buckets=None,
-                    hash_column="organization_id",
-                    key_type="uuid7",
-                )
-            current += timedelta(days=1)
 
     def _bulk_create_logs(
         self,

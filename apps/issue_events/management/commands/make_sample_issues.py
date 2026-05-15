@@ -154,6 +154,18 @@ class Command(MakeSampleCommand):
 
         now = timezone.now()
         start_time = now - timedelta(days=over_days)
+
+        self._ensure_partitions(
+            start_time,
+            now,
+            daily_tables=["issue_events_issueevent"],
+            weekly_tables=[
+                "issue_events_issueaggregate",
+                "issue_events_issuetag",
+                "projects_issueeventprojecthourlystatistic",
+            ],
+        )
+
         # timedelta between each new issue first_seen
         issue_delta = timedelta(seconds=over_days * 86400 / issue_quantity)
         # timedelta between each event for an issue

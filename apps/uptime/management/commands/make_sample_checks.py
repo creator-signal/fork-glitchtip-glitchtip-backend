@@ -38,8 +38,16 @@ class Command(MakeSampleCommand):
 
         # Create checks sequentially based on time
         # Creates a better representation of data on disk
+        now = timezone.now()
+        start_time = now - timezone.timedelta(minutes=checks_quantity_per)
+        self._ensure_partitions(
+            start_time,
+            now,
+            daily_tables=["uptime_monitorcheck"],
+            weekly_tables=["uptime_uptimecheckhourlystatistic"],
+        )
+
         checks = []
-        start_time = timezone.now() - timezone.timedelta(minutes=checks_quantity_per)
         for time_i in range(checks_quantity_per):
             for monitor in monitors:
                 is_first = time_i == 0
@@ -49,6 +57,7 @@ class Command(MakeSampleCommand):
                 checks.append(
                     MonitorCheck(
                         monitor=monitor,
+                        organization=self.organization,
                         is_up=is_up,
                         is_change=is_first,
                         start_check=start_time + timezone.timedelta(minutes=time_i),

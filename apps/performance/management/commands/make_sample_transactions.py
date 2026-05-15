@@ -13,6 +13,13 @@ class Command(MakeSampleCommand):
         quantity = options["quantity"]
         total_count = 0
 
+        now = timezone.now()
+        self._ensure_partitions(
+            now,
+            now,
+            weekly_tables=["projects_transactioneventprojecthourlystatistic"],
+        )
+
         for _ in range(quantity):
             group = generate_fake_transaction_group(self.project)
             total_count += group.count
@@ -21,7 +28,7 @@ class Command(MakeSampleCommand):
         # Populate transaction stats with total count at current hour
         self.upsert_hourly_project_stats(
             "projects_transactioneventprojecthourlystatistic",
-            [timezone.now()] * total_count,
+            [now] * total_count,
         )
 
         self.success_message('Successfully created "%s" transaction groups' % quantity)
