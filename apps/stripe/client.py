@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from typing import Any, AsyncGenerator, Type, TypeAlias, TypeVar
 
@@ -11,6 +12,7 @@ from apps.organizations_ext.models import Organization
 from .exceptions import StripeResourceNotFound
 from .schema import (
     Customer,
+    CustomerListResponse,
     Invoice,
     InvoiceListResponse,
     PortalSession,
@@ -24,6 +26,8 @@ from .schema import (
     SubscriptionExpandCustomer,
     SubscriptionExpandCustomerResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 STRIPE_URL = "https://api.stripe.com/v1"
 HEADERS = {
@@ -232,6 +236,26 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     }
     response = await stripe_post("billing_portal/sessions", params)
     return PortalSession.model_validate_json(response)
+
+
+async def fetch_customer_by_email(email: str) -> Customer | None:
+    """Stripe customer matching the given email, or None.
+
+    Stripe's customer list can return multiple matches for the same email
+    (rare — usually from duplicate-account migrations or admin error). We
+    fetch up to 3 and log a warning if there's more than one match; the
+    caller picks the first returned (Stripe orders by creation desc, so
+    newest customer wins — most likely the one the user remembers).
+    """
+    response = await stripe_get("customers", params={"email": email, "limit": 3})
+    page = CustomerListResponse.model_validate_json(response)
+    if len(page.data) > 1:
+        logger.warning(
+            "Stripe returned %d customers for email lookup; using newest (%s)",
+            len(page.data),
+            page.data[0].id,
+        )
+    return page.data[0] if page.data else None
 
 
 async def fetch_latest_invoice_for_customer(customer_id: str) -> Invoice | None:

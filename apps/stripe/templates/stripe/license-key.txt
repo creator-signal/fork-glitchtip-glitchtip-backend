@@ -1,0 +1,19 @@
+Your GlitchTip support license key
+==================================
+
+Use this key to enable priority support on your self-hosted GlitchTip instance.
+
+    {{ license_key }}
+
+How to use it
+-------------
+
+  1. In your self-hosted GlitchTip, open Organization Settings.
+  2. Find the Support License card.
+  3. Paste the key above and save.
+
+Didn't request this? You can safely ignore this email — no changes have been
+made to your account.
+
+—
+GlitchTip · Open-source error tracking

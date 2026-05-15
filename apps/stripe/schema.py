@@ -167,6 +167,10 @@ class InvoiceListResponse(StripeListResponse[Invoice]):
     pass
 
 
+class CustomerListResponse(StripeListResponse[Customer]):
+    pass
+
+
 class InvoiceCreation(BaseModel):
     enabled: bool
     invoice_data: InvoiceData
