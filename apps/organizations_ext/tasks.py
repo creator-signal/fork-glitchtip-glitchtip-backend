@@ -212,6 +212,11 @@ def _delete_org_cold_storage(org_id: int):
     if not is_duckdb_available():
         return
 
-    table_names = ["logs_logevent", "issue_events_issueevent", "performance_spans"]
+    table_names = [
+        "logs_logevent",
+        "issue_events_issueevent",
+        "performance_spans",
+        "performance_spans_rollup",
+    ]
     for table_name in table_names:
         delete_org_cold_storage(org_id, table_name)

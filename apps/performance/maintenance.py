@@ -7,7 +7,7 @@ from django.utils.timezone import now
 
 from glitchtip.cold_storage import cleanup_all_cold_storage
 
-from .cold_storage import TABLE_NAME
+from .cold_storage import ROLLUP_TABLE_NAME, TABLE_NAME
 from .models import TransactionGroup
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,13 @@ async def cleanup_old_transaction_events():
     if total_deleted:
         logger.info("Deleted %d old transaction groups", total_deleted)
 
-    # Clean up cold storage files
+    # Split retention: raw spans are dropped early (most are never read);
+    # the small trend rollups are kept for the long transaction retention.
+    await sync_to_async(cleanup_all_cold_storage)(
+        retention_days=settings.GLITCHTIP_SPAN_RAW_RETENTION_DAYS,
+        table_name=TABLE_NAME,
+    )
     await sync_to_async(cleanup_all_cold_storage)(
         retention_days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS,
-        table_name=TABLE_NAME,
+        table_name=ROLLUP_TABLE_NAME,
     )

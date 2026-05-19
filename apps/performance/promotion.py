@@ -9,9 +9,10 @@ import io
 import logging
 import os
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
@@ -20,6 +21,7 @@ from glitchtip.cold_storage import (
     _is_s3_storage,
     _parquet_encoding_opts,
     duckdb_quote_path,
+    duckdb_slot,
     get_cold_storage_backend,
     get_duckdb_connection,
     get_duckdb_parquet_path,
@@ -27,7 +29,7 @@ from glitchtip.cold_storage import (
 )
 from glitchtip.partition_manager import UUID7Helper
 
-from .cold_storage import SPAN_PARQUET_COLUMN_TYPES
+from .cold_storage import ROLLUP_TABLE_NAME, SPAN_PARQUET_COLUMN_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,12 @@ TABLE_NAME = "performance_spans"
 
 # Process up to this many rows per organization per invocation.
 BATCH_LIMIT_PER_ORG = 100_000
+
+# An hour is sealed (safe to compact, no longer accepting chunks) once this
+# long after the hour ends. Only throttles re-compaction churn — compaction
+# is idempotent — so it just needs to exceed normal promotion/queue lag.
+# A span arriving later than this for an already-sealed hour is dropped.
+SEAL_GRACE = timedelta(minutes=20)
 
 
 def _delete_promoted_rows(group_uuids: list, org_id: int) -> None:
@@ -88,9 +96,17 @@ async def promote_spans() -> tuple[int, bool]:
 
     from apps.performance.models import SpanStaging
 
-    cutoff = timezone.now() - timedelta(minutes=5)
+    now_dt = timezone.now()
+    cutoff = now_dt - timedelta(minutes=5)
     # UUID7 with min random bits — everything before this was inserted before cutoff
     cutoff_uuid = UUID7Helper.from_datetime(cutoff)
+
+    # Garbage guard (not a correctness mechanism — compaction is idempotent
+    # and seals by ingestion time). Spans with a missing timestamp, a
+    # far-future timestamp, or one already past raw retention are not worth
+    # a Parquet chunk: they are consumed (deleted from staging) and dropped.
+    min_ts = now_dt - timedelta(days=settings.GLITCHTIP_SPAN_RAW_RETENTION_DAYS)
+    max_ts = now_dt + settings.GLITCHTIP_TRANSACTION_FUTURE_SKEW
 
     # Step 1: Get distinct org_ids. This scans range partitions but the query
     # is lightweight (only reads organization_id column).
@@ -105,6 +121,7 @@ async def promote_spans() -> tuple[int, bool]:
         return 0, False
 
     total_promoted = 0
+    total_dropped = 0
     truncated = False
 
     # Step 2: Process each org separately — both id and organization_id
@@ -135,23 +152,30 @@ async def promote_spans() -> tuple[int, bool]:
         if len(rows) >= BATCH_LIMIT_PER_ORG:
             truncated = True
 
-        # Group rows by date within this org
-        date_groups: dict[str, list[tuple]] = {}
+        # Group rows by (date, hour) — the T1 raw unit. Garbage spans
+        # (missing / far-future / past-retention timestamps) are dropped but
+        # still consumed below so they don't reaccumulate in staging.
+        hour_groups: dict[tuple[str, str], list[tuple]] = {}
+        drop_uuids: list = []
         for row in rows:
             ts = row[9]  # timestamp
-            date_str = ts.strftime("%Y%m%d") if ts else "unknown"
-            date_groups.setdefault(date_str, []).append(row)
+            if ts is None or ts < min_ts or ts > max_ts:
+                drop_uuids.append(row[0])
+                continue
+            key = (ts.strftime("%Y%m%d"), ts.strftime("%H"))
+            hour_groups.setdefault(key, []).append(row)
 
-        for date_str, group_rows in date_groups.items():
+        for (date_str, hour_str), group_rows in hour_groups.items():
             try:
                 chunk_path = await _write_chunk_parquet(
-                    storage, org_id, date_str, group_rows
+                    storage, org_id, date_str, hour_str, group_rows
                 )
             except Exception:
                 logger.error(
-                    "Failed to write parquet chunk for org %d date %s",
+                    "Failed to write parquet chunk for org %d %s/%s",
                     org_id,
                     date_str,
+                    hour_str,
                     exc_info=True,
                 )
                 continue
@@ -165,10 +189,11 @@ async def promote_spans() -> tuple[int, bool]:
                 # DELETE failed after chunk was written — remove the chunk
                 # to prevent duplicate data on the next promotion run.
                 logger.error(
-                    "Failed to delete promoted rows for org %d date %s, "
+                    "Failed to delete promoted rows for org %d %s/%s, "
                     "removing chunk to prevent duplicates",
                     org_id,
                     date_str,
+                    hour_str,
                     exc_info=True,
                 )
                 try:
@@ -182,27 +207,50 @@ async def promote_spans() -> tuple[int, bool]:
                 continue
             total_promoted += len(group_rows)
 
+        # Consume dropped rows so they don't reaccumulate in staging.
+        # Non-fatal on failure — they'll be retried next run.
+        if drop_uuids:
+            try:
+                await sync_to_async(_delete_promoted_rows)(drop_uuids, org_id)
+                total_dropped += len(drop_uuids)
+            except Exception:
+                logger.warning(
+                    "Failed to delete %d dropped span rows for org %d",
+                    len(drop_uuids),
+                    org_id,
+                    exc_info=True,
+                )
+
     if total_promoted:
         logger.info("Promoted %d span rows to cold storage", total_promoted)
+    if total_dropped:
+        logger.info(
+            "Dropped %d whacky/stale span rows during promotion", total_dropped
+        )
     return total_promoted, truncated
 
 
 async def _write_chunk_parquet(
-    storage, org_id: int, date_str: str, rows: list[tuple]
+    storage, org_id: int, date_str: str, hour_str: str, rows: list[tuple]
 ) -> str:
-    """Write a chunk Parquet file for a single org+date group via arro3.
+    """Write a chunk Parquet file for a single org+date+hour group via arro3.
 
     Builds Arrow arrays directly from Python tuples — no CSV serialization,
     no temp files, no DuckDB dependency for writes. arro3 and Django
     storage are sync-only today; ``sync_to_async`` is applied at each leaf
     call so the surrounding task stays async-native.
+
+    The ``time.time_ns()`` filename prefix gives a monotonic ingestion
+    sequence used by compaction to seal an hour idempotently.
     """
     import arro3.core as ac
     import arro3.io as aio
 
     chunk_ts = f"{time.time_ns()}_{os.getpid()}"
-    org_dir = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}"
-    relative_path = f"{org_dir}/chunk_{chunk_ts}.parquet"
+    hour_dir = (
+        f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}/{hour_str}"
+    )
+    relative_path = f"{hour_dir}/chunk_{chunk_ts}.parquet"
 
     # Build Arrow arrays directly from row tuples.
     # Row layout: (id, org_id, project_id, txn_name, span_id, txn_id,
@@ -253,14 +301,164 @@ async def _write_chunk_parquet(
     return relative_path
 
 
+def _delete_subtree(storage, rel: str) -> None:
+    """Recursively delete every object under a storage-relative directory."""
+    try:
+        dirs, files = storage.listdir(rel)
+    except (NotImplementedError, OSError):
+        return
+    for f in files:
+        try:
+            storage.delete(f"{rel}/{f}")
+        except Exception:
+            logger.warning("Failed to delete %s/%s", rel, f)
+    for d in dirs:
+        _delete_subtree(storage, f"{rel}/{d}")
+    try:
+        os.rmdir(storage.path(rel))
+    except (OSError, NotImplementedError):
+        pass
+
+
+def _duckdb_copy(storage, input_relpaths: list[str], output_relpath: str) -> bool:
+    """COPY many Parquet inputs into one output via DuckDB.
+
+    Memory is bounded by ``DUCKDB_MEMORY_LIMIT`` + ``ROW_GROUP_SIZE`` and the
+    process-wide ``duckdb_slot`` (benchmarked equivalent to arro3 here, with
+    far less code — see scripts/bench_compaction_ab.py). Filesystem writes go
+    via a ``.tmp`` rename; S3 PUT is atomic. Returns False if no slot was
+    free (caller retries next run; inputs are left intact).
+    """
+    in_paths = [get_duckdb_parquet_path(storage, p) for p in input_relpaths]
+    out_path = get_duckdb_parquet_path(storage, output_relpath)
+    is_s3 = out_path.startswith("s3://")
+    write_path = out_path if is_s3 else out_path + ".tmp"
+
+    with duckdb_slot() as slot:
+        if not slot:
+            return False
+        conn = get_duckdb_connection(storage)
+        try:
+            paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in in_paths)
+            conn.execute(
+                f"COPY (SELECT * FROM read_parquet([{paths_list}])) "
+                f"TO '{duckdb_quote_path(write_path)}' "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)"
+            )
+        finally:
+            conn.close()
+
+    if not is_s3:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        os.rename(write_path, out_path)
+    return True
+
+
+def _write_hour_rollup(
+    storage, hour_file_rel: str, rollup_rel: str, hour_start: datetime
+) -> None:
+    """Aggregate one sealed hour file into its tiny rollup (T3).
+
+    DuckDB only *reads* and produces a small grouped result (one row per
+    (project, transaction, op, description) — sized by cardinality, not span
+    count); the write itself goes through arro3, consistent with the
+    arro3-for-writes rule. Idempotent: overwrites the hour rollup.
+    """
+    src = get_duckdb_parquet_path(storage, hour_file_rel)
+    with duckdb_slot() as slot:
+        if not slot:
+            return
+        conn = get_duckdb_connection(storage)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT project_id, transaction_name, op, description,
+                    COUNT(*), SUM(duration), MIN(duration), MAX(duration),
+                    approx_quantile(duration, 0.5),
+                    approx_quantile(duration, 0.95),
+                    COUNT(DISTINCT transaction_id)
+                FROM read_parquet('{duckdb_quote_path(src)}')
+                GROUP BY project_id, transaction_name, op, description
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+    if not rows:
+        return
+
+    import arro3.core as ac
+    import arro3.io as aio
+
+    bucket_us = int(hour_start.timestamp() * 1_000_000)
+    batch = ac.RecordBatch.from_arrays(
+        [
+            ac.Array([r[0] for r in rows], type=ac.DataType.int32()),
+            ac.Array([r[1] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[2] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[3] for r in rows], type=ac.DataType.utf8()),
+            ac.Array([r[4] for r in rows], type=ac.DataType.int64()),
+            ac.Array([r[5] or 0.0 for r in rows], type=ac.DataType.float64()),
+            ac.Array([r[6] or 0.0 for r in rows], type=ac.DataType.float64()),
+            ac.Array([r[7] or 0.0 for r in rows], type=ac.DataType.float64()),
+            ac.Array([r[8] or 0.0 for r in rows], type=ac.DataType.float64()),
+            ac.Array([r[9] or 0.0 for r in rows], type=ac.DataType.float64()),
+            ac.Array([r[10] for r in rows], type=ac.DataType.int64()),
+            ac.Array([bucket_us] * len(rows), type=ac.DataType.int64()).cast(
+                ac.DataType.timestamp("us")
+            ),
+        ],
+        names=[
+            "project_id",
+            "transaction_name",
+            "op",
+            "description",
+            "count",
+            "sum_duration",
+            "min_duration",
+            "max_duration",
+            "p50",
+            "p95",
+            "transaction_count",
+            "hour_bucket",
+        ],
+    )
+    write_kwargs = {"compression": "zstd(3)", "max_row_group_size": 100_000}
+    if _is_s3_storage(storage):
+        from django.core.files.base import ContentFile
+
+        buf = io.BytesIO()
+        aio.write_parquet(batch, buf, **write_kwargs)
+        buf.seek(0)
+        try:
+            storage.delete(rollup_rel)
+        except Exception:
+            pass
+        storage.save(rollup_rel, ContentFile(buf.read()))
+    else:
+        path = storage.path(rollup_rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        aio.write_parquet(batch, path, **write_kwargs)
+
+
 def compact_span_chunks() -> int:
     """
-    Compact chunk Parquet files into single daily files per org.
+    Collapse the raw span tiers and emit trend rollups.
 
-    For each org directory, merges chunk files for completed days
-    (before today) into a single sorted Parquet file.
+    Tiers (per org):
 
-    Returns number of files compacted.
+    - **Open hour:** ``{date}/{HH}/chunk_*.parquet`` — promotion appends here.
+    - **Sealed hour:** ``{date}/{HH}.parquet`` — one file per completed hour.
+    - **Sealed day:** ``{date}.parquet`` — lazy roll of a fully-sealed day.
+    - **Rollup:** ``performance_spans_rollup/...`` — small per-group hourly
+      aggregates for trend queries, kept far longer than raw.
+
+    An hour is sealed ``SEAL_GRACE`` after it ends. Sealing is idempotent
+    and never rebuilds an existing sealed file, so a span arriving for an
+    already-sealed hour is dropped (acceptably rare with correct-ish clocks;
+    matches the accepted "duplicates only slightly skew aggregates" stance).
+    Cheap to run often — most calls find nothing newly sealed.
+
+    Returns number of chunk files compacted into sealed hours.
     """
     if not is_duckdb_available():
         return 0
@@ -269,124 +467,121 @@ def compact_span_chunks() -> int:
     if not storage:
         return 0
 
-    spans_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}"
+    raw_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}"
+    rollup_prefix = f"{COLD_STORAGE_PREFIX}/{ROLLUP_TABLE_NAME}"
     now = timezone.now()
-    # Skip the last 2 days to avoid racing with the promotion job,
-    # which may still be writing chunks for yesterday's timestamps.
-    skip_dates = {
-        now.strftime("%Y%m%d"),
-        (now - timedelta(days=1)).strftime("%Y%m%d"),
-    }
     compacted = 0
 
     try:
-        org_dirs, _ = storage.listdir(spans_prefix)
+        org_dirs, _ = storage.listdir(raw_prefix)
     except (NotImplementedError, OSError):
         return 0
 
     for org_dir in org_dirs:
         if not org_dir.startswith("org_"):
             continue
-
-        org_path = f"{spans_prefix}/{org_dir}"
+        raw_org = f"{raw_prefix}/{org_dir}"
+        rollup_org = f"{rollup_prefix}/{org_dir}"
         try:
-            date_dirs, flat_files = storage.listdir(org_path)
+            date_dirs, _ = storage.listdir(raw_org)
         except (NotImplementedError, OSError):
             continue
 
-        # Process date subdirectories with chunk files
         for date_dir in date_dirs:
-            if date_dir in skip_dates:
-                continue  # Don't compact recent chunks
-
-            date_path = f"{org_path}/{date_dir}"
             try:
-                _, chunk_files = storage.listdir(date_path)
-            except (NotImplementedError, OSError):
-                continue
-
-            chunks = [f for f in chunk_files if f.endswith(".parquet")]
-            if len(chunks) <= 1:
-                continue
-
+                day_start = datetime.strptime(date_dir, "%Y%m%d").replace(tzinfo=UTC)
+            except ValueError:
+                continue  # not a date dir
             try:
-                _compact_date_chunks(storage, org_path, date_dir, date_path, chunks)
-                compacted += len(chunks)
+                compacted += _compact_org_date(
+                    storage, raw_org, rollup_org, date_dir, day_start, now
+                )
             except Exception:
-                logger.error("Failed to compact chunks in %s", date_path, exc_info=True)
+                logger.error(
+                    "Failed compacting %s/%s", raw_org, date_dir, exc_info=True
+                )
 
     if compacted:
         logger.info("Compacted %d span chunk files", compacted)
-
     return compacted
 
 
-def _compact_date_chunks(
-    storage, org_path: str, date_dir: str, date_path: str, chunks: list[str]
-):
-    """Compact multiple chunk files into a single daily Parquet file.
-
-    Two tuning knobs on the COPY keep the compaction inside a small
-    DuckDB memory budget (controlled by ``DUCKDB_MEMORY_LIMIT``,
-    default 128 MiB) even on orgs with high-entropy span content:
-
-    1. No global ``ORDER BY``. An explicit sort forces DuckDB to fully
-       materialize the input and can exceed the memory limit. The
-       output is still roughly time-ordered — chunks are processed in
-       filename order (``time.time_ns()`` prefix) and rows within a
-       chunk come from the staging table in UUIDv7 id-order, which
-       tracks span ingest time closely — so each row-group in the
-       output spans only the time window of a single chunk and
-       Parquet ``timestamp`` min/max stats stay narrow enough for
-       range-predicate pruning.
-
-    2. Small ``ROW_GROUP_SIZE``. DuckDB's Parquet writer buffers a full
-       row group in memory before flushing. The default of ~120k rows
-       blows the budget for wide spans (long SQL-like descriptions can
-       push rows past 1 KiB). 20k rows keeps the writer buffer under
-       ~40 MiB of in-flight data even on worst-case row widths, which
-       is safe at a 128 MiB default budget and leaves room for
-       read-side buffers.
-
-    Crash safety: on filesystem, writes to a .tmp file then atomically
-    renames. A crash mid-write leaves a .tmp file (ignored by
-    enumerate_org_parquet_files) and chunks remain intact for the next run.
-    On S3, PUT is atomic so no temp file is needed.
-    """
-    chunks = sorted(chunks)
-    chunk_paths = [
-        get_duckdb_parquet_path(storage, f"{date_path}/{chunk}") for chunk in chunks
-    ]
-
-    output_relative = f"{org_path}/{date_dir}.parquet"
-    output_path = get_duckdb_parquet_path(storage, output_relative)
-
-    is_s3 = output_path.startswith("s3://")
-    write_path = output_path if is_s3 else output_path + ".tmp"
-
-    duck_conn = get_duckdb_connection(storage)
+def _compact_org_date(
+    storage, raw_org: str, rollup_org: str, date_dir: str, day_start, now
+) -> int:
+    """Seal due hours for one org+date, then lazily roll the sealed day."""
+    date_path = f"{raw_org}/{date_dir}"
     try:
-        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in chunk_paths)
-        duck_conn.execute(f"""
-            COPY (
-                SELECT * FROM read_parquet([{paths_list}])
-            ) TO '{duckdb_quote_path(write_path)}'
-            (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)
-        """)
-    finally:
-        duck_conn.close()
+        hour_dirs, _ = storage.listdir(date_path)
+    except (NotImplementedError, OSError):
+        hour_dirs = []
 
-    if not is_s3:
-        os.rename(write_path, output_path)
+    compacted = 0
+    for hh in hour_dirs:
+        if len(hh) != 2 or not hh.isdigit():
+            continue
+        hour_start = day_start + timedelta(hours=int(hh))
+        if now <= hour_start + timedelta(hours=1) + SEAL_GRACE:
+            continue  # hour still open
 
-    for chunk in chunks:
+        hour_file = f"{date_path}/{hh}.parquet"
+        chunk_dir = f"{date_path}/{hh}"
+
+        if storage.exists(hour_file):
+            # Already sealed — never rebuild. Drop any late/leftover chunks.
+            _delete_subtree(storage, chunk_dir)
+            continue
+
         try:
-            storage.delete(f"{date_path}/{chunk}")
+            _, chunk_files = storage.listdir(chunk_dir)
+        except (NotImplementedError, OSError):
+            continue
+        chunks = sorted(f for f in chunk_files if f.endswith(".parquet"))
+        if not chunks:
+            _delete_subtree(storage, chunk_dir)
+            continue
+
+        if not _duckdb_copy(
+            storage, [f"{chunk_dir}/{c}" for c in chunks], hour_file
+        ):
+            continue  # slot saturated — retry next run, chunks intact
+
+        try:
+            _write_hour_rollup(
+                storage, hour_file, f"{rollup_org}/{date_dir}/{hh}.parquet", hour_start
+            )
         except Exception:
-            logger.warning("Failed to delete chunk %s/%s", date_path, chunk)
+            logger.error("Failed hour rollup %s/%s", date_dir, hh, exc_info=True)
+        _delete_subtree(storage, chunk_dir)
+        compacted += len(chunks)
 
-    if not is_s3:
-        try:
-            os.rmdir(storage.path(date_path))
-        except OSError:
-            pass
+    # Lazy daily roll once the whole day is sealed.
+    if now > day_start + timedelta(days=1) + SEAL_GRACE:
+        _roll_sealed_day(storage, raw_org, date_dir)
+        _roll_sealed_day(storage, rollup_org, date_dir)
+    return compacted
+
+
+def _roll_sealed_day(storage, base_org: str, date_dir: str) -> None:
+    """Concat a fully-sealed day's hour files into ``{date}.parquet``.
+
+    Idempotent: if the day file already exists, just clears the leftover
+    ``{date}/`` subtree. Used for both the raw and the rollup trees.
+    """
+    day_file = f"{base_org}/{date_dir}.parquet"
+    date_path = f"{base_org}/{date_dir}"
+    if storage.exists(day_file):
+        _delete_subtree(storage, date_path)
+        return
+    try:
+        _, hour_files = storage.listdir(date_path)
+    except (NotImplementedError, OSError):
+        return
+    hours = sorted(f"{date_path}/{f}" for f in hour_files if f.endswith(".parquet"))
+    if not hours:
+        _delete_subtree(storage, date_path)
+        return
+    if _duckdb_copy(storage, hours, day_file):
+        _delete_subtree(storage, date_path)
+
+    return True

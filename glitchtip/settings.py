@@ -178,6 +178,19 @@ GLITCHTIP_TRANSACTION_RETENTION_DAYS = env.int(
         "GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS", default=GLITCHTIP_RETENTION_DAYS
     ),
 )
+# Reject transaction/span events whose timestamp is further in the future
+# than this (clearly-broken clients) — bounds garbage so cold-storage
+# hour-bucketing isn't polluted. Not an operator knob.
+GLITCHTIP_TRANSACTION_FUTURE_SKEW = timedelta(hours=1)
+
+# Retention for raw span Parquet (the T1 hourly / T2 daily tiers). Most
+# span data is never read; raw is kept only long enough for recent
+# debugging and point lookups, then dropped. Trend rollups
+# (performance_spans_rollup) are kept for the much longer
+# GLITCHTIP_TRANSACTION_RETENTION_DAYS instead. Operator-tunable.
+GLITCHTIP_SPAN_RAW_RETENTION_DAYS = env.int(
+    "GLITCHTIP_SPAN_RAW_RETENTION_DAYS", default=30
+)
 GLITCHTIP_UPTIME_RETENTION_DAYS = env.int(
     "GLITCHTIP_UPTIME_RETENTION_DAYS",
     default=env.int(
@@ -853,7 +866,9 @@ if str(GLITCHTIP_ENABLE_DUCKDB or "").lower() == "true":
     }
     VTASKS_SCHEDULE["compact-span-chunks"] = {
         "task": "apps.performance.tasks.compact_span_chunks",
-        "schedule": crontab(hour=3, minute=0),
+        # Collapse each day shortly after it seals (now - MAX_AGE - margin)
+        # rather than once daily. Cheap when nothing is newly sealed.
+        "schedule": 15 * 60,
     }
 
 if GLITCHTIP_ENABLE_UPTIME:

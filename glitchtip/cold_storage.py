@@ -28,6 +28,7 @@ import logging
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -210,12 +211,18 @@ def get_duckdb_read_connection(storage=None):
     eventually push a new query past ``memory_limit``. Periodic recycling
     resets the pool with ~1/N amortized setup cost.
 
-    Read connections also force ``threads=1`` and
-    ``preserve_insertion_order=false`` regardless of the global
-    ``DUCKDB_THREADS`` setting. Cold reads are point lookups with explicit
-    ``ORDER BY``; parallelism multiplies per-thread scan-buffer RAM
-    without reducing latency, and insertion-order preservation forces
-    extra intermediate buffering that we don't rely on.
+    Read connections use the cgroup-aware ``DUCKDB_THREADS`` (set in
+    ``_create_duckdb_connection``) and only override
+    ``preserve_insertion_order=false``. The analytical cold reads
+    (span-group aggregations, trends) are full scans over a date range
+    spanning many per-day Parquet files; on S3 the dominant cost is HTTP
+    round-trip latency per file, which thread parallelism overlaps —
+    measured ~3.5x faster reading ~160 files. ``DUCKDB_THREADS`` is already
+    capped to the pod's CPU quota, which bounds the per-thread scan-buffer
+    RAM that motivated the previous ``threads=1`` clamp; ``memory_limit``
+    bounds the buffer pool on top of that. Insertion-order preservation is
+    still disabled because reads use explicit ``ORDER BY`` and it forces
+    extra intermediate buffering we don't rely on.
 
     Do NOT call .close() on the returned connection — it is managed by
     the thread-local cache. Use ``close_duckdb_read_connection()`` for
@@ -232,7 +239,7 @@ def get_duckdb_read_connection(storage=None):
         except Exception:
             pass
     conn = _create_duckdb_connection(storage)
-    conn.execute("SET threads = 1")
+    # Keep DUCKDB_THREADS from _create_duckdb_connection — do not clamp to 1.
     conn.execute("SET preserve_insertion_order = false")
     _thread_local.duckdb_conn = conn
     _thread_local.duckdb_conn_uses = 1
@@ -249,6 +256,55 @@ def close_duckdb_read_connection():
             pass
         _thread_local.duckdb_conn = None
         _thread_local.duckdb_conn_uses = 0
+
+
+# Process-wide bound on concurrent DuckDB work — global across ALL DuckDB
+# usage (cold reads, compaction COPY, parquet rewrites), because they all
+# draw from the same pod memory budget.
+#
+# ``memory_limit`` is enforced per connection, so without a global bound a
+# burst of dashboard requests (or a read burst racing a compaction)
+# multiplies peak RSS by the number of in-flight DuckDB operations
+# (measured: peak RSS grows ~linearly with concurrency while throughput
+# inverts past the CPU budget — see scripts/bench_cold_read_concurrency.py).
+# Capping at the pod's CPU budget keeps worst-case memory ~= cap *
+# memory_limit and sits at the throughput sweet spot.
+#
+# Internal knob derived from the cgroup-aware DUCKDB_THREADS — not an
+# operator setting. Tests patch ``_duckdb_semaphore`` directly.
+_MAX_CONCURRENT_DUCKDB = max(2, getattr(settings, "DUCKDB_THREADS", 2))
+_DUCKDB_SLOT_TIMEOUT = 10.0
+_duckdb_semaphore = threading.BoundedSemaphore(_MAX_CONCURRENT_DUCKDB)
+
+
+@contextmanager
+def duckdb_slot(block: bool = False):
+    """Bound concurrent DuckDB work, process-wide.
+
+    With ``block=False`` (request-driven reads, periodic compaction): yields
+    True if a slot was acquired within ``_DUCKDB_SLOT_TIMEOUT``, else False —
+    the caller degrades (reads return empty; compaction skips and retries
+    next run) rather than piling on memory during a burst.
+
+    With ``block=True`` (rare, must-complete background work like deleting a
+    removed project's data): waits indefinitely for a slot and always yields
+    True. Reads still degrade rather than deadlock behind it.
+    """
+    if block:
+        _duckdb_semaphore.acquire()
+        acquired = True
+    else:
+        acquired = _duckdb_semaphore.acquire(timeout=_DUCKDB_SLOT_TIMEOUT)
+        if not acquired:
+            logger.warning(
+                "DuckDB concurrency limit (%d) hit; degrading this operation",
+                _MAX_CONCURRENT_DUCKDB,
+            )
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            _duckdb_semaphore.release()
 
 
 def _create_duckdb_connection(storage=None):
@@ -427,6 +483,76 @@ def enumerate_org_parquet_files(
                     paths.append(f"{subdir_path}/{cf}")
         except (OSError, NotImplementedError):
             pass
+
+    return paths
+
+
+def enumerate_hour_tiered_files(
+    storage,
+    table_name: str,
+    org_id: int,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+) -> list[str]:
+    """Enumerate hour-tiered Parquet for an org (spans raw + rollup trees).
+
+    Newest tier wins per period:
+    - ``{date}.parquet``               sealed day — shadows that date
+    - ``{date}/{HH}.parquet``          sealed hour
+    - ``{date}/{HH}/chunk_*.parquet``  open hour — only if no sealed hour
+
+    Day-level range filtering only (None = no filter). Returns
+    storage-relative paths.
+    """
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    try:
+        date_dirs, day_files = storage.listdir(org_prefix)
+    except (NotImplementedError, OSError):
+        return []
+
+    in_range = (
+        (lambda d: _date_in_range(d, start_dt, end_dt))
+        if start_dt is not None and end_dt is not None
+        else (lambda d: True)
+    )
+
+    paths: list[str] = []
+    rolled: set[str] = set()
+
+    for f in sorted(day_files):
+        if not f.endswith(".parquet"):
+            continue
+        date_str = f.removesuffix(".parquet")
+        if not in_range(date_str):
+            continue
+        paths.append(f"{org_prefix}/{f}")
+        rolled.add(date_str)
+
+    for d in sorted(date_dirs):
+        if d in rolled or not in_range(d):
+            continue
+        date_path = f"{org_prefix}/{d}"
+        try:
+            hour_dirs, hour_files = storage.listdir(date_path)
+        except (NotImplementedError, OSError):
+            continue
+        sealed_hours: set[str] = set()
+        for hf in sorted(hour_files):
+            if not hf.endswith(".parquet"):
+                continue
+            paths.append(f"{date_path}/{hf}")
+            sealed_hours.add(hf.removesuffix(".parquet"))
+        for hd in sorted(hour_dirs):
+            if hd in sealed_hours:
+                continue  # sealed hour file shadows late/leftover chunks
+            hour_path = f"{date_path}/{hd}"
+            try:
+                _, chunk_files = storage.listdir(hour_path)
+            except (NotImplementedError, OSError):
+                continue
+            for cf in sorted(chunk_files):
+                if cf.endswith(".parquet"):
+                    paths.append(f"{hour_path}/{cf}")
 
     return paths
 
@@ -1225,6 +1351,31 @@ def query_cold_parquet_files(
     if not parquet_paths:
         return []
 
+    with duckdb_slot() as slot:
+        if not slot:
+            return []
+        return _query_cold_parquet_files_inner(
+            storage,
+            parquet_paths,
+            select_columns,
+            where_sql,
+            params,
+            limit_param,
+            limit,
+        )
+
+
+def _query_cold_parquet_files_inner(
+    storage,
+    parquet_paths: list[str],
+    select_columns: str,
+    where_sql: str,
+    params: list,
+    limit_param: str,
+    limit: int | None,
+) -> list[tuple]:
+    """Inner scan loop for ``query_cold_parquet_files`` — runs while holding
+    a cold-read concurrency slot."""
     all_rows: list[tuple] = []
     duck_conn = get_duckdb_read_connection(storage)
     try:
@@ -1405,6 +1556,33 @@ def archive_and_cleanup_partitions(
     return (archived, failed, deleted)
 
 
+def _purge_tree(storage, prefix: str) -> int:
+    """Recursively delete every object under a storage prefix.
+
+    Best-effort: per-node errors are logged and skipped so one bad object
+    can't strand the rest of a deleted org's data. Handles arbitrary depth
+    (the spans layout is org/{date}/{HH}/chunk_* — three levels).
+    """
+    try:
+        dirs, files = storage.listdir(prefix)
+    except (NotImplementedError, OSError):
+        return 0
+    deleted = 0
+    for f in files:
+        try:
+            storage.delete(f"{prefix}/{f}")
+            deleted += 1
+        except Exception:
+            logger.warning("Failed to delete cold file %s/%s", prefix, f)
+    for d in dirs:
+        deleted += _purge_tree(storage, f"{prefix}/{d}")
+    try:
+        os.rmdir(storage.path(prefix))
+    except (OSError, NotImplementedError):
+        pass
+    return deleted
+
+
 def delete_org_cold_storage(
     org_id: int,
     table_name: str,
@@ -1428,40 +1606,11 @@ def delete_org_cold_storage(
     org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
     deleted_count = 0
 
-    # Try listing files under the org prefix (including subdirectories
-    # for chunk-file layouts like performance_spans/{date}/chunk_*.parquet)
+    # Recursively purge the whole org subtree (handles the spans
+    # hour-tiered layout's arbitrary depth, not just one level of dates).
     try:
-        dirs, files = storage.listdir(org_prefix)
-        for filename in files:
-            file_path = f"{org_prefix}/{filename}"
-            try:
-                storage.delete(file_path)
-                deleted_count += 1
-            except Exception:
-                logger.warning("Failed to delete cold file %s", file_path)
-        # Recurse into subdirectories (e.g. date dirs with chunk files)
-        for subdir in dirs:
-            subdir_path = f"{org_prefix}/{subdir}"
-            try:
-                _, subfiles = storage.listdir(subdir_path)
-                for subfile in subfiles:
-                    try:
-                        storage.delete(f"{subdir_path}/{subfile}")
-                        deleted_count += 1
-                    except Exception:
-                        logger.warning(
-                            "Failed to delete cold file %s/%s", subdir_path, subfile
-                        )
-                # Try to remove the empty directory (filesystem only)
-                if not org_prefix.startswith("s3://"):
-                    try:
-                        import os
-
-                        os.rmdir(storage.path(subdir_path))
-                    except OSError:
-                        pass
-            except (NotImplementedError, OSError):
-                pass
+        storage.listdir(org_prefix)  # availability/existence probe
+        deleted_count = _purge_tree(storage, org_prefix)
     except (NotImplementedError, OSError):
         # listdir not supported — fall back to date sweep
         now = timezone.now()
@@ -1514,7 +1663,12 @@ def rewrite_parquet_excluding_project(
     if not storage:
         return 0
 
-    parquet_paths = enumerate_org_parquet_files(storage, table_name, org_id)
+    # Spans use the hour-tiered layout (raw + rollup trees); logs and
+    # issue events use the flat date layout.
+    if table_name in ("performance_spans", "performance_spans_rollup"):
+        parquet_paths = enumerate_hour_tiered_files(storage, table_name, org_id)
+    else:
+        parquet_paths = enumerate_org_parquet_files(storage, table_name, org_id)
     if not parquet_paths:
         return 0
 
@@ -1531,54 +1685,60 @@ def rewrite_parquet_excluding_project(
 
     for relative_path in parquet_paths:
         parquet_path = get_duckdb_parquet_path(storage, relative_path)
-        duck_conn = get_duckdb_read_connection(storage)
-        try:
-            quoted = duckdb_quote_path(parquet_path)
+        # Must-complete deletion work: wait for a slot rather than skip,
+        # so a removed project's data is always purged from cold storage.
+        with duckdb_slot(block=True):
+            duck_conn = get_duckdb_read_connection(storage)
+            try:
+                quoted = duckdb_quote_path(parquet_path)
 
-            # Count remaining rows after filtering
-            remaining = duck_conn.execute(
-                f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
-            ).fetchone()[0]
+                # Count remaining rows after filtering
+                remaining = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}') {where_clause}"
+                ).fetchone()[0]
 
-            if remaining == 0:
-                # No rows left — delete the file
-                storage.delete(relative_path)
+                if remaining == 0:
+                    # No rows left — delete the file
+                    storage.delete(relative_path)
+                    rewritten_count += 1
+                    logger.debug("Deleted empty cold file %s", relative_path)
+                    continue
+
+                # Check if any rows were actually filtered out
+                total = duck_conn.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
+                ).fetchone()[0]
+
+                if remaining == total:
+                    # No data from this project in this file, skip
+                    continue
+
+                # Rewrite to a temp file then replace for crash safety.
+                # DuckDB handles both read+filter and write here — this is a
+                # rare operation (project deletion only) so we accept DuckDB
+                # for the write rather than adding a pyarrow dependency just
+                # to bridge DuckDB→arro3.
+                is_s3 = parquet_path.startswith("s3://")
+                write_path = parquet_path if is_s3 else parquet_path + ".tmp"
+                duck_conn.execute(f"""
+                    COPY (
+                        SELECT * FROM read_parquet('{quoted}')
+                        {where_clause}
+                    ) TO '{duckdb_quote_path(write_path)}'
+                    (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
+                if not is_s3:
+                    os.rename(write_path, parquet_path)
                 rewritten_count += 1
-                logger.debug("Deleted empty cold file %s", relative_path)
-                continue
-
-            # Check if any rows were actually filtered out
-            total = duck_conn.execute(
-                f"SELECT COUNT(*) FROM read_parquet('{quoted}')"
-            ).fetchone()[0]
-
-            if remaining == total:
-                # No data from this project in this file, skip
-                continue
-
-            # Rewrite to a temp file then replace for crash safety.
-            # DuckDB handles both read+filter and write here — this is a
-            # rare operation (project deletion only) so we accept DuckDB
-            # for the write rather than adding a pyarrow dependency just
-            # to bridge DuckDB→arro3.
-            is_s3 = parquet_path.startswith("s3://")
-            write_path = parquet_path if is_s3 else parquet_path + ".tmp"
-            duck_conn.execute(f"""
-                COPY (
-                    SELECT * FROM read_parquet('{quoted}')
-                    {where_clause}
-                ) TO '{duckdb_quote_path(write_path)}' (FORMAT PARQUET, COMPRESSION ZSTD);
-            """)
-            if not is_s3:
-                os.rename(write_path, parquet_path)
-            rewritten_count += 1
-            logger.debug("Rewrote cold file %s", relative_path)
-        except Exception as e:
-            if is_missing_file_error(e):
-                close_duckdb_read_connection()
-                duck_conn = get_duckdb_read_connection(storage)
-                continue
-            logger.warning("Error rewriting cold file %s: %s", relative_path, e)
+                logger.debug("Rewrote cold file %s", relative_path)
+            except Exception as e:
+                if is_missing_file_error(e):
+                    close_duckdb_read_connection()
+                    duck_conn = get_duckdb_read_connection(storage)
+                    continue
+                logger.warning(
+                    "Error rewriting cold file %s: %s", relative_path, e
+                )
 
     if rewritten_count:
         logger.info(

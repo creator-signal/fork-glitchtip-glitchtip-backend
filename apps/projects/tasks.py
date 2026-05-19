@@ -58,11 +58,18 @@ def _rewrite_cold_storage_for_project(project: Project):
         table_name="logs_logevent",
     )
 
-    # Rewrite performance span Parquet files (has project_id column)
+    # Rewrite performance span Parquet — raw spans and the trend rollups
+    # (both carry project_id). Without the rollup pass a deleted project's
+    # aggregates would survive for the long rollup retention.
     rewrite_parquet_excluding_project(
         org_id=org_id,
         project_id=project.id,
         table_name="performance_spans",
+    )
+    rewrite_parquet_excluding_project(
+        org_id=org_id,
+        project_id=project.id,
+        table_name="performance_spans_rollup",
     )
 
     # Rewrite issue event Parquet files (has issue_id, not project_id)
