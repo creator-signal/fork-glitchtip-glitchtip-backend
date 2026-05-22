@@ -27,6 +27,27 @@ class SettingsTestCase(TestCase):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
 
+    @override_settings(BILLING_URL="https://app.glitchtip.com/api/0/billing/")
+    def test_settings_billing_url_default(self):
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json()["billingUrl"], "https://app.glitchtip.com/api/0/billing/"
+        )
+
+    @override_settings(BILLING_URL="https://eu.glitchtip.com/api/0/billing/")
+    def test_settings_billing_url_overridden(self):
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json()["billingUrl"], "https://eu.glitchtip.com/api/0/billing/"
+        )
+
+    @override_settings(BILLING_URL="https://eu.glitchtip.com/api/0/billing")
+    def test_settings_billing_url_normalizes_missing_trailing_slash(self):
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json()["billingUrl"], "https://eu.glitchtip.com/api/0/billing/"
+        )
+
     def test_settings_oidc(self):
         social_app = baker.make(
             "socialaccount.socialapp",
