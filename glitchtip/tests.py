@@ -27,6 +27,13 @@ class SettingsTestCase(TestCase):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
 
+    def test_settings_does_not_expose_license_key(self):
+        """license_key was removed from the public settings response to avoid
+        PII exposure via the license-invoice endpoint. See instance-license."""
+        res = self.client.get(self.url)
+        self.assertNotIn("licenseKey", res.json())
+        self.assertNotIn("license_key", res.json())
+
     def test_settings_oidc(self):
         social_app = baker.make(
             "socialaccount.socialapp",
@@ -62,6 +69,98 @@ class SettingsTestCase(TestCase):
             cache.delete(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
+
+
+class InstanceLicenseTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_instance_license")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(
+        BILLING_ENABLED=False,
+        GLITCHTIP_LICENSE_KEY=None,
+        GLITCHTIP_BILLING_EMAIL=None,
+    )
+    def test_none_when_unconfigured(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res.json(), {"licenseKey": "", "billingEmail": "", "source": "none"}
+        )
+
+    @override_settings(
+        BILLING_ENABLED=False,
+        GLITCHTIP_LICENSE_KEY="sub_envKey",
+        GLITCHTIP_BILLING_EMAIL="env@example.com",
+    )
+    def test_env_source_when_env_set(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(),
+            {
+                "licenseKey": "sub_envKey",
+                "billingEmail": "env@example.com",
+                "source": "env",
+            },
+        )
+
+    @override_settings(
+        BILLING_ENABLED=False,
+        GLITCHTIP_LICENSE_KEY=None,
+        GLITCHTIP_BILLING_EMAIL=None,
+    )
+    def test_db_source_when_only_db_set(self):
+        from apps.stripe.models import SupportLicense
+
+        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(),
+            {
+                "licenseKey": "sub_dbKey",
+                "billingEmail": "db@example.com",
+                "source": "db",
+            },
+        )
+
+    @override_settings(
+        BILLING_ENABLED=False,
+        GLITCHTIP_LICENSE_KEY="sub_envKey",
+        GLITCHTIP_BILLING_EMAIL=None,
+    )
+    def test_mixed_source_when_only_one_env_set(self):
+        from apps.stripe.models import SupportLicense
+
+        SupportLicense(license_key="ignored", billing_email="db@example.com").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(),
+            {
+                "licenseKey": "sub_envKey",
+                "billingEmail": "db@example.com",
+                "source": "mixed",
+            },
+        )
+
+    @override_settings(
+        BILLING_ENABLED=True,
+        GLITCHTIP_LICENSE_KEY="sub_envKey",
+        GLITCHTIP_BILLING_EMAIL="env@example.com",
+    )
+    def test_billing_enabled_returns_none_regardless_of_env(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(), {"licenseKey": "", "billingEmail": "", "source": "none"}
+        )
 
 
 class APIRootTestCase(TestCase):
