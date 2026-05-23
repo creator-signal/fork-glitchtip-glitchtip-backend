@@ -72,6 +72,12 @@ api.add_router("0/stripe", stripe_router)
 api.add_router("0", sourcecode_router)
 api.add_router("0", teams_router)
 
+if settings.BILLING_ENABLED:
+    # Self-hosted instances have no Stripe credentials; not registered there.
+    from apps.stripe.billing_api import router as billing_router
+
+    api.add_router("0/billing", billing_router)
+
 if settings.GLITCHTIP_ENABLE_UPTIME:
     from apps.uptime.api import router as uptime_router
 

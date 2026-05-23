@@ -232,3 +232,13 @@ class PortalSession(BaseModel):
     on_behalf_of: str | None = None
     return_url: str
     url: str
+
+
+class Invoice(BaseModel):
+    object: Literal["invoice"]
+    id: str
+    status: str | None = None
+    hosted_invoice_url: str | None = None
+
+
+InvoiceListResponse = StripeListResponse[Invoice]

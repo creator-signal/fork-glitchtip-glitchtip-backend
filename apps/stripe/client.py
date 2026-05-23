@@ -11,6 +11,8 @@ from apps.organizations_ext.models import Organization
 from .exceptions import StripeResourceNotFound
 from .schema import (
     Customer,
+    Invoice,
+    InvoiceListResponse,
     PortalSession,
     Price,
     PriceListResponse,
@@ -69,9 +71,16 @@ async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
                     raise StripeResourceNotFound()
 
                 error_data = await response.json()
-                error_message = error_data.get("error", {}).get(
-                    "message", "Unknown error"
-                )
+                error_obj = error_data.get("error", {})
+                error_message = error_obj.get("message", "Unknown error")
+
+                # Stripe returns 400 with code=resource_missing for "No such X"
+                # errors. Treat that the same as a 404.
+                if (
+                    response.status == 400
+                    and error_obj.get("code") == "resource_missing"
+                ):
+                    raise StripeResourceNotFound()
 
                 should_retry_header = response.headers.get("Stripe-Should-Retry")
                 if should_retry_header is not None:
@@ -240,3 +249,25 @@ async def create_subscription(customer: str, price: str, **kwargs) -> Subscripti
 async def fetch_subscription(id: str) -> Subscription:
     response = await stripe_get("subscriptions/" + id)
     return Subscription.model_validate_json(response)
+
+
+async def fetch_subscription_with_customer(id: str) -> SubscriptionExpandCustomer:
+    """Fetch a subscription with its customer object expanded inline.
+
+    Used by the license-invoice endpoint to constant-time compare the
+    operator-supplied email against the customer's billing email without a
+    second round trip.
+    """
+    response = await stripe_get(
+        "subscriptions/" + id, params={"expand": ["customer"]}
+    )
+    return SubscriptionExpandCustomer.model_validate_json(response)
+
+
+async def fetch_latest_invoice_for_customer(customer_id: str) -> "Invoice | None":
+    """Most recent invoice for the given customer, or None if they have none."""
+    response = await stripe_get(
+        "invoices", params={"customer": customer_id, "limit": 1}
+    )
+    page = InvoiceListResponse.model_validate_json(response)
+    return page.data[0] if page.data else None
