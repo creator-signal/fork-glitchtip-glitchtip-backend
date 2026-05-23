@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import StripePrice, StripeProduct, StripeSubscription
+from .models import StripePrice, StripeProduct, StripeSubscription, SupportLicense
 from .utils import get_stripe_link
 
 
@@ -49,6 +49,33 @@ class StripeSubscriptionAdmin(StripeBaseAdmin):
     list_filter = ["status", "price__product"]
 
 
+class SupportLicenseAdmin(admin.ModelAdmin):
+    """Superuser-only admin for the instance-wide support license singleton.
+
+    One row enforced (pk=1). Add/delete disabled. Change requires superuser.
+    """
+
+    list_display = ["license_key", "billing_email", "updated"]
+    fields = ["license_key", "billing_email", "updated"]
+    readonly_fields = ["updated"]
+
+    def has_add_permission(self, request):
+        return not SupportLicense.objects.exists() and request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        # License key is a credential; non-superuser staff must not see it.
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 if settings.BILLING_ENABLED:
     admin.site.register(StripeSubscription, StripeSubscriptionAdmin)
     admin.site.register(StripeProduct, StripeProductAdmin)
+else:
+    # Support license config only makes sense on self-hosted (no Stripe creds).
+    admin.site.register(SupportLicense, SupportLicenseAdmin)

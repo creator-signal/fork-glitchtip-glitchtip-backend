@@ -456,3 +456,68 @@ class StripeSubscription(StripeModel):
         await cls.set_primary_subscriptions_for_organizations(active_organization_ids)
         await cls.update_outdated_subscriptions()
         await cls.remove_inactive_primary_subscriptions()
+
+
+class SupportLicense(models.Model):
+    """Instance-wide support-plan license configuration. Singleton (pk=1)."""
+
+    license_key = models.CharField(max_length=255, blank=True, default="")
+    billing_email = models.EmailField(blank=True, default="")
+    updated = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        try:
+            obj, _ = cls.objects.get_or_create(pk=1)
+        except IntegrityError:
+            # Concurrent first-fetch raced us to INSERT; the row exists now.
+            obj = cls.objects.get(pk=1)
+        return obj
+
+    @classmethod
+    async def aload(cls):
+        try:
+            obj, _ = await cls.objects.aget_or_create(pk=1)
+        except IntegrityError:
+            obj = await cls.objects.aget(pk=1)
+        return obj
+
+    @classmethod
+    def resolved(cls) -> tuple[str, str]:
+        # Env var is authoritative when set (including to empty string, so
+        # operators can disable an inherited value). `None` means use DB.
+        if settings.BILLING_ENABLED:
+            return ("", "")
+        db = cls.load()
+        key = (
+            db.license_key
+            if settings.GLITCHTIP_LICENSE_KEY is None
+            else settings.GLITCHTIP_LICENSE_KEY
+        )
+        email = (
+            db.billing_email
+            if settings.GLITCHTIP_BILLING_EMAIL is None
+            else settings.GLITCHTIP_BILLING_EMAIL
+        )
+        return (key, email)
+
+    @classmethod
+    async def aresolved(cls) -> tuple[str, str]:
+        if settings.BILLING_ENABLED:
+            return ("", "")
+        db = await cls.aload()
+        key = (
+            db.license_key
+            if settings.GLITCHTIP_LICENSE_KEY is None
+            else settings.GLITCHTIP_LICENSE_KEY
+        )
+        email = (
+            db.billing_email
+            if settings.GLITCHTIP_BILLING_EMAIL is None
+            else settings.GLITCHTIP_BILLING_EMAIL
+        )
+        return (key, email)
