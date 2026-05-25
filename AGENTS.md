@@ -55,6 +55,7 @@ curl -H "Authorization: Bearer ddddddddddddddddddddddddddddddddddddddddddddddddd
 ```
 
 ## Gotchas
+- **`VTASKS_SCHEDULE` runs once cluster-wide, not per pod.** django-vtasks elects a single scheduler at any moment (the others are idle stand-ins ready to take over). A schedule entry added here fires once per interval across the whole deployment, not once per pod — so you do NOT need an external lock to keep periodic tasks (compaction, retention sweeps, etc.) from running concurrently on every pod. The work itself can assume single-runner semantics. Manual `aenqueue()` calls bypass the scheduler and CAN race with the scheduled run — guard those separately if duplicate execution would matter.
 - Minimum Python is 3.12 (`requires-python = ">=3.12"`). Don't add `from __future__ import annotations` — PEP 604 (`X | Y`) and PEP 585 (`list[X]`) are native in 3.10+, and the project does not rely on PEP 563 deferred evaluation.
 - **No `a` prefix on async functions in internal code.** GlitchTip is async-first; assume I/O functions are async. Name them `get_foo`, not `aget_foo`. The `a` prefix only makes sense in libraries (Django, allauth, etc.) where a sync sibling exists in the same namespace. Reserve it for code you genuinely intend to upstream into such a project.
 - We optimize postgres column alignment, when making migrations consider column alignment. Some smaller tales don't matter. When in doubt, ask the user.
