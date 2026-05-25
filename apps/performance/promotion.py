@@ -29,11 +29,13 @@ from glitchtip.cold_storage import (
 )
 from glitchtip.partition_manager import UUID7Helper
 
-from .cold_storage import ROLLUP_TABLE_NAME, SPAN_PARQUET_COLUMN_TYPES
+from .cold_storage import (
+    ROLLUP_STORAGE_PREFIX,
+    SPAN_PARQUET_COLUMN_TYPES,
+    STORAGE_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
-
-TABLE_NAME = "performance_spans"
 
 # Process up to this many rows per organization per invocation.
 BATCH_LIMIT_PER_ORG = 100_000
@@ -248,7 +250,7 @@ async def _write_chunk_parquet(
 
     chunk_ts = f"{time.time_ns()}_{os.getpid()}"
     hour_dir = (
-        f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}/org_{org_id}/{date_str}/{hour_str}"
+        f"{COLD_STORAGE_PREFIX}/{STORAGE_PREFIX}/org_{org_id}/{date_str}/{hour_str}"
     )
     relative_path = f"{hour_dir}/chunk_{chunk_ts}.parquet"
 
@@ -467,8 +469,8 @@ def compact_span_chunks() -> int:
     if not storage:
         return 0
 
-    raw_prefix = f"{COLD_STORAGE_PREFIX}/{TABLE_NAME}"
-    rollup_prefix = f"{COLD_STORAGE_PREFIX}/{ROLLUP_TABLE_NAME}"
+    raw_prefix = f"{COLD_STORAGE_PREFIX}/{STORAGE_PREFIX}"
+    rollup_prefix = f"{COLD_STORAGE_PREFIX}/{ROLLUP_STORAGE_PREFIX}"
     now = timezone.now()
     compacted = 0
 
@@ -512,9 +514,33 @@ def _compact_org_date(
     """Seal due hours for one org+date, then lazily roll the sealed day."""
     date_path = f"{raw_org}/{date_dir}"
     try:
-        hour_dirs, _ = storage.listdir(date_path)
+        hour_dirs, hour_files = storage.listdir(date_path)
     except (NotImplementedError, OSError):
-        hour_dirs = []
+        hour_dirs, hour_files = [], []
+
+    # Recover any sealed hour that's missing its rollup. The rollup write
+    # happens after the seal and can fail (slot saturated, transient S3,
+    # etc.); without recovery a single failure silently drops that hour
+    # from every trend query until raw retention expires. We re-derive the
+    # rollup from the sealed raw file — cheap and idempotent.
+    for hf in hour_files:
+        if not hf.endswith(".parquet"):
+            continue
+        hh = hf.removesuffix(".parquet")
+        if len(hh) != 2 or not hh.isdigit():
+            continue
+        rollup_file = f"{rollup_org}/{date_dir}/{hh}.parquet"
+        if storage.exists(rollup_file):
+            continue
+        hour_start = day_start + timedelta(hours=int(hh))
+        try:
+            _write_hour_rollup(
+                storage, f"{date_path}/{hf}", rollup_file, hour_start
+            )
+        except Exception:
+            logger.error(
+                "Failed recovery rollup %s/%s", date_dir, hh, exc_info=True
+            )
 
     compacted = 0
     for hh in hour_dirs:
@@ -526,9 +552,11 @@ def _compact_org_date(
 
         hour_file = f"{date_path}/{hh}.parquet"
         chunk_dir = f"{date_path}/{hh}"
+        rollup_file = f"{rollup_org}/{date_dir}/{hh}.parquet"
 
         if storage.exists(hour_file):
             # Already sealed — never rebuild. Drop any late/leftover chunks.
+            # (Rollup recovery for this hour ran above.)
             _delete_subtree(storage, chunk_dir)
             continue
 
@@ -547,10 +575,10 @@ def _compact_org_date(
             continue  # slot saturated — retry next run, chunks intact
 
         try:
-            _write_hour_rollup(
-                storage, hour_file, f"{rollup_org}/{date_dir}/{hh}.parquet", hour_start
-            )
+            _write_hour_rollup(storage, hour_file, rollup_file, hour_start)
         except Exception:
+            # Rollup will be recomputed on the next compaction tick by the
+            # recovery loop above.
             logger.error("Failed hour rollup %s/%s", date_dir, hh, exc_info=True)
         _delete_subtree(storage, chunk_dir)
         compacted += len(chunks)
@@ -583,5 +611,3 @@ def _roll_sealed_day(storage, base_org: str, date_dir: str) -> None:
         return
     if _duckdb_copy(storage, hours, day_file):
         _delete_subtree(storage, date_path)
-
-    return True

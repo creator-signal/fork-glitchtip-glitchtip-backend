@@ -180,7 +180,9 @@ GLITCHTIP_TRANSACTION_RETENTION_DAYS = env.int(
 )
 # Reject transaction/span events whose timestamp is further in the future
 # than this (clearly-broken clients) — bounds garbage so cold-storage
-# hour-bucketing isn't polluted. Not an operator knob.
+# hour-bucketing isn't polluted. Clients with badly skewed clocks that
+# previously squeaked through now get HTTP 400 "Event time in the
+# future." on transaction ingest. Not an operator knob.
 GLITCHTIP_TRANSACTION_FUTURE_SKEW = timedelta(hours=1)
 
 # Retention for raw span Parquet (the T1 hourly / T2 daily tiers). Most

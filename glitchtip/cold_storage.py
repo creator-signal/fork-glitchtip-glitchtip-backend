@@ -266,9 +266,22 @@ def close_duckdb_read_connection():
 # burst of dashboard requests (or a read burst racing a compaction)
 # multiplies peak RSS by the number of in-flight DuckDB operations
 # (measured: peak RSS grows ~linearly with concurrency while throughput
-# inverts past the CPU budget — see scripts/bench_cold_read_concurrency.py).
+# inverts past the CPU budget — see benchmarks/bench_cold_read_concurrency.py).
 # Capping at the pod's CPU budget keeps worst-case memory ~= cap *
 # memory_limit and sits at the throughput sweet spot.
+#
+# The cap is a connection count, not a thread count: each in-flight DuckDB
+# connection runs its own thread pool of size ``DUCKDB_THREADS``, so under a
+# saturated read burst the process may briefly run up to
+# ``cap * DUCKDB_THREADS`` OS threads. That CPU oversubscription is tolerable
+# (DuckDB threads are largely I/O-waiting on object-storage HTTP), and it is
+# bounded — the semaphore prevents it from growing without limit.
+#
+# The ``max(2, ...)`` floor matters on 1-CPU pods: ``block=True`` deletion
+# work holds a slot for the duration of a multi-file rewrite, so with cap=1
+# a single project-delete would freeze every dashboard read until done.
+# Floor of 2 keeps reads moving in parallel with a rare blocking deletion,
+# at the cost of 2 × memory_limit worst case on small pods.
 #
 # Internal knob derived from the cgroup-aware DUCKDB_THREADS — not an
 # operator setting. Tests patch ``_duckdb_semaphore`` directly.
@@ -284,7 +297,10 @@ def duckdb_slot(block: bool = False):
     With ``block=False`` (request-driven reads, periodic compaction): yields
     True if a slot was acquired within ``_DUCKDB_SLOT_TIMEOUT``, else False —
     the caller degrades (reads return empty; compaction skips and retries
-    next run) rather than piling on memory during a burst.
+    next run) rather than piling on memory during a burst. Callers that
+    must surface the saturation (e.g. background work whose absence causes
+    silent data loss) should log on ``not slot``; reads don't, since a
+    saturated semaphore is itself logged at acquire time.
 
     With ``block=True`` (rare, must-complete background work like deleting a
     removed project's data): waits indefinitely for a slot and always yields
@@ -402,19 +418,21 @@ def get_duckdb_parquet_path(storage, relative_path: str) -> str:
     return storage.path(relative_path)
 
 
-def get_org_cold_storage_path(table_name: str, org_id: int, date_str: str) -> str:
+def get_org_cold_storage_path(storage_prefix: str, org_id: int, date_str: str) -> str:
     """Get the storage-relative path for an org's daily Parquet file (without bucket)."""
-    return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}.parquet"
+    return f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}/{date_str}.parquet"
 
 
-def _get_chunk_dir(table_name: str, org_id: int, date_str: str) -> str:
+def _get_chunk_dir(storage_prefix: str, org_id: int, date_str: str) -> str:
     """Get the storage-relative directory for chunked Parquet files."""
-    return f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}/{date_str}"
+    return f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}/{date_str}"
 
 
-def _get_chunk_path(table_name: str, org_id: int, date_str: str, chunk: int) -> str:
+def _get_chunk_path(storage_prefix: str, org_id: int, date_str: str, chunk: int) -> str:
     """Get the storage-relative path for a specific chunk file."""
-    return f"{_get_chunk_dir(table_name, org_id, date_str)}/chunk_{chunk:03d}.parquet"
+    return (
+        f"{_get_chunk_dir(storage_prefix, org_id, date_str)}/chunk_{chunk:03d}.parquet"
+    )
 
 
 def _date_in_range(date_str: str, start_dt: datetime, end_dt: datetime) -> bool:
@@ -430,7 +448,7 @@ def _date_in_range(date_str: str, start_dt: datetime, end_dt: datetime) -> bool:
 
 def enumerate_org_parquet_files(
     storage,
-    table_name: str,
+    storage_prefix: str,
     org_id: int,
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
@@ -447,7 +465,7 @@ def enumerate_org_parquet_files(
 
     Returns list of storage-relative paths.
     """
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}"
 
     try:
         subdirs, flat_files = storage.listdir(org_prefix)
@@ -489,7 +507,7 @@ def enumerate_org_parquet_files(
 
 def enumerate_hour_tiered_files(
     storage,
-    table_name: str,
+    storage_prefix: str,
     org_id: int,
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
@@ -504,7 +522,7 @@ def enumerate_hour_tiered_files(
     Day-level range filtering only (None = no filter). Returns
     storage-relative paths.
     """
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}"
     try:
         date_dirs, day_files = storage.listdir(org_prefix)
     except (NotImplementedError, OSError):
@@ -558,7 +576,7 @@ def enumerate_hour_tiered_files(
 
 
 def get_parquet_paths_for_date(
-    storage, table_name: str, org_id: int, date_str: str
+    storage, storage_prefix: str, org_id: int, date_str: str
 ) -> list[str]:
     """
     Return all Parquet file paths for an org+date — flat file and/or chunks.
@@ -572,7 +590,7 @@ def get_parquet_paths_for_date(
         return []
     return enumerate_org_parquet_files(
         storage,
-        table_name,
+        storage_prefix,
         org_id,
         start_dt=file_date,
         end_dt=file_date + timedelta(days=1),
@@ -652,7 +670,7 @@ def _flush_csv_to_parquet(
     storage,
     csv_data: bytes | bytearray,
     column_types: dict[str, str],
-    table_name: str,
+    storage_prefix: str,
     org_id: int,
     date_str: str,
     flat_path: str,
@@ -685,7 +703,7 @@ def _flush_csv_to_parquet(
     if chunk_num == 0 and is_final_flush:
         out_path = flat_path
     else:
-        out_path = _get_chunk_path(table_name, org_id, date_str, chunk_num)
+        out_path = _get_chunk_path(storage_prefix, org_id, date_str, chunk_num)
         chunk_num += 1
 
     # Cap row groups so DuckDB readers can decompress one at a time within
@@ -1186,7 +1204,7 @@ def _is_date_before_cutoff(date_str: str, cutoff: datetime) -> bool:
 def cleanup_cold_storage_for_org(
     org_id: int,
     retention_days: int,
-    table_name: str,
+    storage_prefix: str,
     storage=None,
 ) -> int:
     """
@@ -1208,7 +1226,7 @@ def cleanup_cold_storage_for_org(
 
     cutoff = timezone.now() - timedelta(days=retention_days)
     deleted_count = 0
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}"
 
     try:
         subdirs, files = storage.listdir(org_prefix)
@@ -1255,7 +1273,7 @@ def cleanup_cold_storage_for_org(
 
 def cleanup_all_cold_storage(
     retention_days: int | None = None,
-    table_name: str = "logs_logevent",
+    storage_prefix: str = "logs_logevent",
 ) -> int:
     """
     Delete cold storage files older than retention period for all orgs.
@@ -1282,9 +1300,9 @@ def cleanup_all_cold_storage(
 
     # Discover orgs from storage directory instead of querying the database.
     # Only orgs with actual cold data will have directories.
-    table_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}"
+    base_prefix = f"{COLD_STORAGE_PREFIX}/{storage_prefix}"
     try:
-        org_dirs, _ = storage.listdir(table_prefix)
+        org_dirs, _ = storage.listdir(base_prefix)
     except Exception:
         return 0
 
@@ -1297,7 +1315,7 @@ def cleanup_all_cold_storage(
         except ValueError:
             continue
         deleted = cleanup_cold_storage_for_org(
-            org_id, retention_days, table_name, storage=storage
+            org_id, retention_days, storage_prefix, storage=storage
         )
         total_deleted += deleted
 
@@ -1308,7 +1326,7 @@ def cleanup_all_cold_storage(
 
 def query_cold_parquet_files(
     organization_id: int,
-    table_name: str,
+    storage_prefix: str,
     select_columns: str,
     where_sql: str,
     params: list,
@@ -1329,7 +1347,8 @@ def query_cold_parquet_files(
 
     Args:
         organization_id: Org whose files to query
-        table_name: PG table name (e.g., "logs_logevent")
+        storage_prefix: Cold-storage path prefix for this dataset
+            (e.g., "logs_logevent")
         select_columns: Column list for SELECT clause
         where_sql: WHERE clause with DuckDB $N positional parameters
         params: Parameter values (without limit — limit_param references it)
@@ -1346,7 +1365,7 @@ def query_cold_parquet_files(
         return []
 
     parquet_paths = enumerate_org_parquet_files(
-        storage, table_name, organization_id, start_dt, end_dt
+        storage, storage_prefix, organization_id, start_dt, end_dt
     )
     if not parquet_paths:
         return []
@@ -1548,7 +1567,7 @@ def archive_and_cleanup_partitions(
 
     # Delete expired cold storage files
     deleted = cleanup_all_cold_storage(
-        retention_days=retention_days, table_name=table_name
+        retention_days=retention_days, storage_prefix=table_name
     )
     if deleted:
         logger.info(f"{table_name} cold cleanup: {deleted} files deleted")
@@ -1585,7 +1604,7 @@ def _purge_tree(storage, prefix: str) -> int:
 
 def delete_org_cold_storage(
     org_id: int,
-    table_name: str,
+    storage_prefix: str,
 ) -> int:
     """
     Delete all cold storage files for an organization.
@@ -1603,7 +1622,7 @@ def delete_org_cold_storage(
         logger.warning("No storage backend available for org cold storage deletion")
         return 0
 
-    org_prefix = f"{COLD_STORAGE_PREFIX}/{table_name}/org_{org_id}"
+    org_prefix = f"{COLD_STORAGE_PREFIX}/{storage_prefix}/org_{org_id}"
     deleted_count = 0
 
     # Recursively purge the whole org subtree (handles the spans
@@ -1617,7 +1636,7 @@ def delete_org_cold_storage(
         for day_offset in range(365):
             file_date = now - timedelta(days=day_offset)
             date_str = file_date.strftime("%Y%m%d")
-            storage_path = get_org_cold_storage_path(table_name, org_id, date_str)
+            storage_path = get_org_cold_storage_path(storage_prefix, org_id, date_str)
             try:
                 if storage.exists(storage_path):
                     storage.delete(storage_path)
@@ -1627,7 +1646,10 @@ def delete_org_cold_storage(
 
     if deleted_count:
         logger.info(
-            "Deleted %d cold files for org %d (%s)", deleted_count, org_id, table_name
+            "Deleted %d cold files for org %d (%s)",
+            deleted_count,
+            org_id,
+            storage_prefix,
         )
 
     return deleted_count
@@ -1637,7 +1659,7 @@ def rewrite_parquet_excluding_project(
     org_id: int,
     project_id: int | None = None,
     issue_ids: list[int] | None = None,
-    table_name: str = "logs_logevent",
+    storage_prefix: str = "logs_logevent",
 ) -> int:
     """
     Rewrite Parquet files for an org, excluding a deleted project's data.
@@ -1651,7 +1673,8 @@ def rewrite_parquet_excluding_project(
         org_id: Organization ID
         project_id: Project ID to exclude (used for logs)
         issue_ids: Issue IDs to exclude (used for issue events)
-        table_name: Table name for path construction
+        storage_prefix: Cold-storage path prefix for this dataset
+            (e.g., "logs_logevent")
 
     Returns:
         Number of files rewritten or deleted
@@ -1665,15 +1688,15 @@ def rewrite_parquet_excluding_project(
 
     # Spans use the hour-tiered layout (raw + rollup trees); logs and
     # issue events use the flat date layout.
-    if table_name in ("performance_spans", "performance_spans_rollup"):
-        parquet_paths = enumerate_hour_tiered_files(storage, table_name, org_id)
+    if storage_prefix in ("performance_spans", "performance_spans_rollup"):
+        parquet_paths = enumerate_hour_tiered_files(storage, storage_prefix, org_id)
     else:
-        parquet_paths = enumerate_org_parquet_files(storage, table_name, org_id)
+        parquet_paths = enumerate_org_parquet_files(storage, storage_prefix, org_id)
     if not parquet_paths:
         return 0
 
     # Build the WHERE filter
-    if table_name == "issue_events_issueevent" and issue_ids:
+    if storage_prefix == "issue_events_issueevent" and issue_ids:
         placeholders = ", ".join(str(int(iid)) for iid in issue_ids)
         where_clause = f"WHERE issue_id NOT IN ({placeholders})"
     elif project_id is not None:
@@ -1736,9 +1759,7 @@ def rewrite_parquet_excluding_project(
                     close_duckdb_read_connection()
                     duck_conn = get_duckdb_read_connection(storage)
                     continue
-                logger.warning(
-                    "Error rewriting cold file %s: %s", relative_path, e
-                )
+                logger.warning("Error rewriting cold file %s: %s", relative_path, e)
 
     if rewritten_count:
         logger.info(
@@ -1746,7 +1767,7 @@ def rewrite_parquet_excluding_project(
             rewritten_count,
             org_id,
             project_id or f"issues={issue_ids}",
-            table_name,
+            storage_prefix,
         )
 
     return rewritten_count

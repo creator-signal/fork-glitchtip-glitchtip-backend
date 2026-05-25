@@ -23,11 +23,11 @@ from glitchtip.cold_storage import (
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "performance_spans"
+STORAGE_PREFIX = "performance_spans"
 # Trend rollup tier — small per-group hourly aggregates, kept far longer
 # than raw spans (GLITCHTIP_TRANSACTION_RETENTION_DAYS vs
 # GLITCHTIP_SPAN_RAW_RETENTION_DAYS).
-ROLLUP_TABLE_NAME = "performance_spans_rollup"
+ROLLUP_STORAGE_PREFIX = "performance_spans_rollup"
 
 SPAN_PARQUET_COLUMN_TYPES = {
     "organization_id": "INTEGER",
@@ -96,7 +96,7 @@ def _execute_resilient_query(storage, duckdb_paths, sql_builder, params):
 def enumerate_span_files(storage, org_id, start_dt, end_dt) -> list[str]:
     """Enumerate raw span Parquet (T1/T2) for an org over a date range."""
     return enumerate_hour_tiered_files(
-        storage, TABLE_NAME, org_id, start_dt, end_dt
+        storage, STORAGE_PREFIX, org_id, start_dt, end_dt
     )
 
 
@@ -109,7 +109,7 @@ def _get_duckdb_paths(storage, org_id, start_dt, end_dt):
 def _get_rollup_paths(storage, org_id, start_dt, end_dt):
     """Get DuckDB-readable paths for an org's trend rollup Parquet."""
     rel_paths = enumerate_hour_tiered_files(
-        storage, ROLLUP_TABLE_NAME, org_id, start_dt, end_dt
+        storage, ROLLUP_STORAGE_PREFIX, org_id, start_dt, end_dt
     )
     return [get_duckdb_parquet_path(storage, p) for p in rel_paths]
 

@@ -7,7 +7,7 @@ from django.utils.timezone import now
 
 from glitchtip.cold_storage import cleanup_all_cold_storage
 
-from .cold_storage import ROLLUP_TABLE_NAME, TABLE_NAME
+from .cold_storage import ROLLUP_STORAGE_PREFIX, STORAGE_PREFIX
 from .models import TransactionGroup
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,9 @@ async def cleanup_old_transaction_events():
     # the small trend rollups are kept for the long transaction retention.
     await sync_to_async(cleanup_all_cold_storage)(
         retention_days=settings.GLITCHTIP_SPAN_RAW_RETENTION_DAYS,
-        table_name=TABLE_NAME,
+        storage_prefix=STORAGE_PREFIX,
     )
     await sync_to_async(cleanup_all_cold_storage)(
         retention_days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS,
-        table_name=ROLLUP_TABLE_NAME,
+        storage_prefix=ROLLUP_STORAGE_PREFIX,
     )

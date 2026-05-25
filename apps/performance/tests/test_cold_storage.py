@@ -21,8 +21,8 @@ from freezegun import freeze_time
 from model_bakery import baker
 
 from apps.performance.cold_storage import (
-    ROLLUP_TABLE_NAME,
-    TABLE_NAME,
+    ROLLUP_STORAGE_PREFIX,
+    STORAGE_PREFIX,
     enumerate_span_files,
     query_n_plus_one_patterns,
     query_span_groups,
@@ -39,8 +39,8 @@ from glitchtip import cold_storage as gcs
 from glitchtip.cold_storage import get_duckdb_connection, get_duckdb_parquet_path
 from glitchtip.partition_manager import UUID7Helper
 
-RAW = f"cold_storage/{TABLE_NAME}"
-ROLLUP = f"cold_storage/{ROLLUP_TABLE_NAME}"
+RAW = f"cold_storage/{STORAGE_PREFIX}"
+ROLLUP = f"cold_storage/{ROLLUP_STORAGE_PREFIX}"
 
 
 def _make_span_staging_row(
@@ -314,6 +314,43 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
         # hour_bucket is a naive UTC timestamp at the hour start.
         self.assertEqual(row[4], self.hour.replace(tzinfo=None))
 
+    def test_recovers_missing_rollup_after_seal(self):
+        """If the rollup write fails after a successful hour seal, the next
+        compaction tick re-derives it from the sealed file. Otherwise a
+        transient S3 error or slot timeout would silently drop the hour
+        from trend queries forever."""
+        self._seed_hour(n_chunks=1, rows_per=4)
+        rollup_path = f"{ROLLUP}/org_{self.org.id}/20260510/02.parquet"
+
+        # First pass: seal succeeds, rollup write blows up — exactly the
+        # state we need to recover from.
+        with mock.patch(
+            "apps.performance.promotion._write_hour_rollup",
+            side_effect=RuntimeError("transient s3 error"),
+        ), freeze_time("2026-05-10T04:00:00Z"):
+            compact_span_chunks()
+        self.assertTrue(self._exists(self._hour_file()))
+        self.assertFalse(self._exists(rollup_path))
+        self.assertFalse(self._exists(self._chunk_dir()))  # chunks already gone
+
+        # Second pass without the mock: recovery loop fires and writes the
+        # rollup from the sealed hour file.
+        with freeze_time("2026-05-10T04:30:00Z"):
+            compact_span_chunks()
+        self.assertTrue(self._exists(rollup_path))
+
+        # Recovered rollup matches what we'd have gotten on the first pass.
+        rollup = get_duckdb_parquet_path(self.storage, rollup_path)
+        conn = get_duckdb_connection(self.storage)
+        try:
+            row = conn.execute(
+                f"SELECT count, hour_bucket FROM read_parquet('{rollup}')"
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], 4)
+        self.assertEqual(row[1], self.hour.replace(tzinfo=None))
+
 
 class EnumerateSpanFilesTestCase(ColdStorageTestMixin, TestCase):
     def setUp(self):
@@ -353,6 +390,56 @@ class EnumerateSpanFilesTestCase(ColdStorageTestMixin, TestCase):
         )
         with freeze_time("2026-05-11T01:00:00Z"):
             compact_span_chunks()
+        paths = self._enum()
+        self.assertEqual(len(paths), 1)
+        self.assertTrue(paths[0].endswith("/20260510.parquet"))
+
+    def test_legacy_flat_chunks_still_readable_and_swept_up(self):
+        """Pre-MR layout sits at ``org/{date}/chunk_*.parquet`` (no
+        ``{HH}/`` subdir). Two guarantees on upgrade:
+
+        - The new enumerator returns them so reads keep working immediately
+          post-deploy.
+        - The daily-roll branch sweeps any ``.parquet`` file under the date
+          dir into ``{date}.parquet`` regardless of whether it came from
+          the legacy flat layout or the new sealed-hour layout, so legacy
+          chunks get incorporated into the sealed-day file the first time
+          the day rolls. No standalone backfill needed.
+        """
+        # Write a real parquet at the new path, then relocate it to the
+        # legacy layout to simulate data ingested before this MR.
+        self._write_chunk(
+            self.org.id, self.hour, [_row(self.org.id, self.project.id, self.hour)]
+        )
+        hour_dir = os.path.join(
+            self.cold_dir, RAW, f"org_{self.org.id}", "20260510", "02"
+        )
+        legacy_dir = os.path.join(
+            self.cold_dir, RAW, f"org_{self.org.id}", "20260510"
+        )
+        (chunk_name,) = os.listdir(hour_dir)
+        legacy_chunk = f"legacy_{chunk_name}"
+        os.rename(
+            os.path.join(hour_dir, chunk_name),
+            os.path.join(legacy_dir, legacy_chunk),
+        )
+        os.rmdir(hour_dir)
+
+        # Reads pre-roll: enumerator finds the legacy chunk.
+        paths = self._enum()
+        self.assertEqual(len(paths), 1)
+        self.assertTrue(paths[0].endswith(f"/{legacy_chunk}"))
+
+        # Roll the day. Return value is 0 (counts hourly seals, not daily
+        # rolls), but the legacy chunk gets folded into {date}.parquet.
+        with freeze_time("2026-05-11T01:00:00Z"):
+            self.assertEqual(compact_span_chunks(), 0)
+        self.assertTrue(self._exists(f"{RAW}/org_{self.org.id}/20260510.parquet"))
+        self.assertFalse(
+            self._exists(f"{RAW}/org_{self.org.id}/20260510/{legacy_chunk}")
+        )
+
+        # Reads post-roll: same single-file result via the sealed-day path.
         paths = self._enum()
         self.assertEqual(len(paths), 1)
         self.assertTrue(paths[0].endswith("/20260510.parquet"))
@@ -585,8 +672,8 @@ class DeletionTestCase(ColdStorageTestMixin, TestCase):
             [_row(other.organization_id, other.id, self.hour)],
         )
 
-        deleted = delete_org_cold_storage(self.org.id, TABLE_NAME)
-        delete_org_cold_storage(self.org.id, ROLLUP_TABLE_NAME)
+        deleted = delete_org_cold_storage(self.org.id, STORAGE_PREFIX)
+        delete_org_cold_storage(self.org.id, ROLLUP_STORAGE_PREFIX)
 
         self.assertGreater(deleted, 0)
         self.assertFalse(self._exists(f"{RAW}/org_{self.org.id}"))
@@ -610,12 +697,14 @@ class DeletionTestCase(ColdStorageTestMixin, TestCase):
             compact_span_chunks()  # sealed hour + rollup carry project_id
 
         rewrite_parquet_excluding_project(
-            org_id=self.org.id, project_id=self.project.id, table_name=TABLE_NAME
+            org_id=self.org.id,
+            project_id=self.project.id,
+            storage_prefix=STORAGE_PREFIX,
         )
         rewrite_parquet_excluding_project(
             org_id=self.org.id,
             project_id=self.project.id,
-            table_name=ROLLUP_TABLE_NAME,
+            storage_prefix=ROLLUP_STORAGE_PREFIX,
         )
 
         raw = get_duckdb_parquet_path(

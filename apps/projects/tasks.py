@@ -55,7 +55,7 @@ def _rewrite_cold_storage_for_project(project: Project):
     rewrite_parquet_excluding_project(
         org_id=org_id,
         project_id=project.id,
-        table_name="logs_logevent",
+        storage_prefix="logs_logevent",
     )
 
     # Rewrite performance span Parquet — raw spans and the trend rollups
@@ -64,12 +64,12 @@ def _rewrite_cold_storage_for_project(project: Project):
     rewrite_parquet_excluding_project(
         org_id=org_id,
         project_id=project.id,
-        table_name="performance_spans",
+        storage_prefix="performance_spans",
     )
     rewrite_parquet_excluding_project(
         org_id=org_id,
         project_id=project.id,
-        table_name="performance_spans_rollup",
+        storage_prefix="performance_spans_rollup",
     )
 
     # Rewrite issue event Parquet files (has issue_id, not project_id)
@@ -79,5 +79,5 @@ def _rewrite_cold_storage_for_project(project: Project):
         rewrite_parquet_excluding_project(
             org_id=org_id,
             issue_ids=issue_ids,
-            table_name="issue_events_issueevent",
+            storage_prefix="issue_events_issueevent",
         )
