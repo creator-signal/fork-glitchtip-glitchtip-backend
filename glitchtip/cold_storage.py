@@ -227,6 +227,15 @@ def get_duckdb_read_connection(storage=None):
     Do NOT call .close() on the returned connection — it is managed by
     the thread-local cache. Use ``close_duckdb_read_connection()`` for
     explicit cleanup (e.g. in tests).
+
+    Concurrency contract: callers that execute a query on the returned
+    connection MUST hold a ``duckdb_slot()`` for the duration of that
+    query. ``memory_limit`` is enforced per connection, so without the
+    process-wide slot a burst of concurrent reads multiplies peak RSS by
+    the number of in-flight queries. The slot is intentionally NOT
+    acquired here — some inner helpers (e.g. the per-file validation
+    fallback in ``_execute_resilient_query``) reuse the same connection
+    under an already-held slot, and re-acquiring would deadlock.
     """
     conn = getattr(_thread_local, "duckdb_conn", None)
     used = getattr(_thread_local, "duckdb_conn_uses", 0)
