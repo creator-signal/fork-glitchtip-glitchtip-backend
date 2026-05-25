@@ -90,7 +90,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertFalse(TransactionGroup.objects.exists())
 
-        with freeze_time("2020-01-01"):
+        # Fixture transaction is timestamped 2020-12-29T17:51:08Z; freeze
+        # just after so it lands inside the freshness window.
+        with freeze_time("2020-12-29T18:00:00Z"):
             res = self.client.post(
                 self.url,
                 data,
@@ -435,7 +437,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
         envelope = self.get_string_payload(data)
 
-        with freeze_time("2020-01-01"):
+        # Fixture transaction is timestamped 2020-12-29T17:51:08Z; freeze
+        # just after so it lands inside the freshness window.
+        with freeze_time("2020-12-29T18:00:00Z"):
             res = self.client.post(
                 self.url,
                 envelope,
