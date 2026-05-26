@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[manifest]
+members = [
+    "glitchtip-backend",
+    "gt-rust",
+]
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
@@ -1469,6 +1475,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "google-cloud-logging" },
     { name = "granian", extra = ["reload", "uvloop"] },
+    { name = "gt-rust" },
     { name = "mcp", extra = ["cli"] },
     { name = "minidump" },
     { name = "orjson" },
@@ -1531,6 +1538,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.2.0" },
     { name = "google-cloud-logging", specifier = "~=3.0" },
     { name = "granian", extras = ["reload", "uvloop"], specifier = ">=2.6.0" },
+    { name = "gt-rust", editable = "gt_rust" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
     { name = "minidump", specifier = ">=0.0.24" },
     { name = "orjson", specifier = "~=3.9" },
@@ -1915,6 +1923,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/b1/ed/105f619bdd00cb47a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/76/80/58cd2dfc19a07d022abe44bde7c365627f6c7cb6f692ada6c65ca437d09a/grpcio_status-1.80.0-py3-none-any.whl", hash = "sha256:4b56990363af50dbf2c2ebb80f1967185c07d87aa25aa2bea45ddb75fc181dbe", size = 14638, upload-time = "2026-03-30T08:54:01.569Z" },
 ]
+
+[[package]]
+name = "gt-rust"
+version = "0.1.0"
+source = { editable = "gt_rust" }
 
 [[package]]
 name = "h11"

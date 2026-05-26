@@ -72,4 +72,10 @@ stop:					# Stop all containers
 test:					# Execute `pytest` and coverage report inside `web` container
 	$(COMPOSE_RUN) web python manage.py test
 
-.PHONY: bash build build-no-cache clean dbshell help kill lint lint-check locust-start locust-stop locust-restart logs migrate migrations partman-start partman-stop partman-restart restart shell start stop test
+bench-rust-pg:			# Compare gt_rust driver vs psycopg3 (async) on common workloads
+	$(COMPOSE_RUN) web python benchmarks/bench_rust_pg.py $(BENCH_ARGS)
+
+bench-rust-pg-smoketest:	# Single SELECT via gt_rust driver, reports round-trip ms
+	$(COMPOSE_RUN) web python manage.py rust_pg_smoketest $(BENCH_ARGS)
+
+.PHONY: bash build build-no-cache clean dbshell help kill lint lint-check locust-start locust-stop locust-restart logs migrate migrations partman-start partman-stop partman-restart restart shell start stop test bench-rust-pg bench-rust-pg-smoketest

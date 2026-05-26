@@ -46,8 +46,15 @@ dependencies = [
     "minidump>=0.0.24",
     "arro3-core~=0.8",
     "arro3-io~=0.8",
+    "gt-rust",
     "django-async-backend",
 ]
+
+[tool.uv.sources]
+gt-rust = { workspace = true }
+
+[tool.uv.workspace]
+members = ["gt_rust"]
 
 [dependency-groups]
 dev = [

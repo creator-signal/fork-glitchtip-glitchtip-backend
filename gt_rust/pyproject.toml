@@ -1,0 +1,14 @@
+[project]
+name = "gt-rust"
+version = "0.1.0"
+description = "Rust PostgreSQL driver for GlitchTip (tokio-postgres + PyO3)"
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["maturin>=1.9"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "gt_rust._rust"
+python-source = "python"
+features = ["pyo3/extension-module"]
