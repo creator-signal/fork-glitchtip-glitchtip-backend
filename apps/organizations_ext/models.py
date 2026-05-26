@@ -186,6 +186,8 @@ class Organization(SharedBaseModel, OrganizationBase):
         related_name="+",
     )
     is_deleted = models.BooleanField(default=False)
+    license_key = models.CharField(max_length=255, blank=True, default="")
+    license_billing_email = models.EmailField(blank=True, default="")
 
     objects = OrganizationManager()
 

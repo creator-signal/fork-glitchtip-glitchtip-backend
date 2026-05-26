@@ -156,6 +156,21 @@ class InvoiceData(BaseModel):
     rendering_options: str | None = None
 
 
+class Invoice(BaseModel):
+    object: Literal["invoice"]
+    id: str
+    status: str | None = None
+    hosted_invoice_url: str | None = None
+
+
+class InvoiceListResponse(StripeListResponse[Invoice]):
+    pass
+
+
+class CustomerListResponse(StripeListResponse[Customer]):
+    pass
+
+
 class InvoiceCreation(BaseModel):
     enabled: bool
     invoice_data: InvoiceData

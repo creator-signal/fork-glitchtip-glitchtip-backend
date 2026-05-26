@@ -14,6 +14,7 @@ class GlitchTipEmail(ContextMixin):
     html_template_name = None
     text_template_name = None
     subject_template_name = None
+    from_email = None  # falls back to settings.DEFAULT_FROM_EMAIL when None
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -80,7 +81,11 @@ class GlitchTipEmail(ContextMixin):
         subject = self.get_subject_content(context)
         headers = self.get_headers(context)
         msg = EmailMultiAlternatives(
-            subject, self.get_text_content(context), to=to, headers=headers
+            subject,
+            self.get_text_content(context),
+            from_email=self.from_email,
+            to=to,
+            headers=headers,
         )
         if users:
             msg.merge_metadata = {user.email: {"unique_id": user.id} for user in users}

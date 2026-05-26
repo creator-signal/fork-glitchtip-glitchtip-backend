@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from typing import Any, AsyncGenerator, Type, TypeAlias, TypeVar
 
@@ -11,6 +12,9 @@ from apps.organizations_ext.models import Organization
 from .exceptions import StripeResourceNotFound
 from .schema import (
     Customer,
+    CustomerListResponse,
+    Invoice,
+    InvoiceListResponse,
     PortalSession,
     Price,
     PriceListResponse,
@@ -22,6 +26,8 @@ from .schema import (
     SubscriptionExpandCustomer,
     SubscriptionExpandCustomerResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 STRIPE_URL = "https://api.stripe.com/v1"
 HEADERS = {
@@ -69,9 +75,15 @@ async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
                     raise StripeResourceNotFound()
 
                 error_data = await response.json()
-                error_message = error_data.get("error", {}).get(
-                    "message", "Unknown error"
-                )
+                error_obj = error_data.get("error", {})
+                error_message = error_obj.get("message", "Unknown error")
+                # Stripe returns 400 with code=resource_missing for "No such X"
+                # errors. Treat that the same as a 404.
+                if (
+                    response.status == 400
+                    and error_obj.get("code") == "resource_missing"
+                ):
+                    raise StripeResourceNotFound()
 
                 should_retry_header = response.headers.get("Stripe-Should-Retry")
                 if should_retry_header is not None:
@@ -224,6 +236,40 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     }
     response = await stripe_post("billing_portal/sessions", params)
     return PortalSession.model_validate_json(response)
+
+
+async def fetch_customer_by_email(email: str) -> Customer | None:
+    """Stripe customer matching the given email, or None.
+
+    Stripe's customer list can return multiple matches for the same email
+    (rare — usually from duplicate-account migrations or admin error). We
+    fetch up to 3 and log a warning if there's more than one match; the
+    caller picks the first returned (Stripe orders by creation desc, so
+    newest customer wins — most likely the one the user remembers).
+    """
+    response = await stripe_get("customers", params={"email": email, "limit": 3})
+    page = CustomerListResponse.model_validate_json(response)
+    if len(page.data) > 1:
+        logger.warning(
+            "Stripe returned %d customers for email lookup; using newest (%s)",
+            len(page.data),
+            page.data[0].id,
+        )
+    return page.data[0] if page.data else None
+
+
+async def fetch_latest_invoice_for_customer(customer_id: str) -> Invoice | None:
+    """Most recent invoice for the given customer, or None if they have none.
+
+    Used by the public license-invoice endpoint to redirect a self-hosted user
+    to their most recent Stripe-hosted invoice page (which serves as proof of
+    payment for the GlitchTip license).
+    """
+    response = await stripe_get(
+        "invoices", params={"customer": customer_id, "limit": 1}
+    )
+    page = InvoiceListResponse.model_validate_json(response)
+    return page.data[0] if page.data else None
 
 
 async def create_subscription(customer: str, price: str, **kwargs) -> Subscription:
