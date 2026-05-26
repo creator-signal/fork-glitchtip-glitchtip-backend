@@ -89,7 +89,7 @@ else:
         async def __aenter__(self):
             return self
 
-        async def __aexit__(self, exc_type, exc, tb):
+        async def __aexit__(self, _exc_type, _exc, _tb):
             await sync_to_async(self._cursor.close)()
             return None
 
