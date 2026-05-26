@@ -12,3 +12,4 @@ class RecipientType(models.TextChoices):
     NTFY = "ntfy", _("ntfy")
     MICROSOFT_TEAMS = "teams", _("Microsoft Teams")
     ZULIP = "zulip", _("Zulip")
+    FEISHU = "feishu", _("Feishu (Lark) webhook")
