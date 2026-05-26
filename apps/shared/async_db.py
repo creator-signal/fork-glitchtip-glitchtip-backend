@@ -1,14 +1,14 @@
 """Async raw-SQL helpers for the ingest hot paths (events, logs, spans).
 
-Uses django-async-backend's native async cursor so the event loop keeps
-running while Postgres does its work.
+Routes through :mod:`glitchtip.async_compat`, which uses
+django-async-backend's native async cursor when ``USE_ASYNC_BACKEND`` is
+enabled and falls back to a ``sync_to_async`` shim over Django's stock
+psycopg cursor otherwise.
 """
-
-from __future__ import annotations
 
 from typing import Any
 
-from django_async_backend.db import async_connections
+from glitchtip.async_compat import async_connections
 
 
 async def fetchall(

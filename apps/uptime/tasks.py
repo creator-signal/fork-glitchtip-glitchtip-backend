@@ -13,11 +13,11 @@ from django.db.models import F, Q
 from django.tasks import task
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django_async_backend.db.transaction import async_atomic
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
 from apps.shared.async_db import execute_unnest
+from glitchtip.async_compat import async_atomic
 
 from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType

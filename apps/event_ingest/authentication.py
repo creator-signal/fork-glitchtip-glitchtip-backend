@@ -10,11 +10,11 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db.utils import OperationalError
 from django.http import HttpRequest
-from django_async_backend.db import async_connections
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
 from glitchtip.api.exceptions import ThrottleException
+from glitchtip.async_compat import async_connections
 from sentry.utils.auth import parse_auth_header
 
 from .constants import EVENT_BLOCK_CACHE_KEY
