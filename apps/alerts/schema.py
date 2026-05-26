@@ -30,6 +30,7 @@ class EmailAlertRecipientIn(CamelSchema):
 class WebhookAlertRecipientIn(CamelSchema):
     recipient_type: Literal[
         RecipientType.DISCORD,
+        RecipientType.FEISHU,
         RecipientType.GENERAL_WEBHOOK,
         RecipientType.GOOGLE_CHAT,
         RecipientType.MICROSOFT_TEAMS,
