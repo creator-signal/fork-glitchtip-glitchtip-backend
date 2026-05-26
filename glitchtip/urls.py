@@ -41,6 +41,7 @@ urlpatterns = [
         stripe_webhook_view,
         name="stripe_webhook_with_type",
     ),
+    path("", include("apps.self_host_licensing.urls")),
 ]
 
 # Synthetic async-DB benchmark endpoint. Mounted only when the flag is

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: sans-serif; max-width: 640px; margin: 0 auto;">
+  <h2>Thank you for supporting GlitchTip!</h2>
+  <p><strong>Plan:</strong> {{ plan }}<br>
+     <strong>Current period ends:</strong> {{ expires_at|date:"Y-m-d" }}</p>
+  <p>Your license key is below. Set it as the <code>GLITCHTIP_LICENSE_KEY</code>
+  environment variable on your self-hosted GlitchTip instance (or paste it in
+  the Django admin), then restart the server. The "Support GlitchTip" banner
+  will disappear and any future support features will unlock.</p>
+  <pre style="background: #f4f4f4; padding: 12px; word-break: break-all; white-space: pre-wrap;">{{ license_blob }}</pre>
+  <p>To manage your subscription, update your card, or cancel, visit
+  <a href="https://glitchtip.com/manage">https://glitchtip.com/manage</a>.</p>
+  <p>If you need help, reply to this email and include the license key in
+  your message so we can look up your account.</p>
+</body>
+</html>
