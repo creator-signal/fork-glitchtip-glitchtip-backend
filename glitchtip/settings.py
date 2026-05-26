@@ -673,6 +673,14 @@ STRIPE_REGION = env.str("STRIPE_REGION", "")  # Sets stripe customer metadata
 STRIPE_REGION_DOMAINS = env.dict(
     "STRIPE_REGION_DOMAINS", default={}
 )  # Forward webhooks to appropriate domain
+# Base URL of the hosted GlitchTip instance that serves the public billing
+# endpoints (license-invoice/, customer-by-email/). Self-hosted instances
+# point users at this host for support-license operations. Override for
+# regional deployments or local development.
+BILLING_URL = env.str("BILLING_URL", "https://app.glitchtip.com/api/0/billing/")
+# Trailing slash required — consumers concatenate paths onto this.
+if not BILLING_URL.endswith("/"):
+    BILLING_URL += "/"
 if STRIPE_PUBLIC_KEY and STRIPE_SECRET_KEY:
     BILLING_ENABLED = True
 

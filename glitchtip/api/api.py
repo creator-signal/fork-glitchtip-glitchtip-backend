@@ -131,6 +131,7 @@ class SocialAppSchema(ModelSchema):
 class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
+    billing_url: str
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
     license_key: str
     enable_user_registration: bool
@@ -195,9 +196,15 @@ async def get_settings(request: HttpRequest):
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
 
+    billing_url = settings.BILLING_URL
+    if not billing_url.endswith("/"):
+        # Belt-and-suspenders normalize (settings.py also normalizes at startup).
+        billing_url += "/"
+
     return {
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
+        "billing_url": billing_url,
         "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
         "license_key": settings.GLITCHTIP_LICENSE_KEY or "",
         "enable_user_registration": enable_user_registration,
