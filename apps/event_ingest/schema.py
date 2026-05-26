@@ -422,14 +422,22 @@ class TransactionEventSchema(LaxIngestSchema):
     @field_validator("start_timestamp")
     @classmethod
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
-        """Validator to ensure the datetime is recent and timezone-aware."""
+        """Reject out-of-retention / far-future timestamps; normalize to UTC.
+
+        Cold-storage compaction is idempotent and seals by ingestion time,
+        so it does not need a tight freshness window — only a loose guard
+        so a broken-clock client can't push garbage years out (which would
+        pollute hour bucketing) or backfill beyond retention.
+        """
         if v.tzinfo is None:
             v = v.replace(tzinfo=timezone.utc)
-        minimum_date = now() - timedelta(
+        current = now()
+        if v < current - timedelta(
             days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
-        )
-        if v < minimum_date:
+        ):
             raise ValueError("Event time too old.")
+        if v > current + settings.GLITCHTIP_TRANSACTION_FUTURE_SKEW:
+            raise ValueError("Event time in the future.")
         return v
 
 
