@@ -23,7 +23,7 @@ replacement, but two things block adopting it today:
    does not. Switching the counter would shift every test's expected
    number, producing churn that doesn't reflect a real change.
 
-Patching ``AsyncCursorWrapper.execute`` / ``executemany`` at the class
+Patching ``_CursorTarget.execute`` / ``executemany`` at the class
 level sidesteps the per-wrapper storage entirely. The patch is shared
 by every wrapper in every thread, so the counter sees queries no matter
 where they ran. This intentionally counts only queries that go through
@@ -37,7 +37,20 @@ context manager becomes viable. That migration also needs a recalibration
 pass on the expected query counts to absorb the BEGIN/COMMIT delta.
 """
 
-from django_async_backend.db.backends.utils import AsyncCursorWrapper
+from glitchtip.async_compat import USE_ASYNC_BACKEND
+
+if USE_ASYNC_BACKEND:
+    from django_async_backend.db.backends.utils import (
+        AsyncCursorWrapper as _CursorTarget,
+    )
+else:
+    # When async-backend is off, the same hot-path queries pass through
+    # ``_SyncCursorProxy.execute`` / ``executemany`` (via
+    # ``sync_to_async``). Patching that class at the class level gives
+    # the counter the same coverage it had against ``AsyncCursorWrapper``.
+    from glitchtip.async_compat import (
+        _SyncCursorProxy as _CursorTarget,  # type: ignore[attr-defined]
+    )
 
 
 class AsyncQueryCounter:
@@ -55,8 +68,8 @@ class AsyncQueryCounter:
         self.count = 0
 
     def __enter__(self) -> "AsyncQueryCounter":
-        self._orig_execute = AsyncCursorWrapper.execute
-        self._orig_executemany = AsyncCursorWrapper.executemany
+        self._orig_execute = _CursorTarget.execute
+        self._orig_executemany = _CursorTarget.executemany
         counter = self
         orig_execute = self._orig_execute
         orig_executemany = self._orig_executemany
@@ -69,13 +82,13 @@ class AsyncQueryCounter:
             counter.count += 1
             return await orig_executemany(cursor_self, sql, param_list)
 
-        AsyncCursorWrapper.execute = execute
-        AsyncCursorWrapper.executemany = executemany
+        _CursorTarget.execute = execute
+        _CursorTarget.executemany = executemany
         return self
 
     def __exit__(self, *_exc_info) -> None:
-        AsyncCursorWrapper.execute = self._orig_execute
-        AsyncCursorWrapper.executemany = self._orig_executemany
+        _CursorTarget.execute = self._orig_execute
+        _CursorTarget.executemany = self._orig_executemany
 
     def __len__(self) -> int:
         return self.count
