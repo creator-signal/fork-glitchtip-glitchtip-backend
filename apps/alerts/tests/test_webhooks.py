@@ -17,6 +17,7 @@ from ..models import AlertRecipient, Notification
 from ..tasks import process_event_alerts
 from ..webhooks import (
     send_issue_as_discord_webhook,
+    send_issue_as_feishu_webhook,
     send_issue_as_googlechat_webhook,
     send_issue_as_ntfy,
     send_issue_as_teams_webhook,
@@ -32,6 +33,7 @@ DISCORD_TEST_URL = "https://discord.com/api/webhooks/not_real_id/not_real_token"
 GOOGLE_CHAT_TEST_URL = "https://chat.googleapis.com/v1/spaces/space_id/messages?key=api_key&token=api_token"
 NTFY_TEST_URL = "https://ntfy.sh/glitchtip-test-topic"
 TEAMS_TEST_URL = "https://example.webhook.office.com/webhookb2/test"
+FEISHU_TEST_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/not_real_token"
 ZULIP_TEST_URL = "https://zulip.example.com"
 ZULIP_TEST_CONFIG = {
     "bot_email": "bot@zulip.example.com",
@@ -64,6 +66,13 @@ class WebhookTestCase(GlitchTipTestCase):
     def setUp(self):
         self.environment_name = "test-environment"
         self.release_name = "test-release"
+
+        url_allowed_patcher = mock.patch(
+            "apps.alerts.webhooks._is_url_allowed",
+            new=mock.AsyncMock(return_value=True),
+        )
+        url_allowed_patcher.start()
+        self.addCleanup(url_allowed_patcher.stop)
 
         self.create_user_and_project()
         self.monitor = baker.make(
@@ -867,3 +876,80 @@ class WebhookTestCase(GlitchTipTestCase):
         content = mock_post.call_args.kwargs["data"]["content"]
         self.assertIn("GlitchTip Test Notification", content)
         self.assertIn(self.project.name, content)
+
+    @mock.patch("aiohttp.ClientSession")
+    def test_send_issue_as_feishu_webhook(self, MockSession):
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
+        issue = self.generate_issue_with_tags()
+        async_to_sync(send_issue_as_feishu_webhook)(FEISHU_TEST_URL, [issue])
+
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["msg_type"], "interactive")
+        json_data = json.dumps(payload)
+        self.assertIn("GlitchTip Alert", json_data)
+        self.assertIn(str(issue), json_data)
+        self.assertIn(issue.project.name, json_data)
+        self.assertIn(self.environment_name, json_data)
+        self.assertIn(self.release_name, json_data)
+
+    @mock.patch("aiohttp.ClientSession")
+    def test_send_issue_as_feishu_webhook_with_tags_to_add(self, MockSession):
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
+        issue = self.generate_issue_with_tags()
+        async_to_sync(send_issue_as_feishu_webhook)(
+            FEISHU_TEST_URL, [issue], 1, tags_to_add=["custom_tag"]
+        )
+
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn("custom_value", json_data)
+
+    @mock.patch("aiohttp.ClientSession")
+    def test_send_issue_as_feishu_webhook_multiple_issues(self, MockSession):
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
+        issue = self.generate_issue_with_tags()
+        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        async_to_sync(send_issue_as_feishu_webhook)(FEISHU_TEST_URL, [issue, issue2], 2)
+
+        mock_post.assert_called_once()
+        json_data = json.dumps(mock_post.call_args.kwargs["json"])
+        self.assertIn("GlitchTip Alert (2 issues)", json_data)
+
+    @mock.patch("aiohttp.ClientSession")
+    def test_send_test_notification_with_issue_feishu(self, MockSession):
+        """Test notification uses the Feishu handler when issues exist."""
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
+        issue = self.generate_issue_with_tags()
+        async_to_sync(send_test_notification)(
+            FEISHU_TEST_URL, RecipientType.FEISHU, issue.project
+        )
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["msg_type"], "interactive")
+        json_data = json.dumps(payload)
+        self.assertIn(str(issue), json_data)
+
+    @mock.patch("aiohttp.ClientSession")
+    def test_send_test_notification_no_issues_feishu(self, MockSession):
+        """Fallback test notification for Feishu."""
+        mock_constructor, mock_post = _mock_aiohttp_session()
+        MockSession.side_effect = mock_constructor
+
+        async_to_sync(send_test_notification)(
+            FEISHU_TEST_URL, RecipientType.FEISHU, self.project
+        )
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["msg_type"], "interactive")
+        json_data = json.dumps(payload)
+        self.assertIn("GlitchTip Test Notification", json_data)
+        self.assertIn(self.project.name, json_data)
