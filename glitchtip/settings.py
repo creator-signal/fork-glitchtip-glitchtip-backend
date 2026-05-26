@@ -1132,9 +1132,13 @@ LOGGING = {
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
 PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 
-# Support license key — typically a Stripe subscription ID.
-# Hides the "Support GlitchTip" banner and enables future support features.
+# Support license key — Stripe subscription ID (sub_...).
+# Hides the "Support GlitchTip" banner and enables support features.
 GLITCHTIP_LICENSE_KEY = env.str("GLITCHTIP_LICENSE_KEY", None)
+
+# Billing email associated with GLITCHTIP_LICENSE_KEY. Required by the
+# license-invoice endpoint to bind a leaked key to a second factor.
+GLITCHTIP_BILLING_EMAIL = env.str("GLITCHTIP_BILLING_EMAIL", None)
 
 # Legacy setting — still accepted. New deployments should use GLITCHTIP_LICENSE_KEY.
 I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", bool(GLITCHTIP_LICENSE_KEY))

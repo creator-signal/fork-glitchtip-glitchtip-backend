@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.openid_connect.views import (
@@ -30,6 +31,7 @@ from apps.releases.api import router as releases_router
 from apps.sourcecode.api import router as sourcecode_router
 from apps.stats.api import router as stats_router
 from apps.stripe.api import router as stripe_router
+from apps.stripe.models import SupportLicense
 from apps.teams.api import router as teams_router
 from apps.users.api import router as users_router
 from apps.users.models import User
@@ -69,6 +71,12 @@ api.add_router("0", stats_router)
 api.add_router("0/stripe", stripe_router)
 api.add_router("0", sourcecode_router)
 api.add_router("0", teams_router)
+
+if settings.BILLING_ENABLED:
+    # Self-hosted instances have no Stripe credentials; not registered there.
+    from apps.stripe.billing_api import router as billing_router
+
+    api.add_router("0/billing", billing_router)
 
 if settings.GLITCHTIP_ENABLE_UPTIME:
     from apps.uptime.api import router as uptime_router
@@ -132,7 +140,6 @@ class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
-    license_key: str
     enable_user_registration: bool
     enable_social_apps_user_registration: bool
     enable_organization_creation: bool
@@ -199,7 +206,6 @@ async def get_settings(request: HttpRequest):
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
         "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
-        "license_key": settings.GLITCHTIP_LICENSE_KEY or "",
         "enable_user_registration": enable_user_registration,
         "enable_social_apps_user_registration": enable_social_apps_user_registration,
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,
@@ -215,6 +221,29 @@ async def get_settings(request: HttpRequest):
         "glitchtip_instance_name": settings.GLITCHTIP_INSTANCE_NAME,
         "enabled_features": enabled_features,
     }
+
+
+class InstanceLicenseOut(CamelSchema):
+    license_key: str
+    billing_email: str
+    source: Literal["env", "db", "mixed", "none"]
+
+
+@api.get("0/instance-license/", response=InstanceLicenseOut, by_alias=True)
+async def get_instance_license(request: HttpRequest):
+    key, email = await SupportLicense.aresolved()
+    if not key and not email:
+        source = "none"
+    else:
+        key_from_env = settings.GLITCHTIP_LICENSE_KEY is not None
+        email_from_env = settings.GLITCHTIP_BILLING_EMAIL is not None
+        if key_from_env and email_from_env:
+            source = "env"
+        elif key_from_env or email_from_env:
+            source = "mixed"
+        else:
+            source = "db"
+    return {"license_key": key, "billing_email": email, "source": source}
 
 
 class APIRootSchema(Schema):
