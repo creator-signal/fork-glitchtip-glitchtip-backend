@@ -51,18 +51,25 @@ test-min:
       paths:
         - $UV_CACHE_DIR
   script:
-    - uv sync --frozen --no-install-project
+    # Skip gt-rust here — test-min is the psycopg validation path. test-latest
+    # exercises the rust ENGINE.
+    - uv sync --frozen --no-install-project --no-install-package gt-rust
     - uv run ./manage.py test
     - uv cache prune --ci
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
 
-# Latest stack: Python 3.14, PostgreSQL 18, Valkey, S3 cold storage
+# Latest stack: Python 3.14, PostgreSQL 18, Valkey, S3 cold storage,
+# gt_rust as the DB ENGINE.
 test-latest:
   image: ghcr.io/astral-sh/uv:$UV_VERSION-python3.14-$BASE_LAYER
   variables:
     SECRET_KEY: testing
-    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres"
+    # GitLab service postgres has no TLS configured; pin sslmode=disable so
+    # gt_rust's rustls path doesn't try to negotiate. django-environ
+    # propagates the query string into OPTIONS where the gt_rust backend
+    # reads it.
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
     ENABLE_TEST_API: "true"
     ENABLE_OPEN_USER_REGISTRATION: "true"
     VALKEY_URL: "redis://redis:6379"
@@ -71,8 +78,16 @@ test-latest:
     AWS_ACCESS_KEY_ID: minioadmin
     AWS_SECRET_ACCESS_KEY: minioadmin
     AWS_S3_ENDPOINT_URL: "http://minio:9000"
+    GLITCHTIP_USE_RUST_PG: "true"
+    CARGO_HOME: /usr/local/cargo
+    RUSTUP_HOME: /usr/local/rustup
+    PATH: /usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   services:
-    - name: postgres:18
+    # ``postgres:18`` (bookworm-slim variant) ships an entrypoint that
+    # cannot find ``initdb`` in CI, so the service never starts listening
+    # and every connection is refused. The alpine flavour bundles a
+    # working layout.
+    - name: postgres:18-alpine
       alias: postgres
     - name: valkey/valkey:9
       alias: redis
@@ -95,10 +110,21 @@ test-latest:
     - chmod +x /usr/local/bin/mc
     - mc alias set myminio http://minio:9000 minioadmin minioadmin
     - mc mb --ignore-existing myminio/glitchtip-cold || true
+    # Rust toolchain for gt_rust; channel pinned in gt_rust/rust-toolchain.toml
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
     - uv sync --frozen --no-install-project
     # Pre-install DuckDB extensions (mirrors Dockerfile build step)
     - python -c "import duckdb; c=duckdb.connect(); c.install_extension('httpfs'); c.install_extension('aws'); c.close()"
-    - uv run ./manage.py test
+    # Build the gt_rust wheel and install non-editably so gt_rust._rust lands in site-packages
+    - uv pip install --system maturin
+    - cd gt_rust && maturin build --release --out /tmp/wheels && cd ..
+    - uv pip install --system --no-deps --reinstall /tmp/wheels/gt_rust-*.whl
+    - python -c "from gt_rust import RustPgDriver; print('gt_rust._rust OK')"
+    # Avoid ``uv run`` here — it re-syncs the project and replaces the wheel
+    # we just installed with an editable install whose maturin .so was
+    # produced by a different invocation. Run python directly so the
+    # site-packages wheel is what gets imported.
+    - python ./manage.py test
     - uv cache prune --ci
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
