@@ -36,13 +36,19 @@ class SettingsTestCase(TestCase):
         self.assertNotIn("licenseKey", res.json())
         self.assertNotIn("license_key", res.json())
 
-    @override_settings(BILLING_ENABLED=False)
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=False)
     def test_i_paid_for_glitchtip_reflects_support_license(self):
         # No license row → False
         res = self.client.get(self.url)
         self.assertFalse(res.json()["iPaidForGlitchTip"])
         # Setting a license via admin (DB write) → True without restart
         SupportLicense(license_key="sub_xxx").save()
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
+
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=True)
+    def test_legacy_i_paid_env_var_still_overrides(self):
+        # Legacy override: env-set True forces paid even without a license.
         res = self.client.get(self.url)
         self.assertTrue(res.json()["iPaidForGlitchTip"])
 

@@ -195,7 +195,7 @@ async def get_settings(request: HttpRequest):
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
 
-    if settings.BILLING_ENABLED:
+    if settings.BILLING_ENABLED or settings.I_PAID_FOR_GLITCHTIP:
         i_paid_for_glitchtip = True
     else:
         support_license = await SupportLicense.objects.filter(pk=1).afirst()
