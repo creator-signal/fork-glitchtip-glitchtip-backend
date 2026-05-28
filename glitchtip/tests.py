@@ -101,58 +101,38 @@ class InstanceLicenseTestCase(TestCase):
         self.client.force_login(self.user)
         res = self.client.get(self.url)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"licenseKey": "", "billingEmail": ""})
+        self.assertEqual(res.json(), {"billingEmail": ""})
 
     @override_settings(
         BILLING_ENABLED=False,
         GLITCHTIP_LICENSE_KEY="sub_envKey",
         GLITCHTIP_BILLING_EMAIL="env@example.com",
     )
-    def test_returns_env_values_when_env_set(self):
+    def test_returns_env_billing_email(self):
         self.client.force_login(self.user)
         res = self.client.get(self.url)
-        self.assertEqual(
-            res.json(),
-            {"licenseKey": "sub_envKey", "billingEmail": "env@example.com"},
-        )
+        self.assertEqual(res.json(), {"billingEmail": "env@example.com"})
 
     @override_settings(
         BILLING_ENABLED=False,
         GLITCHTIP_LICENSE_KEY=None,
         GLITCHTIP_BILLING_EMAIL=None,
     )
-    def test_returns_db_values_when_only_db_set(self):
+    def test_returns_db_billing_email(self):
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.client.force_login(self.user)
         res = self.client.get(self.url)
-        self.assertEqual(
-            res.json(),
-            {"licenseKey": "sub_dbKey", "billingEmail": "db@example.com"},
-        )
-
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
-    def test_per_field_merge_env_key_with_db_email(self):
-        SupportLicense(license_key="ignored", billing_email="db@example.com").save()
-        self.client.force_login(self.user)
-        res = self.client.get(self.url)
-        self.assertEqual(
-            res.json(),
-            {"licenseKey": "sub_envKey", "billingEmail": "db@example.com"},
-        )
+        self.assertEqual(res.json(), {"billingEmail": "db@example.com"})
 
     @override_settings(
         BILLING_ENABLED=True,
         GLITCHTIP_LICENSE_KEY="sub_envKey",
         GLITCHTIP_BILLING_EMAIL="env@example.com",
     )
-    def test_billing_enabled_returns_empty_regardless_of_env(self):
+    def test_billing_enabled_returns_empty(self):
         self.client.force_login(self.user)
         res = self.client.get(self.url)
-        self.assertEqual(res.json(), {"licenseKey": "", "billingEmail": ""})
+        self.assertEqual(res.json(), {"billingEmail": ""})
 
 
 class APIRootTestCase(TestCase):

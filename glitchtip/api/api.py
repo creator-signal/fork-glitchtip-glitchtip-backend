@@ -224,14 +224,13 @@ async def get_settings(request: HttpRequest):
 
 
 class InstanceLicenseOut(CamelSchema):
-    license_key: str
     billing_email: str
 
 
 @api.get("0/instance-license/", response=InstanceLicenseOut, by_alias=True)
 async def get_instance_license(request: HttpRequest):
-    key, email = await SupportLicense.aresolved()
-    return {"license_key": key, "billing_email": email}
+    _, email = await SupportLicense.aresolved()
+    return {"billing_email": email}
 
 
 class APIRootSchema(Schema):
