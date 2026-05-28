@@ -32,59 +32,16 @@ class SupportLicenseSingletonTestCase(TestCase):
 
 
 class SupportLicenseResolverTestCase(TestCase):
-    @override_settings(
-        BILLING_ENABLED=True,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL="env@example.com",
-    )
+    @override_settings(BILLING_ENABLED=True)
     def test_billing_enabled_short_circuits_to_empty(self):
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.assertEqual(SupportLicense.resolved(), ("", ""))
 
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL="env@example.com",
-    )
-    def test_env_wins_when_both_env_vars_set(self):
-        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
-        self.assertEqual(
-            SupportLicense.resolved(), ("sub_envKey", "env@example.com")
-        )
-
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY=None,
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
-    def test_db_used_when_no_env(self):
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_db_values(self):
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.assertEqual(SupportLicense.resolved(), ("sub_dbKey", "db@example.com"))
 
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
-    def test_partial_env_uses_db_for_missing_field(self):
-        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
-        self.assertEqual(
-            SupportLicense.resolved(), ("sub_envKey", "db@example.com")
-        )
-
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY=None,
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
+    @override_settings(BILLING_ENABLED=False)
     def test_empty_db_returns_empty(self):
-        self.assertEqual(SupportLicense.resolved(), ("", ""))
-
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY="",
-        GLITCHTIP_BILLING_EMAIL="",
-    )
-    def test_empty_string_env_does_not_fall_through_to_db(self):
-        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.assertEqual(SupportLicense.resolved(), ("", ""))

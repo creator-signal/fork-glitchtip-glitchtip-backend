@@ -483,25 +483,12 @@ class SupportLicense(models.Model):
     def resolved(cls) -> tuple[str, str]:
         if settings.BILLING_ENABLED:
             return ("", "")
-        return cls._merge(cls.load())
+        db = cls.load()
+        return (db.license_key, db.billing_email)
 
     @classmethod
     async def aresolved(cls) -> tuple[str, str]:
         if settings.BILLING_ENABLED:
             return ("", "")
-        return cls._merge(await cls.aload())
-
-    @staticmethod
-    def _merge(db: "SupportLicense") -> tuple[str, str]:
-        # `None` means use DB; empty string env is intentional (disables inherited value).
-        key = (
-            db.license_key
-            if settings.GLITCHTIP_LICENSE_KEY is None
-            else settings.GLITCHTIP_LICENSE_KEY
-        )
-        email = (
-            db.billing_email
-            if settings.GLITCHTIP_BILLING_EMAIL is None
-            else settings.GLITCHTIP_BILLING_EMAIL
-        )
-        return (key, email)
+        db = await cls.aload()
+        return (db.license_key, db.billing_email)
