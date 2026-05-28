@@ -195,6 +195,9 @@ async def get_settings(request: HttpRequest):
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
 
+    # Legacy I_PAID_FOR_GLITCHTIP env (and BILLING_ENABLED for hosted) wins as
+    # before. Fall back to the SupportLicense singleton so admin-set licenses
+    # enable paid features without a restart.
     if settings.BILLING_ENABLED or settings.I_PAID_FOR_GLITCHTIP:
         i_paid_for_glitchtip = True
     else:
