@@ -94,43 +94,21 @@ class InstanceLicenseTestCase(TestCase):
         res = self.client.get(self.url)
         self.assertEqual(res.status_code, 401)
 
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY=None,
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
+    @override_settings(BILLING_ENABLED=False)
     def test_empty_when_unconfigured(self):
         self.client.force_login(self.user)
         res = self.client.get(self.url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), {"billingEmail": ""})
 
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL="env@example.com",
-    )
-    def test_returns_env_billing_email(self):
-        self.client.force_login(self.user)
-        res = self.client.get(self.url)
-        self.assertEqual(res.json(), {"billingEmail": "env@example.com"})
-
-    @override_settings(
-        BILLING_ENABLED=False,
-        GLITCHTIP_LICENSE_KEY=None,
-        GLITCHTIP_BILLING_EMAIL=None,
-    )
+    @override_settings(BILLING_ENABLED=False)
     def test_returns_db_billing_email(self):
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.client.force_login(self.user)
         res = self.client.get(self.url)
         self.assertEqual(res.json(), {"billingEmail": "db@example.com"})
 
-    @override_settings(
-        BILLING_ENABLED=True,
-        GLITCHTIP_LICENSE_KEY="sub_envKey",
-        GLITCHTIP_BILLING_EMAIL="env@example.com",
-    )
+    @override_settings(BILLING_ENABLED=True)
     def test_billing_enabled_returns_empty(self):
         self.client.force_login(self.user)
         res = self.client.get(self.url)
