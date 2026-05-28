@@ -160,7 +160,7 @@ async def get_settings(request: HttpRequest):
         if adapter_cls == OpenIDConnectOAuth2Adapter:
             # OIDC adapters resolve authorize_url by fetching the provider's
             # discovery document. Use the async cached helper so the public
-            # /api/0/settings/ endpoint never blocks on a synchronous outbound
+            # /api/settings/ endpoint never blocks on a synchronous outbound
             # request to the IdP.
             social_app.authorize_url = await get_authorize_url(
                 social_app.settings.get("server_url", "")
