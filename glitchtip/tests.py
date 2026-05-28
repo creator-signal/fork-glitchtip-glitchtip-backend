@@ -14,6 +14,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.stripe.models import SupportLicense
 from glitchtip.async_compat import USE_ASYNC_BACKEND as _USE_ASYNC_BACKEND
 from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
@@ -28,6 +29,22 @@ class SettingsTestCase(TestCase):
         with self.assertNumQueries(1):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
+
+    def test_settings_does_not_expose_license_key(self):
+        # license_key is a server-side credential; settings is anonymous-readable.
+        res = self.client.get(self.url)
+        self.assertNotIn("licenseKey", res.json())
+        self.assertNotIn("license_key", res.json())
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_i_paid_for_glitchtip_reflects_support_license(self):
+        # No license row → False
+        res = self.client.get(self.url)
+        self.assertFalse(res.json()["iPaidForGlitchTip"])
+        # Setting a license via admin (DB write) → True without restart
+        SupportLicense(license_key="sub_xxx").save()
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
 
     def test_settings_oidc(self):
         social_app = baker.make(
