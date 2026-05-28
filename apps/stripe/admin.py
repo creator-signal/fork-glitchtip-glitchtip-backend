@@ -50,11 +50,6 @@ class StripeSubscriptionAdmin(StripeBaseAdmin):
 
 
 class SupportLicenseAdmin(admin.ModelAdmin):
-    """Superuser-only admin for the instance-wide support license singleton.
-
-    One row enforced (pk=1). Add/delete disabled. Change requires superuser.
-    """
-
     list_display = ["license_key", "billing_email", "updated"]
     fields = ["license_key", "billing_email", "updated"]
     readonly_fields = ["updated"]
