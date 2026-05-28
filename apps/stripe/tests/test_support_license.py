@@ -13,8 +13,6 @@ class SupportLicenseSingletonTestCase(TestCase):
         sl2.save()
         self.assertEqual(sl2.pk, 1)
         self.assertEqual(SupportLicense.objects.count(), 1)
-
-        # The second save overwrote the first row.
         self.assertEqual(SupportLicense.objects.get().license_key, "sub_second")
 
     def test_load_creates_when_missing(self):
