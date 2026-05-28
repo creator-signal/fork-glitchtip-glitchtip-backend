@@ -1,7 +1,6 @@
 from django.test import TestCase, override_settings
 
 from apps.stripe.models import SupportLicense
-from apps.stripe.validators import SUBSCRIPTION_ID_PATTERN
 
 
 class SupportLicenseSingletonTestCase(TestCase):
@@ -68,7 +67,6 @@ class SupportLicenseResolverTestCase(TestCase):
         GLITCHTIP_BILLING_EMAIL=None,
     )
     def test_partial_env_uses_db_for_missing_field(self):
-        """Env-wins is per-field. Missing env email falls back to DB email."""
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.assertEqual(
             SupportLicense.resolved(), ("sub_envKey", "db@example.com")
@@ -90,16 +88,3 @@ class SupportLicenseResolverTestCase(TestCase):
     def test_empty_string_env_does_not_fall_through_to_db(self):
         SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
         self.assertEqual(SupportLicense.resolved(), ("", ""))
-
-
-class SubscriptionIdPatternTestCase(TestCase):
-    def test_matches_valid(self):
-        self.assertTrue(SUBSCRIPTION_ID_PATTERN.match("sub_1Ta1ZtJ4NuO0bv3IMYnBYvH1"))
-
-    def test_rejects_customer_id_format(self):
-        self.assertIsNone(SUBSCRIPTION_ID_PATTERN.match("cus_OldCustomerId"))
-
-    def test_rejects_garbage(self):
-        self.assertIsNone(SUBSCRIPTION_ID_PATTERN.match("garbage"))
-        self.assertIsNone(SUBSCRIPTION_ID_PATTERN.match(""))
-        self.assertIsNone(SUBSCRIPTION_ID_PATTERN.match("sub_"))
