@@ -1115,8 +1115,14 @@ LOGGING = {
 PLAUSIBLE_URL = env.str("PLAUSIBLE_URL", default=None)
 PLAUSIBLE_DOMAIN = env.str("PLAUSIBLE_DOMAIN", default=None)
 
+# Legacy "force paid" override accepted for backward compatibility. Operators
+# who set this bypass the SupportLicense gating. Deprecation to land in a
+# separate MR targeting a major release.
+I_PAID_FOR_GLITCHTIP = env.bool("I_PAID_FOR_GLITCHTIP", False)
+
 MARKETING_URL = "https://glitchtip.com"
 if BILLING_ENABLED:
+    I_PAID_FOR_GLITCHTIP = True
     VTASKS_SCHEDULE["check-all-organizations-throttle"] = {
         "task": "apps.organizations_ext.tasks.check_all_organizations_throttle",
         "schedule": timedelta(hours=4),
