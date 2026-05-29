@@ -13,15 +13,15 @@ from apps.issue_events.models import EventStatus, Issue
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
 from glitchtip.test_utils.test_case import (
+    GlitchTipRollbackTestCase,
     GlitchTipTestCase,
-    GlitchTipTransactionTestCase,
 )
 
 from ..models import Notification
 from ..tasks import process_event_alerts
 
 
-class AlertTestCase(GlitchTipTransactionTestCase):
+class AlertTestCase(GlitchTipRollbackTestCase):
     def setUp(self):
         super().setUp()
         self.create_user_and_project()

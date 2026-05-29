@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -8,7 +9,6 @@ from urllib.parse import ParseResult, urlparse
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import caches
-from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from ninja import Schema
@@ -17,6 +17,7 @@ from user_agents import parse
 
 from apps.alerts.constants import ISSUE_IDS_KEY
 from apps.difs.tasks import event_difs_resolve_stacktrace
+from apps.files.models import File
 from apps.issue_events.constants import MAX_TAG_LENGTH, EventStatus, LogLevel
 from apps.issue_events.models import IssueEvent, IssueEventType
 from apps.performance.histogram import (
@@ -34,7 +35,7 @@ from apps.shared.async_db import (
     fetchall_unnest,
 )
 from apps.sourcecode.models import DebugSymbolBundle
-from glitchtip.async_compat import AsyncQuerySet, async_atomic
+from glitchtip.async_compat import async_atomic
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
@@ -695,6 +696,114 @@ async def _create_issue_and_hash(
         return hash_rows[0][0], False
 
 
+def _load_json(value):
+    """Parse a raw ``jsonb`` column value.
+
+    Django's psycopg returns ``jsonb`` as a string at the raw-cursor level
+    (the ORM's ``JSONField`` normally parses it); raw SQL must do so itself.
+    """
+    if isinstance(value, (str, bytes, bytearray)):
+        return json.loads(value)
+    return value
+
+
+def _hydrate_file(values: tuple) -> File | None:
+    """Build a ``File`` from a row slice; ``None`` when the FK was NULL."""
+    if values[0] is None:
+        return None
+    return File(
+        id=values[0],
+        created=values[1],
+        name=values[2],
+        headers=_load_json(values[3]),
+        size=values[4],
+        checksum=values[5],
+        type=values[6],
+        blob_id=values[7],
+    )
+
+
+async def _fetch_debug_symbol_bundles(
+    organization_ids: list[int],
+    release_versions: list[str],
+    project_ids: list[int],
+    filenames: list[str],
+    debug_ids: list,
+    read_only_db: str,
+) -> list[DebugSymbolBundle]:
+    """Raw-SQL fetch of debug bundles for sourcemap/DIF resolution.
+
+    Replaces an ``AsyncQuerySet(...).select_related(...)`` — django-async-backend
+    doesn't support ``select_related`` on the async ORM, and this is an ingest
+    hot path. One JOINed query hydrates each ``DebugSymbolBundle`` with its
+    ``file`` and ``sourcemap_file`` relations attached (the only relations the
+    JS sourcemap processor reads; ``release`` is used only via ``release_id``).
+
+    Matches the prior ORM filter: rows in ``organization_ids`` where either the
+    release matches by version *and* project (M2M) *and* file name, or the
+    ``debug_id`` matches directly.
+    """
+    # Mirror the ORM's empty-``__in`` short-circuit: with nothing to match on
+    # either branch there can be no rows, so skip the round-trip entirely.
+    release_branch = bool(release_versions and filenames and project_ids)
+    if not release_branch and not debug_ids:
+        return []
+
+    _, rows = await fetchall(
+        """
+        SELECT
+            dsb.id, dsb.created, dsb.debug_id, dsb.last_used, dsb.data,
+            dsb.file_id, dsb.organization_id, dsb.release_id,
+            dsb.sourcemap_file_id,
+            f.id, f.created, f.name, f.headers, f.size, f.checksum, f.type,
+            f.blob_id,
+            smf.id, smf.created, smf.name, smf.headers, smf.size, smf.checksum,
+            smf.type, smf.blob_id
+        FROM sourcecode_debugsymbolbundle dsb
+        JOIN files_file f ON f.id = dsb.file_id
+        LEFT JOIN files_file smf ON smf.id = dsb.sourcemap_file_id
+        LEFT JOIN releases_release r ON r.id = dsb.release_id
+        WHERE dsb.organization_id = ANY(%s::int[])
+          AND (
+                (
+                    r.version = ANY(%s::text[])
+                    AND f.name = ANY(%s::text[])
+                    AND EXISTS (
+                        SELECT 1
+                        FROM releases_release_projects rrp
+                        WHERE rrp.release_id = dsb.release_id
+                          AND rrp.project_id = ANY(%s::bigint[])
+                    )
+                )
+                OR dsb.debug_id = ANY(%s::uuid[])
+          )
+        """,
+        [organization_ids, release_versions, filenames, project_ids, debug_ids],
+        db_alias=read_only_db,
+    )
+
+    bundles: list[DebugSymbolBundle] = []
+    for row in rows:
+        bundle = DebugSymbolBundle(
+            id=row[0],
+            created=row[1],
+            debug_id=row[2],
+            last_used=row[3],
+            data=_load_json(row[4]) or {},
+            file_id=row[5],
+            organization_id=row[6],
+            release_id=row[7],
+            sourcemap_file_id=row[8],
+        )
+        # Attach related ``File`` rows so the JS processor doesn't re-query.
+        bundle.file = _hydrate_file(row[9:17])
+        sourcemap_file = _hydrate_file(row[17:25])
+        if sourcemap_file is not None:
+            bundle.sourcemap_file = sourcemap_file
+        bundles.append(bundle)
+    return bundles
+
+
 async def process_issue_events(
     messages: list[IssueTaskMessage], read_only_db: str = "default"
 ):
@@ -765,21 +874,15 @@ async def process_issue_events(
         if frame.filename
     }
 
-    debug_files_qs = (
-        AsyncQuerySet(model=DebugSymbolBundle, using=read_only_db)
-        .filter(organization__in={event.organization_id for event in messages})
-        .filter(
-            Q(
-                release__version__in=release_version_set,
-                release__projects__in=project_set,
-                file__name__in=filename_set,
-            )
-            | Q(debug_id__in={image.debug_id for image in sourcemap_images})
-        )
-        .select_related("file", "sourcemap_file", "release")
+    # Materialize once — iterated multiple times below.
+    debug_files = await _fetch_debug_symbol_bundles(
+        organization_ids=list({event.organization_id for event in messages}),
+        release_versions=list(release_version_set),
+        project_ids=list(project_set),
+        filenames=list(filename_set),
+        debug_ids=list({image.debug_id for image in sourcemap_images}),
+        read_only_db=read_only_db,
     )
-    # Materialize once — iterated multiple times below
-    debug_files = [df async for df in debug_files_qs]
 
     now = timezone.now()
     # Update last used if older than 1 day, to minimize queries
