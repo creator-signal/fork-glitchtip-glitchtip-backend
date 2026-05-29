@@ -4,6 +4,7 @@ from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
+from glitchtip.test_utils.async_rollback import AsyncioRollbackTestCase
 
 
 class GlitchTestCase(TestCase):
@@ -87,6 +88,24 @@ class GlitchTipTransactionTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
     The async sessions only see committed rows; ``TransactionTestCase``
     truncates between tests rather than rolling back, so fixtures created
     via sync bakery in ``setUp`` are visible to the async path under test.
+
+    Prefer ``GlitchTipRollbackTestCase``: it gives the same visibility via a
+    rolled-back transaction (no per-test truncation), which is faster.
+    """
+
+    def create_user_and_project(self):
+        self.create_logged_in_user()
+
+
+class GlitchTipRollbackTestCase(GlitchTipTestCaseMixin, AsyncioRollbackTestCase):
+    """Rollback-based replacement for ``GlitchTipTransactionTestCase``.
+
+    Bridges async DB I/O (Django's native async ORM and
+    ``async_connections``) through the connection that the per-test
+    transaction is opened on, so async reads see fixtures created in
+    ``setUp`` and async writes roll back at test end instead of needing
+    ``TransactionTestCase`` truncation. Works whether or not
+    ``USE_ASYNC_BACKEND`` is enabled.
     """
 
     def create_user_and_project(self):
