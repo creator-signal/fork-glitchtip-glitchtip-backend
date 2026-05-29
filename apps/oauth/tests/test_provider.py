@@ -19,6 +19,7 @@ from apps.oauth.provider import (
     _hash_token,
     _token_prefix,
 )
+from glitchtip.test_utils.async_baker import amake
 
 
 def _make_client_info(**overrides):
@@ -322,7 +323,7 @@ class OAuthProviderLoadAccessTokenTest(TestCase):
         self.assertEqual(result.scopes, scopes)
 
     async def test_load_api_token_inactive_user_returns_none(self):
-        inactive_user = await sync_to_async(baker.make)("users.user", is_active=False)
+        inactive_user = await amake("users.user", is_active=False)
         api_token = await sync_to_async(APIToken.objects.create)(
             user=inactive_user,
         )

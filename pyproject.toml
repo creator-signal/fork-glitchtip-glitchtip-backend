@@ -66,6 +66,13 @@ dev = [
     "coverage>=7.13.4",
 ]
 
+[tool.uv.sources]
+# model_bakery's async API (amake/aprepare) is not yet in a release. Track the
+# fork branch carrying it until the upstream PR lands and ships:
+# https://github.com/model-bakers/model_bakery/pull/599
+# When that releases, drop this source and bump the version spec above.
+model-bakery = { git = "https://github.com/bufke/model_bakery.git", branch = "async-support" }
+
 [tool.ruff.lint]
 extend-select = ["I"]
 

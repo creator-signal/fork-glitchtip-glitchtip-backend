@@ -1,10 +1,11 @@
 from datetime import timedelta
 from unittest.mock import patch
 
-from asgiref.sync import sync_to_async
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
+
+from glitchtip.test_utils.async_baker import amake
 
 from ..constants import SubscriptionStatus
 from ..models import StripePrice, StripeProduct, StripeSubscription
@@ -161,7 +162,7 @@ class StripeTestCase(TestCase):
 
     @patch("apps.stripe.models.list_prices")
     async def test_sync_price_round_trips_is_public(self, mock_list_prices):
-        await sync_to_async(baker.make)("stripe.StripeProduct", stripe_id="prod_1")
+        await amake("stripe.StripeProduct", stripe_id="prod_1")
 
         async def mock_prices_generator():
             yield [
@@ -206,7 +207,7 @@ class StripeTestCase(TestCase):
     async def test_sync_price_warns_on_duplicate_public_prices(
         self, mock_list_prices, mock_logger
     ):
-        await sync_to_async(baker.make)("stripe.StripeProduct", stripe_id="prod_1")
+        await amake("stripe.StripeProduct", stripe_id="prod_1")
 
         async def mock_prices_generator():
             yield [
@@ -241,10 +242,8 @@ class StripeTestCase(TestCase):
     )
     @patch("apps.stripe.models.list_subscriptions")
     async def test_sync_subscription(self, mock_list_subscriptions):
-        await sync_to_async(baker.make)("stripe.StripePrice", stripe_id=test_price.id)
-        await sync_to_async(baker.make)(
-            "stripe.StripeProduct", stripe_id=test_price.product
-        )
+        await amake("stripe.StripePrice", stripe_id=test_price.id)
+        await amake("stripe.StripeProduct", stripe_id=test_price.product)
 
         now = timezone.now()
         now_timestamp = int(now.timestamp())
@@ -333,12 +332,10 @@ class StripeTestCase(TestCase):
     async def test_sync_removes_canceled_primary_subscriptions(
         self, mock_fetch_subscription, mock_list_subscriptions
     ):
-        await sync_to_async(baker.make)("stripe.StripePrice", stripe_id=test_price.id)
-        await sync_to_async(baker.make)(
-            "stripe.StripeProduct", stripe_id=test_price.product
-        )
+        await amake("stripe.StripePrice", stripe_id=test_price.id)
+        await amake("stripe.StripeProduct", stripe_id=test_price.product)
 
-        subscription = await sync_to_async(baker.make)(
+        subscription = await amake(
             "stripe.StripeSubscription",
             stripe_id=test_price.product,
             organization=self.org,
