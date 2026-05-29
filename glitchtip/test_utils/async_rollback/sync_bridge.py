@@ -4,9 +4,12 @@ Sync-bridged async DatabaseWrapper used by AsyncioRollbackTestCase.
 Vendored from django-async-backend PR #20:
 https://github.com/Arfey/django-async-backend/pull/20
 
-Copied verbatim from upstream commit 9933f6b (branch
-``feat/asyncio-rollback-testcase``). Remove this file and import from
-``django_async_backend.db.sync_bridge`` once upstream merges.
+Copied from upstream commit 9933f6b (branch ``feat/asyncio-rollback-testcase``),
+with one local change marked below: ``SyncBridgedAsyncWrapper._task`` is a
+dynamic property reporting the running task, so ``async_atomic``'s nested-task
+guard passes when a sync test method drives async code via ``async_to_sync``.
+Remove this file and import from ``django_async_backend.db.sync_bridge`` once
+upstream merges (and carry the ``_task`` change upstream if still needed).
 
 Routes every operation that would normally hit an async psycopg connection
 through Django's sync connection via ``sync_to_async``. This lets a Django
@@ -28,6 +31,7 @@ Trade-offs (intentional):
 """
 
 import _thread
+import asyncio
 import collections
 from contextlib import contextmanager
 
@@ -130,11 +134,30 @@ class SyncBridgedAsyncWrapper:
         self.health_check_done = True
         self.health_check_enabled = False
 
-        # Required by code that introspects task ownership.
-        self._task = None
-
         # Lazy ``_BridgedOps`` proxy — see the ``ops`` property below.
         self._ops_proxy = None
+
+    # ----- Task ownership (glitchtip addition over the vendored bridge) -----
+
+    # ``async_atomic`` guards against using a connection's transaction from a
+    # task other than the one that opened it
+    # (``connection._task is not asyncio.current_task()``). The bridge routes
+    # everything onto one sync connection shared via ``inc_thread_sharing`` and
+    # serialised through ``sync_to_async`` — there is no per-task async state to
+    # protect — so report the running task as the owner. This is what lets a
+    # *sync* test method drive async code (each ``async_to_sync`` spins up a
+    # fresh task) that opens ``async_atomic`` blocks. The harness still assigns
+    # ``_task`` per test; that assignment is accepted and ignored.
+    @property
+    def _task(self):
+        try:
+            return asyncio.current_task()
+        except RuntimeError:
+            return None
+
+    @_task.setter
+    def _task(self, value):
+        pass
 
     # ----- Attributes that defer to the sync connection -----
 
