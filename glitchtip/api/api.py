@@ -160,7 +160,7 @@ async def get_settings(request: HttpRequest):
         if adapter_cls == OpenIDConnectOAuth2Adapter:
             # OIDC adapters resolve authorize_url by fetching the provider's
             # discovery document. Use the async cached helper so the public
-            # /api/0/settings/ endpoint never blocks on a synchronous outbound
+            # /api/settings/ endpoint never blocks on a synchronous outbound
             # request to the IdP.
             social_app.authorize_url = await get_authorize_url(
                 social_app.settings.get("server_url", "")
@@ -221,6 +221,16 @@ async def get_settings(request: HttpRequest):
         "glitchtip_instance_name": settings.GLITCHTIP_INSTANCE_NAME,
         "enabled_features": enabled_features,
     }
+
+
+class InstanceLicenseOut(CamelSchema):
+    billing_email: str
+
+
+@api.get("0/instance-license/", response=InstanceLicenseOut, by_alias=True)
+async def get_instance_license(request: HttpRequest):
+    _, email = await SupportLicense.resolved()
+    return {"billing_email": email}
 
 
 class APIRootSchema(Schema):
