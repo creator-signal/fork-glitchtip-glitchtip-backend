@@ -626,10 +626,18 @@ if ENABLE_OBSERVABILITY_API:
     MIDDLEWARE.insert(0, "django_prometheus.middleware.PrometheusBeforeMiddleware")
     MIDDLEWARE.append("django_prometheus.middleware.PrometheusAfterMiddleware")
 
-# All DB I/O goes through django-async-backend. Inserted at the head of
-# the chain so async cursors are returned to the pool before any other
-# middleware finalises the response.
-MIDDLEWARE.insert(0, "django_async_backend.middleware.close_async_connections")
+# Opt-in: route DB I/O through django-async-backend. When disabled
+# (the default), ``glitchtip.async_compat`` shims the same surface over
+# Django's sync ORM via ``sync_to_async``. Read here from ``os.environ``
+# directly so the flag is consistent with ``glitchtip.async_compat``,
+# which is imported before settings has been fully initialised on some
+# code paths.
+USE_ASYNC_BACKEND = env.bool("USE_ASYNC_BACKEND", default=False)
+
+if USE_ASYNC_BACKEND:
+    # Inserted at the head of the chain so async cursors are returned to
+    # the pool before any other middleware finalises the response.
+    MIDDLEWARE.insert(0, "django_async_backend.middleware.close_async_connections")
 
 ROOT_URLCONF = "glitchtip.urls"
 
@@ -801,11 +809,12 @@ if env.str("DATABASE_HOST", None):
     )
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
-    # async-backend's postgresql backend extends Django's stock postgresql
-    # and adds an AsyncDatabaseWrapper that ``async_connections`` discovers
-    # via load_backend. Sync paths (ORM, migrations, admin) still go through
-    # psycopg unchanged.
-    db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
+    if USE_ASYNC_BACKEND:
+        # async-backend's postgresql backend extends Django's stock postgresql
+        # and adds an AsyncDatabaseWrapper that ``async_connections`` discovers
+        # via load_backend. Sync paths (ORM, migrations, admin) still go through
+        # psycopg unchanged.
+        db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)

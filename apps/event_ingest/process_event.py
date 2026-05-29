@@ -11,8 +11,6 @@ from django.core.cache import caches
 from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.utils import timezone
-from django_async_backend.db.models.query import QuerySet as AsyncQuerySet
-from django_async_backend.db.transaction import async_atomic
 from ninja import Schema
 from psycopg.types.json import Jsonb
 from user_agents import parse
@@ -36,6 +34,7 @@ from apps.shared.async_db import (
     fetchall_unnest,
 )
 from apps.sourcecode.models import DebugSymbolBundle
+from glitchtip.async_compat import AsyncQuerySet, async_atomic
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit

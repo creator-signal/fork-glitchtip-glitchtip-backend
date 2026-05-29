@@ -13,10 +13,10 @@ from unittest.mock import patch
 
 from django.db import connections
 from django.utils import timezone
-from django_async_backend.db import async_connections
 
 from apps.issue_events.constants import EventStatus
 from apps.issue_events.models import Issue, IssueEvent, IssueHash
+from glitchtip.async_compat import async_connections
 from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 
 from ..process_event import process_issue_events
