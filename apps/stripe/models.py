@@ -470,25 +470,13 @@ class SupportLicense(models.Model):
         super().save(*args, **kwargs)
 
     @classmethod
-    def load(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
-        return obj
-
-    @classmethod
-    async def aload(cls):
+    async def load(cls):
         obj, _ = await cls.objects.aget_or_create(pk=1)
         return obj
 
     @classmethod
-    def resolved(cls) -> tuple[str, str]:
+    async def resolved(cls) -> tuple[str, str]:
         if settings.BILLING_ENABLED:
             return ("", "")
-        db = cls.load()
-        return (db.license_key, db.billing_email)
-
-    @classmethod
-    async def aresolved(cls) -> tuple[str, str]:
-        if settings.BILLING_ENABLED:
-            return ("", "")
-        db = await cls.aload()
+        db = await cls.load()
         return (db.license_key, db.billing_email)
