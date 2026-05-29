@@ -229,7 +229,7 @@ class InstanceLicenseOut(CamelSchema):
 
 @api.get("0/instance-license/", response=InstanceLicenseOut, by_alias=True)
 async def get_instance_license(request: HttpRequest):
-    _, email = await SupportLicense.aresolved()
+    _, email = await SupportLicense.resolved()
     return {"billing_email": email}
 
 
