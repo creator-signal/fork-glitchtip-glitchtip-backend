@@ -30,6 +30,7 @@ from apps.releases.api import router as releases_router
 from apps.sourcecode.api import router as sourcecode_router
 from apps.stats.api import router as stats_router
 from apps.stripe.api import router as stripe_router
+from apps.stripe.models import SupportLicense
 from apps.teams.api import router as teams_router
 from apps.users.api import router as users_router
 from apps.users.models import User
@@ -132,7 +133,6 @@ class SettingsOut(CamelSchema):
     social_apps: list[SocialAppSchema]
     billing_enabled: bool
     i_paid_for_glitchtip: bool = Field(alias="iPaidForGlitchTip")
-    license_key: str
     enable_user_registration: bool
     enable_social_apps_user_registration: bool
     enable_organization_creation: bool
@@ -160,7 +160,7 @@ async def get_settings(request: HttpRequest):
         if adapter_cls == OpenIDConnectOAuth2Adapter:
             # OIDC adapters resolve authorize_url by fetching the provider's
             # discovery document. Use the async cached helper so the public
-            # /api/0/settings/ endpoint never blocks on a synchronous outbound
+            # /api/settings/ endpoint never blocks on a synchronous outbound
             # request to the IdP.
             social_app.authorize_url = await get_authorize_url(
                 social_app.settings.get("server_url", "")
@@ -195,11 +195,17 @@ async def get_settings(request: HttpRequest):
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
 
+    # Legacy env wins; fall back to the SupportLicense singleton.
+    if settings.BILLING_ENABLED or settings.I_PAID_FOR_GLITCHTIP:
+        i_paid_for_glitchtip = True
+    else:
+        support_license = await SupportLicense.objects.filter(pk=1).afirst()
+        i_paid_for_glitchtip = bool(support_license and support_license.license_key)
+
     return {
         "social_apps": social_apps,
         "billing_enabled": billing_enabled,
-        "i_paid_for_glitchtip": settings.I_PAID_FOR_GLITCHTIP,
-        "license_key": settings.GLITCHTIP_LICENSE_KEY or "",
+        "i_paid_for_glitchtip": i_paid_for_glitchtip,
         "enable_user_registration": enable_user_registration,
         "enable_social_apps_user_registration": enable_social_apps_user_registration,
         "enable_organization_creation": settings.ENABLE_ORGANIZATION_CREATION,
@@ -215,6 +221,16 @@ async def get_settings(request: HttpRequest):
         "glitchtip_instance_name": settings.GLITCHTIP_INSTANCE_NAME,
         "enabled_features": enabled_features,
     }
+
+
+class InstanceLicenseOut(CamelSchema):
+    billing_email: str
+
+
+@api.get("0/instance-license/", response=InstanceLicenseOut, by_alias=True)
+async def get_instance_license(request: HttpRequest):
+    _, email = await SupportLicense.resolved()
+    return {"billing_email": email}
 
 
 class APIRootSchema(Schema):

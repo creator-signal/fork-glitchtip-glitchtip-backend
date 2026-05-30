@@ -14,6 +14,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.stripe.models import SupportLicense
 from glitchtip.async_compat import USE_ASYNC_BACKEND as _USE_ASYNC_BACKEND
 from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
@@ -28,6 +29,24 @@ class SettingsTestCase(TestCase):
         with self.assertNumQueries(1):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
+
+    def test_settings_does_not_expose_license_key(self):
+        res = self.client.get(self.url)
+        self.assertNotIn("licenseKey", res.json())
+        self.assertNotIn("license_key", res.json())
+
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=False)
+    def test_i_paid_for_glitchtip_reflects_support_license(self):
+        res = self.client.get(self.url)
+        self.assertFalse(res.json()["iPaidForGlitchTip"])
+        SupportLicense(license_key="sub_xxx").save()
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
+
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=True)
+    def test_legacy_i_paid_env_var_still_overrides(self):
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
 
     def test_settings_oidc(self):
         social_app = baker.make(
@@ -64,6 +83,36 @@ class SettingsTestCase(TestCase):
             cache.delete(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
+
+
+class InstanceLicenseTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_instance_license")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_empty_when_unconfigured(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"billingEmail": ""})
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_db_billing_email(self):
+        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": "db@example.com"})
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_returns_empty(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": ""})
 
 
 class APIRootTestCase(TestCase):
