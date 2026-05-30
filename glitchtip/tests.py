@@ -85,6 +85,36 @@ class SettingsTestCase(TestCase):
         self.assertContains(res, "https://example.com/authorize")
 
 
+class InstanceLicenseTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_instance_license")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_empty_when_unconfigured(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"billingEmail": ""})
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_db_billing_email(self):
+        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": "db@example.com"})
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_returns_empty(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": ""})
+
+
 class APIRootTestCase(TestCase):
     def setUp(self):
         self.url = reverse("api:api_root")
