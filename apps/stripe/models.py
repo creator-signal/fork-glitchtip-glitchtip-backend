@@ -456,3 +456,27 @@ class StripeSubscription(StripeModel):
         await cls.set_primary_subscriptions_for_organizations(active_organization_ids)
         await cls.update_outdated_subscriptions()
         await cls.remove_inactive_primary_subscriptions()
+
+
+class SupportLicense(models.Model):
+    """Singleton (pk=1): one instance-wide support-plan license per server."""
+
+    license_key = models.CharField(max_length=255, blank=True, default="")
+    billing_email = models.EmailField(blank=True, default="")
+    updated = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    async def load(cls):
+        obj, _ = await cls.objects.aget_or_create(pk=1)
+        return obj
+
+    @classmethod
+    async def resolved(cls) -> tuple[str, str]:
+        if settings.BILLING_ENABLED:
+            return ("", "")
+        db = await cls.load()
+        return (db.license_key, db.billing_email)
