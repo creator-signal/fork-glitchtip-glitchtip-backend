@@ -1,27 +1,41 @@
-"""Best-effort backfill of recently-active issues into IssueSearchIndex.
+"""Backfill recent issues into IssueSearchIndex, then drop the old GIN.
 
-Intentionally limited: only issues whose ``last_seen`` is within
-``GLITCHTIP_EVENT_HOT_DAYS`` are copied. Older issues are skipped — with
-Issue.search_vector dropped (0022) and no OR-fallback, a skipped issue is
+Two non-transactional steps share this ``atomic = False`` migration. Both
+require autocommit (the backfill commits per batch; ``DROP INDEX
+CONCURRENTLY`` cannot run in a transaction) and both are independently
+idempotent, so a deploy killed mid-migration can simply re-run it.
+
+Step 1 -- Best-effort backfill. Only issues whose ``last_seen`` is within
+``GLITCHTIP_EVENT_HOT_DAYS`` are copied. Older issues are skipped -- with
+Issue.search_vector dropped (0021) and no OR-fallback, a skipped issue is
 not full-text searchable until it next receives an event, at which point
-ingest inserts its index row. This is an accepted tradeoff: few users
-search, and active issues repopulate their index almost immediately.
+ingest inserts its index row. Accepted tradeoff: few users search, and
+active issues repopulate their index almost immediately.
 
-Safety properties:
-- ``atomic = False`` + keyset-paginated batches over the last_seen index:
-  never holds a long transaction or a long single statement, and the work
-  scales with the number of *hot* issues, not total table size, so it
-  can't blow past statement_timeout or block the hot Issue write path for
-  more than one small batch at a time.
+- keyset-paginated batches over the last_seen index never hold a long
+  transaction or a long single statement, and the work scales with the
+  number of *hot* issues, not total table size, so it can't blow past
+  statement_timeout or block the hot Issue write path for more than one
+  small batch at a time.
 - ``ON CONFLICT DO NOTHING``: idempotent and safe to run alongside live
-  ingest (which writes the same rows); if a deploy timeout kills the
-  migration mid-run, the committed batches stay and a re-run resumes.
+  ingest (which writes the same rows); committed batches survive a killed
+  deploy and a re-run resumes.
 - Copies the existing ``search_vector`` tsvector verbatim (no
   ``to_tsvector`` recomputation), so it is cheap and preserves the full
   accumulated lexeme history of each issue.
+
+Step 2 -- Drop the now-redundant Issue.search_vector GIN. Full-text search
+now reads IssueSearchIndex exclusively, so this index is dead weight (and
+its maintenance was the whole reason for the decoupling). Dropped here,
+before the column (0021), so the column drop is pure metadata and doesn't
+have to cascade-drop a large GIN under ACCESS EXCLUSIVE. ``CONCURRENTLY``
+takes only SHARE UPDATE EXCLUSIVE, so it never blocks ingest -- and emits
+``DROP INDEX CONCURRENTLY IF EXISTS``, so the re-run after a killed deploy
+is a no-op rather than an error.
 """
 
 from django.conf import settings
+from django.contrib.postgres.operations import RemoveIndexConcurrently
 from django.db import connection, migrations
 
 # Rows copied per batch. Each batch is a bounded index-range scan over
@@ -94,4 +108,8 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(code=backfill_recent, reverse_code=noop),
+        RemoveIndexConcurrently(
+            model_name="issue",
+            name="issue_event_search__346c17_gin",
+        ),
     ]

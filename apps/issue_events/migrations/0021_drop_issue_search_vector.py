@@ -11,7 +11,7 @@ of row count); the existing column bytes are reclaimed lazily as rows are
 next updated. The only cost is the brief ACCESS EXCLUSIVE lock. We bound the
 wait with ``lock_timeout`` so a busy moment fails fast and is retried, rather
 than queueing behind a long query and stalling ingest. The GIN was already
-dropped in 0021, so this does not cascade to a large index.
+dropped in 0020, so this does not cascade to a large index.
 
 DEPLOY ORDER: this column must be gone only AFTER all code that reads/writes
 it has stopped running. Application code in this change no longer touches it,
@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
     # DROP COLUMN is metadata-only and fast, so an atomic migration is fine.
     # SET LOCAL scopes the lock_timeout to this migration's transaction.
     dependencies = [
-        ("issue_events", "0021_drop_issue_search_vector_gin"),
+        ("issue_events", "0020_backfill_and_drop_search_gin"),
     ]
 
     operations = [
