@@ -13,6 +13,7 @@ from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
+from apps.projects.models import ProjectKey
 from apps.shared.async_db import fetchone
 from glitchtip.api.exceptions import ThrottleException
 from sentry.utils.auth import parse_auth_header
@@ -53,13 +54,22 @@ class EventAuthHttpRequest(HttpRequest):
 
 def auth_from_request(request: HttpRequest):
     """
-    Get DSN (sentry_key) from request header
-    Accept both sentry or glitchtip prefix
-    Do not read request body when possible. This may result in uncompression which is slow.
+    Get the DSN public key (sentry_key) from a request, for both the sentry
+    envelope ingest and native OTLP ingest.
+
+    Accepts, in order: a ``sentry_key``/``glitchtip_key`` query param, a plain
+    ``Authorization: Bearer <key>`` (what OTLP exporters send — harmless on the
+    envelope path since SDKs don't use it), or the sentry ``X-Sentry-Auth`` /
+    ``Authorization`` header format. Avoids reading the request body, which
+    could trigger slow decompression.
     """
     for k in request.GET.keys():
         if k in ["sentry_key", "glitchtip_key"]:
             return request.GET[k]
+
+    authorization = request.META.get("HTTP_AUTHORIZATION", "")
+    if authorization[:7].lower() == "bearer ":
+        return authorization[7:].strip()
 
     if auth_header := request.META.get(
         "HTTP_X_SENTRY_AUTH", request.META.get("HTTP_AUTHORIZATION")
@@ -219,34 +229,6 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     return project
 
 
-def otlp_key_from_request(request: HttpRequest) -> str | None:
-    """Extract the DSN public key from an OTLP request.
-
-    OTel exporters carry credentials in headers (``OTEL_EXPORTER_OTLP_HEADERS``)
-    or query params. We accept both common conventions:
-
-    - ``Authorization: Bearer <public_key>`` — the idiomatic OTLP form.
-    - ``X-Sentry-Auth: Sentry sentry_key=<public_key>`` — sentry's header, for
-      exporters configured to mimic it.
-    - ``?sentry_key=``/``?glitchtip_key=`` query params.
-    """
-    authorization = request.META.get("HTTP_AUTHORIZATION", "")
-    if authorization[:7].lower() == "bearer ":
-        return authorization[7:].strip()
-
-    if header := request.META.get(
-        "HTTP_X_SENTRY_AUTH", request.META.get("HTTP_AUTHORIZATION")
-    ):
-        parsed = parse_auth_header(header)
-        if key := parsed.get("sentry_key", parsed.get("glitchtip_key")):
-            return key
-
-    for param in ("sentry_key", "glitchtip_key"):
-        if param in request.GET:
-            return request.GET[param]
-    return None
-
-
 async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
     """Resolve the project from the DSN public key alone, with no project id
     in the URL.
@@ -262,17 +244,12 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
         raise HttpError(
             503, "Events are not currently being accepted due to maintenance."
         )
-    key_str = otlp_key_from_request(request)
-    if not key_str:
-        raise AuthenticationError(message="Unable to find authentication information")
     try:
-        sentry_key = UUID(key_str)
+        sentry_key = UUID(auth_from_request(request))
     except ValueError as err:
         raise AuthenticationError(
             message="dsn key badly formed hexadecimal UUID string"
         ) from err
-
-    from apps.projects.models import ProjectKey
 
     try:
         key = await ProjectKey.objects.select_related("project__organization").aget(

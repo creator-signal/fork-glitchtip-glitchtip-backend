@@ -194,6 +194,9 @@ class OTLPLogsIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             HTTP_AUTHORIZATION=self.auth,
         )
         self.assertEqual(res.status_code, 200, res.content)
+        # Drain the enqueued task so it can't bleed into a later test's flush.
+        self._flush()
+        self.assertEqual(LogEvent.objects.count(), 2)
 
     def test_json_logs_ingested(self):
         """OTLP/JSON uses camelCase keys and hex trace ids."""
@@ -247,6 +250,29 @@ class OTLPLogsIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(log.level, LogLevel.ERROR)
         self.assertEqual(log.service, "json-svc")
         self.assertEqual(log.data["disk"], "/dev/sda1")
+
+    def test_auth_via_x_sentry_auth_header(self):
+        """OTLP shares auth_from_request, so the sentry X-Sentry-Auth header
+        and ?sentry_key query param work too, not just Bearer."""
+        res = self.client.post(
+            self.url,
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_X_SENTRY_AUTH=f"Sentry sentry_key={self.projectkey.public_key.hex}",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self._flush()
+        self.assertEqual(LogEvent.objects.count(), 2)
+
+    def test_auth_via_query_param(self):
+        res = self.client.post(
+            f"{self.url}?sentry_key={self.projectkey.public_key.hex}",
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self._flush()
+        self.assertEqual(LogEvent.objects.count(), 2)
 
     def test_multi_record_batch_decodes(self):
         """A 101-record batch (single resource/scope) decodes fully, with the

@@ -18,6 +18,10 @@ https://opentelemetry.io/docs/specs/otel/logs/data-model/
 """
 
 import orjson
+from google.protobuf.json_format import MessageToDict
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
+    ExportLogsServiceRequest,
+)
 
 from .schema import LogItemSchema, otel_log_to_log_item
 
@@ -42,8 +46,6 @@ def _proto_anyvalue_to_dict(value) -> dict | None:
     if kind == "bytes_value":
         return {"string_value": value.bytes_value.hex()}
     # array_value / kvlist_value — rare for logs; preserve as a JSON string.
-    from google.protobuf.json_format import MessageToDict
-
     return {"string_value": orjson.dumps(MessageToDict(value)).decode()}
 
 
@@ -90,10 +92,6 @@ def _to_log_item_dicts(records: list[dict], resource_attrs: list[dict]) -> list[
 
 
 def _decode_protobuf(body: bytes) -> list[dict]:
-    from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
-        ExportLogsServiceRequest,
-    )
-
     request = ExportLogsServiceRequest()
     request.ParseFromString(body)
 
