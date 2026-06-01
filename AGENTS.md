@@ -9,6 +9,7 @@
 - **Linting & Formatting:** Adhere to `ruff` standards.
   - Check: `uv run ruff check .`
   - Format: `uv run ruff format .`
+  - CI's `lint` job also runs `vulture` (dead-code detection): `vulture apps/ glitchtip/ vulture_whitelist.py --min-confidence 100`. Run it too before pushing — it flags unused code `ruff` won't (e.g. an unused signal-handler parameter); whitelist false positives in `vulture_whitelist.py`.
 - Disclose usage of AI when making a merge request. Human review is REQUIRED for contributions.
 
 ## Version Control
