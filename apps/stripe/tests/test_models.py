@@ -85,6 +85,120 @@ class StripeTestCase(TestCase):
         )
 
     @patch("apps.stripe.models.list_products")
+    async def test_sync_keeps_products_referenced_by_subscription(
+        self, mock_list_products
+    ):
+        """A product Stripe no longer lists must not be deleted while a
+        subscription still references one of its prices. StripeSubscription.price
+        is RESTRICT, so deleting it would raise RestrictedError and abort sync."""
+        # An archived product (absent from Stripe's response) with a price that a
+        # live subscription still points at.
+        old_product = await StripeProduct.objects.acreate(
+            stripe_id="prod_old", name="Old", events=1000, is_public=False
+        )
+        old_price = await StripePrice.objects.acreate(
+            stripe_id="price_old", product=old_product, price=10.00, nickname="Old"
+        )
+        now = timezone.now()
+        await StripeSubscription.objects.acreate(
+            stripe_id="sub_grandfathered",
+            created=now,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            price=old_price,
+            organization=self.org,
+            status=SubscriptionStatus.ACTIVE,
+            start_date=now,
+            collection_method="charge_automatically",
+        )
+
+        async def mock_products_generator():
+            yield [
+                ProductExpandedPrice(
+                    object="product",
+                    id="prod_current",
+                    active=True,
+                    attributes=[],
+                    created=1678886400,
+                    default_price=test_price,
+                    description="Current",
+                    images=[],
+                    livemode=False,
+                    marketing_features=[],
+                    metadata={
+                        "events": "123",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
+                    name="Current",
+                    package_dimensions=None,
+                    shippable=None,
+                    statement_descriptor=None,
+                    tax_code=None,
+                    type="service",
+                    unit_label=None,
+                    updated=1678886400,
+                    url=None,
+                ),
+            ]
+
+        mock_list_products.return_value = mock_products_generator()
+        # Must not raise RestrictedError.
+        await StripeProduct.sync_from_stripe()
+
+        # The referenced-but-archived product is retained.
+        self.assertTrue(
+            await StripeProduct.objects.filter(stripe_id="prod_old").aexists()
+        )
+
+    @patch("apps.stripe.models.list_products")
+    async def test_sync_deletes_unreferenced_archived_products(
+        self, mock_list_products
+    ):
+        """A product absent from Stripe with no subscription referencing it is
+        still pruned — the retention guard must not block ordinary cleanup."""
+        await StripeProduct.objects.acreate(
+            stripe_id="prod_stale", name="Stale", events=1000, is_public=False
+        )
+
+        async def mock_products_generator():
+            yield [
+                ProductExpandedPrice(
+                    object="product",
+                    id="prod_current",
+                    active=True,
+                    attributes=[],
+                    created=1678886400,
+                    default_price=test_price,
+                    description="Current",
+                    images=[],
+                    livemode=False,
+                    marketing_features=[],
+                    metadata={
+                        "events": "123",
+                        "is_public": "true",
+                        "product_type": "hosted",
+                    },
+                    name="Current",
+                    package_dimensions=None,
+                    shippable=None,
+                    statement_descriptor=None,
+                    tax_code=None,
+                    type="service",
+                    unit_label=None,
+                    updated=1678886400,
+                    url=None,
+                ),
+            ]
+
+        mock_list_products.return_value = mock_products_generator()
+        await StripeProduct.sync_from_stripe()
+
+        self.assertFalse(
+            await StripeProduct.objects.filter(stripe_id="prod_stale").aexists()
+        )
+
+    @patch("apps.stripe.models.list_products")
     async def test_sync_product_round_trips_price_is_public(self, mock_list_products):
         public_price = test_price.model_copy(
             update={"id": "price_pub", "metadata": {"is_public": "true"}}
