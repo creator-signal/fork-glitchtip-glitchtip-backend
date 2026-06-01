@@ -153,7 +153,20 @@ class StripeProduct(StripeModel):
             for obj in product_updated:
                 stripe_ids.add(obj.stripe_id)
 
-        result = await StripeProduct.objects.exclude(stripe_id__in=stripe_ids).adelete()
+        # Keep products whose prices are still referenced by a subscription.
+        # StripePrice.product cascades, but StripeSubscription.price is RESTRICT,
+        # so deleting a product archived in Stripe while a (often grandfathered)
+        # subscription still points at one of its prices raises RestrictedError
+        # and aborts the whole sync. Retaining those products is harmless — they
+        # simply stop appearing in Stripe's product list.
+        referenced_product_ids = StripeSubscription.objects.values_list(
+            "price__product_id", flat=True
+        )
+        result = await (
+            StripeProduct.objects.exclude(stripe_id__in=stripe_ids)
+            .exclude(stripe_id__in=referenced_product_ids)
+            .adelete()
+        )
         if result[0]:
             logger.info(f"Deleted {result[0]} products in Django")
 
