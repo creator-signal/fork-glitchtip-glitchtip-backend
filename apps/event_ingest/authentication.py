@@ -302,6 +302,19 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
         or project.event_throttle_rate == 100
     ):
         raise ThrottleException(600)
+    # Honor partial throttle rates the same way the envelope hot path does, so
+    # a throttled org/project doesn't get a free pass on OTLP ingest. The block
+    # cache that get_project maintains is skipped here — this is the lower-volume
+    # path — so each request re-evaluates independently.
+    if organization.event_throttle_rate or project.event_throttle_rate:
+        if not is_accepting_events(
+            organization.event_throttle_rate
+        ) or not is_accepting_events(project.event_throttle_rate):
+            raise ThrottleException(
+                calculate_retry_after(
+                    max(organization.event_throttle_rate, project.event_throttle_rate)
+                )
+            )
     return info
 
 

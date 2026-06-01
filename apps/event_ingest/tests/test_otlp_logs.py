@@ -140,6 +140,61 @@ class OTLPLogsIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         )
         self.assertIsNotNone(warn.span_id)
 
+    def test_record_without_body_decodes_empty(self):
+        """A record with no body must become "" — not the string "None"."""
+        req = ExportLogsServiceRequest(
+            resource_logs=[
+                ResourceLogs(
+                    scope_logs=[
+                        ScopeLogs(
+                            log_records=[
+                                LogRecord(
+                                    time_unix_nano=int(time.time() * 1e9),
+                                    severity_number=9,
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ]
+        ).SerializeToString()
+        items = decode_otlp_logs(req, "application/x-protobuf")
+        self.assertEqual(items[0]["body"], "")
+
+    def test_zero_trace_and_span_ids_treated_as_absent(self):
+        """All-zero ids mean 'no span context' and must not be stored."""
+        req = ExportLogsServiceRequest(
+            resource_logs=[
+                ResourceLogs(
+                    scope_logs=[
+                        ScopeLogs(
+                            log_records=[
+                                LogRecord(
+                                    time_unix_nano=int(time.time() * 1e9),
+                                    severity_number=9,
+                                    body=AnyValue(string_value="x"),
+                                    trace_id=b"\x00" * 16,
+                                    span_id=b"\x00" * 8,
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ]
+        ).SerializeToString()
+        items = decode_otlp_logs(req, "application/x-protobuf")
+        self.assertIsNone(items[0]["trace_id"])
+        self.assertIsNone(items[0]["span_id"])
+
+    def test_trailing_slash_accepted(self):
+        res = self.client.post(
+            "/v1/logs/",
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=self.auth,
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
     def test_json_logs_ingested(self):
         """OTLP/JSON uses camelCase keys and hex trace ids."""
         now_ns = str(int(time.time() * 1e9))

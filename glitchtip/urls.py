@@ -27,10 +27,11 @@ urlpatterns = [
     ),
     path("api/<int:project_id>/envelope/", event_envelope_view, name="event_envelope"),
     path("api/<int:project_id>/minidump/", minidump_view, name="minidump"),
-    # Native OTLP/HTTP ingest. OTel exporters POST to <endpoint>/v1/logs with
-    # no trailing slash; the project is resolved from the DSN key in the auth
-    # header. Routed through the minimal ingest middleware — see ingest_asgi.py.
-    path("v1/logs", otlp_logs_view, name="otlp_logs"),
+    # Native OTLP/HTTP ingest. OTel exporters POST to <endpoint>/v1/logs (the
+    # trailing slash is optional and tolerated); the project is resolved from
+    # the DSN key in the auth header. Routed through the minimal ingest
+    # middleware — see ingest_asgi.py.
+    re_path(r"^v1/logs/?$", otlp_logs_view, name="otlp_logs"),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
     # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
     path(

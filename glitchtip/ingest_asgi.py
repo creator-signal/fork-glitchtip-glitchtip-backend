@@ -18,8 +18,8 @@ _INGEST_PATH_RE = re.compile(
     # CPU between awaits — not AuthenticationMiddleware etc.
     r"_probe/(?:async|realistic)"
     r")/"
-    # Native OTLP/HTTP ingest (no trailing slash, no /api prefix).
-    r"|v1/(?:logs|traces|metrics)$"
+    # Native OTLP/HTTP ingest (optional trailing slash, no /api prefix).
+    r"|v1/(?:logs|traces|metrics)/?$"
     r")"
 )
 

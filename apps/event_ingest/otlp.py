@@ -25,6 +25,11 @@ from .schema import LogItemSchema, otel_log_to_log_item
 # end-user value and would otherwise be copied into every log row's JSONB.
 _RESOURCE_ATTR_SKIP_PREFIXES = ("telemetry.sdk.", "telemetry.auto.")
 
+# All-zero ids mean "no trace/span context"; treat them as absent rather than
+# storing a meaningless 0 / zero-UUID.
+_ZERO_TRACE_ID = b"\x00" * 16
+_ZERO_SPAN_ID = b"\x00" * 8
+
 
 def _proto_anyvalue_to_dict(value) -> dict | None:
     """Convert a protobuf ``AnyValue`` to the snake_case dict form that
@@ -49,22 +54,25 @@ def _keep_resource_attr(key: str) -> bool:
 def _proto_record_to_otel_dict(record) -> dict:
     """Build an OTLP-log-record dict (snake_case, hex ids) from a protobuf
     ``LogRecord``, matching what ``otel_log_to_log_item`` expects."""
+    body = _proto_anyvalue_to_dict(record.body)
     rec: dict = {
         "time_unix_nano": record.time_unix_nano or record.observed_time_unix_nano,
         # severity_number is the enum's integer value; 0 == UNSPECIFIED.
         "severity_number": record.severity_number or None,
         "severity_text": record.severity_text or None,
-        "body": _proto_anyvalue_to_dict(record.body),
+        # An unset body must map to "" (not the literal "None" str(None) would
+        # produce downstream).
+        "body": body if body is not None else "",
         "attributes": [
             {"key": attr.key, "value": _proto_anyvalue_to_dict(attr.value)}
             for attr in record.attributes
         ],
     }
     # trace_id (16 bytes) / span_id (8 bytes) are hex-encoded per the OTLP/JSON
-    # convention; empty bytes mean the record was not inside a span.
-    if record.trace_id:
+    # convention; empty or all-zero bytes mean the record was not inside a span.
+    if record.trace_id and record.trace_id != _ZERO_TRACE_ID:
         rec["trace_id"] = record.trace_id.hex()
-    if record.span_id:
+    if record.span_id and record.span_id != _ZERO_SPAN_ID:
         rec["span_id"] = record.span_id.hex()
     return rec
 
