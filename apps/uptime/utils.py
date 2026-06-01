@@ -30,6 +30,7 @@ __all__ = [
     "check_url_safe",
     "fetch",
     "fetch_all",
+    "fetch_with_retries",
     "is_ip_blocked",
     "process_response",
 ]
@@ -132,6 +133,35 @@ async def fetch(session, monitor):
         logger.error(f"Monitor {monitor['id']} check failed", exc_info=e)
         monitor["reason"] = MonitorCheckReason.UNKNOWN
     return monitor
+
+
+async def fetch_with_retries(session, monitor):
+    """
+    Run ``fetch`` and, if it reports the monitor down, re-probe a few times a
+    short delay apart before accepting the failure. This confirms a *sustained*
+    failure within a single check cycle instead of waiting whole intervals,
+    which matters most for monitors with long intervals.
+
+    Controlled by GLITCHTIP_UPTIME_CHECK_RETRIES (default 0, i.e. disabled, so
+    behaviour is unchanged) and GLITCHTIP_UPTIME_CHECK_RETRY_DELAY (seconds).
+    Heartbeat monitors are push-based and not re-probed.
+    """
+    retries = settings.GLITCHTIP_UPTIME_CHECK_RETRIES
+    if retries < 1 or monitor["monitor_type"] == MonitorType.HEARTBEAT:
+        return await fetch(session, monitor)
+
+    delay = settings.GLITCHTIP_UPTIME_CHECK_RETRY_DELAY
+    for attempt in range(retries + 1):
+        # Clear transient result fields so a later success can't inherit a
+        # stale failure reason/payload from an earlier attempt.
+        for key in ("reason", "response_time", "data"):
+            monitor.pop(key, None)
+        result = await fetch(session, monitor)
+        if result["is_up"]:
+            return result
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    return result
 
 
 async def fetch_all(monitors):

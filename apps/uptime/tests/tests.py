@@ -2,11 +2,13 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from unittest import mock
 
+import aiohttp
 from aioresponses import aioresponses
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.core import mail
-from django.test import TransactionTestCase
+from django.core.management import call_command
+from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
@@ -18,8 +20,8 @@ from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import MonitorType
 from ..models import Monitor, MonitorCheck
-from ..tasks import dispatch_checks, save_monitor_checks
-from ..utils import fetch_all
+from ..tasks import apply_flap_tolerance, dispatch_checks, save_monitor_checks
+from ..utils import fetch_all, fetch_with_retries
 from ..webhooks import send_uptime_as_webhook
 
 
@@ -513,3 +515,348 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         )
         mocked.assert_called_once()
         self.assertTrue(monitor.checks.filter(is_up=True).exists())
+
+    # --- Flap tolerance (failure/recovery thresholds) ---
+
+    @staticmethod
+    def _transition_result(
+        is_up,
+        latest_is_up,
+        *,
+        last_change=None,
+        monitor_type=MonitorType.GET,
+        failure_threshold=1,
+        recovery_threshold=1,
+        consecutive_failures=0,
+        consecutive_successes=0,
+    ):
+        return {
+            "id": 1,
+            "organization_id": 1,
+            "is_up": is_up,
+            "latest_is_up": latest_is_up,
+            "last_change": last_change,
+            "monitor_type": monitor_type,
+            "failure_threshold": failure_threshold,
+            "recovery_threshold": recovery_threshold,
+            "consecutive_failures": consecutive_failures,
+            "consecutive_successes": consecutive_successes,
+        }
+
+    def test_default_threshold_matches_single_check_behaviour(self):
+        """With thresholds at 1, every result that differs from the cached
+        status flips immediately and is treated as a transition."""
+        # up -> down on a single failure
+        r = self._transition_result(is_up=False, latest_is_up=True)
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+        self.assertFalse(r["new_is_up"])
+        # down -> up on a single success
+        r = self._transition_result(is_up=True, latest_is_up=False)
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+        self.assertTrue(r["new_is_up"])
+        # steady state: no change, no transition
+        r = self._transition_result(is_up=True, latest_is_up=True)
+        apply_flap_tolerance(r)
+        self.assertFalse(r["transitioned"])
+        # first ever check (no cached status) is always a baseline change
+        r = self._transition_result(is_up=True, latest_is_up=None)
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+
+    def test_failure_threshold_requires_consecutive_failures(self):
+        """failure_threshold=3 does not flip on 1 or 2 failures, flips on the 3rd."""
+        failures = 0
+        for expected_failures in (1, 2):
+            r = self._transition_result(
+                is_up=False,
+                latest_is_up=True,
+                failure_threshold=3,
+                consecutive_failures=failures,
+            )
+            apply_flap_tolerance(r)
+            self.assertFalse(r["transitioned"])
+            self.assertTrue(r["new_is_up"])  # still up
+            self.assertEqual(r["consecutive_failures"], expected_failures)
+            failures = r["consecutive_failures"]
+
+        r = self._transition_result(
+            is_up=False,
+            latest_is_up=True,
+            failure_threshold=3,
+            consecutive_failures=failures,
+        )
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+        self.assertFalse(r["new_is_up"])
+        self.assertEqual(r["consecutive_failures"], 3)
+
+    def test_recovery_threshold_requires_consecutive_successes(self):
+        successes = 0
+        for _ in range(2):
+            r = self._transition_result(
+                is_up=True,
+                latest_is_up=False,
+                recovery_threshold=3,
+                consecutive_successes=successes,
+            )
+            apply_flap_tolerance(r)
+            self.assertFalse(r["transitioned"])
+            self.assertFalse(r["new_is_up"])  # still down
+            successes = r["consecutive_successes"]
+
+        r = self._transition_result(
+            is_up=True,
+            latest_is_up=False,
+            recovery_threshold=3,
+            consecutive_successes=successes,
+        )
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+        self.assertTrue(r["new_is_up"])
+
+    def test_counters_reset_on_alternating_results(self):
+        r = self._transition_result(
+            is_up=True, latest_is_up=True, consecutive_failures=2
+        )
+        apply_flap_tolerance(r)
+        self.assertEqual(r["consecutive_failures"], 0)
+        self.assertEqual(r["consecutive_successes"], 1)
+
+    def test_heartbeat_exempt_from_thresholds(self):
+        """Heartbeats keep immediate transitions regardless of configured
+        thresholds (their up results never reach this path)."""
+        r = self._transition_result(
+            is_up=False,
+            latest_is_up=True,
+            monitor_type=MonitorType.HEARTBEAT,
+            failure_threshold=5,
+        )
+        apply_flap_tolerance(r)
+        self.assertTrue(r["transitioned"])
+        self.assertFalse(r["new_is_up"])
+
+    def test_baseline_marks_is_change_without_transition(self):
+        """When there is no prior change record (last_change is None) the check
+        is marked is_change for re-baselining, but it is not a transition/alert."""
+        r = self._transition_result(is_up=True, latest_is_up=True, last_change=None)
+        apply_flap_tolerance(r)
+        self.assertFalse(r["transitioned"])
+        self.assertTrue(r["is_change"])
+
+    def _run_check(self, mon, is_up, now):
+        """Simulate one dispatch cycle: read the monitor's cached state +
+        counters (as perform_checks does) and run a single check result."""
+        mon.refresh_from_db()
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": is_up,
+            "latest_is_up": mon.cached_is_up,
+            "last_change": mon.cached_last_change,
+            "monitor_type": mon.monitor_type,
+            "failure_threshold": mon.failure_threshold,
+            "recovery_threshold": mon.recovery_threshold,
+            "consecutive_failures": mon.consecutive_failures,
+            "consecutive_successes": mon.consecutive_successes,
+        }
+        async_to_sync(save_monitor_checks)([result], now)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_threshold_absorbs_transient_flap(self, _mocked):
+        """Replay of the observed single-interval flap: with failure_threshold=3
+        a lone failed check produces no status flip and no notification, while
+        every check is still recorded for history."""
+        self.create_user_and_project()
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                project=self.project,
+                failure_threshold=3,
+                recovery_threshold=1,
+                consecutive_failures=0,
+                consecutive_successes=0,
+                cached_is_up=True,
+                cached_last_change=datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+
+            self._run_check(mon, is_up=False, now=timezone.now())  # transient blip
+            self._run_check(mon, is_up=True, now=timezone.now())  # recovered
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)  # never flipped
+        self.assertEqual(mon.consecutive_failures, 0)
+        self.assertEqual(len(mail.outbox), 0)  # no false alert
+        self.assertEqual(mon.checks.count(), 2)  # history intact
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_sustained_outage_alerts_once_each_way(self, _mocked):
+        self.create_user_and_project()
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                project=self.project,
+                failure_threshold=3,
+                recovery_threshold=1,
+                consecutive_failures=0,
+                consecutive_successes=0,
+                cached_is_up=True,
+                cached_last_change=datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+
+            for _ in range(3):  # sustained failure crosses the threshold
+                self._run_check(mon, is_up=False, now=timezone.now())
+
+        mon.refresh_from_db()
+        self.assertFalse(mon.cached_is_up)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("is down", mail.outbox[0].body)
+
+        with freeze_time("2020-01-02"):
+            self._run_check(mon, is_up=True, now=timezone.now())  # recovery
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn("is back up", mail.outbox[1].body)
+
+    @override_settings(
+        GLITCHTIP_UPTIME_CHECK_RETRIES=2, GLITCHTIP_UPTIME_CHECK_RETRY_DELAY=0
+    )
+    @aioresponses()
+    def test_in_check_retry_confirms_within_one_cycle(self, mocked):
+        """A failed probe is re-tried within the same check; if a retry
+        succeeds the check is recorded as up."""
+        url = "https://example.com"
+        mocked.get(url, status=500)  # first attempt fails
+        mocked.get(url, status=200)  # retry succeeds
+        monitor = {
+            "id": 1,
+            "organization_id": 1,
+            "monitor_type": MonitorType.GET,
+            "url": url,
+            "timeout": 20,
+            "expected_status": 200,
+            "expected_body": "",
+            "interval": 60,
+            "latest_is_up": None,
+        }
+
+        async def run():
+            async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+                return await fetch_with_retries(session, monitor)
+
+        result = async_to_sync(run)()
+        self.assertTrue(result["is_up"])
+        self.assertIsNone(result.get("reason"))  # no stale failure reason
+
+    @override_settings(GLITCHTIP_UPTIME_CHECK_RETRIES=0)
+    @aioresponses()
+    def test_no_retry_when_disabled(self, mocked):
+        url = "https://example.com"
+        mocked.get(url, status=500)
+        monitor = {
+            "id": 1,
+            "organization_id": 1,
+            "monitor_type": MonitorType.GET,
+            "url": url,
+            "timeout": 20,
+            "expected_status": 200,
+            "expected_body": "",
+            "interval": 60,
+            "latest_is_up": None,
+        }
+
+        async def run():
+            async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+                return await fetch_with_retries(session, monitor)
+
+        result = async_to_sync(run)()
+        self.assertFalse(result["is_up"])
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_resync_cache_uses_confirmed_status(self, _mocked):
+        """resync_monitor_cache derives cached_is_up from the last confirmed
+        transition (is_change=True), not a later sub-threshold blip, and clears
+        the counters."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                failure_threshold=3,
+                consecutive_failures=2,
+                cached_is_up=None,
+            )
+            # Confirmed "up" transition...
+            baker.make(
+                MonitorCheck,
+                monitor=mon,
+                organization=mon.organization,
+                is_up=True,
+                is_change=True,
+                start_check=datetime(2020, 1, 1, 10, 0, tzinfo=dt_timezone.utc),
+            )
+            # ...followed by a transient failed check that did NOT transition.
+            baker.make(
+                MonitorCheck,
+                monitor=mon,
+                organization=mon.organization,
+                is_up=False,
+                is_change=False,
+                start_check=datetime(2020, 1, 1, 11, 0, tzinfo=dt_timezone.utc),
+            )
+
+        call_command("resync_monitor_cache")
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)  # confirmed up, not the blip
+        self.assertEqual(
+            mon.cached_last_change,
+            datetime(2020, 1, 1, 10, 0, tzinfo=dt_timezone.utc),
+        )
+        self.assertEqual(mon.consecutive_failures, 0)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_resync_cache_falls_back_when_no_change_records(self, _mocked):
+        """If retention pruned every is_change=True row on a long-stable
+        monitor, resync must keep the last known status (not NULL, which would
+        re-baseline and fire a spurious notification on the next check)."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                cached_is_up=None,
+            )
+            baker.make(
+                MonitorCheck,
+                monitor=mon,
+                organization=mon.organization,
+                is_up=True,
+                is_change=False,
+                start_check=datetime(2020, 1, 1, 9, 0, tzinfo=dt_timezone.utc),
+            )
+
+        call_command("resync_monitor_cache")
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)  # fell back to latest check
+        self.assertIsNone(mon.cached_last_change)  # no confirmed transition known

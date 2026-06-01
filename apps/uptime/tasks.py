@@ -21,7 +21,7 @@ from glitchtip.async_compat import async_atomic
 
 from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType
-from .utils import fetch
+from .utils import fetch_with_retries
 from .webhooks import send_uptime_as_webhook
 
 logger = logging.getLogger(__name__)
@@ -91,18 +91,76 @@ async def update_uptime_statistics(org_counts: dict[int, int], check_time):
         )
 
 
+def apply_flap_tolerance(result):
+    """
+    Decide whether a check result confirms a status transition, applying the
+    monitor's failure/recovery thresholds.
+
+    Mutates ``result`` in place, setting:
+      - ``new_is_up``: the (possibly unchanged) confirmed status to persist
+      - ``transitioned``: True only on a confirmed Up<->Down flip (drives alerts)
+      - ``is_change``: marks the MonitorCheck row (transition, or re-baseline
+        when there is no prior change record)
+      - ``consecutive_failures`` / ``consecutive_successes``: updated counters
+
+    With both thresholds at their default of 1 this reduces exactly to the
+    historical single-check behaviour. Heartbeat monitors are exempt (forced to
+    1): their "up" results never reach this path and recovery is recorded by the
+    push endpoint, so thresholding them would break recovery detection.
+    """
+    prev_is_up = result["latest_is_up"]
+    check_is_up = result["is_up"]
+
+    if result.get("monitor_type") == MonitorType.HEARTBEAT:
+        failure_threshold = recovery_threshold = 1
+    else:
+        failure_threshold = result.get("failure_threshold", 1)
+        recovery_threshold = result.get("recovery_threshold", 1)
+
+    failures = result.get("consecutive_failures", 0)
+    successes = result.get("consecutive_successes", 0)
+    if check_is_up:
+        successes += 1
+        failures = 0
+    else:
+        failures += 1
+        successes = 0
+
+    if prev_is_up is None:
+        # First check (or post-pruning baseline): adopt the result immediately.
+        new_is_up = check_is_up
+        transitioned = True
+    elif check_is_up and not prev_is_up and successes >= recovery_threshold:
+        new_is_up = True
+        transitioned = True
+    elif not check_is_up and prev_is_up and failures >= failure_threshold:
+        new_is_up = False
+        transitioned = True
+    else:
+        new_is_up = prev_is_up
+        transitioned = False
+
+    result["new_is_up"] = new_is_up
+    result["transitioned"] = transitioned
+    result["is_change"] = transitioned or result["last_change"] is None
+    result["consecutive_failures"] = failures
+    result["consecutive_successes"] = successes
+
+
 async def save_monitor_checks(results, now):
     """
     Bulk save monitor checks and trigger notifications.
     """
+    for result in results:
+        apply_flap_tolerance(result)
+
     monitor_checks = await MonitorCheck.objects.abulk_create(
         [
             MonitorCheck(
                 monitor_id=result["id"],
                 organization_id=result["organization_id"],
                 is_up=result["is_up"],
-                is_change=result["latest_is_up"] != result["is_up"]
-                or result["last_change"] is None,
+                is_change=result["is_change"],
                 start_check=now,
                 reason=result.get("reason", None),
                 response_time=result.get("response_time", None),
@@ -112,21 +170,26 @@ async def save_monitor_checks(results, now):
         ]
     )
 
-    # Bulk update cached fields on Monitor
-    monitors_to_update = []
-    for result in results:
-        is_change = (
-            result["latest_is_up"] != result["is_up"] or result["last_change"] is None
-        )
-        monitor = Monitor(
+    # Bulk update cached fields and flap counters on Monitor
+    monitors_to_update = [
+        Monitor(
             pk=result["id"],
-            cached_is_up=result["is_up"],
-            cached_last_change=now if is_change else result["last_change"],
+            cached_is_up=result["new_is_up"],
+            cached_last_change=now if result["is_change"] else result["last_change"],
+            consecutive_failures=result["consecutive_failures"],
+            consecutive_successes=result["consecutive_successes"],
         )
-        monitors_to_update.append(monitor)
+        for result in results
+    ]
     if monitors_to_update:
         await Monitor.objects.abulk_update(
-            monitors_to_update, ["cached_is_up", "cached_last_change"]
+            monitors_to_update,
+            [
+                "cached_is_up",
+                "cached_last_change",
+                "consecutive_failures",
+                "consecutive_successes",
+            ],
         )
 
     # Update hourly statistics
@@ -134,20 +197,20 @@ async def save_monitor_checks(results, now):
     await update_uptime_statistics(org_counts, now)
 
     for i, result in enumerate(results):
-        if result["latest_is_up"] != result["is_up"]:
+        if result["transitioned"]:
             last_change = result["last_change"]
             if last_change:
                 last_change = last_change.isoformat()
             # Pass monitor_id and composite PK as a list of strings for JSON serializability
             monitor_check_pk = [str(monitor_checks[i].id), result["organization_id"]]
             await send_monitor_notification.aenqueue(
-                result["id"], monitor_check_pk, not result["is_up"], last_change
+                result["id"], monitor_check_pk, not result["new_is_up"], last_change
             )
 
 
 async def run_checks(monitors, now):
     async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-        tasks = [asyncio.create_task(fetch(session, m)) for m in monitors]
+        tasks = [asyncio.create_task(fetch_with_retries(session, m)) for m in monitors]
         pending = tasks
         buffer = []
         BATCH_SIZE = 100

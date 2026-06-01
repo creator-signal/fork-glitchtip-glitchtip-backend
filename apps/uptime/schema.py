@@ -36,6 +36,8 @@ class MonitorIn(CamelSchema, ModelSchema):
     expected_status: int | None
     timeout: Annotated[int, Ge(1), Le(60)] | None
     project: str | None = None
+    failure_threshold: Annotated[int, Ge(1)] = 1
+    recovery_threshold: Annotated[int, Ge(1)] = 1
 
     @model_validator(mode="after")
     def validate(self):
@@ -141,6 +143,8 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "expected_body",
             "interval",
             "timeout",
+            "failure_threshold",
+            "recovery_threshold",
         ]
 
     model_config = ConfigDict(coerce_numbers_to_str=True)

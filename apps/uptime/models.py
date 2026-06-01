@@ -84,6 +84,19 @@ class Monitor(models.Model):
     expected_body = models.CharField(max_length=2000, blank=True)
     cached_is_up = models.BooleanField(null=True, default=None)
     cached_last_change = models.DateTimeField(null=True, default=None)
+    # Flap tolerance: running counts of consecutive same-result checks, used to
+    # gate status transitions/notifications against the thresholds below.
+    consecutive_failures = models.PositiveIntegerField(default=0)
+    consecutive_successes = models.PositiveIntegerField(default=0)
+    # Consecutive failed checks required to transition Up->Down (and successful
+    # checks for Down->Up). Default 1 preserves the historical single-check
+    # behaviour; raise to absorb transient blips. Not applied to heartbeats.
+    failure_threshold = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(1)]
+    )
+    recovery_threshold = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(1)]
+    )
 
     objects = MonitorManager()
 
