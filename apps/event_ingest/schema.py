@@ -796,7 +796,17 @@ def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
     """
     if not isinstance(val, dict):
         return val
-    for suffix in ("string_value", "int_value", "double_value", "bool_value"):
+    # snake_case keys come from protobuf decoding; camelCase from OTLP/JSON.
+    for suffix in (
+        "string_value",
+        "int_value",
+        "double_value",
+        "bool_value",
+        "stringValue",
+        "intValue",
+        "doubleValue",
+        "boolValue",
+    ):
         if suffix in val:
             return val[suffix]
     return val

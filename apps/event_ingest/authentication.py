@@ -219,6 +219,92 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     return project
 
 
+def otlp_key_from_request(request: HttpRequest) -> str | None:
+    """Extract the DSN public key from an OTLP request.
+
+    OTel exporters carry credentials in headers (``OTEL_EXPORTER_OTLP_HEADERS``)
+    or query params. We accept both common conventions:
+
+    - ``Authorization: Bearer <public_key>`` — the idiomatic OTLP form.
+    - ``X-Sentry-Auth: Sentry sentry_key=<public_key>`` — sentry's header, for
+      exporters configured to mimic it.
+    - ``?sentry_key=``/``?glitchtip_key=`` query params.
+    """
+    authorization = request.META.get("HTTP_AUTHORIZATION", "")
+    if authorization[:7].lower() == "bearer ":
+        return authorization[7:].strip()
+
+    if header := request.META.get(
+        "HTTP_X_SENTRY_AUTH", request.META.get("HTTP_AUTHORIZATION")
+    ):
+        parsed = parse_auth_header(header)
+        if key := parsed.get("sentry_key", parsed.get("glitchtip_key")):
+            return key
+
+    for param in ("sentry_key", "glitchtip_key"):
+        if param in request.GET:
+            return request.GET[param]
+    return None
+
+
+async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
+    """Resolve the project from the DSN public key alone, with no project id
+    in the URL.
+
+    Native OTLP exporters point at a base endpoint (``/v1/logs``,
+    ``/v1/traces``) and carry the DSN key in a header — there is no project id
+    in the path. ``public_key`` is globally unique, so the key fully identifies
+    the project. This is a lower-volume path than the sentry envelope ingest,
+    so it uses a single indexed ORM lookup rather than the raw-cursor stored
+    procedure that ``get_project`` uses on the hot path.
+    """
+    if settings.MAINTENANCE_EVENT_FREEZE:
+        raise HttpError(
+            503, "Events are not currently being accepted due to maintenance."
+        )
+    key_str = otlp_key_from_request(request)
+    if not key_str:
+        raise AuthenticationError(message="Unable to find authentication information")
+    try:
+        sentry_key = UUID(key_str)
+    except ValueError as err:
+        raise AuthenticationError(
+            message="dsn key badly formed hexadecimal UUID string"
+        ) from err
+
+    from apps.projects.models import ProjectKey
+
+    try:
+        key = await ProjectKey.objects.select_related("project__organization").aget(
+            public_key=sentry_key, is_active=True
+        )
+    except ProjectKey.DoesNotExist as err:
+        raise REJECTION_MAP["v"] from err
+
+    project = key.project
+    organization = project.organization
+    info = ProjectAuthInfo(
+        id=project.id,
+        scrub_ip_addresses=project.scrub_ip_addresses,
+        event_throttle_rate=project.event_throttle_rate,
+        organization_id=organization.id,
+        organization=OrganizationInfo(
+            id=organization.id,
+            is_accepting_events=organization.is_accepting_events,
+            event_throttle_rate=organization.event_throttle_rate,
+            scrub_ip_addresses=organization.scrub_ip_addresses,
+        ),
+        first_event=project.first_event,
+    )
+    if (
+        not organization.is_accepting_events
+        or organization.event_throttle_rate == 100
+        or project.event_throttle_rate == 100
+    ):
+        raise ThrottleException(600)
+    return info
+
+
 async def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:
     """
     Event Ingest authentication means validating the DSN (sentry_key).
