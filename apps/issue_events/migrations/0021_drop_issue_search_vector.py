@@ -1,6 +1,6 @@
 """Drop the now-unused Issue.search_vector column.
 
-Full-text search reads IssueSearchIndex (populated on ingest + backfilled in
+Full-text search reads IssueIndex (populated on ingest + backfilled in
 0020); nothing reads or writes Issue.search_vector anymore. Removing it
 narrows the hot Issue row (better cache density for issue-list reads) and
 reclaims the column from a table too large to hash-partition today -- and

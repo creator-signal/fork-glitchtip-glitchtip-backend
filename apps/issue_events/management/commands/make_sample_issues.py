@@ -11,7 +11,7 @@ from apps.issue_events.models import (
     Issue,
     IssueEvent,
     IssueEventType,
-    IssueSearchIndex,
+    IssueIndex,
     IssueTag,
     TagKey,
     TagValue,
@@ -57,16 +57,20 @@ class Command(MakeSampleCommand):
         self, issues: list[Issue], issue_events: list[list[IssueEvent]]
     ):
         issues = Issue.objects.bulk_create(issues)
-        # Populate the decoupled search index so sample issues are searchable
-        # (full-text search reads IssueSearchIndex, not the Issue table).
-        IssueSearchIndex.objects.bulk_create(
+        # Populate the IssueIndex leaf (the hot/queryable projection +
+        # full-text store): count/last_seen/level derived from the issue's events
+        # (bulk_create skips the post_save signal, so create rows explicitly).
+        IssueIndex.objects.bulk_create(
             [
-                IssueSearchIndex(
+                IssueIndex(
                     issue=issue,
                     organization_id=self.project.organization_id,
+                    count=len(issue_events[i]),
+                    last_seen=max(e.timestamp for e in issue_events[i]),
+                    level=issue_events[i][0].level,
                     fts_document=SearchVector(Value(issue.title)),
                 )
-                for issue in issues
+                for i, issue in enumerate(issues)
             ],
             ignore_conflicts=True,
         )
@@ -105,16 +109,19 @@ class Command(MakeSampleCommand):
         issue_tags = []
         for i, issue in enumerate(issues):
             events = issue_events[i]
+            # count/last_seen now live on the leaf; derive from the events here.
+            event_count = len(events)
+            issue_last_seen = max(e.timestamp for e in events)
             tags = events[0].tags
             for tag_key, tag_value in tags.items():
                 tag_key_id = tag_keys[tag_key]
                 tag_value_id = tag_values[tag_value]
-                tag_count = max(int(issue.count / 10), 1)
+                tag_count = max(int(event_count / 10), 1)
                 # Create a few groups of IssueTags over time
                 for _ in range(tag_count):
                     # Rather than group to nearest minute, just make it random
                     # To avoid conflicts. Good enough for performance testing.
-                    tag_date = issue.last_seen - timedelta(
+                    tag_date = issue_last_seen - timedelta(
                         minutes=random.randint(0, 60),
                         seconds=random.randint(0, 60),
                         milliseconds=random.randint(0, 1000),
@@ -217,7 +224,6 @@ class Command(MakeSampleCommand):
             }
 
             first_seen = start_time
-            last_seen = first_seen + event_delta * event_count
             start_time += issue_delta
 
             events: list[IssueEvent] = []
@@ -246,12 +252,9 @@ class Command(MakeSampleCommand):
                 Issue(
                     title=title,
                     culprit=culprit,
-                    level=level,
                     metadata={"title": title},
                     first_seen=first_seen,
-                    last_seen=last_seen,
                     project=self.project,
-                    count=event_count,
                 ),
             )
             issue_events.append(events)

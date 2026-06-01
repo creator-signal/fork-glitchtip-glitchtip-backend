@@ -29,6 +29,7 @@ from apps.mcp.serializers import (
     serialize_project,
 )
 from apps.mcp.server import _check_scopes, _parse_datetime
+from glitchtip.test_utils.issue import make_issue
 
 
 class ValidateTokenTest(TestCase):
@@ -120,8 +121,7 @@ class DataLayerTest(TestCase):
         self.assertEqual(projects[0].id, self.project.id)
 
     def test_get_issues(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             title="Test Issue",
         )
@@ -132,8 +132,7 @@ class DataLayerTest(TestCase):
         self.assertEqual(issues[0].id, issue.id)
 
     def test_get_issues_with_project_filter(self):
-        baker.make(
-            "issue_events.Issue",
+        make_issue(
             project=self.project,
             title="Test Issue",
         )
@@ -288,8 +287,7 @@ class DataLayerTest(TestCase):
         self.assertEqual(monitors[0].id, monitor.id)
 
     def test_update_issue_resolve(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.UNRESOLVED,
         )
@@ -298,8 +296,7 @@ class DataLayerTest(TestCase):
         self.assertEqual(result.status, EventStatus.RESOLVED)
 
     def test_update_issue_unresolve(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
         )
@@ -309,8 +306,7 @@ class DataLayerTest(TestCase):
         self.assertIsNone(result.resolved_in_release)
 
     def test_update_issue_ignore(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.UNRESOLVED,
         )
@@ -325,8 +321,7 @@ class DataLayerTest(TestCase):
             version="1.0.0",
         )
         release.projects.add(self.project)
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.UNRESOLVED,
         )
@@ -343,8 +338,7 @@ class DataLayerTest(TestCase):
             organization=self.organization,
             version="2.0.0",
         )
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.UNRESOLVED,
         )
@@ -365,9 +359,7 @@ class DataLayerTest(TestCase):
         result = async_to_sync(update_issue)(self.user.id, 999999, "resolved")
         self.assertIsNone(result)
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=True)
     @patch("apps.issue_events.cold_storage.query_cold_events")
     def test_get_latest_event_cold_storage_fallback(
         self, mock_query_cold, _mock_duckdb
@@ -388,9 +380,7 @@ class DataLayerTest(TestCase):
         self.assertEqual(result.issue, issue)
         mock_query_cold.assert_called_once()
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=False)
     def test_get_latest_event_no_duckdb(self, _mock_duckdb):
         """When DuckDB is not available, return None."""
         issue = baker.make("issue_events.Issue", project=self.project)
@@ -398,13 +388,9 @@ class DataLayerTest(TestCase):
         result = async_to_sync(get_latest_event)(self.user.id, issue.id)
         self.assertIsNone(result)
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=True)
     @patch("apps.issue_events.cold_storage.get_event_from_cold")
-    def test_get_event_cold_storage_uuid7_fallback(
-        self, mock_get_cold, _mock_duckdb
-    ):
+    def test_get_event_cold_storage_uuid7_fallback(self, mock_get_cold, _mock_duckdb):
         """UUIDv7 cold fallback uses get_event_from_cold with extracted timestamp."""
         from glitchtip.partition_manager import UUID7Helper
 
@@ -425,13 +411,9 @@ class DataLayerTest(TestCase):
         self.assertEqual(result.issue, issue)
         mock_get_cold.assert_called_once()
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=True)
     @patch("apps.issue_events.cold_storage.query_cold_events")
-    def test_get_event_cold_storage_uuid4_fallback(
-        self, mock_query_cold, _mock_duckdb
-    ):
+    def test_get_event_cold_storage_uuid4_fallback(self, mock_query_cold, _mock_duckdb):
         """UUIDv4 cold fallback scans recent cold storage by event_id."""
         import uuid as uuid_mod
 
@@ -455,13 +437,9 @@ class DataLayerTest(TestCase):
         call_kwargs = mock_query_cold.call_args[1]
         self.assertEqual(call_kwargs["event_id"], sdk_event_id)
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=True
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=True)
     @patch("apps.issue_events.cold_storage.get_event_from_cold")
-    def test_get_event_cold_storage_with_org_slug(
-        self, mock_get_cold, _mock_duckdb
-    ):
+    def test_get_event_cold_storage_with_org_slug(self, mock_get_cold, _mock_duckdb):
         """Providing organization_slug scopes the cold storage search."""
         from glitchtip.partition_manager import UUID7Helper
 
@@ -483,9 +461,7 @@ class DataLayerTest(TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.issue, issue)
 
-    @patch(
-        "apps.issue_events.cold_storage.is_duckdb_available", return_value=False
-    )
+    @patch("apps.issue_events.cold_storage.is_duckdb_available", return_value=False)
     def test_get_event_no_duckdb(self, _mock_duckdb):
         """When DuckDB is not available, return None for missing events."""
         import uuid as uuid_mod
@@ -514,8 +490,7 @@ class SerializerTest(TestCase):
 
     def test_serialize_issue(self):
         now = timezone.now()
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             title="Test Error",
             count=5,
@@ -603,16 +578,12 @@ class ParseDatetimeTest(TestCase):
     def test_relative_now_minus_10m(self):
         result = _parse_datetime("now-10m")
         expected = timezone.now() - timedelta(minutes=10)
-        self.assertAlmostEqual(
-            result.timestamp(), expected.timestamp(), delta=2
-        )
+        self.assertAlmostEqual(result.timestamp(), expected.timestamp(), delta=2)
 
     def test_relative_now_minus_1h(self):
         result = _parse_datetime("now-1h")
         expected = timezone.now() - timedelta(hours=1)
-        self.assertAlmostEqual(
-            result.timestamp(), expected.timestamp(), delta=2
-        )
+        self.assertAlmostEqual(result.timestamp(), expected.timestamp(), delta=2)
 
     def test_invalid_raises(self):
         with self.assertRaises(ValueError):
@@ -631,13 +602,11 @@ class IssueFilterTest(TestCase):
 
     def test_filter_by_start(self):
         now = timezone.now()
-        old_issue = baker.make(
-            "issue_events.Issue",
+        old_issue = make_issue(
             project=self.project,
             first_seen=now - timedelta(hours=2),
         )
-        new_issue = baker.make(
-            "issue_events.Issue",
+        new_issue = make_issue(
             project=self.project,
             first_seen=now - timedelta(minutes=5),
         )
@@ -653,18 +622,15 @@ class IssueFilterTest(TestCase):
 
     def test_filter_by_start_and_end(self):
         now = timezone.now()
-        baker.make(
-            "issue_events.Issue",
+        make_issue(
             project=self.project,
             first_seen=now - timedelta(hours=5),
         )
-        target_issue = baker.make(
-            "issue_events.Issue",
+        target_issue = make_issue(
             project=self.project,
             first_seen=now - timedelta(hours=2),
         )
-        baker.make(
-            "issue_events.Issue",
+        make_issue(
             project=self.project,
             first_seen=now - timedelta(minutes=5),
         )
@@ -679,8 +645,7 @@ class IssueFilterTest(TestCase):
         self.assertEqual(issues[0].id, target_issue.id)
 
     def test_filter_by_environment(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
         )
         tag_key = baker.make("issue_events.TagKey", key="environment")

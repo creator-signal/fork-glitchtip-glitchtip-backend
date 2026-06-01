@@ -555,25 +555,61 @@ async def send_issue_as_feishu_webhook(
     elements = []
     for issue in issues:
         tags = await gather_issue_tags(issue, tags_to_add)
-        fields = [{"is_short": True, "text": {"tag": "lark_md", "content": f"**Project**\n{issue.project.name}"}}]
+        fields = [
+            {
+                "is_short": True,
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**Project**\n{issue.project.name}",
+                },
+            }
+        ]
         for tag in tags:
-            fields.append({"is_short": True, "text": {"tag": "lark_md", "content": f"**{tag.label}**\n{tag.value}"}})
+            fields.append(
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**{tag.label}**\n{tag.value}",
+                    },
+                }
+            )
 
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**[{issue}]({issue.get_detail_url()})**\n{issue.culprit or ''}"},
-            "fields": fields,
-        })
-        elements.append({
-            "tag": "action",
-            "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": f"View Issue {issue.short_id_display}"}, "url": issue.get_detail_url(), "type": "primary"}],
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**[{issue}]({issue.get_detail_url()})**\n{issue.culprit or ''}",
+                },
+                "fields": fields,
+            }
+        )
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": f"View Issue {issue.short_id_display}",
+                        },
+                        "url": issue.get_detail_url(),
+                        "type": "primary",
+                    }
+                ],
+            }
+        )
         elements.append({"tag": "hr"})
 
     payload = {
         "msg_type": "interactive",
         "card": {
-            "header": {"title": {"tag": "plain_text", "content": title}, "template": "red"},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": "red",
+            },
             "elements": elements,
         },
     }
@@ -599,7 +635,7 @@ async def send_test_notification(
 
     issue = await (
         Issue.objects.filter(project=project)
-        .select_related("project__organization")
+        .select_related("project__organization", "index")
         .order_by("-id")
         .afirst()
     )
@@ -642,8 +678,13 @@ async def send_test_notification(
         payload = {
             "msg_type": "interactive",
             "card": {
-                "header": {"title": {"tag": "plain_text", "content": title}, "template": "blue"},
-                "elements": [{"tag": "div", "text": {"tag": "plain_text", "content": message}}],
+                "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "blue",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "plain_text", "content": message}}
+                ],
             },
         }
         return await send_feishu_webhook(url, payload)
@@ -668,7 +709,7 @@ async def send_webhook_notification(
     issues = [
         issue
         async for issue in notification.issues.select_related(
-            "project__organization"
+            "project__organization", "index"
         ).all()[: settings.MAX_ISSUES_PER_ALERT]
     ]
 

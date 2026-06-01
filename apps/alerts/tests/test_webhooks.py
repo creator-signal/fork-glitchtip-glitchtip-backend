@@ -10,6 +10,7 @@ from apps.issue_events.constants import LogLevel
 from apps.uptime.constants import MonitorType
 from apps.uptime.models import Monitor, MonitorCheck
 from apps.uptime.webhooks import send_uptime_as_webhook
+from glitchtip.test_utils.issue import make_issue
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
 from ..constants import RecipientType
@@ -100,7 +101,7 @@ class WebhookTestCase(GlitchTipTestCase):
         key_custom = baker.make("issue_events.TagKey", key="custom_tag")
         custom_value = baker.make("issue_events.TagValue", value="custom_value")
 
-        issue = baker.make("issue_events.Issue", level=LogLevel.ERROR)
+        issue = make_issue(level=LogLevel.ERROR)
         baker.make(
             "issue_events.IssueTag",
             issue=issue,
@@ -138,8 +139,8 @@ class WebhookTestCase(GlitchTipTestCase):
         MockSession.side_effect = mock_constructor
 
         issue = self.generate_issue_with_tags()
-        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
-        issue3 = baker.make("issue_events.Issue", level=LogLevel.NOTSET)
+        issue2 = make_issue(level=LogLevel.ERROR, short_id=2)
+        issue3 = make_issue(level=LogLevel.NOTSET)
 
         async_to_sync(send_issue_as_webhook)(TEST_URL, [issue, issue2, issue3], 3)
 
@@ -505,7 +506,7 @@ class WebhookTestCase(GlitchTipTestCase):
         MockSession.side_effect = mock_constructor
 
         issue = self.generate_issue_with_tags()
-        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        issue2 = make_issue(level=LogLevel.ERROR, short_id=2)
         async_to_sync(send_issue_as_ntfy)(NTFY_TEST_URL, [issue, issue2], 2)
 
         mock_post.assert_called_once()
@@ -677,7 +678,7 @@ class WebhookTestCase(GlitchTipTestCase):
         MockSession.side_effect = mock_constructor
 
         issue = self.generate_issue_with_tags()
-        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        issue2 = make_issue(level=LogLevel.ERROR, short_id=2)
         async_to_sync(send_issue_as_teams_webhook)(TEAMS_TEST_URL, [issue, issue2], 2)
 
         mock_post.assert_called_once()
@@ -806,7 +807,7 @@ class WebhookTestCase(GlitchTipTestCase):
         MockSession.side_effect = mock_constructor
 
         issue = self.generate_issue_with_tags()
-        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        issue2 = make_issue(level=LogLevel.ERROR, short_id=2)
         async_to_sync(send_issue_as_zulip)(
             ZULIP_TEST_URL, [issue, issue2], 2, config=ZULIP_TEST_CONFIG
         )
@@ -915,7 +916,7 @@ class WebhookTestCase(GlitchTipTestCase):
         MockSession.side_effect = mock_constructor
 
         issue = self.generate_issue_with_tags()
-        issue2 = baker.make("issue_events.Issue", level=LogLevel.ERROR, short_id=2)
+        issue2 = make_issue(level=LogLevel.ERROR, short_id=2)
         async_to_sync(send_issue_as_feishu_webhook)(FEISHU_TEST_URL, [issue, issue2], 2)
 
         mock_post.assert_called_once()
