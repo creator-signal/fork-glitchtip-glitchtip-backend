@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlencode
 
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.openid_connect.views import (
@@ -231,6 +232,25 @@ class InstanceLicenseOut(CamelSchema):
 async def get_instance_license(request: HttpRequest):
     _, email = await SupportLicense.resolved()
     return {"billing_email": email}
+
+
+class SupportLinkOut(CamelSchema):
+    url: str
+
+
+SUPPORT_LINK_BASE_URL = "https://glitchtip.com/support"
+
+
+@api.get("0/instance-license/support-link/", response=SupportLinkOut, by_alias=True)
+async def get_support_link(request: HttpRequest):
+    # Server-built; sub_xxx stays off the FE and out of access logs.
+    license_key, billing_email = await SupportLicense.resolved()
+    if not license_key:
+        return {"url": SUPPORT_LINK_BASE_URL}
+    params = {"sub": license_key}
+    if billing_email:
+        params["email"] = billing_email
+    return {"url": f"{SUPPORT_LINK_BASE_URL}#{urlencode(params)}"}
 
 
 class APIRootSchema(Schema):
