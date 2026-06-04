@@ -1,3 +1,21 @@
+# 6.1.7 (unreleased)
+
+- Security: Require the requesting user's own admin role to delete projects, DSN keys, and teams. A logged-in non-admin organization member could previously delete these within their own organization, because the role check matched any admin in the org rather than the caller (reported by Gumbraise).
+- Security: Validate outbound webhook URLs to block SSRF.
+- Security: Hash OAuth refresh and access tokens at rest, and restore the proactive access-token cache purge on revoke.
+- Security: Derive cookie Secure flags from the site URL and warn on unsafe defaults.
+- Feat: Assign issues to organization members or teams.
+- Feat: Add Feishu (Lark) webhook alert recipient.
+- Perf: Switch event-ingest and uptime-stats hot-path bulk writes from VALUES to UNNEST.
+- Perf: Hour-tiered, idempotent span cold storage with bounded reads and rollup recovery.
+- Perf: Cache the OIDC discovery document instead of fetching it per request.
+- Perf: Batch invalid-DSN block-cache lookups into a single MGET and scope them by (project, key).
+- Perf: Skip the hstore OID lookup on every new database connection.
+- Fix: Persist raw JavaScript stack traces only when sourcemaps remap frames; improve best-stacktrace selection and iOS event context.
+- Fix: Replace the 4 GB DATA_UPLOAD_MAX_MEMORY_SIZE workaround with a sized default.
+- Fix: Assorted Stripe billing fixes.
+- Deps: django-async-backend 6.0.6, symbolic 13.1.1, pydantic 2.13.3, django-anymail 15, django-prometheus 2.5.0, django-stubs 6.0.3, plus routine boto3, ruff, granian, and ipython updates.
+
 # 6.1.6
 
 - Feat: Accept API tokens as a fallback for MCP endpoint auth (for clients without full OAuth DCR support)
