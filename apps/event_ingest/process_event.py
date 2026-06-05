@@ -8,6 +8,7 @@ from urllib.parse import ParseResult, urlparse
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import caches
+from django.db import connections, transaction
 from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.utils import timezone
@@ -34,7 +35,7 @@ from apps.shared.async_db import (
     fetchall_unnest,
 )
 from apps.sourcecode.models import DebugSymbolBundle
-from glitchtip.async_compat import AsyncQuerySet, async_atomic
+from glitchtip.async_compat import AsyncQuerySet
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
@@ -610,89 +611,104 @@ async def _create_issue_and_hash(
 ) -> tuple[int, bool]:
     """Atomically create an Issue + IssueHash and return ``(issue_id, created)``.
 
-    Two writes wrapped in :func:`async_atomic`:
-    Issue (with ``to_tsvector('english', ...)`` for search_vector) then
-    IssueHash. The unique on ``(project_id, value)`` lets concurrent ingest
-    of the same hash race; the loser catches IntegrityError, reads back the
-    winner's id, and returns ``created=False``.
+    The whole unit — project-counter upsert, then the Issue
+    (with ``to_tsvector('english', ...)`` for search_vector) and IssueHash
+    writes wrapped in ``transaction.atomic()`` — runs inside a single
+    ``sync_to_async`` hop. This is deliberate: with ``USE_ASYNC_BACKEND``
+    off (the default), ``async_compat`` is a ``sync_to_async`` shim over
+    Django's thread-local connection, which this async worker shares across
+    concurrently running tasks. Holding a transaction open across an
+    ``await`` would let a sibling task close or poison that shared
+    connection mid-block, cascading as "Cannot open a new connection in an
+    atomic block" / TransactionManagementError. Keeping the transaction
+    inside one synchronous call means it never spans an await, so siblings
+    serialise before/after it on the executor thread and can't interfere.
 
-    The project counter upsert (one round-trip) runs before the atomic
-    block so its value is visible even on the IntegrityError path.
+    The unique on ``(project_id, value)`` lets concurrent ingest of the same
+    hash race; the loser catches IntegrityError, reads back the winner's id,
+    and returns ``created=False``. The project counter upsert runs before the
+    atomic block so its value is consumed even on the IntegrityError path.
     """
-    _, counter_rows = await fetchall(
-        """
-        INSERT INTO projects_projectcounter (project_id, value)
-        VALUES (%s, 1)
-        ON CONFLICT (project_id) DO UPDATE
-        SET value = projects_projectcounter.value + 1
-        RETURNING value
-        """,
-        [project_id],
-    )
-    short_id = counter_rows[0][0]
-
     search_vector_str = get_search_vector(processing_event)
 
-    try:
-        async with async_atomic():
-            _, issue_rows = await fetchall(
+    def _create_issue_and_hash_sync() -> tuple[int, bool]:
+        conn = connections["default"]
+        with conn.cursor() as cursor:
+            cursor.execute(
                 """
-                INSERT INTO issue_events_issue (
-                    project_id, type, title, metadata,
-                    first_seen, last_seen,
-                    first_release_id, last_release_id,
-                    level, short_id, search_vector,
-                    count, status, is_public, is_deleted, culprit
-                )
-                VALUES (
-                    %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s,
-                    %s, %s, to_tsvector('english', %s),
-                    1, %s, false, false, NULL
-                )
-                RETURNING id
+                INSERT INTO projects_projectcounter (project_id, value)
+                VALUES (%s, 1)
+                ON CONFLICT (project_id) DO UPDATE
+                SET value = projects_projectcounter.value + 1
+                RETURNING value
                 """,
-                [
-                    project_id,
-                    issue_defaults["type"],
-                    issue_defaults["title"],
-                    Jsonb(issue_defaults["metadata"]),
-                    issue_defaults["first_seen"],
-                    issue_defaults["last_seen"],
-                    issue_defaults.get("first_release_id"),
-                    issue_defaults.get("last_release_id"),
-                    issue_defaults.get("level", LogLevel.ERROR),
-                    short_id,
-                    search_vector_str,
-                    EventStatus.UNRESOLVED,
-                ],
+                [project_id],
             )
-            issue_id = issue_rows[0][0]
-            await execute(
-                """
-                INSERT INTO issue_events_issuehash (issue_id, project_id, value)
-                VALUES (%s, %s, %s::uuid)
-                """,
-                [issue_id, project_id, processing_event.issue_hash],
-            )
+            short_id = cursor.fetchone()[0]
+        try:
+            with transaction.atomic():
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO issue_events_issue (
+                            project_id, type, title, metadata,
+                            first_seen, last_seen,
+                            first_release_id, last_release_id,
+                            level, short_id, search_vector,
+                            count, status, is_public, is_deleted, culprit
+                        )
+                        VALUES (
+                            %s, %s, %s, %s,
+                            %s, %s,
+                            %s, %s,
+                            %s, %s, to_tsvector('english', %s),
+                            1, %s, false, false, NULL
+                        )
+                        RETURNING id
+                        """,
+                        [
+                            project_id,
+                            issue_defaults["type"],
+                            issue_defaults["title"],
+                            Jsonb(issue_defaults["metadata"]),
+                            issue_defaults["first_seen"],
+                            issue_defaults["last_seen"],
+                            issue_defaults.get("first_release_id"),
+                            issue_defaults.get("last_release_id"),
+                            issue_defaults.get("level", LogLevel.ERROR),
+                            short_id,
+                            search_vector_str,
+                            EventStatus.UNRESOLVED,
+                        ],
+                    )
+                    issue_id = cursor.fetchone()[0]
+                    cursor.execute(
+                        """
+                        INSERT INTO issue_events_issuehash (issue_id, project_id, value)
+                        VALUES (%s, %s, %s::uuid)
+                        """,
+                        [issue_id, project_id, processing_event.issue_hash],
+                    )
             check_set_issue_id(
                 processing_events,
                 project_id,
                 processing_event.issue_hash,
                 issue_id,
             )
-        return issue_id, True
-    except IntegrityError:
-        # Concurrent writer won the (project_id, value) race; read its issue_id.
-        _, hash_rows = await fetchall(
-            """
-            SELECT issue_id FROM issue_events_issuehash
-            WHERE project_id = %s AND value = %s::uuid
-            """,
-            [project_id, processing_event.issue_hash],
-        )
-        return hash_rows[0][0], False
+            return issue_id, True
+        except IntegrityError:
+            # Concurrent writer won the (project_id, value) race; read its id.
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT issue_id FROM issue_events_issuehash
+                    WHERE project_id = %s AND value = %s::uuid
+                    """,
+                    [project_id, processing_event.issue_hash],
+                )
+                return cursor.fetchone()[0], False
+
+    return await sync_to_async(_create_issue_and_hash_sync)()
 
 
 async def process_issue_events(
