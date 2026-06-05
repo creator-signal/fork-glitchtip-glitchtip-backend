@@ -238,19 +238,17 @@ class SupportLinkOut(CamelSchema):
     url: str
 
 
-SUPPORT_LINK_BASE_URL = "https://glitchtip.com/support"
-
-
 @api.get("0/instance-license/support-link/", response=SupportLinkOut, by_alias=True)
 async def get_support_link(request: HttpRequest):
-    # Server-built; sub_xxx stays off the FE and out of access logs.
+    # Built server-side; license key never reaches the client or access logs.
     license_key, billing_email = await SupportLicense.resolved()
-    if not license_key:
-        return {"url": SUPPORT_LINK_BASE_URL}
-    params = {"sub": license_key}
-    if billing_email:
-        params["email"] = billing_email
-    return {"url": f"{SUPPORT_LINK_BASE_URL}#{urlencode(params)}"}
+    url = "https://glitchtip.com/support"
+    if license_key:
+        params = {"sub": license_key}
+        if billing_email:
+            params["email"] = billing_email
+        url += f"#{urlencode(params)}"
+    return {"url": url}
 
 
 class APIRootSchema(Schema):
