@@ -1661,11 +1661,18 @@ async def process_transaction_events(
 
                 description = parameterize_description(span.op, span.description)
                 span_timestamp = span.start_timestamp or event.start_timestamp
-                # SpanStaging.id is UUIDv7 from the span's timestamp (matches
-                # the table's RANGE-partition key on id)
+                # SpanStaging.id is a server-time UUIDv7. It is the table's
+                # RANGE-partition key and promotion's insertion-order cursor
+                # (id < cutoff), so it must track ingestion time, not the
+                # client clock: staging keeps only a short partition horizon,
+                # and a skewed/backdated client timestamp would route the row
+                # to a nonexistent partition (IntegrityError, failing the
+                # whole batch). The real event time is preserved in the
+                # timestamp column below, which is what promotion buckets and
+                # garbage-filters on.
                 span_rows.append(
                     (
-                        UUID7Helper.from_datetime(span_timestamp),
+                        UUID7Helper.from_datetime(),
                         ingest_event.organization_id,
                         ingest_event.project_id,
                         span_duration_ms,
