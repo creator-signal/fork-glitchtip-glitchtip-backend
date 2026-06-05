@@ -2,7 +2,6 @@ from django.tasks import task_backends
 from django.urls import reverse
 
 from apps.issue_events.models import Issue, IssueEvent
-from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 
 from .utils import EventIngestTestCase
 
@@ -21,12 +20,11 @@ class SecurityAPITestCase(EventIngestTestCase):
         )
 
     def test_security_api(self):
-        with AsyncQueryCounter() as q:
+        with self.assertNumQueries(11):
             res = self.client.post(
                 self.url, self.small_event, content_type="application/json"
             )
             task_backends["default"].flush_batches()
-        self.assertEqual(len(q), 9)
         self.assertEqual(res.status_code, 201)
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
