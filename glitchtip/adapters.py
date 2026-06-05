@@ -1,6 +1,7 @@
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.internal.flows.login import record_authentication
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+from django.conf import settings
 
 from apps.users.utils import (
     is_social_apps_user_registration_open,
@@ -15,6 +16,15 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
 
 
 class CustomDefaultAccountAdapter(DefaultAccountAdapter):
+    def send_mail(self, template_prefix, email, context):
+        # Single chokepoint for all allauth mail (email confirmation, password
+        # reset, MFA notices). When email is disabled, skip without rendering or
+        # sending -- callers like the password-reset endpoint still return their
+        # normal response, they just don't deliver mail.
+        if not settings.EMAIL_ENABLED:
+            return
+        return super().send_mail(template_prefix, email, context)
+
     def render_mail(self, template_prefix, email, context, headers=None):
         headers = headers or {}
         default_headers = GlitchTipEmail.get_default_headers()

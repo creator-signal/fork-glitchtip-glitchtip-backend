@@ -1061,11 +1061,44 @@ EMAIL_INVITE_THROTTLE_COUNT = env.int("EMAIL_THROTTLE_COUNT", 50)
 EMAIL_INVITE_THROTTLE_INTERVAL = env.int("EMAIL_THROTTLE_INTERVAL", 300)  # 5 minutes
 EMAIL_INVITE_REQUIRE_VERIFICATION = env.bool("EMAIL_INVITE_REQUIRE_VERIFICATION", False)
 
+# Email is optional. With no transport configured, email is disabled: nothing
+# is sent, account verification and password reset are off, and /api/settings/
+# omits "email" so the frontend hides email-only UI. Disabling is implicit so a
+# bare install with no MTA doesn't crash on the default smtp -> localhost:25.
+#
+# Auto-enabled by any explicit transport: an EMAIL_* var below, an Anymail
+# provider, or a non-default EMAIL_BACKEND. So pointing at localhost:25 yourself
+# enables it (and fails loudly if broken) -- only the untouched default is
+# "unconfigured". Set EMAIL_ENABLED to override the auto-detection either way.
+_EMAIL_TRANSPORT_ENV_VARS = (
+    "EMAIL_URL",
+    "EMAIL_HOST",
+    "EMAIL_PORT",
+    "EMAIL_HOST_USER",
+    "EMAIL_HOST_PASSWORD",
+    "EMAIL_USE_TLS",
+    "EMAIL_USE_SSL",
+    "EMAIL_TIMEOUT",
+    "EMAIL_FILE_PATH",
+)
+EMAIL_ENABLED = env.bool(
+    "EMAIL_ENABLED",
+    default=TESTING
+    or bool(ANYMAIL)
+    or any(var in os.environ for var in _EMAIL_TRANSPORT_ENV_VARS)
+    or EMAIL_BACKEND != "django.core.mail.backends.smtp.EmailBackend",
+)
+
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_ADAPTER = "glitchtip.adapters.CustomDefaultAccountAdapter"
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+# Without a mail transport an account's email can never be confirmed, so treat
+# it as unverified/untrusted: skip verification entirely rather than minting
+# confirmations that can't be delivered. With email configured, keep allauth's
+# default "optional" behavior (login allowed, confirmation sent in background).
+ACCOUNT_EMAIL_VERIFICATION = "optional" if EMAIL_ENABLED else "none"
 ACCOUNT_REAUTHENTICATION_TIMEOUT = SESSION_COOKIE_AGE  # Disabled for now
 LOGIN_REDIRECT_URL = "/"
 LOGIN_URL = "/login"

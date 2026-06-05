@@ -1,12 +1,15 @@
 from datetime import datetime
 from typing import Literal
 
+from django.conf import settings
+from django.urls import reverse
 from ninja import Field, ModelSchema
 from pydantic import ConfigDict, EmailStr
 
 from apps.users.schema import UserSchema
 from glitchtip.schema import CamelSchema
 
+from .invitation_backend import InvitationTokenGenerator
 from .models import (
     Organization,
     OrganizationUser,
@@ -103,6 +106,28 @@ class OrganizationUserDetailSchema(OrganizationUserSchema):
     @staticmethod
     def resolve_teams(obj):
         return [team.slug for team in obj.teams.all()]
+
+
+class OrganizationUserInviteSchema(OrganizationUserSchema):
+    """Response for the invite (member create) endpoint.
+
+    Surfaces the acceptance link so the frontend can offer a copy-link invite
+    flow. This is the only delivery path when email is disabled, and a harmless
+    convenience when email works. The link carries the same time-limited token
+    the invite email uses, so possessing it is what grants acceptance.
+    """
+
+    invite_link: str | None = None
+
+    @staticmethod
+    def resolve_invite_link(obj) -> str | None:
+        if obj.user_id is not None:
+            # Already accepted -- no pending invite to link to.
+            return None
+        token = InvitationTokenGenerator().make_token(obj)
+        return settings.GLITCHTIP_URL.geturl() + reverse(
+            "invitations_register", args=[obj.pk, token]
+        )
 
 
 class AcceptInviteIn(CamelSchema):
