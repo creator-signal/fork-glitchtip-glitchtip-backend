@@ -323,6 +323,44 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "Should have processed the valid event after ignoring the attachment.",
         )
 
+    def test_envelope_empty_event_id_header(self):
+        """
+        Some SDKs (e.g. sentry-go on client_report envelopes, which have no
+        associated event) send an empty string for the optional event_id
+        header field instead of omitting it. The envelope must still be
+        accepted rather than rejected with a 400 for an invalid UUID.
+        """
+        envelope_header_bytes = json.dumps(
+            {
+                "event_id": "",
+                "sent_at": "2025-04-08T13:09:00Z",
+                "dsn": "https://key@app.example.com/1",
+            }
+        ).encode()
+        report_payload_bytes = json.dumps(
+            {
+                "timestamp": "2025-04-08T13:09:00Z",
+                "discarded_events": [
+                    {"reason": "sample_rate", "category": "transaction", "quantity": 6}
+                ],
+            }
+        ).encode()
+        report_header_bytes = json.dumps(
+            {"type": "client_report", "length": len(report_payload_bytes)}
+        ).encode()
+
+        data = (
+            envelope_header_bytes
+            + b"\n"
+            + report_header_bytes
+            + b"\n"
+            + report_payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200, res.content)
+
     def test_envelope_ignores_log_item_with_length(self):
         """
         Ensure that log items are skipped, but subsequent valid events are being processed.
