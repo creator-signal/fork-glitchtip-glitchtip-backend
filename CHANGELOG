@@ -1,3 +1,7 @@
+# 6.1.8
+
+- Fix: Prevent "Cannot open a new connection in an atomic block" / TransactionManagementError during concurrent async event ingest by running issue creation in a single transaction instead of holding it open across an await
+
 # 6.1.7
 
 - Security: Require the requesting user's own admin role to delete projects, DSN keys, and teams. A logged-in non-admin organization member could previously delete these within their own organization, because the role check matched any admin in the org rather than the caller (reported by Gumbraise).
