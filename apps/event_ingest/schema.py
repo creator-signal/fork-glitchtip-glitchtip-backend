@@ -432,9 +432,7 @@ class TransactionEventSchema(LaxIngestSchema):
         if v.tzinfo is None:
             v = v.replace(tzinfo=timezone.utc)
         current = now()
-        if v < current - timedelta(
-            days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
-        ):
+        if v < current - timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS):
             raise ValueError("Event time too old.")
         if v > current + settings.GLITCHTIP_TRANSACTION_FUTURE_SKEW:
             raise ValueError("Event time in the future.")
@@ -446,6 +444,17 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     dsn: str | None = None
     sdk: ClientSDKInfo | None = None
     sent_at: datetime = Field(default_factory=now)
+
+    @field_validator("event_id", mode="before")
+    def empty_event_id_to_none(cls, v: Any) -> Any:
+        # event_id is optional in the envelope spec. Some SDKs (e.g.
+        # sentry-go on client_report envelopes, which have no associated
+        # event) send an empty string rather than omitting the key. The
+        # field default only applies when the key is absent, so coerce a
+        # blank value to None instead of failing UUID parsing.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 SupportedItemType = Literal[
