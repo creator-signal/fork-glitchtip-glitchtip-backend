@@ -194,6 +194,11 @@ async def get_settings(request: HttpRequest):
         enabled_features.append("uptime")
     if settings.GLITCHTIP_ENABLE_MCP:
         enabled_features.append("mcp")
+    if settings.EMAIL_ENABLED:
+        # Signals that email-dependent UI (password reset, resend confirmation)
+        # is usable. When absent, the frontend hides those and offers copy-link
+        # invites instead.
+        enabled_features.append("email")
 
     # Legacy env wins; fall back to the SupportLicense singleton.
     if settings.BILLING_ENABLED or settings.I_PAID_FOR_GLITCHTIP:

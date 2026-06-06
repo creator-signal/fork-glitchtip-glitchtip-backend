@@ -77,6 +77,10 @@ class GlitchTipEmail(ContextMixin):
         return context
 
     def _send_email(self, context, to, users=None):
+        if not settings.EMAIL_ENABLED:
+            # Email disabled: skip deterministically. Invite/throttle/alert/
+            # uptime tasks still run to completion, they just don't send.
+            return
         subject = self.get_subject_content(context)
         headers = self.get_headers(context)
         msg = EmailMultiAlternatives(

@@ -28,6 +28,7 @@ from .schema import (
     OrganizationSchema,
     OrganizationUserDetailSchema,
     OrganizationUserIn,
+    OrganizationUserInviteSchema,
     OrganizationUserSchema,
     OrganizationUserUpdateSchema,
 )
@@ -199,7 +200,7 @@ async def get_organization_member(
 
 @router.post(
     "organizations/{slug:organization_slug}/members/",
-    response={201: OrganizationUserSchema},
+    response={201: OrganizationUserInviteSchema},
     by_alias=True,
 )
 @has_permission(["member:write", "member:admin"])
@@ -209,9 +210,13 @@ async def create_organization_member(
     user = await User.objects.aget(id=request.auth.user_id)
 
     if (
-        settings.EMAIL_INVITE_REQUIRE_VERIFICATION
+        settings.EMAIL_ENABLED
+        and settings.EMAIL_INVITE_REQUIRE_VERIFICATION
         and not await user.emailaddress_set.filter(verified=True).aexists()
     ):
+        # No email transport means no email can ever be verified, so this gate
+        # can't be satisfied. Skip it in disabled mode rather than blocking all
+        # invites; acceptance is gated by the invite token instead.
         raise HttpError(403, "User must have a verified email address")
 
     organization = await aget_object_or_404(
