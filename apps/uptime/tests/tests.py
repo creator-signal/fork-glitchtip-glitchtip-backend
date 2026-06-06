@@ -226,6 +226,151 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(len(mail.outbox), 2)
         self.assertIn("is back up", mail.outbox[1].body)
 
+    @aioresponses()
+    def test_monitor_notification_threshold(self, mocked):
+        """With an uptime failure threshold, alert only once N failed checks
+        occur within M minutes; dedup the down alert; alert again on recovery."""
+        self.create_user_and_project()
+        test_url = "https://example.com"
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-01"):
+            monitor = baker.make(
+                Monitor,
+                name=test_url,
+                url=test_url,
+                monitor_type=MonitorType.GET,
+                project=self.project,
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__uptime_quantity=3,
+                alert__uptime_timespan_minutes=5,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+            # Seed two earlier down checks within the 5-minute window so that
+            # the loop's down check becomes the 3rd failure (== threshold).
+            baker.make(
+                MonitorCheck,
+                monitor=monitor,
+                organization=monitor.organization,
+                is_up=False,
+                is_change=False,
+                start_check=datetime(2020, 1, 1, 0, 0, 0, tzinfo=dt_timezone.utc),
+            )
+
+        async def run_loop():
+            for _ in range(60):
+                await dispatch_checks.func()
+
+        # First down run: only 1 prior down check seeded + this one = 2 < 3,
+        # so no email yet.
+        mocked.get(test_url, status=500)
+        with freeze_time("2020-01-01 00:01:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Second down run: now 3 down checks within the window -> alert once.
+        mocked.get(test_url, status=500)
+        with freeze_time("2020-01-01 00:02:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("is down", mail.outbox[0].body)
+
+        # Still down -> dedup, no additional email.
+        mocked.get(test_url, status=500)
+        with freeze_time("2020-01-01 00:03:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 1)
+
+        # Recovery -> a single "back up" email.
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-01 00:04:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn("is back up", mail.outbox[1].body)
+
+    @aioresponses()
+    def test_monitor_notification_blip_below_threshold(self, mocked):
+        """A short blip that never reaches the failure threshold sends neither
+        a down email nor a recovery email."""
+        self.create_user_and_project()
+        test_url = "https://example.com"
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-01"):
+            baker.make(
+                Monitor,
+                name=test_url,
+                url=test_url,
+                monitor_type=MonitorType.GET,
+                project=self.project,
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__uptime_quantity=3,
+                alert__uptime_timespan_minutes=5,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+
+        async def run_loop():
+            for _ in range(60):
+                await dispatch_checks.func()
+
+        # Single down check (1 < 3) -> no down email.
+        mocked.get(test_url, status=500)
+        with freeze_time("2020-01-01 00:01:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Recovery before threshold reached -> no recovery email either.
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-01 00:02:00"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 0)
+
+    @aioresponses()
+    def test_recovery_email_for_monitor_already_down_at_upgrade(self, mocked):
+        """A monitor already DOWN at upgrade time (seeded cached_down_alerted=True,
+        as the 0018 backfill does) sends exactly one recovery email on coming back
+        up. This proves the backfill's intent: without it, cached_down_alerted would
+        be False and the 'is back up' email would be skipped."""
+        self.create_user_and_project()
+        test_url = "https://example.com"
+        # Monitor created while down; baker won't perform a check since we mock 500.
+        mocked.get(test_url, status=500)
+        with freeze_time("2020-01-01"):
+            monitor = baker.make(
+                Monitor,
+                name=test_url,
+                url=test_url,
+                monitor_type=MonitorType.GET,
+                project=self.project,
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+        # Simulate the post-backfill state: already down, down alert already sent.
+        Monitor.objects.filter(pk=monitor.pk).update(
+            cached_is_up=False, cached_down_alerted=True
+        )
+
+        async def run_loop():
+            for _ in range(60):
+                await dispatch_checks.func()
+
+        # Recovery -> exactly one "is back up" email.
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-02"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("is back up", mail.outbox[0].body)
+
     @mock.patch("aiohttp.ClientSession")
     def test_discord_webhook(self, MockSession):
         from apps.alerts.tests.test_webhooks import _mock_aiohttp_session

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from collections import Counter
+from datetime import timedelta
 from uuid import UUID
 
 import aiohttp
@@ -15,7 +16,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.alerts.constants import RecipientType
-from apps.alerts.models import AlertRecipient
+from apps.alerts.models import AlertRecipient, ProjectAlert
 from apps.shared.async_db import execute_unnest
 
 from .email import MonitorEmail
@@ -118,37 +119,96 @@ async def save_monitor_checks(results, now):
         ]
     )
 
-    # Bulk update cached fields on Monitor
+    # Look up uptime failure thresholds for monitors that are currently down.
+    # Only alerts with uptime_quantity > 1 delay notification; everything else
+    # keeps the default "alert on the first failed check" behaviour and needs
+    # no extra query. If a project has several uptime alerts, use the most
+    # eager (smallest) threshold.
+    down_thresholds: dict[int, tuple[int, int]] = {}
+    down_ids = [r["id"] for r in results if r["is_up"] is False]
+    if down_ids:
+        async for row in (
+            ProjectAlert.objects.filter(
+                project__monitor__id__in=down_ids,
+                uptime=True,
+                uptime_quantity__gt=1,
+                uptime_timespan_minutes__isnull=False,
+            )
+            .values(
+                "project__monitor__id",
+                "uptime_quantity",
+                "uptime_timespan_minutes",
+            )
+            .order_by()
+        ):
+            monitor_id = row["project__monitor__id"]
+            existing = down_thresholds.get(monitor_id)
+            if existing is None or row["uptime_quantity"] < existing[0]:
+                down_thresholds[monitor_id] = (
+                    row["uptime_quantity"],
+                    row["uptime_timespan_minutes"],
+                )
+
     monitors_to_update = []
-    for result in results:
+    to_notify = []
+    for i, result in enumerate(results):
         is_change = (
             result["latest_is_up"] != result["is_up"] or result["last_change"] is None
         )
-        monitor = Monitor(
-            pk=result["id"],
-            cached_is_up=result["is_up"],
-            cached_last_change=now if is_change else result["last_change"],
+        transition = result["latest_is_up"] != result["is_up"]
+        down_alerted = result.get("cached_down_alerted", False)
+
+        if result["is_up"] is False:
+            if not down_alerted:
+                threshold = down_thresholds.get(result["id"])
+                if threshold is None:
+                    if transition:
+                        to_notify.append(i)
+                        down_alerted = True
+                else:
+                    quantity, timespan_minutes = threshold
+                    window_start = now - timedelta(minutes=timespan_minutes)
+                    down_count = await MonitorCheck.objects.filter(
+                        monitor_id=result["id"],
+                        organization_id=result["organization_id"],
+                        is_up=False,
+                        start_check__gte=window_start,
+                    ).acount()
+                    if down_count >= quantity:
+                        to_notify.append(i)
+                        down_alerted = True
+        else:
+            if down_alerted:
+                to_notify.append(i)
+                down_alerted = False
+
+        monitors_to_update.append(
+            Monitor(
+                pk=result["id"],
+                cached_is_up=result["is_up"],
+                cached_last_change=now if is_change else result["last_change"],
+                cached_down_alerted=down_alerted,
+            )
         )
-        monitors_to_update.append(monitor)
     if monitors_to_update:
         await Monitor.objects.abulk_update(
-            monitors_to_update, ["cached_is_up", "cached_last_change"]
+            monitors_to_update,
+            ["cached_is_up", "cached_last_change", "cached_down_alerted"],
         )
 
     # Update hourly statistics
     org_counts = Counter(r["organization_id"] for r in results)
     await update_uptime_statistics(org_counts, now)
 
-    for i, result in enumerate(results):
-        if result["latest_is_up"] != result["is_up"]:
-            last_change = result["last_change"]
-            if last_change:
-                last_change = last_change.isoformat()
-            # Pass monitor_id and composite PK as a list of strings for JSON serializability
-            monitor_check_pk = [str(monitor_checks[i].id), result["organization_id"]]
-            await send_monitor_notification.aenqueue(
-                result["id"], monitor_check_pk, not result["is_up"], last_change
-            )
+    for i in to_notify:
+        result = results[i]
+        last_change = result["last_change"]
+        if last_change:
+            last_change = last_change.isoformat()
+        monitor_check_pk = [str(monitor_checks[i].id), result["organization_id"]]
+        await send_monitor_notification.aenqueue(
+            result["id"], monitor_check_pk, not result["is_up"], last_change
+        )
 
 
 async def run_checks(monitors, now):

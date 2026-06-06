@@ -103,6 +103,60 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         res = self.client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
 
+    def test_project_alerts_uptime_threshold_validation(self):
+        """uptime_quantity and uptime_timespan_minutes must be set together."""
+        url = reverse(
+            "api:create_project_alert", args=[self.organization.slug, self.project.slug]
+        )
+        base = {
+            "name": "threshold",
+            "uptime": True,
+            "alertRecipients": [{"recipientType": "email", "url": ""}],
+        }
+
+        # Only quantity set -> 422
+        res = self.client.post(
+            url, {**base, "uptimeQuantity": 3}, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 422)
+
+        # Only timespan set -> 422
+        res = self.client.post(
+            url,
+            {**base, "uptimeTimespanMinutes": 5},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 422)
+
+        # Both set -> 201
+        res = self.client.post(
+            url,
+            {**base, "uptimeQuantity": 3, "uptimeTimespanMinutes": 5},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        alert = ProjectAlert.objects.get(name="threshold")
+        self.assertEqual(alert.uptime_quantity, 3)
+        self.assertEqual(alert.uptime_timespan_minutes, 5)
+
+        # Both null -> 201 (threshold disabled, event fields unaffected)
+        res = self.client.post(
+            url,
+            {
+                "name": "no-threshold",
+                "uptime": True,
+                "timespanMinutes": 60,
+                "quantity": 2,
+                "alertRecipients": [{"recipientType": "email", "url": ""}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        alert = ProjectAlert.objects.get(name="no-threshold")
+        self.assertIsNone(alert.uptime_quantity)
+        self.assertIsNone(alert.uptime_timespan_minutes)
+        self.assertEqual(alert.quantity, 2)
+
     def test_project_alerts_update_all_types(self):
         alert = baker.make(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
