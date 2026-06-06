@@ -227,6 +227,7 @@ class TransactionIngestTestCase(TransactionTestCase):
         # SQL should be parameterized
         self.assertIn("%s", db_span.description)
 
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_span_backdated_timestamp_uses_server_time_id(self):
         """A span whose client clock predates the staging partition horizon
         must still insert. The id is derived from server (ingestion) time so
