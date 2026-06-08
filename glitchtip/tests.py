@@ -115,6 +115,38 @@ class InstanceLicenseTestCase(TestCase):
         self.assertEqual(res.json(), {"billingEmail": ""})
 
 
+class SupportLinkTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_support_link")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_base_url_when_unlicensed(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"url": "https://glitchtip.com/support"})
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_embeds_license_key_only(self):
+        SupportLicense(license_key="sub_dbKey").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(), {"url": "https://glitchtip.com/support#sub=sub_dbKey"}
+        )
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_returns_base_url(self):
+        SupportLicense(license_key="sub_dbKey").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"url": "https://glitchtip.com/support"})
+
+
 class APIRootTestCase(TestCase):
     def setUp(self):
         self.url = reverse("api:api_root")
