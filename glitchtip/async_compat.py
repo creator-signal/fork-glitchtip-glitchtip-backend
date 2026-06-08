@@ -3,8 +3,17 @@
 When ``USE_ASYNC_BACKEND=True`` (opt-in), the symbols below are the real
 async-backend primitives: native async cursors, ``async_atomic``,
 ``AsyncQuerySet``. When the flag is off (the default), this module
-exposes thin ``sync_to_async`` shims over Django's stock sync ORM and
-psycopg cursor.
+exposes ``sync_to_async`` shims over Django's stock sync ORM:
+``async_atomic`` wraps ``transaction.atomic`` and ``AsyncQuerySet``
+returns a stock QuerySet.
+
+Note there is intentionally no async-cursor shim here. Wrapping a sync
+cursor method-by-method would make one logical query cost several
+serialized ``thread_sensitive`` hops (open · execute · fetch · close);
+instead :mod:`apps.shared.async_db` runs each query's full block in a
+single ``sync_to_async`` against Django's stock ``connections``, the way
+a vanilla Django view would. ``async_connections`` here only needs to
+cover the connection lifecycle that the test teardown drives.
 
 The flag is read from the environment directly so this module has no
 import-time dependency on ``django.conf.settings`` — it is imported by
@@ -17,7 +26,6 @@ change the few call sites back to ``from django_async_backend.X import Y``.
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any
 
 from asgiref.sync import sync_to_async
 
@@ -46,93 +54,21 @@ if USE_ASYNC_BACKEND:
 
 else:
     from django.db import connections, transaction
-    from psycopg import ClientCursor
-
-    class _SyncCursorProxy:
-        """Async-shaped proxy around a Django sync cursor.
-
-        Every method hops to the sync executor via ``sync_to_async``
-        (``thread_sensitive=True`` — the asyncio default), which keeps all
-        DB I/O for a given task on a single thread so Django's
-        thread-local connection state and any open transaction remain
-        consistent across awaits.
-        """
-
-        def __init__(self, cursor) -> None:
-            self._cursor = cursor
-
-        async def execute(self, sql: str, params: Any = None):
-            return await sync_to_async(self._cursor.execute)(sql, params)
-
-        async def executemany(self, sql: str, param_list):
-            return await sync_to_async(self._cursor.executemany)(sql, param_list)
-
-        async def fetchall(self):
-            return await sync_to_async(self._cursor.fetchall)()
-
-        async def fetchone(self):
-            return await sync_to_async(self._cursor.fetchone)()
-
-        async def fetchmany(self, size: int | None = None):
-            if size is None:
-                return await sync_to_async(self._cursor.fetchmany)()
-            return await sync_to_async(self._cursor.fetchmany)(size)
-
-        @property
-        def description(self):
-            return self._cursor.description
-
-        @property
-        def rowcount(self):
-            return self._cursor.rowcount
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, _exc_type, _exc, _tb):
-            await sync_to_async(self._cursor.close)()
-            return None
-
-    class _SyncOps:
-        """Minimal stand-in for ``conn.ops.compose_sql``.
-
-        Mogrifies via a temporary psycopg ``ClientCursor`` — psycopg3's
-        server-side cursors don't expose mogrify, but ClientCursor does
-        and operates on the same raw connection.
-        """
-
-        def __init__(self, alias: str) -> None:
-            self._alias = alias
-
-        async def compose_sql(self, template: str, params):
-            def _do():
-                conn = connections[self._alias]
-                conn.ensure_connection()
-                cc = ClientCursor(conn.connection)
-                try:
-                    return cc.mogrify(template, params)
-                finally:
-                    cc.close()
-
-            return await sync_to_async(_do)()
 
     class _SyncConnectionProxy:
+        """Stand-in for a single ``async_connections[alias]`` entry.
+
+        The hot-path raw-SQL helpers no longer go through here — when the
+        flag is off, :mod:`apps.shared.async_db` talks to Django's stock
+        ``connections`` directly, running each query's full
+        open/execute/fetch/close block in a *single* ``sync_to_async`` hop
+        (the way a vanilla Django view would). What remains is the
+        ``close()`` the per-task test teardown calls to release the
+        connection on the same thread that opened it.
+        """
+
         def __init__(self, alias: str) -> None:
             self._alias = alias
-            self.ops = _SyncOps(alias)
-
-        async def cursor(self):
-            # Resolve ``connections[alias]`` *inside* the sync executor —
-            # ``connections`` is a per-thread handler, so a wrapper looked
-            # up on the event-loop thread can't be used from the worker
-            # thread (Django raises ``DatabaseError`` on thread sharing).
-            alias = self._alias
-
-            def _open():
-                return connections[alias].cursor()
-
-            sync_cursor = await sync_to_async(_open)()
-            return _SyncCursorProxy(sync_cursor)
 
         async def close(self):
             alias = self._alias
