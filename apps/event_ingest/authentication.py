@@ -13,8 +13,8 @@ from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
+from apps.shared.async_db import fetchone
 from glitchtip.api.exceptions import ThrottleException
-from glitchtip.async_compat import async_connections
 from sentry.utils.auth import parse_auth_header
 
 from .constants import EVENT_BLOCK_CACHE_KEY
@@ -117,18 +117,14 @@ async def get_project_auth_info_row(project_id: int, sentry_key: UUID):
 
     if "read_only" in settings.DATABASES:
         try:
-            async with await async_connections["read_only"].cursor() as cursor:
-                await cursor.execute(sql, params)
-                return await cursor.fetchone()
+            return await fetchone(sql, params, db_alias="read_only")
         except OperationalError:
             pass
         except Exception as e:
             # Fail safe - don't let a read only db failure stop the request
             logger.warning("Failed to read from read_only database", exc_info=e)
 
-    async with await async_connections["default"].cursor() as cursor:
-        await cursor.execute(sql, params)
-        return await cursor.fetchone()
+    return await fetchone(sql, params, db_alias="default")
 
 
 async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
