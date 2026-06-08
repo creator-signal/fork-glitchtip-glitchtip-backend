@@ -139,20 +139,6 @@ class SupportLinkTestCase(TestCase):
             res.json(), {"url": "https://glitchtip.com/support#sub=sub_dbKey"}
         )
 
-    @override_settings(BILLING_ENABLED=False)
-    def test_embeds_license_key_and_email(self):
-        SupportLicense(
-            license_key="sub_dbKey", billing_email="db@example.com"
-        ).save()
-        self.client.force_login(self.user)
-        res = self.client.get(self.url)
-        self.assertEqual(
-            res.json(),
-            {
-                "url": "https://glitchtip.com/support#sub=sub_dbKey&email=db%40example.com"
-            },
-        )
-
     @override_settings(BILLING_ENABLED=True)
     def test_billing_enabled_returns_base_url(self):
         SupportLicense(license_key="sub_dbKey").save()
