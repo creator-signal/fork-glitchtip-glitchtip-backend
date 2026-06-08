@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlencode
 
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.openid_connect.views import (
@@ -236,6 +237,19 @@ class InstanceLicenseOut(CamelSchema):
 async def get_instance_license(request: HttpRequest):
     _, email = await SupportLicense.resolved()
     return {"billing_email": email}
+
+
+class SupportLinkOut(CamelSchema):
+    url: str
+
+
+@api.get("0/instance-license/support-link/", response=SupportLinkOut, by_alias=True)
+async def get_support_link(request: HttpRequest):
+    license_key, _ = await SupportLicense.resolved()
+    url = "https://glitchtip.com/support"
+    if license_key:
+        url += f"#{urlencode({'sub': license_key})}"
+    return {"url": url}
 
 
 class APIRootSchema(Schema):
