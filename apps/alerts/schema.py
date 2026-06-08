@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 
 from django.conf import settings
 from ninja import Field, ModelSchema
-from pydantic import HttpUrl, field_validator
+from pydantic import HttpUrl, field_validator, model_validator
 
 from glitchtip.schema import CamelSchema
 from glitchtip.url_validation import validate_public_url
@@ -84,7 +84,22 @@ class ProjectAlertIn(CamelSchema, ModelSchema):
 
     class Meta:
         model = ProjectAlert
-        fields = ["name", "timespan_minutes", "quantity", "uptime"]
+        fields = [
+            "name",
+            "timespan_minutes",
+            "quantity",
+            "uptime",
+            "uptime_quantity",
+            "uptime_timespan_minutes",
+        ]
+
+    @model_validator(mode="after")
+    def _validate_uptime_threshold(self):
+        if (self.uptime_quantity is None) != (self.uptime_timespan_minutes is None):
+            raise ValueError(
+                "uptime_quantity and uptime_timespan_minutes must both be set or both be null"
+            )
+        return self
 
 
 class ProjectAlertSchema(CamelSchema, ModelSchema):

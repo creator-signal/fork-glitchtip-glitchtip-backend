@@ -84,6 +84,7 @@ class Monitor(models.Model):
     expected_body = models.CharField(max_length=2000, blank=True)
     cached_is_up = models.BooleanField(null=True, default=None)
     cached_last_change = models.DateTimeField(null=True, default=None)
+    cached_down_alerted = models.BooleanField(default=False)
 
     objects = MonitorManager()
 

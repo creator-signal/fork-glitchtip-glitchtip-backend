@@ -1,5 +1,6 @@
 # 6.1.8
 
+- Feat: Uptime monitor alerts support an independent failure threshold (uptime_quantity / uptime_timespan_minutes) — alert only after N failed checks within M minutes, set separately from the event threshold. No threshold preserves immediate alerting; sub-threshold blips no longer send down or recovery emails.
 - Fix: Prevent "Cannot open a new connection in an atomic block" / TransactionManagementError during concurrent async event ingest by running issue creation in a single transaction instead of holding it open across an await
 
 # 6.1.7

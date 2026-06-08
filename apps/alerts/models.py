@@ -21,6 +21,8 @@ class ProjectAlert(CreatedModel):
     uptime = models.BooleanField(
         default=False, help_text="Send alert on any uptime monitor check failure"
     )
+    uptime_quantity = models.PositiveSmallIntegerField(blank=True, null=True)
+    uptime_timespan_minutes = models.PositiveSmallIntegerField(blank=True, null=True)
 
 
 class AlertRecipient(models.Model):
