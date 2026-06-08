@@ -74,13 +74,8 @@ async def update_uptime_statistics(org_counts: dict[int, int], check_time):
 
     try:
         # A single INSERT ... ON CONFLICT is atomic by itself and needs no
-        # surrounding transaction. Wrapping it in async_atomic() is unsafe when
-        # USE_ASYNC_BACKEND is disabled (the default): async_atomic is then a
-        # sync_to_async shim over Django's thread-local connection, which this
-        # async worker shares across concurrently running tasks. Holding the
-        # transaction open across the await below lets a sibling task close or
-        # reset that shared connection mid-block, surfacing as "Cannot open a
-        # new connection in an atomic block" / TransactionManagementError.
+        # surrounding transaction, so we issue it directly without an
+        # async_atomic() wrapper.
         await execute_unnest(
             "INSERT INTO uptime_uptimecheckhourlystatistic "
             "(organization_id, date, count) "

@@ -29,10 +29,10 @@ import os
 
 from django.conf import settings
 from django.http import HttpResponse
+from django_async_backend.db.models.query import QuerySet as AsyncQuerySet
 
 from apps.projects.models import Project
 from apps.shared.async_db import fetchall
-from glitchtip.async_compat import AsyncQuerySet
 
 
 def _python_cpu_burn(target_us: int) -> None:

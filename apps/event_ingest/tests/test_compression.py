@@ -27,14 +27,16 @@ class CompressionTestCase(EventIngestTestCase):
         json_data = json.dumps(self.event).encode("utf-8")
         compressed_data = zstd.compress(json_data)
 
-        with self.assertNumQueries(20):
-            res = self.client.post(
-                self.url,
-                compressed_data,
-                content_type="application/json",
-                HTTP_CONTENT_ENCODING="zstd",
-            )
-            task_backends["default"].flush_batches()
+        # TODO: re-add assertNumQueries once unit tests run on the async
+        # backend. assertNumQueries only observes Django's sync connection and
+        # can't count the ingest queries issued through async_connections.
+        res = self.client.post(
+            self.url,
+            compressed_data,
+            content_type="application/json",
+            HTTP_CONTENT_ENCODING="zstd",
+        )
+        task_backends["default"].flush_batches()
 
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.event["event_id"])

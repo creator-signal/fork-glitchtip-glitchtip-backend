@@ -62,21 +62,14 @@ class IngestDispatcher:
 
                 @classmethod
                 def _get_middleware_setting(cls):
-                    from glitchtip.async_compat import USE_ASYNC_BACKEND
-
-                    chain = [
+                    return [
+                        # async-backend needs explicit per-request cleanup to
+                        # return pool connections; without it the pool
+                        # saturates after max_size requests.
+                        "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
                     ]
-                    if USE_ASYNC_BACKEND:
-                        # async-backend needs explicit per-request cleanup
-                        # to return pool connections; without it the pool
-                        # saturates after max_size requests.
-                        chain.insert(
-                            0,
-                            "django_async_backend.middleware.close_async_connections",
-                        )
-                    return chain
 
                 def load_middleware(self, is_async=True):
                     # Override to use our minimal middleware list

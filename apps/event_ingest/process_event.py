@@ -12,6 +12,7 @@ from django.db import connections, transaction
 from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.utils import timezone
+from django_async_backend.db.models.query import QuerySet as AsyncQuerySet
 from ninja import Schema
 from psycopg.types.json import Jsonb
 from user_agents import parse
@@ -35,7 +36,6 @@ from apps.shared.async_db import (
     fetchall_unnest,
 )
 from apps.sourcecode.models import DebugSymbolBundle
-from glitchtip.async_compat import AsyncQuerySet
 from glitchtip.cold_storage import is_duckdb_available
 from glitchtip.partition_manager import UUID7Helper
 from sentry.culprit import generate_culprit
@@ -635,12 +635,11 @@ async def _create_issue_and_hash(
     The whole unit — project-counter upsert, then the Issue, IssueHash, and
     IssueIndex (the issue's hot/queryable projection plus its full-text
     document) writes wrapped in ``transaction.atomic()`` — runs inside a single
-    ``sync_to_async`` hop. This is deliberate: with ``USE_ASYNC_BACKEND`` off
-    (the default), ``async_compat`` is a ``sync_to_async`` shim over Django's
-    thread-local connection, which this async worker shares across concurrently
-    running tasks. Holding a transaction open across an ``await`` would let a
-    sibling task close or poison that shared connection mid-block, cascading as
-    "Cannot open a new connection in an atomic block" /
+    ``sync_to_async`` hop over Django's sync connection. This is deliberate:
+    that sync connection is thread-local, and this async worker shares it
+    across concurrently running tasks. Holding a transaction open across an
+    ``await`` would let a sibling task close or poison that shared connection
+    mid-block, cascading as "Cannot open a new connection in an atomic block" /
     TransactionManagementError. Keeping the transaction inside one synchronous
     call means it never spans an await, so siblings serialise before/after it
     on the executor thread and can't interfere.

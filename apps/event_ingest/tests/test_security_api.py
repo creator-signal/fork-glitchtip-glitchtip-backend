@@ -20,11 +20,13 @@ class SecurityAPITestCase(EventIngestTestCase):
         )
 
     def test_security_api(self):
-        with self.assertNumQueries(12):
-            res = self.client.post(
-                self.url, self.small_event, content_type="application/json"
-            )
-            task_backends["default"].flush_batches()
+        # TODO: re-add assertNumQueries once unit tests run on the async
+        # backend. assertNumQueries only observes Django's sync connection and
+        # can't count the ingest queries issued through async_connections.
+        res = self.client.post(
+            self.url, self.small_event, content_type="application/json"
+        )
+        task_backends["default"].flush_batches()
         self.assertEqual(res.status_code, 201)
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
