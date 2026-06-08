@@ -1,3 +1,11 @@
+# 6.1.9
+
+- Feat: Support running with email disabled when SMTP is unconfigured; show the active email transport on the startup banner.
+- Feat: Add an instance support-link API endpoint.
+- Fix: Accept an empty event_id in the envelope header during ingest.
+- Perf: Reduce async event-ingest worker CPU by collapsing each raw-SQL helper to a single sync_to_async hop (was up to four) on the default sync path.
+- Deps: django-vtasks 2.1.2, django-vcache 2.2.0.
+
 # 6.1.8
 
 - Fix: Prevent "Cannot open a new connection in an atomic block" / TransactionManagementError during concurrent async event ingest by running issue creation in a single transaction instead of holding it open across an await
