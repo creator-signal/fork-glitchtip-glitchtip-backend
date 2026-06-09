@@ -3,6 +3,7 @@ import logging
 import time
 
 import aiohttp
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.http import (
@@ -20,7 +21,13 @@ from apps.organizations_ext.tasks import check_organization_throttle
 
 from .client import stripe_get
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
-from .models import StripePrice, StripeProduct, StripeSubscription
+from .email import SupportLicenseWelcomeEmail
+from .models import (
+    StripePrice,
+    StripeProduct,
+    StripeSubscription,
+    SupportLicenseWelcome,
+)
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import compute_cycle, unix_to_datetime
 
@@ -74,26 +81,80 @@ async def update_price(price: Price):
     )
 
 
+async def handle_support_subscription(
+    subscription: Subscription, customer_obj: Customer
+) -> bool:
+    """Handle an instance-wide support-license purchase (no GlitchTip org).
+
+    Returns True if the subscription is a support product (handled), else False
+    so the caller can fall through to its normal missing-org handling. Sends the
+    welcome email once per purchase: aget_or_create's `created` flag is the
+    idempotency primitive — retries and tier changes on the same subscription
+    find the row and skip the email.
+    """
+    price = subscription.items.data[0].price
+    product_id = price.product if isinstance(price.product, str) else None
+    if not product_id:
+        return False
+    product = Product.model_validate_json(await stripe_get(f"products/{product_id}"))
+    if product.metadata.get("product_type", "").lower() != "support":
+        return False
+
+    if subscription.status not in ACTIVE_SUBSCRIPTION_STATUSES:
+        # Not active yet (e.g. incomplete). A later subscription.updated event
+        # fires the welcome once it activates.
+        return True
+    if not customer_obj.email:
+        logger.warning(
+            f"Support subscription {subscription.id} is active but its customer "
+            "has no email; a later event with one will retry"
+        )
+        return True
+    if not settings.EMAIL_ENABLED:
+        return True
+
+    _, created = await SupportLicenseWelcome.objects.aget_or_create(
+        stripe_id=subscription.id
+    )
+    if created:
+        try:
+            await sync_to_async(
+                SupportLicenseWelcomeEmail(license_key=subscription.id).send_email
+            )(customer_obj.email)
+        except Exception:
+            # Release the idempotency claim and re-raise so the Stripe retry
+            # re-sends. The license key is the entire payload and recovery
+            # (Flow B) is deferred, so a dropped send must not be permanent.
+            await SupportLicenseWelcome.objects.filter(
+                stripe_id=subscription.id
+            ).adelete()
+            raise
+    return True
+
+
 async def update_subscription(subscription: Subscription, request: HttpRequest):
     customer_obj = Customer.model_validate_json(
         await stripe_get(f"customers/{subscription.customer}")
     )
-    customer_metadata = customer_obj.metadata
-    if not customer_metadata:
-        logger.warning(f"Customer {customer_obj.id} has no metadata")
-        return
-    try:
-        organization_id = int(
-            customer_metadata.get(
-                "organization_id", customer_metadata.get("djstripe_subscriber")
-            )
-        )
-    except TypeError:
+    customer_metadata = customer_obj.metadata or {}
+    organization_id = None
+    org_id_raw = customer_metadata.get(
+        "organization_id", customer_metadata.get("djstripe_subscriber")
+    )
+    if org_id_raw is not None:
+        try:
+            organization_id = int(org_id_raw)
+        except (TypeError, ValueError):
+            organization_id = None
+
+    if not organization_id:
+        # No GlitchTip org. May be an instance-wide support-license purchase,
+        # handled (welcome email) without an org; otherwise it's a real anomaly.
+        if await handle_support_subscription(subscription, customer_obj):
+            return
         logger.warning(
             f"Customer {customer_obj.id} has no organization_id", exc_info=True
         )
-        return
-    if not organization_id:
         return
 
     # Check region, is it this region or should it be forwarded
