@@ -61,6 +61,7 @@ class TimedTestRunner(DiscoverRunner):
                 "projects_issueeventprojecthourlystatistic",
                 "projects_transactioneventprojecthourlystatistic",
                 "projects_logprojecthourlystatistic",
+                "uptime_uptimecheckhourlystatistic",
             ]
 
             with connections[using].cursor() as cursor:

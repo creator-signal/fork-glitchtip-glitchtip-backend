@@ -233,6 +233,12 @@ class StripeAPITestCase(TestCase):
             date=timezone.make_aware(datetime(2020, 1, 10, 8)),
             count=40,
         )
+        baker.make(
+            "uptime.UptimeCheckHourlyStatistic",
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 10, 8)),
+            count=50,
+        )
 
         url = reverse(
             "api:subscription_events_count_daily",
@@ -249,11 +255,13 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(jan5["eventCount"], 20)
         self.assertEqual(jan5["transactionEventCount"], 0)
         self.assertEqual(jan5["logEventCount"], 0)
-        # Jan 10 should have 30 transaction events and 40 log events
+        # Jan 10 should have 30 transaction events, 40 logs (=4 events), and
+        # 50 uptime checks (=5 events); logs and uptime are both weighted 0.1
         jan10 = next(d for d in data if d["date"] == "2020-01-10")
         self.assertEqual(jan10["eventCount"], 0)
         self.assertEqual(jan10["transactionEventCount"], 30)
         self.assertEqual(jan10["logEventCount"], 4)
+        self.assertEqual(jan10["uptimeCheckEventCount"], 5)
         # Jan 1 should be all zeros
         jan1 = data[0]
         self.assertEqual(jan1["date"], "2020-01-01")
