@@ -51,12 +51,12 @@ class EventCounts:
 
     @property
     def total_event_count(self) -> int:
-        """Weighted total: errors=1.0, transactions=1.0, uptime=1.0, file_size=1.0, logs=0.1"""
+        """Weighted total: errors=1.0, transactions=1.0, file_size=1.0, uptime=0.1, logs=0.1"""
         return (
             self.issue_event_count * 10
             + self.transaction_count * 10
             + self.log_count  # 0.1 weight
-            + self.uptime_check_event_count * 10
+            + self.uptime_check_event_count  # 0.1 weight
             + self.file_size * 10
         ) // 10
 
