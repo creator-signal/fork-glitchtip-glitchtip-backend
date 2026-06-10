@@ -1,10 +1,13 @@
 import re
 import uuid
+from datetime import timedelta
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from model_bakery import baker
 
+from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import APIPermissionTestCase, GlitchTipTestCaseMixin
 
 
@@ -39,7 +42,15 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         super().create_logged_in_user()
 
     def test_multi_page_list(self):
-        first_event = baker.make("issue_events.IssueEvent", issue__project=self.project)
+        now = timezone.now()
+        # Pin the bracketing events' ids so list ordering (by -id) is
+        # deterministic; same-millisecond ids otherwise sort randomly, and the
+        # 50 middle events (created "now") fall between these two.
+        first_event = baker.make(
+            "issue_events.IssueEvent",
+            issue__project=self.project,
+            id=UUID7Helper.from_datetime(now - timedelta(seconds=1)),
+        )
         baker.make(
             "issue_events.IssueEvent",
             issue__project=self.project,
@@ -50,6 +61,7 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "issue_events.IssueEvent",
             issue__project=self.project,
             issue_id=first_event.issue_id,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=1)),
         )
         url = get_list_issue_event_url(first_event.issue_id)
 
@@ -96,14 +108,24 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def test_retrieve(self):
         issue = baker.make("issue_events.issue", project=self.project)
         org = self.project.organization
+        now = timezone.now()
         baker.make(
             "issue_events.IssueEvent", issue=issue, organization=org, _quantity=10
         )
+        # prev/next navigate by id (UUIDv7), and from_datetime fills the
+        # sub-millisecond bits randomly — so events created in the same
+        # millisecond sort arbitrarily. Pin explicit, increasing ids.
         previous_event = baker.make(
-            "issue_events.IssueEvent", issue=issue, organization=org
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=org,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=1)),
         )
         latest_event = baker.make(
-            "issue_events.IssueEvent", issue=issue, organization=org
+            "issue_events.IssueEvent",
+            issue=issue,
+            organization=org,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=2)),
         )
         url = get_issue_event_url(issue.id, "a" * 32)
         res = self.client.get(url)
@@ -142,10 +164,25 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     def test_relative_event_ordering(self):
         issue = baker.make("issue_events.issue", project=self.project)
+        now = timezone.now()
         baker.make("issue_events.IssueEvent", issue=issue)
-        event1 = baker.make("issue_events.IssueEvent", issue=issue)
-        event2 = baker.make("issue_events.IssueEvent", issue=issue)
-        event3 = baker.make("issue_events.IssueEvent", issue=issue)
+        # Explicit, increasing UUIDv7 ids so id-based prev/next navigation is
+        # deterministic (same-millisecond ids otherwise sort randomly).
+        event1 = baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=1)),
+        )
+        event2 = baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=2)),
+        )
+        event3 = baker.make(
+            "issue_events.IssueEvent",
+            issue=issue,
+            id=UUID7Helper.from_datetime(now + timedelta(seconds=3)),
+        )
         baker.make("issue_events.IssueEvent", issue=issue)
         url = get_issue_event_url(issue.id, event2.id)
         res = self.client.get(url)
