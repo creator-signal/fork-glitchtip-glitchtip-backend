@@ -6,7 +6,6 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from apps.stripe.constants import SubscriptionStatus
-from apps.stripe.models import SupportLicenseWelcome
 from apps.stripe.schema import (
     Price,
     Subscription,
@@ -22,6 +21,7 @@ def build_subscription(
     subscription_id=SUPPORT_SUB_ID,
     product_id="prod_support",
     status=SubscriptionStatus.ACTIVE,
+    metadata=None,
 ):
     now = int(timezone.now().timestamp())
     return Subscription(
@@ -66,7 +66,7 @@ def build_subscription(
         created=now,
         status=status,
         livemode=False,
-        metadata={},
+        metadata=metadata or {},
         cancel_at_period_end=False,
         start_date=now,
         collection_method="charge_automatically",
@@ -120,19 +120,21 @@ class SupportWelcomeEmailTestCase(TestCase):
     def setUp(self):
         self.request = RequestFactory().post("/")
 
-    async def test_sends_welcome_and_records_idempotency(self):
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(),
+    async def test_sends_welcome_and_marks_stripe(self):
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
             await update_subscription(build_subscription(), self.request)
 
-        self.assertTrue(
-            await SupportLicenseWelcome.objects.filter(
-                stripe_id=SUPPORT_SUB_ID
-            ).aexists()
-        )
+        # Idempotency is marked on the Stripe subscription, not our DB.
+        mark.assert_awaited_once_with(SUPPORT_SUB_ID)
         self.assertEqual(len(mail.outbox), 1)
         body = mail.outbox[0].body
         html = mail.outbox[0].alternatives[0][0]
@@ -145,81 +147,108 @@ class SupportWelcomeEmailTestCase(TestCase):
             self.assertNotIn("&email=", content)
             self.assertNotIn("#email=", content)
 
-    async def test_idempotent_no_duplicate_email(self):
-        side = stripe_get_side_effect()
-        with patch(
-            "apps.stripe.views.stripe_get", new_callable=AsyncMock, side_effect=side
+    async def test_already_marked_skips_send(self):
+        # welcome_sent rides in on the webhook payload, so the check is free and
+        # short-circuits before the product fetch.
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ) as get,
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
-            await update_subscription(build_subscription(), self.request)
-        with patch(
-            "apps.stripe.views.stripe_get", new_callable=AsyncMock, side_effect=side
-        ):
-            await update_subscription(build_subscription(), self.request)
+            await update_subscription(
+                build_subscription(metadata={"welcome_sent": "true"}), self.request
+            )
 
-        self.assertEqual(
-            await SupportLicenseWelcome.objects.filter(
-                stripe_id=SUPPORT_SUB_ID
-            ).acount(),
-            1,
-        )
-        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(mail.outbox), 0)
+        mark.assert_not_awaited()
+        fetched = [call.args[0] for call in get.await_args_list]
+        self.assertFalse(any(path.startswith("products/") for path in fetched))
 
     async def test_non_support_product_sends_nothing(self):
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(product_type="hosted"),
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(product_type="hosted"),
+            ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
             await update_subscription(build_subscription(), self.request)
 
-        self.assertFalse(await SupportLicenseWelcome.objects.aexists())
         self.assertEqual(len(mail.outbox), 0)
+        mark.assert_not_awaited()
 
     async def test_inactive_status_defers_welcome(self):
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(),
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
             await update_subscription(
                 build_subscription(status=SubscriptionStatus.INCOMPLETE),
                 self.request,
             )
         self.assertEqual(len(mail.outbox), 0)
-        self.assertFalse(await SupportLicenseWelcome.objects.aexists())
+        mark.assert_not_awaited()
 
         # Becomes active later -> welcome fires once.
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(),
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch("apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock),
         ):
             await update_subscription(build_subscription(), self.request)
         self.assertEqual(len(mail.outbox), 1)
 
-    async def test_missing_customer_email_defers(self):
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(email=None),
+    async def test_missing_customer_email_is_terminal_and_alerts(self):
+        # Active support sub with no customer email: retrying the same payload
+        # can't help, so we don't raise (the webhook 200s and Stripe stops
+        # retrying) and alert with the sub id only — never the email.
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(email=None),
+            ),
+            patch("apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock),
+            self.assertLogs("apps.stripe.views", level="ERROR") as logs,
         ):
             await update_subscription(build_subscription(), self.request)
         self.assertEqual(len(mail.outbox), 0)
-        self.assertFalse(await SupportLicenseWelcome.objects.aexists())
+        output = "\n".join(logs.output)
+        self.assertIn(SUPPORT_SUB_ID, output)
+        self.assertNotIn("buyer@example.com", output)
 
-        # A later event that carries an email sends exactly once.
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(),
+        # A later event that carries an email is a fresh delivery and sends once.
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch("apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock),
         ):
             await update_subscription(build_subscription(), self.request)
         self.assertEqual(len(mail.outbox), 1)
 
-    async def test_send_failure_releases_row_for_retry(self):
-        # A failed send must not burn the only delivery: no row is left behind,
-        # the exception propagates (so the webhook 500s and Stripe retries), and
-        # a later working delivery sends exactly once.
+    async def test_send_failure_reraises_and_does_not_mark(self):
+        # A transient send failure must re-raise (so the webhook 500s and Stripe
+        # retries) and must not mark welcome_sent — the next attempt re-sends.
         with (
             patch(
                 "apps.stripe.views.stripe_get",
@@ -230,17 +259,46 @@ class SupportWelcomeEmailTestCase(TestCase):
                 "apps.stripe.email.SupportLicenseWelcomeEmail.send_email",
                 side_effect=RuntimeError("smtp down"),
             ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
             with self.assertRaises(RuntimeError):
                 await update_subscription(build_subscription(), self.request)
-        self.assertFalse(await SupportLicenseWelcome.objects.aexists())
         self.assertEqual(len(mail.outbox), 0)
+        mark.assert_not_awaited()
 
-        with patch(
-            "apps.stripe.views.stripe_get",
-            new_callable=AsyncMock,
-            side_effect=stripe_get_side_effect(),
+        # A later working delivery sends and marks exactly once.
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent", new_callable=AsyncMock
+            ) as mark,
         ):
             await update_subscription(build_subscription(), self.request)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(await SupportLicenseWelcome.objects.acount(), 1)
+        mark.assert_awaited_once_with(SUPPORT_SUB_ID)
+
+    async def test_mark_failure_after_send_reraises(self):
+        # send-then-mark: the email already went out, then the mark fails. We
+        # re-raise so Stripe retries; the retry re-sends (a benign duplicate).
+        # This is the at-least-once tradeoff — better a dupe than a lost key.
+        with (
+            patch(
+                "apps.stripe.views.stripe_get",
+                new_callable=AsyncMock,
+                side_effect=stripe_get_side_effect(),
+            ),
+            patch(
+                "apps.stripe.views.mark_welcome_sent",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stripe down"),
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await update_subscription(build_subscription(), self.request)
+        self.assertEqual(len(mail.outbox), 1)

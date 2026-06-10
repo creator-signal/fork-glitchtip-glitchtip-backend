@@ -19,14 +19,13 @@ from pydantic import ValidationError
 from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
 
-from .client import stripe_get
+from .client import mark_welcome_sent, stripe_get
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
 from .email import SupportLicenseWelcomeEmail
 from .models import (
     StripePrice,
     StripeProduct,
     StripeSubscription,
-    SupportLicenseWelcome,
 )
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import compute_cycle, unix_to_datetime
@@ -87,11 +86,16 @@ async def handle_support_subscription(
     """Handle an instance-wide support-license purchase (no GlitchTip org).
 
     Returns True if the subscription is a support product (handled), else False
-    so the caller can fall through to its normal missing-org handling. Sends the
-    welcome email once per purchase: aget_or_create's `created` flag is the
-    idempotency primitive — retries and tier changes on the same subscription
-    find the row and skip the email.
+    so the caller can fall through to its normal missing-org handling.
+
+    Idempotency is the `welcome_sent` flag on the Stripe subscription, not a
+    local row — it rides in on the webhook payload, so the check is free.
+    Send-then-mark (at-least-once): a dropped mark re-sends on Stripe's retry,
+    which beats a record-then-send that can silently lose the only delivery.
     """
+    if (subscription.metadata or {}).get("welcome_sent"):
+        return True
+
     price = subscription.items.data[0].price
     product_id = price.product if isinstance(price.product, str) else None
     if not product_id:
@@ -104,31 +108,29 @@ async def handle_support_subscription(
         # Not active yet (e.g. incomplete). A later subscription.updated event
         # fires the welcome once it activates.
         return True
-    if not customer_obj.email:
-        logger.warning(
-            f"Support subscription {subscription.id} is active but its customer "
-            "has no email; a later event with one will retry"
-        )
-        return True
     if not settings.EMAIL_ENABLED:
         return True
+    if not customer_obj.email:
+        # Terminal: active support sub with no customer email — retrying the same
+        # payload can't help, so return (200, to stop Stripe's retries) and alert
+        # with the sub id only (no PII). A later event carrying an email sends.
+        logger.error(
+            f"Support subscription {subscription.id} is active but its customer "
+            "has no email"
+        )
+        return True
 
-    _, created = await SupportLicenseWelcome.objects.aget_or_create(
-        stripe_id=subscription.id
-    )
-    if created:
-        try:
-            await sync_to_async(
-                SupportLicenseWelcomeEmail(license_key=subscription.id).send_email
-            )(customer_obj.email)
-        except Exception:
-            # Release the idempotency claim and re-raise so the Stripe retry
-            # re-sends. The license key is the entire payload and recovery
-            # (Flow B) is deferred, so a dropped send must not be permanent.
-            await SupportLicenseWelcome.objects.filter(
-                stripe_id=subscription.id
-            ).adelete()
-            raise
+    try:
+        await sync_to_async(
+            SupportLicenseWelcomeEmail(license_key=subscription.id).send_email
+        )(customer_obj.email)
+        await mark_welcome_sent(subscription.id)
+    except Exception:
+        # Transient (SMTP/Stripe blip). Re-raise so the webhook 500s and Stripe
+        # retries; the next attempt re-sends. A mark that fails after a good send
+        # just re-sends once on retry — benign.
+        logger.warning(f"Support welcome send/mark failed for {subscription.id}")
+        raise
     return True
 
 

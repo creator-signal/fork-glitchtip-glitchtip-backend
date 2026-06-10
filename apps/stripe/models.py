@@ -493,18 +493,3 @@ class SupportLicense(models.Model):
             return ("", "")
         db = await cls.load()
         return (db.license_key, db.billing_email)
-
-
-class SupportLicenseWelcome(models.Model):
-    """Idempotency record for the support-license welcome email.
-
-    A support purchase has no GlitchTip organization, so it can't be stored as a
-    StripeSubscription (that model requires a synced StripePrice). One row per
-    support subscription keyed on its Stripe id; aget_or_create's `created` flag
-    is what makes the welcome email fire exactly once per purchase.
-    """
-
-    # max_length mirrors SupportLicense.license_key (the same sub_xxx value),
-    # not StripeModel's 30.
-    stripe_id = models.CharField(primary_key=True, max_length=255)
-    created = models.DateTimeField(auto_now_add=True)
