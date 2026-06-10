@@ -492,4 +492,8 @@ class SupportLicense(models.Model):
         if settings.BILLING_ENABLED:
             return ("", "")
         db = await cls.load()
-        return (db.license_key, db.billing_email)
+        # The admin DB row wins; otherwise fall back to the GLITCHTIP_LICENSE_KEY
+        # env var (the recommended setup) so env-only deployments still surface
+        # the key in support links. billing_email is DB-only — env has none.
+        license_key = db.license_key or settings.GLITCHTIP_LICENSE_KEY or ""
+        return (license_key, db.billing_email)
