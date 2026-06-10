@@ -8,6 +8,7 @@ Collector emits.
 """
 
 import time
+from uuid import UUID
 
 import orjson
 from django.core.cache import cache
@@ -20,6 +21,7 @@ from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.logs.v1.logs_pb2 import LogRecord, ResourceLogs, ScopeLogs
 
+from apps.event_ingest.constants import EVENT_BLOCK_CACHE_KEY
 from apps.event_ingest.otlp import decode_otlp_logs
 from apps.logs.constants import LogLevel
 from apps.logs.models import LogEvent
@@ -295,6 +297,101 @@ class OTLPLogsIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertEqual(res.status_code, 401)
         self._flush()
         self.assertEqual(LogEvent.objects.count(), 0)
+
+    def test_invalid_dsn_block_cached(self):
+        """An unknown key is cached as blocked so a repeat flood is bounced
+        from Valkey without a DB lookup or reading the request body."""
+        bad = "00000000000000000000000000000000"
+        res = self.client.post(
+            self.url,
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=f"Bearer {bad}",
+        )
+        self.assertEqual(res.status_code, 401)
+        block_key = f"{EVENT_BLOCK_CACHE_KEY}otlp:{UUID(bad)}"
+        self.assertEqual(cache.get(block_key), "v")
+        # Repeat stays rejected (served from cache).
+        res = self.client.post(
+            self.url,
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=f"Bearer {bad}",
+        )
+        self.assertEqual(res.status_code, 401)
+
+    def test_over_quota_org_throttle_cached(self):
+        """An org over quota (100% throttle) is rejected and the throttle is
+        cached, so the next request re-blocks from cache instead of hitting the
+        DB and reading the body again."""
+        self.organization.event_throttle_rate = 100
+        self.organization.save()
+        res = self.client.post(
+            self.url,
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=self.auth,
+        )
+        self.assertEqual(res.status_code, 429)
+        self.assertEqual(res.headers.get("Retry-After"), "600")
+        block_key = f"{EVENT_BLOCK_CACHE_KEY}otlp:{self.projectkey.public_key}"
+        self.assertEqual(cache.get(block_key), "t:100:100")
+        # Repeat stays throttled and nothing is ingested.
+        res = self.client.post(
+            self.url,
+            _build_protobuf_request(),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=self.auth,
+        )
+        self.assertEqual(res.status_code, 429)
+        self._flush()
+        self.assertEqual(LogEvent.objects.count(), 0)
+
+    def test_observed_time_used_when_no_timestamp(self):
+        """A record carrying only observed time (no original timestamp) must
+        use it on both transports, not collapse to the 1970 epoch."""
+        observed = int(time.time() * 1e9)
+        proto = ExportLogsServiceRequest(
+            resource_logs=[
+                ResourceLogs(
+                    scope_logs=[
+                        ScopeLogs(
+                            log_records=[
+                                LogRecord(
+                                    observed_time_unix_nano=observed,
+                                    severity_number=9,
+                                    body=AnyValue(string_value="x"),
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ]
+        ).SerializeToString()
+        proto_items = decode_otlp_logs(proto, "application/x-protobuf")
+        self.assertAlmostEqual(proto_items[0]["timestamp"], observed / 1e9, places=3)
+
+        json_body = orjson.dumps(
+            {
+                "resourceLogs": [
+                    {
+                        "scopeLogs": [
+                            {
+                                "logRecords": [
+                                    {
+                                        "observedTimeUnixNano": str(observed),
+                                        "severityNumber": 9,
+                                        "body": {"stringValue": "x"},
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        )
+        json_items = decode_otlp_logs(json_body, "application/json")
+        self.assertAlmostEqual(json_items[0]["timestamp"], observed / 1e9, places=3)
 
     def test_missing_auth_rejected(self):
         res = self.client.post(

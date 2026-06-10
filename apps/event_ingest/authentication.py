@@ -236,9 +236,15 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
     Native OTLP exporters point at a base endpoint (``/v1/logs``,
     ``/v1/traces``) and carry the DSN key in a header — there is no project id
     in the path. ``public_key`` is globally unique, so the key fully identifies
-    the project. This is a lower-volume path than the sentry envelope ingest,
-    so it uses a single indexed ORM lookup rather than the raw-cursor stored
-    procedure that ``get_project`` uses on the hot path.
+    the project, via a single indexed ORM lookup rather than the raw-cursor
+    stored procedure that ``get_project`` uses on the hot path.
+
+    Rejection must stay cheap: a flood of unpaid traffic (an invalid key, or a
+    real key whose org is over quota) must not cost a database lookup — let
+    alone reading the body — on every request. So this keeps the same block
+    cache ``get_project`` does, keyed on the DSN public key (we have no project
+    id here). Once a key is known-bad or known-throttled, repeat requests are
+    bounced from Valkey in one round trip, before any DB hit or body read.
     """
     if settings.MAINTENANCE_EVENT_FREEZE:
         raise HttpError(
@@ -251,11 +257,25 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
             message="dsn key badly formed hexadecimal UUID string"
         ) from err
 
+    # Cheap-rejection cache, keyed on the public key (a key is either unknown
+    # -> "v" or throttled -> "t:org:project", never both, so one slot suffices).
+    block_cache_key = f"{EVENT_BLOCK_CACHE_KEY}otlp:{sentry_key}"
+    cached = await cache.aget(block_cache_key)
+    if cached == "v":
+        raise REJECTION_MAP["v"]
+    if cached and (throttle := deserialize_throttle(cached)):
+        org_throttle, project_throttle = throttle
+        if not is_accepting_events(org_throttle) or not is_accepting_events(
+            project_throttle
+        ):
+            raise ThrottleException(calculate_retry_after(max(throttle)))
+
     try:
         key = await ProjectKey.objects.select_related("project__organization").aget(
             public_key=sentry_key, is_active=True
         )
     except ProjectKey.DoesNotExist as err:
+        await cache.aset(block_cache_key, "v", REJECTION_WAIT)
         raise REJECTION_MAP["v"] from err
 
     project = key.project
@@ -273,25 +293,40 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
         ),
         first_event=project.first_event,
     )
+    org_throttle = organization.event_throttle_rate
+    project_throttle = project.event_throttle_rate
     if (
         not organization.is_accepting_events
-        or organization.event_throttle_rate == 100
-        or project.event_throttle_rate == 100
+        or org_throttle == 100
+        or project_throttle == 100
     ):
+        # Cache as a 100% throttle so the next flood request re-blocks from
+        # Valkey instead of repeating the lookup.
+        await cache.aset(block_cache_key, serialize_throttle(100, 100), REJECTION_WAIT)
         raise ThrottleException(600)
     # Honor partial throttle rates the same way the envelope hot path does, so
-    # a throttled org/project doesn't get a free pass on OTLP ingest. The block
-    # cache that get_project maintains is skipped here — this is the lower-volume
-    # path — so each request re-evaluates independently.
-    if organization.event_throttle_rate or project.event_throttle_rate:
-        if not is_accepting_events(
-            organization.event_throttle_rate
-        ) or not is_accepting_events(project.event_throttle_rate):
+    # a throttled org/project doesn't get a free pass on OTLP ingest.
+    if org_throttle or project_throttle:
+        await cache.aset(
+            block_cache_key,
+            serialize_throttle(org_throttle, project_throttle),
+            REJECTION_WAIT,
+        )
+        if not is_accepting_events(org_throttle) or not is_accepting_events(
+            project_throttle
+        ):
             raise ThrottleException(
-                calculate_retry_after(
-                    max(organization.event_throttle_rate, project.event_throttle_rate)
-                )
+                calculate_retry_after(max(org_throttle, project_throttle))
             )
+
+    # Recompute the org's quota throttle out of band, like the envelope path,
+    # so an over-quota OTLP-only org gets its throttle set promptly (and then
+    # cached above) rather than waiting on the periodic sweep.
+    if (
+        settings.BILLING_ENABLED
+        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
+    ):
+        await check_organization_throttle.aenqueue(organization.id)
     return info
 
 
