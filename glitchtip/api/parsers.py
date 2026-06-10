@@ -1,8 +1,30 @@
 import orjson
 from django.http import HttpRequest
+from ninja.errors import HttpError
 from ninja.parser import Parser
+
+from apps.event_ingest.rust_envelope import (
+    EnvelopeTooBig,
+    decompress_body,
+    request_content_encoding,
+)
 
 
 class ORJSONParser(Parser):
     def parse_body(self, request: HttpRequest):
-        return orjson.loads(request.body)
+        body = request.body
+        # There is no request-body decompression middleware anymore. A
+        # Content-Encoded body (e.g. an SDK gzipping a /store/ event, or zstd)
+        # therefore arrives still compressed — decompress it in Rust before JSON
+        # parsing. The decompressed-size cap is enforced inside gt_rust. Plain
+        # bodies (the common case, no Content-Encoding) skip straight to
+        # orjson, byte-for-byte as before.
+        encoding = request_content_encoding(request)
+        if encoding is not None:
+            try:
+                body = decompress_body(body, encoding)
+            except EnvelopeTooBig:
+                raise HttpError(413, "Request body too large") from None
+            except ValueError:
+                raise HttpError(400, "Invalid compressed request body") from None
+        return orjson.loads(body)

@@ -32,7 +32,10 @@ class IngestDispatcher:
     Ingest endpoints only need:
     - SecurityMiddleware (HSTS headers)
     - CorsMiddleware (browser SDKs send from different origins)
-    - DecompressBodyMiddleware (gzip/br/zstd decompression)
+
+    Request-body decompression (gzip/deflate/br/zstd) is no longer a
+    middleware: it runs in Rust (gt_rust) at each ingest endpoint's
+    body-read seam.
 
     Skipped for ingest (saves ~8 middleware calls per request):
     - SessionMiddleware
@@ -65,7 +68,6 @@ class IngestDispatcher:
                     chain = [
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
-                        "glitchtip.middleware.DecompressBodyMiddleware",
                     ]
                     if USE_ASYNC_BACKEND:
                         # async-backend needs explicit per-request cleanup

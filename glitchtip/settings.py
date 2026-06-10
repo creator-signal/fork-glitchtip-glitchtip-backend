@@ -130,20 +130,21 @@ if not DEBUG and not TESTING:
         )
 
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
-# Enforced at decompression time by DecompressBodyMiddleware and is the source
-# of truth for ingest body size. DATA_UPLOAD_MAX_MEMORY_SIZE below sits just
-# above this to give Django's own check a matching ceiling.
+# Enforced at decompression time inside gt_rust (the ingest decompression
+# primitive) and is the source of truth for ingest body size.
+# DATA_UPLOAD_MAX_MEMORY_SIZE below sits just above this to give Django's own
+# check a matching ceiling.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
     5 * 1024 * 1024,  # 5 MB
 )
 
-# Raw request body cap before view handling. For ingest endpoints the
-# DecompressBodyMiddleware enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the
-# decompressed stream and sets CONTENT_LENGTH to that cap, so this setting
-# must be at least as large. Multipart file uploads (minidumps, source-map
-# chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk, so this
-# does not need to cover them.
+# Raw request body cap before view handling. For ingest endpoints gt_rust
+# enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the decompressed bytes, but
+# the *compressed* body Django reads is smaller than that, so this only needs
+# to cover uncompressed ingest bodies. Multipart file uploads (minidumps,
+# source-map chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk,
+# so this does not need to cover them.
 #
 # 15 MB default gives plenty of headroom over the 5 MB ingest cap for any
 # non-ingest JSON bodies (webhooks, bulk invites, assemble manifests) while
@@ -614,7 +615,6 @@ MIDDLEWARE += [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "glitchtip.middleware.DecompressBodyMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "allauth.account.middleware.AccountMiddleware",
 ]
