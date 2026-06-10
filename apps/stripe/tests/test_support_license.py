@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings
 
 from apps.stripe.models import SupportLicense
@@ -56,10 +58,16 @@ class SupportLicenseResolverTestCase(TestCase):
         self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
 
     @override_settings(BILLING_ENABLED=False, GLITCHTIP_LICENSE_KEY="sub_envKey")
-    async def test_db_key_overrides_env_var(self):
+    async def test_env_var_overrides_db_key(self):
+        # Env var wins over the DB row; its email is dropped (env has none).
         await SupportLicense(
             license_key="sub_dbKey", billing_email="db@example.com"
         ).asave()
-        self.assertEqual(
-            await SupportLicense.resolved(), ("sub_dbKey", "db@example.com")
-        )
+        self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
+
+    @override_settings(BILLING_ENABLED=False, GLITCHTIP_LICENSE_KEY="sub_envKey")
+    async def test_env_var_skips_db_call(self):
+        # When the env var is set, resolved() must not query the DB.
+        with patch.object(SupportLicense, "load") as mock_load:
+            self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
+        mock_load.assert_not_called()

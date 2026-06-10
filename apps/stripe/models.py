@@ -491,9 +491,9 @@ class SupportLicense(models.Model):
     async def resolved(cls) -> tuple[str, str]:
         if settings.BILLING_ENABLED:
             return ("", "")
+        # Env var wins and short-circuits the DB query when set. Fall back to
+        # the DB row otherwise. billing_email is DB-only — env carries no email.
+        if settings.GLITCHTIP_LICENSE_KEY:
+            return (settings.GLITCHTIP_LICENSE_KEY, "")
         db = await cls.load()
-        # The admin DB row wins; otherwise fall back to the GLITCHTIP_LICENSE_KEY
-        # env var (the recommended setup) so env-only deployments still surface
-        # the key in support links. billing_email is DB-only — env has none.
-        license_key = db.license_key or settings.GLITCHTIP_LICENSE_KEY or ""
-        return (license_key, db.billing_email)
+        return (db.license_key, db.billing_email)
