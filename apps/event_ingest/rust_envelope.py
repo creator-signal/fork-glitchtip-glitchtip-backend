@@ -1,23 +1,23 @@
 """Rust-backed request-body decompression + envelope framing for event ingest.
 
-``gt_rust`` is a hard dependency of the ingest path. There is no Python
-decompression fallback and no enable/disable flag: **all** ``Content-Encoding``
-handling (gzip / deflate / br / zstd) for every ingest endpoint runs in Rust's
-allocator via the ``gt_rust`` extension. This module is what replaced the old
-``glitchtip.middleware.DecompressBodyMiddleware`` and its hand-rolled streaming
-decoders.
+Every ingest endpoint's ``Content-Encoding`` handling (gzip / deflate / br /
+zstd) runs in Rust via the ``gt_rust`` extension. ``gt_rust`` is a hard
+dependency of the ingest path: there is no Python decompression path and no
+enable/disable flag — the request body is decompressed in Rust or not at all.
 
-Why move this off Python:
+Why Rust owns this:
 
-  - **Decompression.** The middleware streamed the compressed body through a
-    Python decoder, materializing the decompressed payload on the Python heap
-    before the view saw it. ``gt_rust`` decompresses in Rust with the GIL
-    released and a hard size cap, so a zip bomb is stopped before it balloons
-    pymalloc arenas — the win is *bounded memory per request*, not raw speed.
-  - **Envelope framing.** ``request.body`` + ``BytesIO``/``readline`` framing
-    allocates per line, a steady drip into the arenas that fragment under high
-    async concurrency. ``gt_rust`` frames in Rust and hands back only the item
-    payload bytes. Item *schema validation* stays in Python (Pydantic) — the
+  - **Bounded-memory decompression.** Decompression runs in Rust with the GIL
+    released and a hard cap on the decompressed size, enforced *as the stream is
+    read* (see ``GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE``). A highly compressible
+    body — a malicious zip bomb, or simply a deeply recursive error payload an
+    SDK captured — trips the cap the moment it crosses the line, before it can
+    balloon Python's pymalloc arenas. The win is bounded memory per request, not
+    raw speed.
+  - **Allocation-light framing.** Framing in Rust hands back only the item
+    header line and the verbatim payload bytes, avoiding the per-line Python
+    allocations (``BytesIO``/``readline``) that fragment the allocator under high
+    async concurrency. Item *schema validation* stays in Python (Pydantic) — the
     deliberate seam; it can move into Rust later behind this same boundary.
 
 Two entry points, by endpoint shape:
@@ -28,8 +28,8 @@ Two entry points, by endpoint shape:
     ``/security/``, ``/minidump/``): decompress only, hand the raw bytes to the
     endpoint's own parser.
 
-Both take the raw (still-compressed) request body plus the original
-``Content-Encoding``; with the middleware gone, nothing decompresses upstream.
+Both take the raw (still-compressed) request body plus its ``Content-Encoding``;
+nothing decompresses the body upstream of the view.
 """
 
 from urllib.parse import urlparse
@@ -55,8 +55,7 @@ __all__ = [
 
 # Content-Encoding values gt_rust can decode. Anything else (absent,
 # ``identity``, or an unknown token) means "no decompression" — the body is
-# handed through as-is, matching how the old middleware only wrapped the stream
-# for these four encodings.
+# passed through to the view as-is.
 _DECODABLE = frozenset({"gzip", "deflate", "br", "zstd"})
 
 
@@ -71,7 +70,7 @@ def request_content_encoding(request: HttpRequest) -> str | None:
 
 
 def _max_unzipped() -> int:
-    """The decompressed-size cap, formerly enforced by the middleware."""
+    """The decompressed-size cap applied to every ingest body."""
     return settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE
 
 

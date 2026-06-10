@@ -13,12 +13,11 @@ from apps.event_ingest.rust_envelope import (
 class ORJSONParser(Parser):
     def parse_body(self, request: HttpRequest):
         body = request.body
-        # There is no request-body decompression middleware anymore. A
-        # Content-Encoded body (e.g. an SDK gzipping a /store/ event, or zstd)
-        # therefore arrives still compressed — decompress it in Rust before JSON
-        # parsing. The decompressed-size cap is enforced inside gt_rust. Plain
-        # bodies (the common case, no Content-Encoding) skip straight to
-        # orjson, byte-for-byte as before.
+        # A Content-Encoded body (e.g. an SDK gzipping a /store/ event, or zstd)
+        # arrives still compressed — nothing decompresses the request body
+        # upstream of this parser — so decompress it in Rust before JSON parsing.
+        # The decompressed-size cap is enforced inside gt_rust. Plain bodies (the
+        # common case, no Content-Encoding) skip straight to orjson.
         encoding = request_content_encoding(request)
         if encoding is not None:
             try:

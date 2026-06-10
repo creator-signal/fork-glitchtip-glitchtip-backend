@@ -106,10 +106,10 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     except RequestDataTooBig as e:
         return HttpResponseForbidden(f"{e}", status=413)
 
-    # Decompress (if Content-Encoded) and frame the envelope in Rust. There is
-    # no upstream decompression middleware anymore: gt_rust takes the raw body
-    # plus the original Content-Encoding and returns the lifted header fields
-    # plus the item list, enforcing the decompressed-size cap in its allocator.
+    # Decompress (if Content-Encoded) and frame the envelope in Rust: gt_rust
+    # takes the raw body plus its Content-Encoding and returns the lifted header
+    # fields plus the item list, enforcing the decompressed-size cap in its own
+    # allocator. The body is never decompressed in Python.
     try:
         envelope = frame_envelope(body, content_encoding)
     except (ValueError, EnvelopeTooBig) as e:
@@ -137,10 +137,10 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     minidump_bytes: bytes | None = None
     event_processed = False
 
-    # Loop through items. gt_rust already split each item into its header line
-    # and verbatim payload bytes (length- or newline-delimited) and stopped at
-    # the first non-JSON item header, so no framing or short-read handling is
-    # left here — just validate the header and dispatch on type.
+    # Loop through items. gt_rust has already split each item into its header
+    # line and verbatim payload bytes (length- or newline-delimited) and stopped
+    # at the first non-JSON item header, so this loop does no framing or
+    # short-read handling — just validate the header and dispatch on type.
     for envelope_item in envelope.items:
         item_header_line = envelope_item.header
         payload_bytes = envelope_item.payload
@@ -402,10 +402,9 @@ async def minidump_view(request: EventAuthHttpRequest, project_id: int):
 
     update_first_event = project.first_event is None
 
-    # With the decompression middleware gone, a Content-Encoded multipart upload
-    # arrives still compressed. Decompress the body in Rust and swap in a plain
-    # stream before Django parses request.FILES — the same point the old
-    # middleware wrapped request._stream, just in Rust's allocator. (Minidump
+    # A Content-Encoded multipart upload arrives still compressed (nothing
+    # decompresses the body upstream of this view). Decompress it in Rust and
+    # swap in a plain stream before Django parses request.FILES. (Minidump
     # uploaders rarely set Content-Encoding, so this is usually skipped.)
     content_encoding = request_content_encoding(request)
     if content_encoding:

@@ -33,9 +33,8 @@ class IngestDispatcher:
     - SecurityMiddleware (HSTS headers)
     - CorsMiddleware (browser SDKs send from different origins)
 
-    Request-body decompression (gzip/deflate/br/zstd) is no longer a
-    middleware: it runs in Rust (gt_rust) at each ingest endpoint's
-    body-read seam.
+    Request-body decompression (gzip/deflate/br/zstd) is not a middleware:
+    it runs in Rust (gt_rust) at each ingest endpoint's body-read seam.
 
     Skipped for ingest (saves ~8 middleware calls per request):
     - SessionMiddleware
