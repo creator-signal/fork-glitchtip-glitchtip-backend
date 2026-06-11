@@ -4,6 +4,7 @@ import uuid
 from dataclasses import asdict
 
 import orjson
+import sentry_sdk
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
@@ -132,9 +133,47 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
         try:
             item_header = ItemHeaderSchema.model_validate_json(item_header_line)
         except ValidationError as e:
-            if any(err["type"] == "json_invalid" for err in e.errors()):
+            errors = e.errors()
+            if any(err["type"] == "json_invalid" for err in errors):
                 # Not valid JSON — corrupted/binary data, typically
                 # from a tunnel proxy mangling binary envelope payloads.
+                break
+            # An unknown item type (a `literal_error` on the `type` field) is
+            # a valid header for a type that is in neither the supported nor
+            # the ignored list — e.g. the SDK spec added something new. Give
+            # each distinct type its own fingerprint so a genuinely-new type
+            # surfaces as its own issue instead of folding every unknown type
+            # into one. Other schema failures (e.g. a malformed `length`) keep
+            # the generic grouping so they aren't merged under a type.
+            type_error = next(
+                (
+                    err
+                    for err in errors
+                    if err["type"] == "literal_error" and err["loc"][:1] == ("type",)
+                ),
+                None,
+            )
+            if type_error is not None:
+                item_type = type_error.get("input")
+                if not isinstance(item_type, str):
+                    try:
+                        item_type = orjson.loads(item_header_line).get("type")
+                    except orjson.JSONDecodeError:
+                        item_type = None
+                    if not isinstance(item_type, str):
+                        item_type = "unknown"
+                with sentry_sdk.new_scope() as scope:
+                    scope.level = "warning"
+                    scope.fingerprint = [
+                        "envelope-unsupported-item-type",
+                        item_type,
+                    ]
+                    scope.set_tag("envelope_item_type", item_type)
+                    scope.set_context(
+                        "invalid item header",
+                        {"line": item_header_line.decode(errors="replace")[:1024]},
+                    )
+                    sentry_sdk.capture_exception(e)
                 break
             # Valid JSON that our schema doesn't understand — worth
             # knowing about in case the SDK spec evolved.

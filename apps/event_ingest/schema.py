@@ -472,6 +472,7 @@ IgnoredItemType = Literal[
     "replay_video",
     "span",
     "profile_chunk",
+    "trace_metric",
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
