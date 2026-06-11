@@ -3,6 +3,7 @@ import uuid
 from unittest import mock
 from urllib.parse import urlparse
 
+import sentry_sdk
 from django.core.cache import cache
 from django.tasks import task_backends
 from django.test.client import FakePayload
@@ -672,3 +673,75 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(report.comments, "Anonymous feedback")
         self.assertEqual(report.name, "")
         self.assertEqual(report.email, "")
+
+    @mock.patch("apps.event_ingest.views.sentry_sdk.capture_exception")
+    @mock.patch("apps.event_ingest.views.capture_exception")
+    def test_ignored_trace_metric_item(self, mock_capture, mock_scoped_capture):
+        """
+        A `trace_metric` item is an explicitly ignored type: it must be
+        accepted-and-dropped silently, without capturing any exception, and
+        must not fail the envelope.
+        """
+        payload_bytes = json.dumps({"some": "metric"}).encode()
+        data = (
+            json.dumps({"event_id": uuid.uuid4().hex}).encode()
+            + b"\n"
+            + json.dumps(
+                {
+                    "type": "trace_metric",
+                    "content_type": "application/vnd.sentry.items.trace-metric+json",
+                    "length": len(payload_bytes),
+                }
+            ).encode()
+            + b"\n"
+            + payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200, res.content)
+        mock_capture.assert_not_called()
+        mock_scoped_capture.assert_not_called()
+
+    @mock.patch("apps.event_ingest.views.sentry_sdk.capture_exception")
+    def test_unknown_item_type_fingerprints_per_type(self, mock_capture):
+        """
+        An unknown item type (in neither the supported nor ignored lists)
+        captures an exception fingerprinted by the offending type, so each
+        genuinely-new type surfaces as its own issue rather than folding all
+        unknown types together.
+        """
+        captured_fingerprints = []
+
+        def record_fingerprint(_exc):
+            scope = sentry_sdk.get_current_scope()
+            captured_fingerprints.append(list(scope._fingerprint))
+
+        mock_capture.side_effect = record_fingerprint
+
+        for item_type in ("wholly_made_up_type", "another_made_up_type"):
+            data = (
+                json.dumps({"event_id": uuid.uuid4().hex}).encode()
+                + b"\n"
+                + json.dumps({"type": item_type}).encode()
+                + b"\n"
+                + json.dumps({"foo": "bar"}).encode()
+                + b"\n"
+            )
+            res = self.client.post(
+                self.url, data, content_type="application/x-sentry-envelope"
+            )
+            self.assertEqual(res.status_code, 200, res.content)
+
+        self.assertEqual(mock_capture.call_count, 2)
+        self.assertEqual(
+            captured_fingerprints,
+            [
+                ["envelope-unsupported-item-type", "wholly_made_up_type"],
+                ["envelope-unsupported-item-type", "another_made_up_type"],
+            ],
+        )
