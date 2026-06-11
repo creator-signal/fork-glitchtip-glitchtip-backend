@@ -376,8 +376,8 @@ async def subscription_events_count_for_period(
         "total": counts.total_event_count,
         "event_count": counts.issue_event_count,
         "transaction_event_count": counts.transaction_count,
-        "uptime_check_event_count": counts.uptime_check_event_count,
-        "log_event_count": counts.log_count,
+        "uptime_check_event_count": counts.uptime_check_event_count // 10,
+        "log_event_count": counts.log_count // 10,
         "file_size_mb": counts.file_size,
     }
 

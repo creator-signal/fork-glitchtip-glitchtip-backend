@@ -158,6 +158,19 @@ class StripeAPITestCase(TestCase):
             date=timezone.make_aware(datetime(2020, 1, 15, 10)),
             count=25,
         )
+        baker.make(
+            "projects.LogProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 15, 10)),
+            count=40,
+        )
+        baker.make(
+            "uptime.UptimeCheckHourlyStatistic",
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 1, 15, 10)),
+            count=50,
+        )
         url = reverse(
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
@@ -166,7 +179,12 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["eventCount"], 25)
-        self.assertEqual(data["total"], 25)
+        # Logs and uptime checks each weigh 0.1: reported per-category as the
+        # billed contribution (count // 10), same as the current-period branch.
+        self.assertEqual(data["logEventCount"], 4)
+        self.assertEqual(data["uptimeCheckEventCount"], 5)
+        # 25 issues + 40 logs * 0.1 + 50 uptime * 0.1 = 25 + 4 + 5
+        self.assertEqual(data["total"], 34)
 
     def test_subscription_events_count_for_period_retention_limit(self):
         url = reverse(
