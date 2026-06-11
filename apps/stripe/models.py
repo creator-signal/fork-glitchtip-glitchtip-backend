@@ -491,5 +491,9 @@ class SupportLicense(models.Model):
     async def resolved(cls) -> tuple[str, str]:
         if settings.BILLING_ENABLED:
             return ("", "")
+        # Env var wins and short-circuits the DB query when set. Fall back to
+        # the DB row otherwise. billing_email is DB-only — env carries no email.
+        if settings.GLITCHTIP_LICENSE_KEY:
+            return (settings.GLITCHTIP_LICENSE_KEY, "")
         db = await cls.load()
         return (db.license_key, db.billing_email)

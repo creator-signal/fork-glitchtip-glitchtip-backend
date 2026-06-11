@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings
 
 from apps.stripe.models import SupportLicense
@@ -23,9 +25,7 @@ class SupportLicenseSingletonTestCase(TestCase):
         self.assertEqual(await SupportLicense.objects.acount(), 1)
 
     async def test_load_returns_existing(self):
-        await SupportLicense(
-            license_key="sub_existing", billing_email="a@b.co"
-        ).asave()
+        await SupportLicense(license_key="sub_existing", billing_email="a@b.co").asave()
         sl = await SupportLicense.load()
         self.assertEqual(sl.license_key, "sub_existing")
         self.assertEqual(sl.billing_email, "a@b.co")
@@ -51,3 +51,23 @@ class SupportLicenseResolverTestCase(TestCase):
     @override_settings(BILLING_ENABLED=False)
     async def test_empty_db_returns_empty(self):
         self.assertEqual(await SupportLicense.resolved(), ("", ""))
+
+    @override_settings(BILLING_ENABLED=False, GLITCHTIP_LICENSE_KEY="sub_envKey")
+    async def test_env_var_fallback_when_db_empty(self):
+        # An env-only deployment (no admin row) still surfaces its key.
+        self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
+
+    @override_settings(BILLING_ENABLED=False, GLITCHTIP_LICENSE_KEY="sub_envKey")
+    async def test_env_var_overrides_db_key(self):
+        # Env var wins over the DB row; its email is dropped (env has none).
+        await SupportLicense(
+            license_key="sub_dbKey", billing_email="db@example.com"
+        ).asave()
+        self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
+
+    @override_settings(BILLING_ENABLED=False, GLITCHTIP_LICENSE_KEY="sub_envKey")
+    async def test_env_var_skips_db_call(self):
+        # When the env var is set, resolved() must not query the DB.
+        with patch.object(SupportLicense, "load") as mock_load:
+            self.assertEqual(await SupportLicense.resolved(), ("sub_envKey", ""))
+        mock_load.assert_not_called()
