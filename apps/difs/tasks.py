@@ -4,6 +4,7 @@ import tempfile
 from hashlib import sha1
 
 from asgiref.sync import sync_to_async
+from django.core.files import File as DjangoFile
 from django.tasks import task
 from symbolic import Archive, normalize_debug_id, parse_addr
 
@@ -198,35 +199,57 @@ def update_frames(event: ErrorIssueEventSchema, frames):
 
 
 def difs_get_file_from_chunks(checksum, chunks):
-    files = File.objects.filter(checksum=checksum).select_related("blob")
-
-    for file in files:
-        blob = file.blob
-        file_chunks = [blob.checksum]
-        if file_chunks == chunks:
-            return file
-
-    return None
+    # File.checksum is the whole-file SHA1, so an existing File with a matching
+    # checksum already holds identical content, regardless of how it was split
+    # into chunks on upload. (chunks is kept for call-site compatibility.)
+    return (
+        File.objects.filter(checksum=checksum, blob__isnull=False)
+        .select_related("blob")
+        .first()
+    )
 
 
 def difs_create_file_from_chunks(name, checksum, chunks):
-    blobs = FileBlob.objects.filter(checksum__in=chunks)
+    # Order blobs by the client-supplied chunk order. filter(__in=...) returns
+    # rows in arbitrary order, so we must re-order to reassemble correctly.
+    blobs_by_checksum = {
+        blob.checksum: blob for blob in FileBlob.objects.filter(checksum__in=chunks)
+    }
+    if set(blobs_by_checksum) != set(chunks):
+        # A chunk is missing; the file cannot be assembled.
+        raise ChecksumMismatched()
+    ordered_blobs = [blobs_by_checksum[c] for c in chunks]
 
+    # GlitchTip's File model points at a single FileBlob, so a multi-chunk file
+    # must be concatenated into one combined blob. Stream the chunks in order
+    # into a temp file while verifying the whole-file checksum.
     total_checksum = sha1(b"")
     size = 0
+    with tempfile.NamedTemporaryFile() as tf:
+        for blob in ordered_blobs:
+            with blob.blob.open("rb") as binary_file:
+                for data in iter(lambda f=binary_file: f.read(65536), b""):
+                    size += len(data)
+                    total_checksum.update(data)
+                    tf.write(data)
 
-    for blob in blobs:
-        with blob.blob.open("rb") as binary_file:
-            content = binary_file.read()
-            size += len(content)
-            total_checksum.update(content)
+        if checksum != total_checksum.hexdigest():
+            raise ChecksumMismatched()
 
-    total_checksum = total_checksum.hexdigest()
-    if checksum != total_checksum:
-        raise ChecksumMismatched()
+        if len(ordered_blobs) == 1:
+            # Single chunk: the uploaded blob already is the whole file, so
+            # reuse it directly and avoid storing a duplicate blob.
+            file_blob = ordered_blobs[0]
+        else:
+            tf.flush()
+            tf.seek(0)
+            file_blob, _ = FileBlob.objects.get_or_create(
+                checksum=checksum,
+                defaults={"blob": DjangoFile(tf, name=checksum), "size": size},
+            )
 
     file = File(name=name, headers={}, size=size, checksum=checksum)
-    file.blob = blobs[0]
+    file.blob = file_blob
     file.save()
     return file
 

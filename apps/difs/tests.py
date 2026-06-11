@@ -18,7 +18,7 @@ from apps.difs.stacktrace_processor import (
     jvm_module_to_path,
 )
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
-from apps.files.models import File
+from apps.files.models import File, FileBlob
 from glitchtip.test_utils import generators  # noqa: F401
 from glitchtip.test_utils.test_case import GlitchTestCase
 
@@ -287,6 +287,48 @@ class DifsTasksTestCase(GlitchTestCase):
         chunks = [fileblob1.checksum, fileblob2.checksum]
         with self.assertRaises(ChecksumMismatched):
             difs_create_file_from_chunks("123", checksum, chunks)
+
+    def test_difs_create_file_from_chunks_assembles_content(self):
+        # A multi-chunk file is concatenated into a single combined blob whose
+        # content is the whole file, not just the first chunk.
+        fileblob1 = self.create_file_blob("1", "aaa")
+        fileblob2 = self.create_file_blob("2", "bbb")
+        checksum = sha1(b"aaabbb").hexdigest()
+        chunks = [fileblob1.checksum, fileblob2.checksum]
+        difs_create_file_from_chunks("ab", checksum, chunks)
+        file = File.objects.filter(checksum=checksum).first()
+        self.assertEqual(file.checksum, checksum)
+        self.assertEqual(file.size, 6)
+        with file.blob.blob.open("rb") as f:
+            self.assertEqual(f.read(), b"aaabbb")
+
+    def test_difs_create_file_from_chunks_respects_chunk_order(self):
+        # Reassembly must follow the request's chunk order, not the arbitrary
+        # order FileBlob.objects.filter(checksum__in=...) returns.
+        fileblob1 = self.create_file_blob("1", "aaa")
+        fileblob2 = self.create_file_blob("2", "bbb")
+        checksum = sha1(b"bbbaaa").hexdigest()
+        chunks = [fileblob2.checksum, fileblob1.checksum]
+        difs_create_file_from_chunks("ba", checksum, chunks)
+        file = File.objects.filter(checksum=checksum).first()
+        with file.blob.blob.open("rb") as f:
+            self.assertEqual(f.read(), b"bbbaaa")
+
+    def test_difs_create_file_from_chunks_single_chunk_reuses_blob(self):
+        # A single-chunk file reuses the uploaded blob without storing a copy.
+        fileblob = self.create_file_blob("1", "solo")
+        checksum = fileblob.checksum
+        difs_create_file_from_chunks("solo", checksum, [fileblob.checksum])
+        file = File.objects.filter(checksum=checksum).first()
+        self.assertEqual(file.blob_id, fileblob.id)
+        self.assertEqual(FileBlob.objects.filter(checksum=checksum).count(), 1)
+
+    def test_difs_create_file_from_chunks_missing_chunk(self):
+        fileblob = self.create_file_blob("1", "aaa")
+        checksum = sha1(b"aaabbb").hexdigest()
+        chunks = [fileblob.checksum, sha1(b"bbb").hexdigest()]
+        with self.assertRaises(ChecksumMismatched):
+            difs_create_file_from_chunks("ab", checksum, chunks)
 
 
 class IOSSymbolicationTestCase(GlitchTestCase):
