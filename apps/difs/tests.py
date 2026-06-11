@@ -330,6 +330,31 @@ class DifsTasksTestCase(GlitchTestCase):
         with self.assertRaises(ChecksumMismatched):
             difs_create_file_from_chunks("ab", checksum, chunks)
 
+    def test_difs_create_file_from_chunks_duplicate_chunk(self):
+        # A file whose two chunks have identical content references the same
+        # blob twice. The blob must be emitted once per chunk-list entry (so the
+        # content is duplicated), not once per distinct checksum.
+        fileblob = self.create_file_blob("1", "aa")
+        checksum = sha1(b"aaaa").hexdigest()
+        chunks = [fileblob.checksum, fileblob.checksum]
+        difs_create_file_from_chunks("aa", checksum, chunks)
+        file = File.objects.filter(checksum=checksum).first()
+        self.assertEqual(file.size, 4)
+        with file.blob.blob.open("rb") as f:
+            self.assertEqual(f.read(), b"aaaa")
+
+    def test_difs_create_file_from_chunks_is_idempotent(self):
+        # Assembling the same multi-chunk file twice must not create a second
+        # combined blob; the get_or_create keyed on the whole-file checksum
+        # collapses the repeat onto the existing blob.
+        fileblob1 = self.create_file_blob("1", "aaa")
+        fileblob2 = self.create_file_blob("2", "bbb")
+        checksum = sha1(b"aaabbb").hexdigest()
+        chunks = [fileblob1.checksum, fileblob2.checksum]
+        difs_create_file_from_chunks("ab", checksum, chunks)
+        difs_create_file_from_chunks("ab", checksum, chunks)
+        self.assertEqual(FileBlob.objects.filter(checksum=checksum).count(), 1)
+
 
 class IOSSymbolicationTestCase(GlitchTestCase):
     @classmethod

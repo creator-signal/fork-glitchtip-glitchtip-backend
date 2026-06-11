@@ -174,7 +174,7 @@ def event_difs_resolve_stacktrace(event: ErrorIssueEventSchema, project_id: int)
                 sum(1 for f in item.frames if f and f.get("filename")),
             ),
         )
-        
+
         update_frames(event, best_remapped_stacktrace.frames)
 
     # JVM source context (runs after proguard deobfuscation if applicable).
@@ -228,7 +228,7 @@ def difs_create_file_from_chunks(name, checksum, chunks):
     with tempfile.NamedTemporaryFile() as tf:
         for blob in ordered_blobs:
             with blob.blob.open("rb") as binary_file:
-                for data in iter(lambda f=binary_file: f.read(65536), b""):
+                while data := binary_file.read(65536):
                     size += len(data)
                     total_checksum.update(data)
                     tf.write(data)
