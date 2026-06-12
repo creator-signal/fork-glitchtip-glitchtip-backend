@@ -1,9 +1,11 @@
 from django.db.models import F
 from django.tasks import task
 
+from apps.organizations_ext.models import Organization
+
 from .constants import EventStatus
 from .maintenance import delete_issues_in_batches
-from .models import Issue, IssueEvent, IssueHash
+from .models import Issue, IssueEvent, IssueHash, IssueIndex
 from .services import IssueFilters, filter_issue_list, get_queryset
 
 
@@ -31,6 +33,14 @@ async def update_issues_task(
     qs = filter_issue_list(qs, filters)
     qs = qs.exclude(id__in=exclude_ids).filter(id__lte=max_id)
 
+    # IssueIndex partition key, so the leaf writes below prune to one
+    # hash partition instead of scanning all of them.
+    organization_id = (
+        await Organization.objects.filter(slug=organization_slug)
+        .values_list("id", flat=True)
+        .afirst()
+    )
+
     status = update_params.get("status")
     merge_id = update_params.get("merge")
     assignee_org_user_id = update_params.get("assigned_to_org_user_id")
@@ -39,8 +49,9 @@ async def update_issues_task(
 
     if status:
         event_status = EventStatus.from_string(status)
-        # Optimization: Don't update rows that already match
-        qs = qs.exclude(status=event_status)
+        # Optimization: Don't update rows that already match. status lives on the
+        # IssueIndex leaf.
+        qs = qs.exclude(index__status=event_status)
 
         chunk_size = 1000
         while True:
@@ -49,7 +60,9 @@ async def update_issues_task(
             if not batch_ids:
                 break
 
-            await Issue.objects.filter(id__in=batch_ids).aupdate(status=event_status)
+            await IssueIndex.objects.filter(
+                issue_id__in=batch_ids, organization_id=organization_id
+            ).aupdate(status=event_status)
 
     if apply_assignment:
         chunk_size = 1000
@@ -78,8 +91,10 @@ async def update_issues_task(
                 )[:chunk_size]
             ]
             if not batch_ids:
-                target_issue.count = F("count") + updated_issue_count
-                await target_issue.asave(update_fields=["count"])
+                # count lives on the IssueIndex leaf.
+                await IssueIndex.objects.filter(
+                    issue_id=target_issue.id, organization_id=organization_id
+                ).aupdate(count=F("count") + updated_issue_count)
                 break
 
             # Soft delete source issues

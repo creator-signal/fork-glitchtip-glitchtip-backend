@@ -253,6 +253,7 @@ async def update_issues(processing_events: list[ProcessingEvent]):
                 issues_to_update[issue_id].last_release_id = processing_event.release_id
         else:
             issues_to_update[issue_id] = IssueUpdate(
+                organization_id=processing_event.organization_id,
                 last_seen=processing_event.received,
                 search_vector=vector,
                 last_release_id=processing_event.release_id,
@@ -265,10 +266,11 @@ async def update_issues(processing_events: list[ProcessingEvent]):
         [
             (
                 issue_id,
+                value.organization_id,
                 value.added_count,
-                value.search_vector,
                 value.last_seen,
                 value.last_release_id,
+                value.search_vector,
             )
             for issue_id, value in issues_to_update.items()
         ],
@@ -276,15 +278,33 @@ async def update_issues(processing_events: list[ProcessingEvent]):
     )
 
     max_lexemes = settings.SEARCH_MAX_LEXEMES
+    # Single hot-path write: the IssueIndex leaf carries the per-event
+    # columns (count/last_seen/last_release) and the full-text document, so the
+    # Issue table is not touched on event ingest. Append to rows that already
+    # exist, insert the rest. The UPDATE is filtered on organization_id (the
+    # hash partition key) so Postgres prunes partitions. An issue with no leaf
+    # row yet (created by an older release, or not backfilled) is created here on
+    # its next event — both the stats and search self-heal.
     sql = (
-        "UPDATE issue_events_issue SET "
-        "count = issue_events_issue.count + v.added_count, "
-        f"search_vector = append_and_limit_tsvector(issue_events_issue.search_vector, v.new_vector, {max_lexemes}, 'english'::regconfig), "
-        "last_seen = GREATEST(issue_events_issue.last_seen, v.last_seen), "
-        "last_release_id = COALESCE(v.last_release_id, issue_events_issue.last_release_id) "
-        "FROM unnest(%s::bigint[], %s::int[], %s::text[], %s::timestamptz[], %s::bigint[]) "
-        "AS v(id, added_count, new_vector, last_seen, last_release_id) "
-        "WHERE issue_events_issue.id = v.id"
+        "WITH v AS ("
+        "SELECT * FROM unnest(%s::bigint[], %s::int[], %s::int[], %s::timestamptz[], %s::bigint[], %s::text[]) "
+        "AS t(id, org_id, added_count, last_seen, last_release_id, new_text)"
+        "), upd AS ("
+        "UPDATE issue_events_issueindex t SET "
+        "count = t.count + v.added_count, "
+        "last_seen = GREATEST(t.last_seen, v.last_seen), "
+        "last_release_id = COALESCE(v.last_release_id, t.last_release_id), "
+        "fts_document = "
+        f"append_and_limit_tsvector(t.fts_document, v.new_text, {max_lexemes}, 'english'::regconfig) "
+        "FROM v WHERE t.issue_id = v.id AND t.organization_id = v.org_id "
+        "RETURNING t.issue_id"
+        ") "
+        "INSERT INTO issue_events_issueindex "
+        "(issue_id, organization_id, count, last_seen, last_release_id, fts_document) "
+        "SELECT v.id, v.org_id, v.added_count, v.last_seen, v.last_release_id, "
+        "to_tsvector('english'::regconfig, v.new_text) "
+        "FROM v WHERE NOT EXISTS (SELECT 1 FROM upd WHERE upd.issue_id = v.id) "
+        "ON CONFLICT (issue_id, organization_id) DO NOTHING"
     )
     await execute_unnest(sql, list(data))
 
@@ -581,12 +601,13 @@ async def _fetch_issue_hashes_raw(
 
     sql = """
         SELECT ih.project_id, ih.value, ih.issue_id,
-               i.status AS issue__status,
+               si.status AS issue__status,
                i.resolved_in_release_id AS issue__resolved_in_release_id
         FROM unnest(%s::bigint[], %s::uuid[]) AS k(project_id, value)
         JOIN issue_events_issuehash ih
             ON ih.project_id = k.project_id AND ih.value = k.value
         JOIN issue_events_issue i ON i.id = ih.issue_id
+        JOIN issue_events_issueindex si ON si.issue_id = ih.issue_id
     """
     columns, rows = await fetchall_unnest(sql, list(pairs), db_alias=db_alias)
     dicts = [dict(zip(columns, row)) for row in rows]
@@ -611,18 +632,18 @@ async def _create_issue_and_hash(
 ) -> tuple[int, bool]:
     """Atomically create an Issue + IssueHash and return ``(issue_id, created)``.
 
-    The whole unit — project-counter upsert, then the Issue
-    (with ``to_tsvector('english', ...)`` for search_vector) and IssueHash
-    writes wrapped in ``transaction.atomic()`` — runs inside a single
-    ``sync_to_async`` hop. This is deliberate: with ``USE_ASYNC_BACKEND``
-    off (the default), ``async_compat`` is a ``sync_to_async`` shim over
-    Django's thread-local connection, which this async worker shares across
-    concurrently running tasks. Holding a transaction open across an
-    ``await`` would let a sibling task close or poison that shared
-    connection mid-block, cascading as "Cannot open a new connection in an
-    atomic block" / TransactionManagementError. Keeping the transaction
-    inside one synchronous call means it never spans an await, so siblings
-    serialise before/after it on the executor thread and can't interfere.
+    The whole unit — project-counter upsert, then the Issue, IssueHash, and
+    IssueIndex (the issue's hot/queryable projection plus its full-text
+    document) writes wrapped in ``transaction.atomic()`` — runs inside a single
+    ``sync_to_async`` hop. This is deliberate: with ``USE_ASYNC_BACKEND`` off
+    (the default), ``async_compat`` is a ``sync_to_async`` shim over Django's
+    thread-local connection, which this async worker shares across concurrently
+    running tasks. Holding a transaction open across an ``await`` would let a
+    sibling task close or poison that shared connection mid-block, cascading as
+    "Cannot open a new connection in an atomic block" /
+    TransactionManagementError. Keeping the transaction inside one synchronous
+    call means it never spans an await, so siblings serialise before/after it
+    on the executor thread and can't interfere.
 
     The unique on ``(project_id, value)`` lets concurrent ingest of the same
     hash race; the loser catches IntegrityError, reads back the winner's id,
@@ -652,17 +673,13 @@ async def _create_issue_and_hash(
                         """
                         INSERT INTO issue_events_issue (
                             project_id, type, title, metadata,
-                            first_seen, last_seen,
-                            first_release_id, last_release_id,
-                            level, short_id, search_vector,
-                            count, status, is_public, is_deleted, culprit
+                            first_seen, first_release_id,
+                            short_id, is_public, is_deleted, culprit
                         )
                         VALUES (
                             %s, %s, %s, %s,
                             %s, %s,
-                            %s, %s,
-                            %s, %s, to_tsvector('english', %s),
-                            1, %s, false, false, NULL
+                            %s, false, false, NULL
                         )
                         RETURNING id
                         """,
@@ -672,13 +689,8 @@ async def _create_issue_and_hash(
                             issue_defaults["title"],
                             Jsonb(issue_defaults["metadata"]),
                             issue_defaults["first_seen"],
-                            issue_defaults["last_seen"],
                             issue_defaults.get("first_release_id"),
-                            issue_defaults.get("last_release_id"),
-                            issue_defaults.get("level", LogLevel.ERROR),
                             short_id,
-                            search_vector_str,
-                            EventStatus.UNRESOLVED,
                         ],
                     )
                     issue_id = cursor.fetchone()[0]
@@ -688,6 +700,30 @@ async def _create_issue_and_hash(
                         VALUES (%s, %s, %s::uuid)
                         """,
                         [issue_id, project_id, processing_event.issue_hash],
+                    )
+                    # Write the IssueIndex leaf: the hot/queryable projection
+                    # of the issue (count/last_seen/status/level/last_release)
+                    # plus the sole full-text document. count starts at 1;
+                    # status defaults UNRESOLVED.
+                    cursor.execute(
+                        """
+                        INSERT INTO issue_events_issueindex (
+                            issue_id, organization_id, last_release_id, last_seen,
+                            count, status, level, fts_document
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, 1, %s, %s, to_tsvector('english', %s)
+                        )
+                        """,
+                        [
+                            issue_id,
+                            processing_event.organization_id,
+                            issue_defaults.get("last_release_id"),
+                            issue_defaults["last_seen"],
+                            EventStatus.UNRESOLVED,
+                            issue_defaults.get("level", LogLevel.ERROR),
+                            search_vector_str,
+                        ],
                     )
             check_set_issue_id(
                 processing_events,
@@ -1026,7 +1062,11 @@ async def process_issue_events(
                 if resolved_in is None or (
                     event_release is not None and resolved_in != event_release
                 ):
-                    issues_to_reopen.append(hash_obj["issue_id"])
+                    # (issue_id, organization_id) so the leaf reopen below prunes
+                    # to a single hash partition.
+                    issues_to_reopen.append(
+                        (hash_obj["issue_id"], processing_event.organization_id)
+                    )
 
         if not processing_event.issue_id:
             issue_id, created = await _create_issue_and_hash(
@@ -1087,11 +1127,22 @@ async def process_issue_events(
         )
 
     if issues_to_reopen:
+        # issues_to_reopen holds (issue_id, organization_id) pairs.
+        reopen_ids = [p[0] for p in issues_to_reopen]
+        reopen_orgs = [p[1] for p in issues_to_reopen]
+        # status lives on the IssueIndex leaf; resolved_in_release stays on
+        # Issue. The leaf update joins on (issue_id, organization_id) so Postgres
+        # prunes to single hash partitions instead of scanning all of them.
         await execute(
-            "UPDATE issue_events_issue "
-            "SET status = %s, resolved_in_release_id = NULL "
+            "UPDATE issue_events_issueindex si SET status = %s "
+            "FROM unnest(%s::bigint[], %s::int[]) AS v(issue_id, org_id) "
+            "WHERE si.issue_id = v.issue_id AND si.organization_id = v.org_id",
+            [EventStatus.UNRESOLVED, reopen_ids, reopen_orgs],
+        )
+        await execute(
+            "UPDATE issue_events_issue SET resolved_in_release_id = NULL "
             "WHERE id = ANY(%s)",
-            [EventStatus.UNRESOLVED, list(issues_to_reopen)],
+            [reopen_ids],
         )
         # Notification.issues is a Django ManyToManyField; the through-table
         # FKs aren't ON DELETE CASCADE in Postgres (Django emulates that in
@@ -1112,7 +1163,7 @@ async def process_issue_events(
             DELETE FROM alerts_notification
             WHERE id IN (SELECT notification_id FROM notification_ids)
             """,
-            [list(issues_to_reopen)],
+            [reopen_ids],
         )
 
     # ignore_conflicts because we could have an invalid duplicate event_id, received

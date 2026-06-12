@@ -77,6 +77,13 @@ sort_options = Literal[
     "-priority",
 ]
 
+# count/last_seen moved to the IssueIndex leaf; map the public sort keys to
+# their ORM path. first_seen stays on Issue; priority is an annotation.
+_SORT_FIELD_MAP = {
+    "last_seen": "index__last_seen",
+    "count": "index__count",
+}
+
 
 async def get_queryset(
     user_id: int | None,
@@ -84,6 +91,7 @@ async def get_queryset(
     project_slug: str | None = None,
 ) -> QuerySet[Issue]:
     qs = Issue.objects
+    leaf_org_id: int | None = None
 
     if organization_slug:
         if user_id:
@@ -91,6 +99,7 @@ async def get_queryset(
                 Organization, users=user_id, slug=organization_slug
             )
             qs = qs.filter(project__organization_id=organization.id)
+            leaf_org_id = organization.id
         else:
             # Internal/System usage without user_id
             qs = qs.filter(project__organization__slug=organization_slug)
@@ -100,15 +109,25 @@ async def get_queryset(
     if project_slug:
         qs = qs.filter(project__slug=project_slug)
 
+    # Constrain the IssueIndex partition key so org-scoped list/search
+    # queries prune the hash partitions instead of scanning all of them (the
+    # leaf is joined on issue_id, which alone gives the planner no partition to
+    # pick). Every non-deleted issue has a leaf row, so this never drops results.
+    if leaf_org_id is not None:
+        qs = qs.filter(index__organization_id=leaf_org_id)
+
     return qs.annotate(
         num_comments=Count("comments", distinct=True),
     ).select_related(
         "project",
         "first_release",
-        "last_release",
         "resolved_in_release",
         "assigned_to_org_user__user",
         "assigned_to_team",
+        # The hot columns (count/last_seen/status/level/last_release) live on the
+        # IssueIndex leaf; pull it (and its last_release) so the Issue proxy
+        # properties and the serializer don't issue a query per row.
+        "index__last_release",
     )
 
 
@@ -160,14 +179,14 @@ def filter_issue_list(
                 query_value = query_value.strip('"')
 
                 if query_name == "is":
-                    qs = qs.filter(status=EventStatus.from_string(query_value))
+                    qs = qs.filter(index__status=EventStatus.from_string(query_value))
                 elif query_name == "has":
                     # Does not require distinct as we already have a group by from annotations
                     qs = qs.filter(
                         issuetag__tag_key__key=query_value,
                     )
                 elif query_name == "level":
-                    qs = qs.filter(level=LogLevel.from_string(query_value))
+                    qs = qs.filter(index__level=LogLevel.from_string(query_value))
                 else:
                     qs = qs.filter(
                         issuetag__tag_key__key=query_name,
@@ -175,13 +194,21 @@ def filter_issue_list(
                     )
             if len(query_part) == 1:
                 search_query = " ".join(queries[i:])
+                # Full-text search reads the decoupled IssueIndex (the
+                # Issue.search_vector column has been dropped). Scoping by
+                # organization_id lets Postgres prune the hash partitions;
+                # without it the join is on issue_id alone and every partition
+                # is scanned, so callers must resolve organization_id on the
+                # text-search path (list_issues / list_project_issues do).
+                index_q = Q(index__fts_document=search_query)
+                if organization_id:
+                    index_q &= Q(index__organization_id=organization_id)
                 if "*" in search_query:
                     qs = qs.filter(
-                        Q(title__ilike=f"%{search_query.replace('*', '%')}%")
-                        | Q(search_vector=search_query)
+                        Q(title__ilike=f"%{search_query.replace('*', '%')}%") | index_q
                     )
                 else:
-                    qs = qs.filter(search_vector=search_query)
+                    qs = qs.filter(index_q)
                 # Search queries must be at end of query string, finished when parsing
                 break
 
@@ -190,10 +217,15 @@ def filter_issue_list(
             # Inspired by https://stackoverflow.com/a/43788975/443457
             qs = qs.annotate(
                 priority=ExpressionWrapper(
-                    Log(10, F("count"))
-                    + Extract(F("last_seen"), "epoch") / Value(300000.0),
+                    Log(10, F("index__count"))
+                    + Extract(F("index__last_seen"), "epoch") / Value(300000.0),
                     output_field=FloatField(),
                 )
             )
-        qs = qs.order_by(sort)
+        # count/last_seen live on the IssueIndex leaf; map the sort key to
+        # the relation path (first_seen and priority stay as-is).
+        descending = sort.startswith("-")
+        key = sort.lstrip("-")
+        order_field = _SORT_FIELD_MAP.get(key, key)
+        qs = qs.order_by(("-" if descending else "") + order_field)
     return qs

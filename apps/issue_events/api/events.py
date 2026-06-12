@@ -96,16 +96,18 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
         await Issue.objects.filter(
             id=issue_id, project__organization__users=request.auth.user_id
         )
-        .select_related("project__organization")
+        .select_related("project__organization", "index")
         .afirst()
     )
     if not issue:
         raise Http404()
 
     # Filter by organization_id to enable hash sub-partition pruning
-    qs = get_queryset(request, issue_id).filter(
-        organization_id=issue.project.organization_id
-    ).order_by("-id")
+    qs = (
+        get_queryset(request, issue_id)
+        .filter(organization_id=issue.project.organization_id)
+        .order_by("-id")
+    )
     qs = qs.annotate(
         previous=Subquery(
             qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
@@ -187,7 +189,7 @@ async def get_issue_event(request: AuthHttpRequest, issue_id: int, event_id: uui
         await Issue.objects.filter(
             id=issue_id, project__organization__users=request.auth.user_id
         )
-        .select_related("project__organization")
+        .select_related("project__organization", "index")
         .afirst()
     )
     if not issue:
@@ -328,7 +330,7 @@ async def get_event_json(
             project__organization__slug=organization_slug,
             project__organization__users=request.auth.user_id,
         )
-        .select_related("project__organization")
+        .select_related("project__organization", "index")
         .afirst()
     )
     if not issue:

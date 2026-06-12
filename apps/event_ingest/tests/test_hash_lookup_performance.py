@@ -16,7 +16,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.issue_events.constants import EventStatus
-from apps.issue_events.models import Issue, IssueEvent, IssueHash
+from apps.issue_events.models import Issue, IssueEvent, IssueHash, IssueIndex
 from glitchtip.async_compat import async_connections
 
 from ..process_event import process_issue_events
@@ -188,8 +188,7 @@ class PrimaryFallbackTestCase(EventIngestTestCase):
         """
         self.process_events(generate_event())
         issue = Issue.objects.first()
-        issue.status = EventStatus.RESOLVED
-        issue.save(update_fields=["status"])
+        IssueIndex.objects.filter(issue=issue).update(status=EventStatus.RESOLVED)
 
         self._process_with_stale_replica(
             generate_event(event={"event_id": uuid.uuid4()})
