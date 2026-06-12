@@ -28,6 +28,11 @@ from glitchtip.api.exceptions import ThrottleException
 
 from .authentication import get_project_by_key
 from .otlp import decode_otlp_logs
+from .rust_envelope import (
+    EnvelopeTooBig,
+    decompress_body,
+    request_content_encoding,
+)
 from .utils import serialize_for_vtasks
 
 logger = logging.getLogger(__name__)
@@ -61,10 +66,24 @@ async def otlp_logs_view(request: HttpRequest) -> HttpResponse:
     except HttpError as e:
         return JsonResponse({"detail": str(e)}, status=e.status_code)
 
+    content_encoding = request_content_encoding(request)
     try:
         body = await sync_to_async(lambda: request.body)()
     except RequestDataTooBig as e:
         return HttpResponseForbidden(f"{e}", status=413)
+
+    # OTLP/HTTP exporters MAY gzip the body and signal it with
+    # Content-Encoding (the spec requires servers to support gzip, and the
+    # OpenTelemetry Collector's OTLP/HTTP exporter gzips by default). With the
+    # decompression middleware gone, decompress here in Rust — same body-read
+    # seam the envelope/minidump views use — before decoding.
+    if content_encoding:
+        try:
+            body = decompress_body(body, content_encoding)
+        except EnvelopeTooBig as e:
+            return HttpResponseForbidden(f"{e}", status=413)
+        except ValueError:
+            return JsonResponse({"detail": "Invalid compressed body"}, status=400)
 
     content_type = request.content_type or ""
     try:
