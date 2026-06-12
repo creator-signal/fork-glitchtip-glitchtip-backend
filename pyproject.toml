@@ -47,6 +47,7 @@ dependencies = [
     "arro3-core~=0.8",
     "arro3-io~=0.8",
     "django-async-backend~=6.0",
+    "opentelemetry-proto~=1.0",
 ]
 
 [dependency-groups]

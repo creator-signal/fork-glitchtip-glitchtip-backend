@@ -9,14 +9,18 @@ Non-ingest requests pass through to the full Django application unchanged.
 import re
 
 _INGEST_PATH_RE = re.compile(
-    r"^/api/("
-    r"\d+/(envelope|store|minidump|security)|"
+    r"^/(?:"
+    r"api/(?:"
+    r"\d+/(?:envelope|store|minidump|security)|"
     # Async-DB benchmark endpoints, see glitchtip.async_probe. Routed
     # through the minimal middleware chain so the bench measures the
     # async-cursor wire I/O and (for /realistic/) the in-handler Python
     # CPU between awaits — not AuthenticationMiddleware etc.
-    r"_probe/(async|realistic)"
+    r"_probe/(?:async|realistic)"
     r")/"
+    # Native OTLP/HTTP ingest (optional trailing slash, no /api prefix).
+    r"|v1/(?:logs|traces|metrics)/?$"
+    r")"
 )
 
 

@@ -797,7 +797,17 @@ def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
     """
     if not isinstance(val, dict):
         return val
-    for suffix in ("string_value", "int_value", "double_value", "bool_value"):
+    # snake_case keys come from protobuf decoding; camelCase from OTLP/JSON.
+    for suffix in (
+        "string_value",
+        "int_value",
+        "double_value",
+        "bool_value",
+        "stringValue",
+        "intValue",
+        "doubleValue",
+        "boolValue",
+    ):
         if suffix in val:
             return val[suffix]
     return val
@@ -805,8 +815,16 @@ def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
 
 def otel_log_to_log_item(otel: dict) -> dict:
     """Convert a single OTel log record dict to a LogItemSchema-compatible dict."""
-    # Timestamp: nanoseconds (string or int) → seconds (float)
-    time_unix_nano = otel.get("time_unix_nano") or otel.get("timeUnixNano") or "0"
+    # Timestamp: nanoseconds (string or int) → seconds (float). Fall back to the
+    # observed time when the record carries no original timestamp (valid per the
+    # OTel data model), so such records don't collapse to the 1970 epoch.
+    time_unix_nano = (
+        otel.get("time_unix_nano")
+        or otel.get("timeUnixNano")
+        or otel.get("observed_time_unix_nano")
+        or otel.get("observedTimeUnixNano")
+        or "0"
+    )
     timestamp = int(time_unix_nano) / 1e9
 
     # Body: {"string_value": "..."} or plain string
