@@ -34,6 +34,7 @@ class MonitorCheckResponseTimeSchema(MonitorCheckSchema, ModelSchema):
 class MonitorIn(CamelSchema, ModelSchema):
     expected_body: str
     expected_status: int | None
+    interval: Annotated[int, Ge(1), Le(86400)]
     timeout: Annotated[int, Ge(1), Le(60)] | None
     project: str | None = None
 
