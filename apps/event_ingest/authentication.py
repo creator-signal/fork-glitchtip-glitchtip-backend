@@ -13,6 +13,7 @@ from django.http import HttpRequest
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
+from apps.projects.models import ProjectKey
 from apps.shared.async_db import fetchone
 from glitchtip.api.exceptions import ThrottleException
 from sentry.utils.auth import parse_auth_header
@@ -53,13 +54,22 @@ class EventAuthHttpRequest(HttpRequest):
 
 def auth_from_request(request: HttpRequest):
     """
-    Get DSN (sentry_key) from request header
-    Accept both sentry or glitchtip prefix
-    Do not read request body when possible. This may result in uncompression which is slow.
+    Get the DSN public key (sentry_key) from a request, for both the sentry
+    envelope ingest and native OTLP ingest.
+
+    Accepts, in order: a ``sentry_key``/``glitchtip_key`` query param, a plain
+    ``Authorization: Bearer <key>`` (what OTLP exporters send — harmless on the
+    envelope path since SDKs don't use it), or the sentry ``X-Sentry-Auth`` /
+    ``Authorization`` header format. Avoids reading the request body, which
+    could trigger slow decompression.
     """
     for k in request.GET.keys():
         if k in ["sentry_key", "glitchtip_key"]:
             return request.GET[k]
+
+    authorization = request.META.get("HTTP_AUTHORIZATION", "")
+    if authorization[:7].lower() == "bearer ":
+        return authorization[7:].strip()
 
     if auth_header := request.META.get(
         "HTTP_X_SENTRY_AUTH", request.META.get("HTTP_AUTHORIZATION")
@@ -217,6 +227,107 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
     ):
         await check_organization_throttle.aenqueue(project.organization_id)
     return project
+
+
+async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
+    """Resolve the project from the DSN public key alone, with no project id
+    in the URL.
+
+    Native OTLP exporters point at a base endpoint (``/v1/logs``,
+    ``/v1/traces``) and carry the DSN key in a header — there is no project id
+    in the path. ``public_key`` is globally unique, so the key fully identifies
+    the project, via a single indexed ORM lookup rather than the raw-cursor
+    stored procedure that ``get_project`` uses on the hot path.
+
+    Rejection must stay cheap: a flood of unpaid traffic (an invalid key, or a
+    real key whose org is over quota) must not cost a database lookup — let
+    alone reading the body — on every request. So this keeps the same block
+    cache ``get_project`` does, keyed on the DSN public key (we have no project
+    id here). Once a key is known-bad or known-throttled, repeat requests are
+    bounced from Valkey in one round trip, before any DB hit or body read.
+    """
+    if settings.MAINTENANCE_EVENT_FREEZE:
+        raise HttpError(
+            503, "Events are not currently being accepted due to maintenance."
+        )
+    try:
+        sentry_key = UUID(auth_from_request(request))
+    except ValueError as err:
+        raise AuthenticationError(
+            message="dsn key badly formed hexadecimal UUID string"
+        ) from err
+
+    # Cheap-rejection cache, keyed on the public key (a key is either unknown
+    # -> "v" or throttled -> "t:org:project", never both, so one slot suffices).
+    block_cache_key = f"{EVENT_BLOCK_CACHE_KEY}otlp:{sentry_key}"
+    cached = await cache.aget(block_cache_key)
+    if cached == "v":
+        raise REJECTION_MAP["v"]
+    if cached and (throttle := deserialize_throttle(cached)):
+        org_throttle, project_throttle = throttle
+        if not is_accepting_events(org_throttle) or not is_accepting_events(
+            project_throttle
+        ):
+            raise ThrottleException(calculate_retry_after(max(throttle)))
+
+    try:
+        key = await ProjectKey.objects.select_related("project__organization").aget(
+            public_key=sentry_key, is_active=True
+        )
+    except ProjectKey.DoesNotExist as err:
+        await cache.aset(block_cache_key, "v", REJECTION_WAIT)
+        raise REJECTION_MAP["v"] from err
+
+    project = key.project
+    organization = project.organization
+    info = ProjectAuthInfo(
+        id=project.id,
+        scrub_ip_addresses=project.scrub_ip_addresses,
+        event_throttle_rate=project.event_throttle_rate,
+        organization_id=organization.id,
+        organization=OrganizationInfo(
+            id=organization.id,
+            is_accepting_events=organization.is_accepting_events,
+            event_throttle_rate=organization.event_throttle_rate,
+            scrub_ip_addresses=organization.scrub_ip_addresses,
+        ),
+        first_event=project.first_event,
+    )
+    org_throttle = organization.event_throttle_rate
+    project_throttle = project.event_throttle_rate
+    if (
+        not organization.is_accepting_events
+        or org_throttle == 100
+        or project_throttle == 100
+    ):
+        # Cache as a 100% throttle so the next flood request re-blocks from
+        # Valkey instead of repeating the lookup.
+        await cache.aset(block_cache_key, serialize_throttle(100, 100), REJECTION_WAIT)
+        raise ThrottleException(600)
+    # Honor partial throttle rates the same way the envelope hot path does, so
+    # a throttled org/project doesn't get a free pass on OTLP ingest.
+    if org_throttle or project_throttle:
+        await cache.aset(
+            block_cache_key,
+            serialize_throttle(org_throttle, project_throttle),
+            REJECTION_WAIT,
+        )
+        if not is_accepting_events(org_throttle) or not is_accepting_events(
+            project_throttle
+        ):
+            raise ThrottleException(
+                calculate_retry_after(max(org_throttle, project_throttle))
+            )
+
+    # Recompute the org's quota throttle out of band, like the envelope path,
+    # so an over-quota OTLP-only org gets its throttle set promptly (and then
+    # cached above) rather than waiting on the periodic sweep.
+    if (
+        settings.BILLING_ENABLED
+        and random.random() < 1 / settings.GLITCHTIP_THROTTLE_CHECK_INTERVAL
+    ):
+        await check_organization_throttle.aenqueue(organization.id)
+    return info
 
 
 async def event_auth(request: HttpRequest) -> ProjectAuthInfo | None:

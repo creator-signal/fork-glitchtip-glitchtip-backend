@@ -6,6 +6,7 @@ from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
+from apps.event_ingest.otlp_views import otlp_logs_view
 from apps.event_ingest.views import event_envelope_view, minidump_view
 from apps.stripe.views import stripe_webhook_view
 
@@ -26,6 +27,11 @@ urlpatterns = [
     ),
     path("api/<int:project_id>/envelope/", event_envelope_view, name="event_envelope"),
     path("api/<int:project_id>/minidump/", minidump_view, name="minidump"),
+    # Native OTLP/HTTP ingest. OTel exporters POST to <endpoint>/v1/logs (the
+    # trailing slash is optional and tolerated); the project is resolved from
+    # the DSN key in the auth header. Routed through the minimal ingest
+    # middleware — see ingest_asgi.py.
+    re_path(r"^v1/logs/?$", otlp_logs_view, name="otlp_logs"),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
     # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
     path(
