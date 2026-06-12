@@ -159,6 +159,43 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 422)
 
     @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_create_max_interval(self, mocked):
+        """A one-day interval (86400) is allowed by the validator and must not
+        overflow the column (previously a smallint, max 32767)."""
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 86400,
+            "project": str(self.project.pk),
+            "timeout": 25,
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        monitor = Monitor.objects.all().first()
+        self.assertEqual(monitor.interval, 86400)
+
+    def test_create_over_max_interval(self):
+        """An interval above the 86400 ceiling must be rejected at the API
+        layer (clean 4xx) rather than reaching the DB and raising a 500."""
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 86401,
+            "project": str(self.project.pk),
+            "timeout": 25,
+        }
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+        self.assertEqual(Monitor.objects.count(), 0)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_expected_status(self, mocked):
         data = {
             "monitorType": "Ping",
