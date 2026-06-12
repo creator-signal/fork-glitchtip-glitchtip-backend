@@ -12,12 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 async def cleanup_old_releases():
-    from apps.issue_events.models import Issue, IssueEvent
+    from apps.issue_events.models import Issue, IssueEvent, IssueIndex
     from apps.sourcecode.models import DebugSymbolBundle
 
     days_ago = now() - timedelta(days=settings.GLITCHTIP_RELEASE_RETENTION_DAYS)
     db_alias = settings.MAINTENANCE_DATABASE_ALIAS
-    queryset = Release.objects.using(db_alias).filter(created__lt=days_ago).order_by("id")
+    queryset = (
+        Release.objects.using(db_alias).filter(created__lt=days_ago).order_by("id")
+    )
 
     total_deleted = 0
     while True:
@@ -33,8 +35,10 @@ async def cleanup_old_releases():
             .using(db_alias)
             .aupdate(first_release=None)
         )
+        # last_release moved to the IssueIndex leaf (its FK is DO_NOTHING,
+        # so nullify here before the raw release delete).
         await (
-            Issue.objects.filter(last_release_id__in=batch_ids)
+            IssueIndex.objects.filter(last_release_id__in=batch_ids)
             .using(db_alias)
             .aupdate(last_release=None)
         )

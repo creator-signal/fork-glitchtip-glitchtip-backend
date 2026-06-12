@@ -67,7 +67,6 @@ class DuckDBAvailabilityTestCase(TestCase):
         self.assertFalse(is_duckdb_available())
 
 
-
 class ColdStoragePathTestCase(TestCase):
     """Test cold storage path generation for issue events."""
 
@@ -226,9 +225,7 @@ class MaintenanceTestCase(TestCase):
 class MaintainPartitionsSkipTestCase(TestCase):
     """Test that maintain_partitions skips issue_events when DuckDB is available."""
 
-    @override_settings(
-        GLITCHTIP_ENABLE_DUCKDB="true"
-    )
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_skip_issue_events_when_duckdb_available(self):
         """When DuckDB is available, issue_events should be skipped from standard drop."""
         self.assertTrue(is_duckdb_available())
@@ -352,7 +349,6 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             title="Test Issue",
             metadata={"title": "Test Issue"},
             type=0,
-            level=40,
         )
 
         event_ids = []
@@ -441,7 +437,6 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             title='Error: ("Connection broken")',
             metadata={"title": 'Error: ("Connection broken")'},
             type=0,
-            level=40,
         )
 
         event_time = self.archive_date + timedelta(seconds=1)
@@ -488,9 +483,7 @@ class ArchiveThenQueryTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             )
 
             target_time = UUID7Helper.extract_datetime(event_id)
-            result = get_event_from_cold(
-                self.organization.id, event_id, target_time
-            )
+            result = get_event_from_cold(self.organization.id, event_id, target_time)
 
             self.assertIsNotNone(result)
             self.assertEqual(result.id, event_id)
@@ -578,21 +571,23 @@ class MultiDateColdStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
                 event_time = date + timedelta(hours=i)
                 event_id = UUID7Helper.from_datetime(event_time)
                 event_ids.append(event_id)
-                rows.append({
-                    "id": str(event_id),
-                    "event_id": str(uuid.uuid4()),
-                    "timestamp": event_time,
-                    "issue_id": issue_id,
-                    "organization_id": org_id,
-                    "release_id": None,
-                    "type": 0,
-                    "level": 4,
-                    "title": f"Event {date_str}_{i}",
-                    "transaction": "/api/test",
-                    "data": "{}",
-                    "tags": "{}",
-                    "hashes": "[]",
-                })
+                rows.append(
+                    {
+                        "id": str(event_id),
+                        "event_id": str(uuid.uuid4()),
+                        "timestamp": event_time,
+                        "issue_id": issue_id,
+                        "organization_id": org_id,
+                        "release_id": None,
+                        "type": 0,
+                        "level": 4,
+                        "title": f"Event {date_str}_{i}",
+                        "transaction": "/api/test",
+                        "data": "{}",
+                        "tags": "{}",
+                        "hashes": "[]",
+                    }
+                )
 
             conn = duckdb.connect()
             conn.execute("SET threads=1")
@@ -632,7 +627,6 @@ class MultiDateColdStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             title="Test Issue",
             metadata={"title": "Test Issue"},
             type=0,
-            level=40,
         )
 
         with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
@@ -660,24 +654,23 @@ class MultiDateColdStorageTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         """The /events/latest/ endpoint falls back to cold storage."""
         from django.urls import reverse
 
-        from ..models import Issue
+        from ..models import Issue, IssueIndex
 
         issue = Issue.objects.create(
             project=self.project,
             title="Test Issue",
             metadata={"title": "Test Issue"},
             type=0,
-            level=40,
-            last_seen=self.dates[-1] + timedelta(hours=4),
+        )
+        IssueIndex.objects.filter(issue=issue).update(
+            last_seen=self.dates[-1] + timedelta(hours=4)
         )
 
         with self.settings(GLITCHTIP_COLD_STORAGE_DIR=self.cold_dir):
             all_ids = self._write_parquet_files(issue.id)
             newest_ids = all_ids[self.dates[-1].strftime("%Y%m%d")]
 
-            url = reverse(
-                "api:get_latest_issue_event", kwargs={"issue_id": issue.id}
-            )
+            url = reverse("api:get_latest_issue_event", kwargs={"issue_id": issue.id})
             res = self.client.get(url)
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json()["id"], newest_ids[-1].hex)

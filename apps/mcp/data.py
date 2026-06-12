@@ -7,7 +7,7 @@ from django.db.models import QuerySet
 from apps.alerts.api import get_project_alert_queryset
 from apps.alerts.models import ProjectAlert
 from apps.issue_events.constants import EventStatus
-from apps.issue_events.models import Issue, IssueEvent
+from apps.issue_events.models import Issue, IssueEvent, IssueIndex
 from apps.issue_events.services import filter_issue_list, is_uuid7
 from apps.issue_events.services import get_queryset as get_issues_qs
 from apps.logs.api import LogEventRow, query_logs_combined
@@ -74,16 +74,18 @@ async def get_issues(
 
 async def get_issue(user_id: int, issue_id: int) -> Issue | None:
     qs = Issue.objects.filter(project__organization__users=user_id).select_related(
-        "project", "resolved_in_release"
+        "project", "resolved_in_release", "index"
     )
     qs = _apply_compliance_filter(qs)
     return await qs.filter(id=issue_id).afirst()
 
 
 async def get_latest_event(user_id: int, issue_id: int) -> IssueEvent | None:
-    issue = await Issue.objects.filter(
-        id=issue_id, project__organization__users=user_id
-    ).select_related("project__organization").afirst()
+    issue = (
+        await Issue.objects.filter(id=issue_id, project__organization__users=user_id)
+        .select_related("project__organization", "index")
+        .afirst()
+    )
     if not issue:
         return None
     qs = IssueEvent.objects.filter(
@@ -476,7 +478,7 @@ async def update_issue(
     Returns the updated issue, or None if not found / no access.
     """
     qs = Issue.objects.filter(project__organization__users=user_id).select_related(
-        "project__organization", "resolved_in_release"
+        "project__organization", "resolved_in_release", "index"
     )
     qs = _apply_compliance_filter(qs)
 
@@ -487,10 +489,11 @@ async def update_issue(
     new_status = EventStatus.from_string(status)
     if new_status is None:
         raise ValueError(f"Invalid status: {status!r}")
-    obj.status = new_status
-    update_fields = ["status"]
+    # status lives on the IssueIndex leaf (written below); only
+    # resolved_in_release is an Issue field here.
+    update_fields: list[str] = []
 
-    if obj.status == EventStatus.RESOLVED:
+    if new_status == EventStatus.RESOLVED:
         if in_release:
             release = await Release.objects.filter(
                 version=in_release,
@@ -512,5 +515,11 @@ async def update_issue(
         obj.resolved_in_release = None
         update_fields.append("resolved_in_release_id")
 
-    await obj.asave(update_fields=update_fields)
+    if update_fields:
+        await obj.asave(update_fields=update_fields)
+    # Include the partition key so the update prunes to one hash partition.
+    await IssueIndex.objects.filter(
+        issue_id=obj.id, organization_id=obj.project.organization_id
+    ).aupdate(status=new_status)
+    obj.index.status = new_status
     return obj

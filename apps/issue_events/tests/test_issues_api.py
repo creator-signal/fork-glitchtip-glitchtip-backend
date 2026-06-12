@@ -5,20 +5,20 @@ from timeit import default_timer as timer
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
-from django.db.models import F, Value
+from django.db.models import Value
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.event_ingest.model_functions import PipeConcat
+from glitchtip.test_utils.issue import make_issue
 from glitchtip.test_utils.test_case import (
     APIPermissionTestCase,
     GlitchTestCase,
 )
 
 from ..constants import EventStatus, LogLevel
-from ..models import Issue
+from ..models import Issue, IssueIndex
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,8 @@ class IssueAPITestCase(GlitchTestCase):
 
     def test_sort(self):
         issue1 = baker.make("issue_events.Issue", project=self.project)
-        issue2 = baker.make("issue_events.Issue", project=self.project, count=2)
+        issue2 = baker.make("issue_events.Issue", project=self.project)
+        IssueIndex.objects.filter(issue=issue2).update(count=2)
         issue3 = baker.make("issue_events.Issue", project=self.project)
 
         res = self.client.get(self.list_url)
@@ -183,12 +184,22 @@ class IssueAPITestCase(GlitchTestCase):
         res = self.client.get(self.list_url + "?sort=-priority&environment=env")
         self.assertEqual(res.status_code, 200)
 
-    def test_search(self):
-        issue = baker.make(
-            "issue_events.Issue",
-            project=self.project,
-            search_vector=SearchVector(Value("apple sauce")),
+    def _set_search_document(self, issue, text):
+        """Populate an issue's IssueIndex row (the full-text store).
+
+        Two steps: the SearchVector expression is applied via update() (it does
+        not resolve through Model.save()).
+        """
+        IssueIndex.objects.get_or_create(
+            issue=issue, organization_id=self.organization.id
         )
+        IssueIndex.objects.filter(issue=issue).update(
+            fts_document=SearchVector(Value(text))
+        )
+
+    def test_search(self):
+        issue = baker.make("issue_events.Issue", project=self.project)
+        self._set_search_document(issue, "apple sauce")
         event = baker.make("issue_events.IssueEvent", issue=issue)
         other_issue = baker.make("issue_events.Issue", project=self.project)
 
@@ -231,16 +242,36 @@ class IssueAPITestCase(GlitchTestCase):
         event3 = baker.make(
             "issue_events.IssueEvent", issue=issue, data={"name": "plum sauce"}
         )
-        Issue.objects.filter(id=issue.id).update(
-            search_vector=SearchVector(
-                PipeConcat(F("search_vector"), SearchVector(Value(event3.data["name"])))
-            )
-        )
-        issue.search_vector = SearchVector(Value("apple sauce plum "))
+        # A later event extends the issue's search document (same as ingest's
+        # append path appending to fts_document).
+        self._set_search_document(issue, "apple sauce plum sauce")
         res = self.client.get(self.list_url + '?query=is:unresolved "plum sauce"')
         self.assertContains(res, event3.issue.title)
         res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
         self.assertContains(res, event.issue.title)
+
+    def test_search_via_decoupled_index(self):
+        """
+        Search resolves through IssueIndex.fts_document, the sole
+        full-text store now that Issue.search_vector is dropped. Guards
+        against the index being populated with a corrupted (re-tokenized)
+        tsvector and against the org-scoped partition-pruning join.
+        """
+        issue = baker.make("issue_events.Issue", project=self.project)
+        # The post_save signal already created the leaf row; just set the vector.
+        IssueIndex.objects.filter(issue=issue).update(
+            fts_document=SearchVector(Value("kangaroo marsupial"))
+        )
+        other_issue = baker.make("issue_events.Issue", project=self.project)
+
+        def ids(query):
+            res = self.client.get(self.list_url + "?query=" + query)
+            self.assertEqual(res.status_code, 200)
+            return {int(row["id"]) for row in res.json()}
+
+        self.assertEqual(ids("is:unresolved kangaroo"), {issue.id})
+        self.assertNotIn(other_issue.id, ids("is:unresolved kangaroo"))
+        self.assertEqual(ids('is:unresolved "kangaroo marsupial"'), {issue.id})
 
     def test_search_unmatched_quote(self):
         """Queries with unmatched quotes should not raise ValueError"""
@@ -256,8 +287,8 @@ class IssueAPITestCase(GlitchTestCase):
             "issue_events.Issue",
             project=self.project,
             title=issue_str,
-            search_vector=SearchVector(Value(issue_str)),
         )
+        self._set_search_document(issue, issue_str)
         res = self.client.get(self.list_url + "?query=is:unresolved f*o")
         self.assertContains(res, issue.title)
         res = self.client.get(self.list_url + "?query=is:unresolved f*x")
@@ -583,12 +614,10 @@ class IssueAPITestCase(GlitchTestCase):
         level_warning = LogLevel.WARNING
         level_fatal = LogLevel.FATAL
 
-        issue1 = baker.make(
-            "issue_events.Issue", project=self.project, level=level_warning
-        )
-        issue2 = baker.make(
-            "issue_events.Issue", project=self.project, level=level_fatal
-        )
+        issue1 = baker.make("issue_events.Issue", project=self.project)
+        IssueIndex.objects.filter(issue=issue1).update(level=level_warning)
+        issue2 = baker.make("issue_events.Issue", project=self.project)
+        IssueIndex.objects.filter(issue=issue2).update(level=level_fatal)
         baker.make("issue_events.Issue", project=self.project)
 
         res = self.client.get(self.list_url + f"?query=level:{level_warning.label}")
@@ -670,8 +699,7 @@ class IssueAPITestCase(GlitchTestCase):
             version="1.0.0",
         )
         release.projects.add(self.project)
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             short_id=1,
             status=EventStatus.RESOLVED,
@@ -690,8 +718,7 @@ class IssueAPITestCase(GlitchTestCase):
             version="2.0.0",
         )
         release.projects.add(self.project)
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             short_id=1,
             last_release=release,
@@ -710,8 +737,7 @@ class IssueAPITestCase(GlitchTestCase):
             organization=self.project.organization,
             version="1.0.0",
         )
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
             resolved_in_release=release,
@@ -776,10 +802,10 @@ class IssueAPITestCase(GlitchTestCase):
             "issue_events.Issue",
             project=self.project,
             _quantity=2,
-            # Baker creates issues with random count values, despite not creating any events
-            # so set this to the number we will make
-            count=issue_event_count,
         )
+        # count lives on the IssueIndex leaf; set it to the number of
+        # events we create per issue.
+        IssueIndex.objects.filter(issue__in=issues).update(count=issue_event_count)
         baker.make(
             "issue_events.IssueEvent",
             issue=issues[0],
@@ -966,8 +992,7 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_assign_without_status_keeps_status(self):
-        issue = baker.make(
-            "issue_events.Issue",
+        issue = make_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
         )
@@ -1009,9 +1034,7 @@ class IssueAPITestCase(GlitchTestCase):
         now = timezone.now()
 
         # Issue with stats both inside and outside the 24h window
-        issue_with_stats = baker.make(
-            "issue_events.Issue", project=self.project, count=100
-        )
+        issue_with_stats = make_issue(project=self.project, count=100)
         # This stat is recent and should be in the response
         recent_stat = baker.make(
             "issue_events.IssueAggregate",
@@ -1028,9 +1051,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Issue with no recent statistics
-        issue_without_stats = baker.make(
-            "issue_events.Issue", project=self.project, count=50
-        )
+        issue_without_stats = make_issue(project=self.project, count=50)
 
         # Issue belonging to another organization that should not appear
         baker.make("issue_events.Issue")
@@ -1082,7 +1103,7 @@ class IssueAPITestCase(GlitchTestCase):
         now = timezone.now()
 
         # Create an issue to test against
-        issue = baker.make("issue_events.Issue", project=self.project, count=250)
+        issue = make_issue(project=self.project, count=250)
 
         # Stat from 2 days ago (should be included)
         baker.make(
