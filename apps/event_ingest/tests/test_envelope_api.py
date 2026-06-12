@@ -1,3 +1,4 @@
+import gzip
 import json
 import uuid
 from unittest import mock
@@ -59,6 +60,27 @@ class EnvelopeAPITestCase(EventIngestTestCase):
                 content_type="application/json",
             )
             task_backends["default"].flush_batches()
+        self.assertContains(res, self.django_event[0]["event_id"])
+        self.assertEqual(self.project.issues.count(), 1)
+        self.assertEqual(IssueEvent.objects.count(), 1)
+
+    def test_envelope_api_gzip(self):
+        """A gzip Content-Encoded envelope is decompressed + framed in Rust.
+
+        DecompressBodyMiddleware is gone, so the view hands the raw compressed
+        body and the Content-Encoding straight to gt_rust's parse_envelope.
+        """
+        payload = list_to_envelope(self.django_event)
+        if isinstance(payload, str):
+            payload = payload.encode()
+        res = self.client.post(
+            self.url,
+            data=gzip.compress(payload),
+            content_type="application/x-sentry-envelope",
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.django_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)

@@ -1,8 +1,11 @@
+import gzip
 import uuid
 
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.tasks import task_backends
 from django.test import TestCase
+from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
 from django.urls import reverse
 
 from apps.event_ingest.minidump_event import (
@@ -108,7 +111,9 @@ class MinidumpToEventTest(TestCase):
         self.assertEqual(images[0]["type"], "elf")
         self.assertEqual(images[0]["image_addr"], "0x400000")
         self.assertEqual(images[0]["image_size"], 0x10000)
-        self.assertEqual(images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1")
+        self.assertEqual(
+            images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1"
+        )
 
     def test_sentry_metadata_merged(self):
         data = self._load_fixture()
@@ -239,6 +244,33 @@ class MinidumpViewTest(EventIngestTestCase):
         self.assertEqual(exc["type"], "SIGSEGV")
         # Release is stored as a FK, not in event.data
         self.assertTrue(Release.objects.filter(version="1.0.0").exists())
+
+    def test_upload_minidump_gzipped(self):
+        """A gzip Content-Encoded multipart upload is decompressed in Rust.
+
+        With DecompressBodyMiddleware gone, the view decompresses the body via
+        gt_rust before Django parses request.FILES.
+        """
+        uploaded = SimpleUploadedFile(
+            "crash.dmp", self.minidump_data, content_type="application/octet-stream"
+        )
+        body = encode_multipart(
+            BOUNDARY,
+            {"upload_file_minidump": uploaded, "sentry": '{"release":"1.0.0"}'},
+        )
+        res = self.client.generic(
+            "POST",
+            self.url,
+            data=gzip.compress(body),
+            content_type=MULTIPART_CONTENT,
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        self.assertEqual(res.status_code, 200)
+        uuid.UUID(res.json()["id"])
+        task_backends["default"].flush_batches()
+        event = IssueEvent.objects.first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.data["platform"], "native")
 
     def test_missing_file(self):
         """Request without upload_file_minidump returns 400."""

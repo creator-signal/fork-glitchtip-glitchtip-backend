@@ -7,6 +7,7 @@ opentelemetry-proto messages — the same wire format an OTel SDK or the
 Collector emits.
 """
 
+import gzip
 import time
 from uuid import UUID
 
@@ -141,6 +142,21 @@ class OTLPLogsIngestTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
             str(warn.trace_id).replace("-", ""), "edec519707974fc8bfccb5a017e17394"
         )
         self.assertIsNotNone(warn.span_id)
+
+    def test_gzip_encoded_protobuf_ingested(self):
+        """OTLP/HTTP exporters MAY gzip the body (the OpenTelemetry Collector
+        does so by default). The body is decompressed in Rust at the view's
+        body-read seam, with no decompression middleware in the chain."""
+        res = self.client.post(
+            self.url,
+            gzip.compress(_build_protobuf_request()),
+            content_type="application/x-protobuf",
+            HTTP_AUTHORIZATION=self.auth,
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self._flush()
+        self.assertEqual(LogEvent.objects.count(), 2)
 
     def test_record_without_body_decodes_empty(self):
         """A record with no body must become "" — not the string "None"."""

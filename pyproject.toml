@@ -6,8 +6,6 @@ authors = ["David Burke"]
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "Brotli>=1.2.0",
-    "zstandard>=0.23.0; python_version < '3.14'",
     "django~=6.0",
     "django-vtasks[valkey]~=2.1.2",
     "django-allauth[mfa,socialaccount]~=65.0",
@@ -40,6 +38,7 @@ dependencies = [
     "pyyaml>=6.0.2", # allauth openapi spec
     "granian[reload,uvloop]>=2.6.0",
     "django-vcache>=2.2.0",
+    "glitchtip-rust>=0.2.1",
     "uuid6>=2024.1.12",
     "mcp[cli]>=1.9",
     "duckdb>=1.2.0",
