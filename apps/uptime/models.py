@@ -68,6 +68,13 @@ class Monitor(models.Model):
     expected_status = models.PositiveSmallIntegerField(
         default=200, blank=True, null=True
     )
+    confirmation_threshold = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Number of consecutive failed checks before the monitor is "
+        "considered down and a notification is sent. 1 alerts on the first "
+        "failure.",
+    )
     monitor_type = models.CharField(
         max_length=12, choices=MonitorType.choices, default=MonitorType.PING
     )
@@ -84,6 +91,11 @@ class Monitor(models.Model):
     expected_body = models.CharField(max_length=2000, blank=True)
     cached_is_up = models.BooleanField(null=True, default=None)
     cached_last_change = models.DateTimeField(null=True, default=None)
+    cached_consecutive_down = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Consecutive failing checks observed so far. Drives the "
+        "confirmation_threshold debounce; reset to 0 on any successful check.",
+    )
 
     objects = MonitorManager()
 
