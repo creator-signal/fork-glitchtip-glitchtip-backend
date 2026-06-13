@@ -19,14 +19,19 @@ class APITokenTests(TestCase):
         data = {"scopes": [scope_name]}
         res = self.client.post(self.url, data, content_type="application/json")
         self.assertContains(res, scope_name, status_code=201)
+        # Create endpoint returns the full unmasked token
+        token = res.json()["token"]
+        self.assertEqual(len(token), 64)
 
     def test_list(self):
         self.client.force_login(self.user)
         api_token = baker.make("api_tokens.APIToken", user=self.user)
         other_api_token = baker.make("api_tokens.APIToken")
         res = self.client.get(self.url)
-        self.assertContains(res, api_token.token)
-        self.assertNotContains(res, other_api_token.token)
+        # List endpoint returns masked tokens (last 8 chars)
+        self.assertContains(res, api_token.token[-8:])
+        self.assertNotContains(res, api_token.token)
+        self.assertNotContains(res, other_api_token.token[-8:])
 
     def test_destroy(self):
         self.client.force_login(self.user)
