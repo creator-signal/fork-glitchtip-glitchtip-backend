@@ -88,6 +88,22 @@ class AsyncLinkHeaderPagination(CursorPagination):
             obj async for obj in queryset[cursor.offset : cursor.offset + limit + 1]
         ]
 
+    def _get_position_from_instance(self, instance, ordering) -> str:
+        # The base implementation does a flat ``getattr(instance, field_name)``,
+        # which raises AttributeError when the ordering field lives on a related
+        # model — e.g. the issue list sorts by ``index__last_seen`` /
+        # ``index__count`` on the IssueIndex leaf. Walk the ``__`` relation path
+        # (the leaf is select_related, so this never issues an extra query) so
+        # the next-page cursor position resolves instead of 500ing.
+        field_name = ordering[0].lstrip("-")
+        if isinstance(instance, dict):
+            attr = instance[field_name]
+        else:
+            attr = instance
+            for part in field_name.split("__"):
+                attr = getattr(attr, part)
+        return str(attr)
+
     async def apaginate_queryset(
         self,
         queryset: "QuerySet",
