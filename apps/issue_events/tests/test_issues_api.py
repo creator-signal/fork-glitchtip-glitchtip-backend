@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 import uuid
 from timeit import default_timer as timer
 
@@ -183,6 +184,47 @@ class IssueAPITestCase(GlitchTestCase):
         baker.make("issue_events.Issue", project=self.project)
         res = self.client.get(self.list_url + "?sort=-priority&environment=env")
         self.assertEqual(res.status_code, 200)
+
+    def test_paginated_list_sorted_by_index_field(self):
+        """The list sorts by count/last_seen, which live on the IssueIndex leaf
+        (``index__count`` / ``index__last_seen``). The cursor paginator builds
+        the next-page position from the last row on the page, so a result set
+        spanning more than one page must resolve the ordering value through the
+        relation rather than 500ing on a flat getattr.
+        """
+        # Distinct count/last_seen so the ordering (and the cursor position
+        # filter) is unambiguous: issues[0] is oldest/smallest, issues[2] newest.
+        base = timezone.make_aware(timezone.datetime(2020, 1, 1))
+        issues = [
+            baker.make("issue_events.Issue", project=self.project) for _ in range(3)
+        ]
+        for i, issue in enumerate(issues):
+            IssueIndex.objects.filter(issue=issue).update(
+                count=i + 1, last_seen=base + datetime.timedelta(hours=i)
+            )
+
+        # limit=2 forces a second page from 3 issues, exercising the next-page
+        # cursor position extraction off the joined index field (the regression:
+        # this 500'd on a flat getattr of "index__last_seen"/"index__count").
+        # Default sort is -last_seen, so the newest two land on the first page.
+        for sort, expected_first_page in (
+            ("", [issues[2].id, issues[1].id]),
+            ("&sort=last_seen", [issues[0].id, issues[1].id]),
+            ("&sort=-count", [issues[2].id, issues[1].id]),
+        ):
+            res = self.client.get(self.list_url + f"?limit=2{sort}")
+            self.assertEqual(res.status_code, 200, msg=f"sort={sort!r}: {res.content}")
+            page1 = [item["id"] for item in res.json()]
+            self.assertEqual(page1, [str(i) for i in expected_first_page])
+            self.assertIn('rel="next"; results="true"', res["Link"])
+
+            # Follow the next link and assert the two pages together cover every
+            # issue exactly once (no row dropped or duplicated across the cursor).
+            next_url = re.search(r'<([^>]+)>; rel="next"', res["Link"]).group(1)
+            res2 = self.client.get(next_url)
+            self.assertEqual(res2.status_code, 200)
+            page2 = [item["id"] for item in res2.json()]
+            self.assertEqual(sorted(page1 + page2), sorted(str(i.id) for i in issues))
 
     def _set_search_document(self, issue, text):
         """Populate an issue's IssueIndex row (the full-text store).
