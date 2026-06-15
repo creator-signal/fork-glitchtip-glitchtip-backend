@@ -36,6 +36,7 @@ class MonitorIn(CamelSchema, ModelSchema):
     expected_status: int | None
     interval: Annotated[int, Ge(1), Le(86400)]
     timeout: Annotated[int, Ge(1), Le(60)] | None
+    confirmation_threshold: Annotated[int, Ge(1), Le(100)] = 1
     project: str | None = None
 
     @model_validator(mode="after")
@@ -114,6 +115,7 @@ class MonitorIn(CamelSchema, ModelSchema):
             "name",
             "url",
             "interval",
+            "confirmation_threshold",
         ]
 
 
@@ -142,6 +144,7 @@ class MonitorSchema(CamelSchema, ModelSchema):
             "expected_body",
             "interval",
             "timeout",
+            "confirmation_threshold",
         ]
 
     model_config = ConfigDict(coerce_numbers_to_str=True)
