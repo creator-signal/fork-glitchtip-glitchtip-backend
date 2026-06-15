@@ -513,3 +513,127 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         )
         mocked.assert_called_once()
         self.assertTrue(monitor.checks.filter(is_up=True).exists())
+
+    def _down_result(self, mon, consecutive_down, threshold):
+        return {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": False,
+            "latest_is_up": True,
+            "last_change": datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+            "cached_consecutive_down": consecutive_down,
+            "confirmation_threshold": threshold,
+            "monitor_type": MonitorType.GET,
+        }
+
+    def test_confirmation_threshold_below_does_not_flip_state(self):
+        """A failure below confirmation_threshold counts toward the consecutive
+        tally but leaves the official state up and sends no notification."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                confirmation_threshold=2,
+            )
+        now = datetime(2020, 1, 1, 12, 0, tzinfo=dt_timezone.utc)
+        with freeze_time("2020-01-01"):
+            async_to_sync(save_monitor_checks)([self._down_result(mon, 0, 2)], now)
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)  # still officially up
+        self.assertEqual(mon.cached_consecutive_down, 1)
+        # The raw failing check is still recorded, but it isn't a state change
+        latest = mon.checks.order_by("-start_check").first()
+        self.assertFalse(latest.is_up)
+        self.assertFalse(latest.is_change)
+
+    def test_confirmation_threshold_reached_flips_state(self):
+        """The check that reaches confirmation_threshold flips state to down."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                confirmation_threshold=2,
+            )
+        now = datetime(2020, 1, 2, 12, 0, tzinfo=dt_timezone.utc)
+        with freeze_time("2020-01-02"):
+            async_to_sync(save_monitor_checks)([self._down_result(mon, 1, 2)], now)
+
+        mon.refresh_from_db()
+        self.assertFalse(mon.cached_is_up)
+        self.assertEqual(mon.cached_consecutive_down, 2)
+        self.assertEqual(mon.cached_last_change, now)
+        latest = mon.checks.order_by("-start_check").first()
+        self.assertTrue(latest.is_change)
+
+    def test_consecutive_down_resets_on_success(self):
+        """A successful check resets the consecutive-failure tally to zero
+        without recording a state change (state was never confirmed down)."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                confirmation_threshold=2,
+                cached_is_up=True,
+                cached_consecutive_down=1,
+            )
+        now = datetime(2020, 1, 2, 12, 0, tzinfo=dt_timezone.utc)
+        result = {
+            "id": mon.id,
+            "organization_id": mon.organization_id,
+            "is_up": True,
+            "latest_is_up": True,
+            "last_change": datetime(2020, 1, 1, tzinfo=dt_timezone.utc),
+            "cached_consecutive_down": 1,
+            "confirmation_threshold": 2,
+            "monitor_type": MonitorType.GET,
+        }
+        with freeze_time("2020-01-02"):
+            async_to_sync(save_monitor_checks)([result], now)
+
+        mon.refresh_from_db()
+        self.assertTrue(mon.cached_is_up)
+        self.assertEqual(mon.cached_consecutive_down, 0)
+
+    @aioresponses()
+    def test_confirmation_threshold_delays_notification(self, mocked):
+        """With confirmation_threshold=2, no notification fires on the first
+        failure; the second consecutive failure sends a single notification."""
+        self.create_user_and_project()
+        test_url = "https://example.com"
+        mocked.get(test_url, status=200)
+        with freeze_time("2020-01-01"):
+            baker.make(
+                Monitor,
+                name=test_url,
+                url=test_url,
+                monitor_type=MonitorType.GET,
+                project=self.project,
+                confirmation_threshold=2,
+            )
+            baker.make(
+                "alerts.AlertRecipient",
+                alert__uptime=True,
+                alert__project=self.project,
+                recipient_type="email",
+            )
+
+        async def run_loop():
+            for _ in range(60):
+                await dispatch_checks.func()
+
+        # First failure: below threshold, no notification yet
+        mocked.get(test_url, status=500, repeat=True)
+        with freeze_time("2020-01-02"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Second consecutive failure: threshold reached, notify once
+        mocked.get(test_url, status=500, repeat=True)
+        with freeze_time("2020-01-03"):
+            async_to_sync(run_loop)()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("is down", mail.outbox[0].body)

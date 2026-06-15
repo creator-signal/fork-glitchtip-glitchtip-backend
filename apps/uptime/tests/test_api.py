@@ -96,7 +96,29 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.timeout, data["timeout"])
         self.assertEqual(monitor.organization, self.organization)
         self.assertEqual(monitor.project, self.project)
+        # Defaults to the current behavior (alert on first failure) when omitted
+        self.assertEqual(monitor.confirmation_threshold, 1)
         mocked.enqueue.assert_called_once()
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_create_monitor_confirmation_threshold(self, mocked):
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 60,
+            "project": str(self.project.pk),
+            "timeout": 25,
+            "confirmationThreshold": 3,
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["confirmationThreshold"], 3)
+        monitor = Monitor.objects.get()
+        self.assertEqual(monitor.confirmation_threshold, 3)
 
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_port_monitor(self, mocked):
