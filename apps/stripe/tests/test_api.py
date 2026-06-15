@@ -296,3 +296,72 @@ class StripeAPITestCase(TestCase):
         res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["data"], [])
+
+    def test_period_self_hosted_uses_rolling_window_without_subscription(self):
+        # Self-hosted (BILLING_ENABLED=False): usage is reported over a rolling
+        # 30-day window and must NOT require a StripeSubscription row.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 1, 10)),  # within last 30d
+            count=10,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        with self.settings(BILLING_ENABLED=False), freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 10)
+
+    def test_period_self_hosted_previous_window_without_subscription(self):
+        # "Last 30 days" on self-hosted = the prior rolling window, still no sub.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 2, 1, 10)),  # in prior window
+            count=25,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        with self.settings(BILLING_ENABLED=False), freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 25)
+
+    def test_events_count_daily_self_hosted_without_subscription(self):
+        # Self-hosted daily chart spans the rolling 30-day window, no sub required.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=15,
+        )
+        baker.make(
+            "projects.LogProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=40,
+        )
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        with self.settings(BILLING_ENABLED=False), freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()["data"]
+        self.assertEqual(len(data), 31)  # 2020-02-14 .. 2020-03-15 inclusive
+        mar10 = next(d for d in data if d["date"] == "2020-03-10")
+        self.assertEqual(mar10["eventCount"], 15)
+        self.assertEqual(mar10["logEventCount"], 4)  # 40 // 10

@@ -11,6 +11,7 @@ from ninja import ModelSchema, Router
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import (
+    EventCounts,
     Organization,
     get_current_period_dates,
     get_event_counts,
@@ -37,7 +38,12 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import compute_cycle, compute_cycle_n_ago, unix_to_datetime
+from .utils import (
+    compute_cycle,
+    compute_cycle_n_ago,
+    rolling_period,
+    unix_to_datetime,
+)
 
 router = Router()
 
@@ -300,6 +306,18 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     }
 
 
+def counts_to_usage_response(counts: EventCounts) -> dict:
+    """Serialize event counts for the usage endpoints (uptime/logs weigh 0.1)."""
+    return {
+        "total": counts.total_event_count,
+        "event_count": counts.issue_event_count,
+        "transaction_event_count": counts.transaction_count,
+        "uptime_check_event_count": counts.uptime_check_event_count // 10,
+        "log_event_count": counts.log_count // 10,
+        "file_size_mb": counts.file_size,
+    }
+
+
 @router.get(
     "subscriptions/{slug:organization_slug}/events_count/period/",
     response=SubscriptionUsageSchema,
@@ -326,17 +344,16 @@ async def subscription_events_count_for_period(
     )
 
     if periods_ago == 0:
-        period = await get_current_period_dates(org)
-        start, end = period if period else (None, None)
+        # get_current_period_dates returns a rolling 30-day window on self-hosted.
+        start, end = await get_current_period_dates(org)
         counts = await get_event_counts(org.id, start, end)
-        return {
-            "total": counts.total_event_count,
-            "event_count": counts.issue_event_count,
-            "transaction_event_count": counts.transaction_count,
-            "uptime_check_event_count": counts.uptime_check_event_count // 10,
-            "log_event_count": counts.log_count // 10,
-            "file_size_mb": counts.file_size,
-        }
+        return counts_to_usage_response(counts)
+
+    if not settings.BILLING_ENABLED:
+        # Self-hosted: prior rolling 30-day window (no subscription to anchor to).
+        start, end = rolling_period(periods_ago)
+        counts = await get_event_counts(org.id, start, end)
+        return counts_to_usage_response(counts)
 
     subscription = await (
         StripeSubscription.objects.filter(
@@ -372,14 +389,7 @@ async def subscription_events_count_for_period(
 
     period_start, period_end = period
     counts = await get_event_counts(org.id, period_start, period_end)
-    return {
-        "total": counts.total_event_count,
-        "event_count": counts.issue_event_count,
-        "transaction_event_count": counts.transaction_count,
-        "uptime_check_event_count": counts.uptime_check_event_count // 10,
-        "log_event_count": counts.log_count // 10,
-        "file_size_mb": counts.file_size,
-    }
+    return counts_to_usage_response(counts)
 
 
 @router.get(
@@ -396,22 +406,28 @@ async def subscription_events_count_daily(
         users=request.auth.user_id,
     )
 
-    subscription = await (
-        StripeSubscription.objects.filter(
-            organization_id=org.id,
-            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+    if not settings.BILLING_ENABLED:
+        # Self-hosted has no billing cycle: chart the rolling 30-day window.
+        cycle_start, cycle_end = rolling_period(0)
+    else:
+        subscription = await (
+            StripeSubscription.objects.filter(
+                organization_id=org.id,
+                status__in=ACTIVE_SUBSCRIPTION_STATUSES,
+            )
+            .order_by("-created")
+            .afirst()
         )
-        .order_by("-created")
-        .afirst()
-    )
 
-    if subscription is None:
-        return {"data": []}
+        if subscription is None:
+            return {"data": []}
 
-    cycle_start = (
-        subscription.subscription_cycle_start or subscription.current_period_start
-    )
-    cycle_end = subscription.subscription_cycle_end or subscription.current_period_end
+        cycle_start = (
+            subscription.subscription_cycle_start or subscription.current_period_start
+        )
+        cycle_end = (
+            subscription.subscription_cycle_end or subscription.current_period_end
+        )
 
     today = timezone.now().date()
     period_start_date = cycle_start.date()
