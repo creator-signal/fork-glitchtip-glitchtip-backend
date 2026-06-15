@@ -862,16 +862,15 @@ wheels = [
 
 [[package]]
 name = "django-async-backend"
-version = "6.0.6"
+version = "6.0.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/8a/ad20e017e70463f583e3a32bbd88838ec72ea4bf0c3534d83af531677588/django_async_backend-6.0.6.tar.gz", hash = "sha256:80e2bb997bc178017cef7ab3a68c86fcce264d44adec9b5e75ed9f65eae107dc", size = 98093, upload-time = "2026-06-02T20:31:06.432Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/5f/1a3742760e29dc81571c414d5124fe4cb702a87a011cba095b8b310cce7b/django_async_backend-6.0.7.tar.gz", hash = "sha256:7d4ac832b47b98fd794ab50bb66926de0d02ba6c16b3af90710f25caf133b96b", size = 101301, upload-time = "2026-06-15T09:58:44.876Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/78/b195874115fff8a64e7338dc2a94e34440738655bbf9d469a4d22ac1e41f/django_async_backend-6.0.6-py3-none-any.whl", hash = "sha256:68433c03309a9d35ec232d5aebf6b51e61ef03eb7f083abe2f4429d32cee8d8c", size = 104913, upload-time = "2026-06-02T20:31:05.014Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/1d/f16802460fb35c27486243b537165f7343a51b3a68ae321de343429898b8/django_async_backend-6.0.7-py3-none-any.whl", hash = "sha256:4fb7eff4ab84fcfd527f0329e4cfa87cfb8332d9069fd6a670975e06e34ddda9", size = 107980, upload-time = "2026-06-15T09:58:43.494Z" },
 ]
 
 [[package]]
