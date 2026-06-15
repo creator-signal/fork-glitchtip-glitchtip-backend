@@ -99,6 +99,63 @@ class UptimeAPITestCase(GlitchTestCase):
         mocked.enqueue.assert_called_once()
 
     @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_create_with_thresholds(self, mocked):
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 60,
+            "project": str(self.project.pk),
+            "timeout": 25,
+            "failureThreshold": 3,
+            "recoveryThreshold": 2,
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["failureThreshold"], 3)
+        monitor = Monitor.objects.get()
+        self.assertEqual(monitor.failure_threshold, 3)
+        self.assertEqual(monitor.recovery_threshold, 2)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_create_defaults_thresholds_to_one(self, mocked):
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 60,
+            "project": str(self.project.pk),
+            "timeout": 25,
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 201)
+        monitor = Monitor.objects.get()
+        self.assertEqual(monitor.failure_threshold, 1)
+        self.assertEqual(monitor.recovery_threshold, 1)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
+    def test_create_rejects_threshold_below_one(self, mocked):
+        data = {
+            "monitorType": "Ping",
+            "name": "Test",
+            "url": "https://www.google.com",
+            "expectedStatus": 200,
+            "expectedBody": "",
+            "interval": 60,
+            "project": str(self.project.pk),
+            "timeout": 25,
+            "failureThreshold": 0,
+        }
+        res = self.client.post(self.list_url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+
+    @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_port_monitor(self, mocked):
         """Port monitor URLs should be converted to domain:port format, with protocol removed"""
         data = {

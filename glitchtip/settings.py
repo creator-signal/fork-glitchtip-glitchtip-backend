@@ -232,6 +232,15 @@ GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS = env.bool(
     "GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS", False
 )
 
+# In-check retry: when a probe fails, re-probe this many extra times a short
+# delay apart before counting it as a failure. Confirms a sustained failure
+# within one check cycle (useful for long-interval monitors) and absorbs
+# sub-interval transient blips. Default 0 disables retries (unchanged behaviour).
+GLITCHTIP_UPTIME_CHECK_RETRIES = env.int("GLITCHTIP_UPTIME_CHECK_RETRIES", 0)
+GLITCHTIP_UPTIME_CHECK_RETRY_DELAY = env.float(
+    "GLITCHTIP_UPTIME_CHECK_RETRY_DELAY", 2.0
+)
+
 # Allow alert webhooks (Discord, Slack-style, Teams, ntfy, Zulip, generic) to target
 # private/internal IPs. Kept separate from the uptime flag: a user may legitimately
 # want to monitor an internal service without also permitting webhook-triggered
