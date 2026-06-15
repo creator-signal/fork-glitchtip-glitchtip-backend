@@ -68,13 +68,6 @@ if DEBUG is False:
 if DEBUG and ENABLE_TEST_API:
     ACCOUNT_RATE_LIMITS = False  # Disable for e2e tests
 
-# Enables a synthetic /api/_probe/async/ endpoint (see glitchtip.urls)
-# that runs a small fixed sequence of raw-SQL queries via the async-DB
-# helper. Used by the concurrency benchmarks to measure async-cursor
-# throughput in isolation from the full ingest pipeline. Independent of
-# DEBUG / ENABLE_TEST_API because realistic benches need DEBUG=False.
-ASYNC_PROBE_ENABLED = env.bool("ASYNC_PROBE_ENABLED", False)
-
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Necessary for kubernetes health checks
 POD_IP = env.str("POD_IP", default=None)

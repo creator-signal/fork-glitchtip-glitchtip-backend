@@ -27,7 +27,7 @@ from apps.performance.histogram import (
     percentile_from_histogram,
 )
 from apps.performance.parameterize import parameterize_description
-from apps.shared.async_db import (
+from apps.shared.raw_sql import (
     execute,
     execute_mogrified_values,
     execute_unnest,

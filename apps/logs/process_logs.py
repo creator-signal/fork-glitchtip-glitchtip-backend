@@ -6,7 +6,7 @@ from uuid import UUID
 
 import orjson
 
-from apps.shared.async_db import execute_unnest
+from apps.shared.raw_sql import execute_unnest
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel

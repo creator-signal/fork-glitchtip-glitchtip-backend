@@ -14,7 +14,7 @@ from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.organizations_ext.tasks import check_organization_throttle
 from apps.projects.models import ProjectKey
-from apps.shared.async_db import fetchone
+from apps.shared.raw_sql import fetchone
 from glitchtip.api.exceptions import ThrottleException
 from sentry.utils.auth import parse_auth_header
 

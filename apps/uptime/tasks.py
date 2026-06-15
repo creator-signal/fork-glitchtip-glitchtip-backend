@@ -16,7 +16,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.alerts.constants import RecipientType
 from apps.alerts.models import AlertRecipient
-from apps.shared.async_db import execute_unnest
+from apps.shared.raw_sql import execute_unnest
 
 from .email import MonitorEmail
 from .models import Monitor, MonitorCheck, MonitorType
