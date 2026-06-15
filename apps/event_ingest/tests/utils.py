@@ -7,10 +7,10 @@ from typing import Union
 from asgiref.sync import async_to_sync
 from django.test import TransactionTestCase
 from django.utils import timezone
+from django_async_backend.db import async_connections
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
-from glitchtip.async_compat import async_connections
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..process_event import process_issue_events
