@@ -1139,7 +1139,8 @@ async def process_issue_events(
             [EventStatus.UNRESOLVED, reopen_ids, reopen_orgs],
         )
         await execute(
-            "UPDATE issue_events_issue SET resolved_in_release_id = NULL "
+            "UPDATE issue_events_issue "
+            "SET resolved_in_release_id = NULL, resolved_in_next_release = FALSE "
             "WHERE id = ANY(%s)",
             [reopen_ids],
         )
