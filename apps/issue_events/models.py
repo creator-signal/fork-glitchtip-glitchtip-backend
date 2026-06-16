@@ -90,7 +90,7 @@ class Issue(SoftDeleteModel):
         on_delete=models.SET_NULL,
         related_name="+",
     )
-    resolved_in_next_release = models.BooleanField(default=False)
+    resolved_in_next_release = models.BooleanField(default=False, db_default=False)
     assigned_to_org_user = models.ForeignKey(
         "organizations_ext.OrganizationUser",
         blank=True,

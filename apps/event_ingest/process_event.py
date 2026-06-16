@@ -673,12 +673,14 @@ async def _create_issue_and_hash(
                         INSERT INTO issue_events_issue (
                             project_id, type, title, metadata,
                             first_seen, first_release_id,
-                            short_id, is_public, is_deleted, culprit
+                            short_id, is_public, is_deleted, culprit,
+                            resolved_in_next_release
                         )
                         VALUES (
                             %s, %s, %s, %s,
                             %s, %s,
-                            %s, false, false, NULL
+                            %s, false, false, NULL,
+                            false
                         )
                         RETURNING id
                         """,
