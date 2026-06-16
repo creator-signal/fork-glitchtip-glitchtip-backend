@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from allauth.socialaccount.models import SocialApp
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
@@ -29,6 +30,7 @@ from apps.projects.models import (
     TransactionEventProjectHourlyStatistic,
 )
 from apps.sourcecode.models import DebugSymbolBundle
+from apps.stripe.utils import compute_cycle_n_ago
 from apps.uptime.models import UptimeCheckHourlyStatistic
 
 from .constants import OrganizationUserRole
@@ -104,9 +106,7 @@ async def get_event_counts(
         Q(project__organization_id=org_id) & created_filter
     ).aaggregate(total=Coalesce(Sum("file__blob__size"), 0))
 
-    file_size = int(
-        (symbol_result["total"] + info_result["total"]) / 1000000
-    )
+    file_size = int((symbol_result["total"] + info_result["total"]) / 1000000)
 
     return EventCounts(
         issue_event_count=issue_result["total"],
@@ -117,18 +117,68 @@ async def get_event_counts(
     )
 
 
-async def get_current_period_dates(
-    org: "Organization",
-) -> tuple[datetime, datetime] | None:
+SELF_HOSTED_USAGE_WINDOW_DAYS = 30
+
+
+def rolling_period(
+    periods_ago: int = 0, now: datetime | None = None
+) -> tuple[datetime, datetime]:
+    """Rolling 30-day usage window for self-hosted installs (no billing cycle).
+
+    Self-hosters have no Stripe cycle, but they still pay for usage in hardware,
+    so we report it over a rolling month. periods_ago=0 -> (now - 30d, now);
+    periods_ago=1 -> (now - 60d, now - 30d).
     """
-    Determine the current billing period date range for an organization.
-    Returns None if billing is disabled (meaning no date filtering needed).
+    if now is None:
+        now = timezone.now()
+    window = timedelta(days=SELF_HOSTED_USAGE_WINDOW_DAYS)
+    end = now - window * periods_ago
+    return end - window, end
+
+
+def get_free_tier_cycle(
+    created: datetime, periods_ago: int = 0
+) -> tuple[datetime, datetime]:
+    """Monthly usage cycle anchored to an organization's creation date.
+
+    Used for SaaS organizations without an active Stripe subscription (the free
+    tier, or a lapsed subscription). Stripe is the source of truth whenever a
+    subscription exists; without one we still need a stable monthly window, so
+    we anchor it to the signup date exactly as throttling does. periods_ago=1 is
+    the immediately preceding cycle.
+    """
+    now = timezone.now()
+    if created > now:
+        cycle_start = created
+    else:
+        # Find the anchor that started on or before `now`.
+        months_diff = (now.year - created.year) * 12 + now.month - created.month
+        cycle_start = created + relativedelta(months=months_diff)
+        if cycle_start > now:
+            cycle_start = created + relativedelta(months=months_diff - 1)
+    cycle_start -= relativedelta(months=periods_ago)
+    return cycle_start, cycle_start + relativedelta(months=1)
+
+
+async def get_current_period_dates(
+    org: "Organization", periods_ago: int = 0
+) -> tuple[datetime, datetime] | None:
+    """Resolve the usage-reporting window for an organization, N periods back.
+
+    Single source of truth shared by the usage API, the admin, and throttling so
+    the number a user sees matches the window we actually enforce:
+
+    - Self-hosted (BILLING_ENABLED=False): a rolling 30-day window.
+    - SaaS with an active subscription: the Stripe cycle dates — Stripe is the
+      source of truth (handles annual plans with virtual monthly cycles).
+    - SaaS without an active subscription: a monthly cycle anchored to the org's
+      creation date, mirroring how the free tier is throttled.
+
+    Returns None only when periods_ago points to a cycle before an annual
+    subscription began (matching compute_cycle_n_ago).
     """
     if not settings.BILLING_ENABLED:
-        return None
-
-    now = timezone.now()
-    thirty_days_ago = now - timedelta(days=30)
+        return rolling_period(periods_ago)
 
     sub = await (
         type(org)
@@ -141,15 +191,20 @@ async def get_current_period_dates(
         )
         .afirst()
     )
-    if sub:
-        cycle_start, cycle_end, period_start, period_end = sub
-        start = cycle_start or period_start or thirty_days_ago
-        end = cycle_end or period_end or now
-    else:
-        start = thirty_days_ago
-        end = now
+    cycle_start, cycle_end, period_start, period_end = (
+        sub if sub else (None, None, None, None)
+    )
 
-    return start, end
+    if period_start and period_end:
+        # Active subscription: Stripe is the source of truth.
+        if periods_ago == 0:
+            return cycle_start or period_start, cycle_end or period_end
+        return compute_cycle_n_ago(
+            period_start, period_end, cycle_start, cycle_end, periods_ago
+        )
+
+    # No active subscription: mimic the free tier with our own anchor.
+    return get_free_tier_cycle(org.created, periods_ago)
 
 
 class Organization(SharedBaseModel, OrganizationBase):
