@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from dateutil.relativedelta import relativedelta
@@ -36,6 +36,23 @@ def unix_to_datetime(timestamp: int) -> datetime:
     process's local timezone (``$TZ``).
     """
     return datetime.fromtimestamp(timestamp, tz=dt_timezone.utc)
+
+
+SELF_HOSTED_USAGE_WINDOW_DAYS = 30
+
+
+def rolling_period(
+    periods_ago: int = 0, now: datetime | None = None
+) -> tuple[datetime, datetime]:
+    """Rolling usage window for self-hosted (no billing cycle).
+
+    periods_ago=0 -> (now - 30d, now); periods_ago=1 -> (now - 60d, now - 30d).
+    """
+    if now is None:
+        now = timezone.now()
+    end = now - timedelta(days=SELF_HOSTED_USAGE_WINDOW_DAYS * periods_ago)
+    start = end - timedelta(days=SELF_HOSTED_USAGE_WINDOW_DAYS)
+    return start, end
 
 
 def compute_cycle(period_start: datetime, period_end: datetime, is_annual: bool):

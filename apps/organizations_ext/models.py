@@ -119,16 +119,17 @@ async def get_event_counts(
 
 async def get_current_period_dates(
     org: "Organization",
-) -> tuple[datetime, datetime] | None:
+) -> tuple[datetime, datetime]:
     """
-    Determine the current billing period date range for an organization.
-    Returns None if billing is disabled (meaning no date filtering needed).
+    Determine the current usage period date range for an organization.
+    Self-hosted (billing disabled) has no billing cycle, so it gets a rolling
+    30-day window.
     """
-    if not settings.BILLING_ENABLED:
-        return None
-
     now = timezone.now()
     thirty_days_ago = now - timedelta(days=30)
+
+    if not settings.BILLING_ENABLED:
+        return thirty_days_ago, now
 
     sub = await (
         type(org)
