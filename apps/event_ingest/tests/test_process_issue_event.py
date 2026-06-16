@@ -62,8 +62,10 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_two_events(self):
-        with self.assertNumQueries(11):
-            self.process_events([{}, {}])
+        # TODO: re-add assertNumQueries once unit tests run on the async
+        # backend. assertNumQueries only observes Django's sync connection and
+        # can't count the ingest queries issued through async_connections.
+        self.process_events([{}, {}])
         self.assertEqual(Issue.objects.count(), 1)
         self.assertEqual(IssueHash.objects.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 2)
@@ -149,8 +151,10 @@ class IssueEventIngestTestCase(EventIngestTestCase):
             "release": "newr",
             "environment": "newe",
         }
-        with self.assertNumQueries(17):
-            self.process_events([event1, {}])
+        # TODO: re-add assertNumQueries once unit tests run on the async
+        # backend. assertNumQueries only observes Django's sync connection and
+        # can't count the ingest queries issued through async_connections.
+        self.process_events([event1, {}])
         self.process_events([event1, event2, {}])
         self.assertEqual(self.project.releases.count(), 3)
         self.assertEqual(self.project.environment_set.count(), 3)

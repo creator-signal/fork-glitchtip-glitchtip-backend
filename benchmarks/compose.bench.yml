@@ -4,9 +4,6 @@ x-environment: &bench-environment
   SECRET_KEY: change_me
   ENABLE_ORGANIZATION_CREATION: "true"
   ENABLE_TEST_API: "true"
-  # Synthetic async-DB endpoint at /api/_probe/async/. Independent of
-  # DEBUG/ENABLE_TEST_API so realistic benches (DEBUG=False) can use it.
-  ASYNC_PROBE_ENABLED: "true"
   DEBUG: "false"
   EMAIL_BACKEND: "django.core.mail.backends.console.EmailBackend"
   ENABLE_OBSERVABILITY_API: "true"
@@ -15,9 +12,6 @@ x-environment: &bench-environment
   GLITCHTIP_ENABLE_LOGS: "true"
   MALLOC_TRIM_INTERVAL: "${MALLOC_TRIM_INTERVAL:-0}"
   MEMRAY_ENABLED: "${MEMRAY_ENABLED:-0}"
-  # Backend selector — see run_concurrency_bench.sh.
-  #   async (default) → django-async-backend's postgresql backend
-  BACKEND_VARIANT: "${BACKEND_VARIANT:-async}"
   # Pool sizing — a realistic prod-size pool per worker. Tune via env.
   DATABASE_POOL_MIN_SIZE: "${DATABASE_POOL_MIN_SIZE:-5}"
   DATABASE_POOL_MAX_SIZE: "${DATABASE_POOL_MAX_SIZE:-40}"
@@ -68,7 +62,6 @@ services:
         [ -n \"$${MALLOC_MMAP_THRESHOLD_:-}\" ] && export MALLOC_MMAP_THRESHOLD_=$${MALLOC_MMAP_THRESHOLD_};
         [ -n \"$${MALLOC_TRIM_THRESHOLD_:-}\" ] && export MALLOC_TRIM_THRESHOLD_=$${MALLOC_TRIM_THRESHOLD_};
         echo \"malloc: ARENA_MAX=$$MALLOC_ARENA_MAX MMAP_THRESHOLD=$${MALLOC_MMAP_THRESHOLD_:-default} TRIM_THRESHOLD=$${MALLOC_TRIM_THRESHOLD_:-default}\";
-        echo \"backend variant: $${BACKEND_VARIANT:-async}\";
         export DJANGO_SETTINGS_MODULE=glitchtip.settings;
         python manage.py migrate --no-input --skip-checks &&
         python manage.py maintain_partitions &&

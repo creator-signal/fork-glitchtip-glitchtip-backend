@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
-from unittest import skipUnless
 from unittest.mock import patch
 from uuid import UUID
 
@@ -14,7 +13,6 @@ from django.urls import reverse
 from model_bakery import baker
 
 from apps.stripe.models import SupportLicense
-from glitchtip.async_compat import USE_ASYNC_BACKEND as _USE_ASYNC_BACKEND
 from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 from glitchtip.settings import _is_self_referencing_dsn
@@ -525,17 +523,12 @@ class DatabaseSettingsTestCase(TestCase):
         self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
-        # ENGINE is async-backend's postgresql when the feature flag is
-        # on, and Django's stock postgresql otherwise. Either way the
-        # assertion guards against a typo or accidental SQLite fallback.
-        from glitchtip.async_compat import USE_ASYNC_BACKEND
-
-        expected_engine = (
-            "django_async_backend.db.backends.postgresql"
-            if USE_ASYNC_BACKEND
-            else "django.db.backends.postgresql"
+        # async-backend's postgresql is the only DB engine; the assertion
+        # guards against a typo or accidental SQLite fallback.
+        self.assertEqual(
+            db_settings.get("ENGINE"),
+            "django_async_backend.db.backends.postgresql",
         )
-        self.assertEqual(db_settings.get("ENGINE"), expected_engine)
 
 
 class IsSelfReferencingDsnTestCase(TestCase):
@@ -1246,10 +1239,6 @@ class ProductionWarningTests(SimpleTestCase):
         self.assertNotIn("ALLOWED_HOSTS is the wildcard default", r.stderr)
 
 
-@skipUnless(
-    _USE_ASYNC_BACKEND,
-    "task_signals only registers receivers when USE_ASYNC_BACKEND is enabled",
-)
 class TaskSignalsTestCase(SimpleTestCase):
     """The worker has no HTTP middleware, so async DB connections opened
     by an async task would leak. ``glitchtip.task_signals`` connects a
@@ -1259,7 +1248,7 @@ class TaskSignalsTestCase(SimpleTestCase):
     async def _assert_signal_closes_async_connections(self, signal, **payload):
         from unittest.mock import AsyncMock
 
-        from glitchtip.async_compat import async_connections
+        from django_async_backend.db import async_connections
 
         with patch.object(
             async_connections, "close_all", new_callable=AsyncMock

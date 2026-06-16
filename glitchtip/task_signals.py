@@ -10,18 +10,13 @@ We re-close on both ``task_finished`` and ``task_failure``: vtasks fires
 exactly one of the two per task (including on cancellation), and both
 receivers run inside the same asyncio.Task that executed the user task,
 which is the Task that owns the connection wrappers.
-
-When ``USE_ASYNC_BACKEND`` is off, the sync DB connection layer cleans
-itself up between tasks the normal Django way and no signal handler is
-needed.
 """
 
 import asyncio
 import logging
 
+from django_async_backend.db import async_connections
 from django_vtasks.signals import task_failure, task_finished
-
-from glitchtip.async_compat import USE_ASYNC_BACKEND, async_connections
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +28,5 @@ async def _close_async_connections(**_kwargs):
         logger.exception("Failed to close async DB connections after task")
 
 
-if USE_ASYNC_BACKEND:
-    task_finished.connect(_close_async_connections, weak=False)
-    task_failure.connect(_close_async_connections, weak=False)
+task_finished.connect(_close_async_connections, weak=False)
+task_failure.connect(_close_async_connections, weak=False)

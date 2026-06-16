@@ -10,14 +10,7 @@ import re
 
 _INGEST_PATH_RE = re.compile(
     r"^/(?:"
-    r"api/(?:"
-    r"\d+/(?:envelope|store|minidump|security)|"
-    # Async-DB benchmark endpoints, see glitchtip.async_probe. Routed
-    # through the minimal middleware chain so the bench measures the
-    # async-cursor wire I/O and (for /realistic/) the in-handler Python
-    # CPU between awaits — not AuthenticationMiddleware etc.
-    r"_probe/(?:async|realistic)"
-    r")/"
+    r"api/\d+/(?:envelope|store|minidump|security)/"
     # Native OTLP/HTTP ingest (optional trailing slash, no /api prefix).
     r"|v1/(?:logs|traces|metrics)/?$"
     r")"
@@ -62,21 +55,14 @@ class IngestDispatcher:
 
                 @classmethod
                 def _get_middleware_setting(cls):
-                    from glitchtip.async_compat import USE_ASYNC_BACKEND
-
-                    chain = [
+                    return [
+                        # async-backend needs explicit per-request cleanup to
+                        # return pool connections; without it the pool
+                        # saturates after max_size requests.
+                        "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
                     ]
-                    if USE_ASYNC_BACKEND:
-                        # async-backend needs explicit per-request cleanup
-                        # to return pool connections; without it the pool
-                        # saturates after max_size requests.
-                        chain.insert(
-                            0,
-                            "django_async_backend.middleware.close_async_connections",
-                        )
-                    return chain
 
                 def load_middleware(self, is_async=True):
                     # Override to use our minimal middleware list

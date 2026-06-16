@@ -8,6 +8,7 @@
 
 # 6.1.8
 
+- Refactor: Make django-async-backend the only database engine and remove the USE_ASYNC_BACKEND opt-in flag along with its sync-fallback shim layer. The async backend is now always active; sync ORM, migrations, and admin paths are unaffected.
 - Fix: Prevent "Cannot open a new connection in an atomic block" / TransactionManagementError during concurrent async event ingest by running issue creation in a single transaction instead of holding it open across an await
 
 # 6.1.7
