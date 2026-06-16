@@ -352,3 +352,24 @@ class FreeTierCycleTestCase(TestCase):
             self.assertEqual(
                 end, datetime(2020, 4, 30, 12, 0, 0, tzinfo=dt_timezone.utc)
             )
+
+    def test_get_free_tier_cycle_historical_contiguous(self):
+        # Historical cycles (periods_ago > 0) must tile the timeline with no
+        # gaps or overlaps, even when the signup day (31) is clamped in short
+        # months. Each cycle's start must equal the previous cycle's end.
+        created = datetime(2020, 1, 31, 12, 0, 0, tzinfo=dt_timezone.utc)
+        with freeze_time("2020-04-10"):
+            current = get_free_tier_cycle(created)
+            prev = get_free_tier_cycle(created, periods_ago=1)
+            prev2 = get_free_tier_cycle(created, periods_ago=2)
+        # current = Mar 31 - Apr 30 (matches the periods_ago=0 case above)
+        self.assertEqual(
+            current[0], datetime(2020, 3, 31, 12, 0, 0, tzinfo=dt_timezone.utc)
+        )
+        # Contiguous: each window ends exactly where the next begins.
+        self.assertEqual(prev[1], current[0])
+        self.assertEqual(prev2[1], prev[0])
+        # Re-anchored on `created`, so the chain lands back on Jan 31.
+        self.assertEqual(
+            prev2[0], datetime(2020, 1, 31, 12, 0, 0, tzinfo=dt_timezone.utc)
+        )

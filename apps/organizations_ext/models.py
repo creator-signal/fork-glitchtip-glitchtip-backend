@@ -149,15 +149,19 @@ def get_free_tier_cycle(
     """
     now = timezone.now()
     if created > now:
-        cycle_start = created
+        current_index = 0
     else:
-        # Find the anchor that started on or before `now`.
-        months_diff = (now.year - created.year) * 12 + now.month - created.month
-        cycle_start = created + relativedelta(months=months_diff)
-        if cycle_start > now:
-            cycle_start = created + relativedelta(months=months_diff - 1)
-    cycle_start -= relativedelta(months=periods_ago)
-    return cycle_start, cycle_start + relativedelta(months=1)
+        # How many whole months since signup contain `now`.
+        current_index = (now.year - created.year) * 12 + now.month - created.month
+        if created + relativedelta(months=current_index) > now:
+            current_index -= 1
+    # Re-anchor every boundary on `created` so adjacent cycles stay contiguous
+    # even when the signup day (29-31) gets clamped in shorter months.
+    index = current_index - periods_ago
+    return (
+        created + relativedelta(months=index),
+        created + relativedelta(months=index + 1),
+    )
 
 
 async def get_current_period_dates(
