@@ -756,11 +756,15 @@ class DatabaseSettingsTestCase(TestCase):
         self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
-        # async-backend's postgresql is the only DB engine; the assertion
-        # guards against a typo or accidental SQLite fallback.
-        self.assertEqual(
+        # Guard against a typo or accidental SQLite fallback. The default is
+        # the async-backend (psycopg); gt_rust.django_backend is the opt-in
+        # Rust driver selected via DATABASE_ENGINE. Both are valid.
+        self.assertIn(
             db_settings.get("ENGINE"),
-            "django_async_backend.db.backends.postgresql",
+            {
+                "django_async_backend.db.backends.postgresql",
+                "gt_rust.django_backend",
+            },
         )
 
 
