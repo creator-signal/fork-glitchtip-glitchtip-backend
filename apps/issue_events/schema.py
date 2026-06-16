@@ -85,7 +85,7 @@ class IssueSchema(ModelSchema):
     share_id: int | None = Field(default=None, serialization_alias="shareId")
     logger: str | None = None
     permalink: str | None = "Not implemented"
-    status_details: dict[str, str] | None = Field(
+    status_details: dict[str, str | bool] | None = Field(
         default_factory=dict, serialization_alias="statusDetails"
     )
     subscription_details: str | None = Field(
@@ -141,8 +141,11 @@ class IssueSchema(ModelSchema):
 
     @staticmethod
     def resolve_status_details(obj: Issue):
-        if obj.status == EventStatus.RESOLVED and obj.resolved_in_release_id:
-            return {"inRelease": obj.resolved_in_release.version}
+        if obj.status == EventStatus.RESOLVED:
+            if obj.resolved_in_release_id:
+                return {"inRelease": obj.resolved_in_release.version}
+            if obj.resolved_in_next_release:
+                return {"inNextRelease": True}
         return {}
 
     @staticmethod
