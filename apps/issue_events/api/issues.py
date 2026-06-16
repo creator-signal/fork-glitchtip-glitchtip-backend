@@ -232,7 +232,7 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
                 else:
                     obj.resolved_in_next_release = True
                     update_fields.append("resolved_in_next_release")
-        elif new_status != EventStatus.RESOLVED:
+        else:
             obj.resolved_in_release = None
             obj.resolved_in_next_release = False
             update_fields.extend(
