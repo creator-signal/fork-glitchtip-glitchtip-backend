@@ -211,7 +211,10 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
                 ).afirst()
                 if release:
                     obj.resolved_in_release = release
-                    update_fields.append("resolved_in_release_id")
+                    obj.resolved_in_next_release = False
+                    update_fields.extend(
+                        ["resolved_in_release_id", "resolved_in_next_release"]
+                    )
             elif payload.status_details.in_next_release:
                 release = await (
                     Release.objects.filter(
@@ -222,10 +225,19 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
                 )
                 if release:
                     obj.resolved_in_release = release
-                    update_fields.append("resolved_in_release_id")
-        elif new_status != EventStatus.RESOLVED:
+                    obj.resolved_in_next_release = False
+                    update_fields.extend(
+                        ["resolved_in_release_id", "resolved_in_next_release"]
+                    )
+                else:
+                    obj.resolved_in_next_release = True
+                    update_fields.append("resolved_in_next_release")
+        else:
             obj.resolved_in_release = None
-            update_fields.append("resolved_in_release_id")
+            obj.resolved_in_next_release = False
+            update_fields.extend(
+                ["resolved_in_release_id", "resolved_in_next_release"]
+            )
 
     if "assigned_to" in payload.model_fields_set:
         org_user, team = await resolve_assignee(

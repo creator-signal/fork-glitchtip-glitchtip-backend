@@ -795,6 +795,60 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         self.assertIsNone(issue.resolved_in_release)
 
+    def test_resolve_in_next_release_no_releases(self):
+        """inNextRelease with no releases sets resolved_in_next_release flag and GET returns it"""
+        issue = baker.make("issue_events.Issue", project=self.project)
+        data = {"status": "resolved", "statusDetails": {"inNextRelease": True}}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["statusDetails"], {"inNextRelease": True})
+        issue.refresh_from_db()
+        self.assertTrue(issue.resolved_in_next_release)
+        self.assertIsNone(issue.resolved_in_release)
+
+        get_res = self.client.get(reverse("api:get_issue", kwargs={"issue_id": issue.id}))
+        self.assertEqual(get_res.json()["statusDetails"], {"inNextRelease": True})
+
+    def test_plain_resolve_clears_resolved_in_next_release(self):
+        """Plain resolve after a stale resolved_in_next_release flag clears the flag"""
+        issue = make_issue(
+            project=self.project,
+            status=EventStatus.UNRESOLVED,
+            resolved_in_next_release=True,
+        )
+        data = {"status": "resolved"}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["statusDetails"], {})
+        issue.refresh_from_db()
+        self.assertFalse(issue.resolved_in_next_release)
+
+    def test_unresolve_clears_resolved_in_next_release(self):
+        """Un-resolving an issue clears resolved_in_next_release"""
+        issue = make_issue(
+            project=self.project,
+            status=EventStatus.RESOLVED,
+            resolved_in_next_release=True,
+        )
+        data = {"status": "unresolved"}
+        res = self.client.put(
+            get_issue_url(issue.pk),
+            data,
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.status, EventStatus.UNRESOLVED)
+        self.assertFalse(issue.resolved_in_next_release)
+
     def test_issue_delete(self):
         issue = baker.make("issue_events.Issue", project=self.project)
         not_my_issue = baker.make("issue_events.Issue")
