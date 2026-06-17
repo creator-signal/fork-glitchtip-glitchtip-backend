@@ -43,20 +43,20 @@ class OrganizationManager(OrgManager):
     pass
 
 
-# Billed weight per raw category, in tenths of a billed event (uptime/logs: 10 = 1).
+# Billed weight per raw category (uptime/logs are weighted 0.1: 10 raw = 1 billed).
 # Single source of truth for usage weighting; don't re-weight elsewhere.
-USAGE_WEIGHT_TENTHS = {
-    "issue_event_count": 10,
-    "transaction_count": 10,
-    "log_count": 1,
-    "uptime_check_event_count": 1,
-    "file_size": 10,
+USAGE_WEIGHTS = {
+    "issue_event_count": 1,
+    "transaction_count": 1,
+    "log_count": 0.1,
+    "uptime_check_event_count": 0.1,
+    "file_size": 1,
 }
 
 
 @dataclass
 class EventCounts:
-    """Raw per-category usage counts plus billed values (weights: USAGE_WEIGHT_TENTHS)."""
+    """Raw per-category usage counts plus billed values (weights: USAGE_WEIGHTS)."""
 
     issue_event_count: int = 0
     transaction_count: int = 0
@@ -66,13 +66,12 @@ class EventCounts:
 
     def billed(self, field: str) -> float:
         """Unfloored billed contribution of one raw category, e.g. 50 uptime -> 5.0."""
-        return getattr(self, field) * USAGE_WEIGHT_TENTHS[field] / 10
+        return getattr(self, field) * USAGE_WEIGHTS[field]
 
     @property
     def total_event_count(self) -> int:
-        """Weighted billed total, floored exactly once (in integer tenths)."""
-        tenths = sum(getattr(self, f) * w for f, w in USAGE_WEIGHT_TENTHS.items())
-        return tenths // 10
+        """Weighted billed total, floored exactly once."""
+        return int(sum(getattr(self, f) * w for f, w in USAGE_WEIGHTS.items()))
 
 
 async def get_event_counts(
