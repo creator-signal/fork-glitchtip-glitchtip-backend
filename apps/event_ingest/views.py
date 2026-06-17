@@ -6,6 +6,7 @@ from dataclasses import asdict
 import orjson
 import sentry_sdk
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
@@ -25,6 +26,7 @@ from glitchtip.partition_manager import UUID7Helper
 from .api import get_ip_address
 from .authentication import EventAuthHttpRequest, event_auth
 from .minidump_event import minidump_to_event
+from .pii_scrubber import resolve_scrubber
 from .rust_envelope import (
     EnvelopeTooBig,
     decompress_body,
@@ -99,6 +101,12 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
     request.auth = project  # Assuming event_auth returns the project object
     update_first_event = project.first_event is None
     client_ip = get_ip_address(request)
+    # Server-side PII scrubbing config (per-project, falling back to the
+    # fleet-wide default). Resolved once per request; scrub_event is a no-op
+    # when scrubbing is disabled, so call sites stay unconditional.
+    scrubber = resolve_scrubber(
+        project.scrub_config, settings.GLITCHTIP_PII_SCRUB_DEFAULT
+    )
 
     content_encoding = request_content_encoding(request)
     try:
@@ -227,7 +235,9 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     interchange_event = IngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,
-                        payload=item.dict() | {"type": issue_type},
+                        payload=scrubber.scrub_event(
+                            item.dict() | {"type": issue_type}
+                        ),
                         received=timezone.now(),
                         update_first_event=update_first_event,
                         uuid=primary_id.hex,
@@ -244,7 +254,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                     interchange_event = IngestTaskMessage(
                         project_id=project_id,
                         organization_id=project.organization_id,  # Use project from auth
-                        payload=item.dict(),
+                        payload=scrubber.scrub_event(item.dict()),
                         received=timezone.now(),
                         update_first_event=update_first_event,
                         uuid=primary_id.hex,
@@ -272,8 +282,6 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
 
                 elif item_header.type in ("log", "otel_log"):
                     # Check if logs feature is enabled
-                    from django.conf import settings
-
                     if not settings.GLITCHTIP_ENABLE_LOGS:
                         # Silently ignore logs when feature is disabled
                         continue
@@ -347,7 +355,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
             interchange_event = IngestTaskMessage(
                 project_id=project_id,
                 organization_id=project.organization_id,
-                payload=item.dict() | {"type": issue_type},
+                payload=scrubber.scrub_event(item.dict() | {"type": issue_type}),
                 received=timezone.now(),
                 update_first_event=update_first_event,
                 uuid=primary_id.hex,
@@ -461,11 +469,14 @@ async def minidump_view(request: EventAuthHttpRequest, project_id: int):
 
     issue_type = IssueEventType.ERROR if item.exception else IssueEventType.DEFAULT
 
+    scrubber = resolve_scrubber(
+        project.scrub_config, settings.GLITCHTIP_PII_SCRUB_DEFAULT
+    )
     primary_id = UUID7Helper.from_datetime()
     interchange_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=project.organization_id,
-        payload=item.dict() | {"type": issue_type},
+        payload=scrubber.scrub_event(item.dict() | {"type": issue_type}),
         received=timezone.now(),
         update_first_event=update_first_event,
         uuid=primary_id.hex,

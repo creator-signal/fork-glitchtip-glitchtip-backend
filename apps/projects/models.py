@@ -47,6 +47,16 @@ class Project(CreatedModel, SoftDeleteModel):
         validators=[MaxValueValidator(100)],
         help_text="Probability (in percent) on how many events are throttled. Used for throttling at project level",
     )
+    scrub_config = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Server-side PII scrubbing config applied at ingest. See "
+            "apps.event_ingest.pii_scrubber.ScrubConfig for the accepted keys "
+            "(enabled, sensitive_keys, safe_keys, scrub_emails, ...). Null "
+            "falls back to the GLITCHTIP_PII_SCRUB_DEFAULT setting."
+        ),
+    )
     undeleted_objects = ProjectSoftDeleteManager()
 
     class Meta:
