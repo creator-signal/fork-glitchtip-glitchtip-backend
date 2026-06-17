@@ -2,7 +2,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asgiref.sync import async_to_sync
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from freezegun import freeze_time
@@ -309,9 +309,12 @@ class StripeAPITestCase(TestCase):
             {self.organization.id}
         )
 
+    @override_settings(BILLING_ENABLED=True)
     def test_daily_billed_series_sums_to_period_total_low_volume(self):
         # BUG-006 regression: low-volume uptime (5/day) must NOT floor to 0 on
         # each daily bar, and the daily series must sum to the period total.
+        # BILLING_ENABLED so the period endpoint date-bounds to the subscription
+        # cycle (it counts all events otherwise), exercising the billed path.
         self._make_active_subscription(datetime(2020, 3, 1), datetime(2020, 4, 1))
         for day in range(10, 16):  # Mar 10..15, six days
             baker.make(
@@ -344,6 +347,7 @@ class StripeAPITestCase(TestCase):
             period["uptimeCheckEventCount"],
         )
 
+    @override_settings(BILLING_ENABLED=True)
     def test_breakdown_categories_reconcile_with_total(self):
         # Per-category billed values are unfloored, so they sum to the period
         # total within the single final floor (old code floored each category).
