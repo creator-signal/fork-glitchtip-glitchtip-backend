@@ -450,4 +450,99 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(len(data), 31)  # 2020-02-14 .. 2020-03-15 inclusive
         mar10 = next(d for d in data if d["date"] == "2020-03-10")
         self.assertEqual(mar10["eventCount"], 15)
-        self.assertEqual(mar10["logEventCount"], 4)  # 40 // 10
+        self.assertEqual(mar10["logEventCount"], 4.0)  # 40 * 0.1, unfloored
+
+    def _make_active_subscription(self, period_start: datetime, period_end: datetime):
+        baker.make(
+            "stripe.StripeSubscription",
+            organization=self.organization,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.make_aware(period_start),
+            current_period_end=timezone.make_aware(period_end),
+        )
+        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+            {self.organization.id}
+        )
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_daily_billed_series_sums_to_period_total_low_volume(self):
+        # BUG-006 regression: low-volume uptime (5/day) must NOT floor to 0 on
+        # each daily bar, and the daily series must sum to the period total.
+        # BILLING_ENABLED so the period endpoint date-bounds to the subscription
+        # cycle (it counts all events otherwise), exercising the billed path.
+        self._make_active_subscription(datetime(2020, 3, 1), datetime(2020, 4, 1))
+        for day in range(10, 16):  # Mar 10..15, six days
+            baker.make(
+                "uptime.UptimeCheckHourlyStatistic",
+                organization=self.organization,
+                date=timezone.make_aware(datetime(2020, 3, day, 8)),
+                count=5,
+            )
+        period_url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        daily_url = reverse(
+            "api:subscription_events_count_daily",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 3, 16)):
+            period = self.client.get(period_url).json()
+            daily = self.client.get(daily_url).json()["data"]
+
+        # 6 days * 5 checks = 30 raw uptime = 3.0 billed; old per-day floor gave 0.
+        self.assertEqual(period["uptimeCheckEventCount"], 3.0)
+        self.assertEqual(period["total"], 3)
+        seeded = [d for d in daily if d["uptimeCheckEventCount"]]
+        self.assertEqual(len(seeded), 6)  # every seeded day shows up (0.5 each)
+        self.assertTrue(all(d["uptimeCheckEventCount"] == 0.5 for d in seeded))
+        # The daily series reconciles exactly with the period figure.
+        self.assertEqual(
+            sum(d["uptimeCheckEventCount"] for d in daily),
+            period["uptimeCheckEventCount"],
+        )
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_breakdown_categories_reconcile_with_total(self):
+        # Per-category billed values are unfloored, so they sum to the period
+        # total within the single final floor (old code floored each category).
+        self._make_active_subscription(datetime(2020, 3, 1), datetime(2020, 4, 1))
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=250,
+        )
+        baker.make(
+            "projects.LogProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=40,
+        )
+        baker.make(
+            "uptime.UptimeCheckHourlyStatistic",
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=55,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 3, 15)):
+            data = self.client.get(url).json()
+        self.assertEqual(data["uptimeCheckEventCount"], 5.5)  # 55 * 0.1, unfloored
+        self.assertEqual(data["logEventCount"], 4.0)
+        self.assertEqual(data["eventCount"], 250)
+        category_sum = (
+            data["eventCount"]
+            + data["transactionEventCount"]
+            + data["uptimeCheckEventCount"]
+            + data["logEventCount"]
+        )
+        # 250 + 0 + 5.5 + 4.0 = 259.5 ; total floored once = 259.
+        self.assertEqual(data["total"], 259)
+        self.assertLess(abs(category_sum - data["total"]), 1)
