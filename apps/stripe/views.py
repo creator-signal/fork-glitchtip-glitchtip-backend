@@ -164,7 +164,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         await check_organization_throttle.aenqueue(organization.id, True)
 
     # Primary subscription should be removed if status is not active
-    elif stripe_subscription.stripe_id is organization.stripe_primary_subscription_id:
+    elif stripe_subscription.stripe_id == organization.stripe_primary_subscription_id:
         organization.stripe_primary_subscription = None
         await organization.asave(update_fields=["stripe_primary_subscription"])
 
