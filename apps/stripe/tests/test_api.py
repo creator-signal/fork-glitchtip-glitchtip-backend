@@ -8,11 +8,16 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
+from apps.organizations_ext.models import Organization
 from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.models import StripeSubscription
 from apps.stripe.utils import unix_to_datetime
 
 
+# These usage endpoints branch on BILLING_ENABLED. It is False by default (and
+# in CI), so pin it True here to exercise the SaaS/Stripe paths deterministically;
+# self-hosted cases override it back to False per-test.
+@override_settings(BILLING_ENABLED=True)
 class StripeAPITestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -200,6 +205,8 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(res.status_code, 200)
 
     def test_subscription_events_count_for_period_no_subscription(self):
+        # SaaS org with no active subscription falls back to the free-tier
+        # anchored cycle; with no events in the prior window the total is 0.
         url = reverse(
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
@@ -288,14 +295,162 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(jan1["uptimeCheckEventCount"], 0)
         self.assertEqual(jan1["logEventCount"], 0)
 
+    def _make_org_created(self, created: datetime):
+        """Org owned by self.user with a deterministic created date."""
+        org = baker.make("organizations_ext.Organization")
+        org.add_user(self.user)
+        Organization.objects.filter(pk=org.pk).update(
+            created=timezone.make_aware(created)
+        )
+        org.refresh_from_db()
+        return org
+
     def test_events_count_daily_no_subscription(self):
+        # SaaS org with no subscription: the daily chart spans the free-tier
+        # cycle anchored to org.created (not an empty list, not all-time).
+        org = self._make_org_created(datetime(2020, 1, 10))
+        project = baker.make("projects.Project", organization=org)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=org,
+            date=timezone.make_aware(datetime(2020, 2, 12, 9)),
+            count=7,
+        )
+        url = reverse(
+            "api:subscription_events_count_daily",
+            args=[org.slug],
+        )
+        with freeze_time(datetime(2020, 2, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()["data"]
+        # Anchored cycle is 2020-02-10 .. 2020-03-10; capped at today (02-15).
+        self.assertEqual(len(data), 6)  # Feb 10 .. Feb 15 inclusive
+        feb12 = next(d for d in data if d["date"] == "2020-02-12")
+        self.assertEqual(feb12["eventCount"], 7)
+
+    def test_period_free_tier_uses_anchored_cycle_without_subscription(self):
+        # SaaS org with no subscription: current-period usage comes from the
+        # free-tier cycle anchored to org.created, not all-time and not rolling.
+        org = self._make_org_created(datetime(2020, 1, 10))
+        project = baker.make("projects.Project", organization=org)
+        # In the current anchored cycle (2020-02-10 .. 2020-03-10).
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=org,
+            date=timezone.make_aware(datetime(2020, 2, 20, 9)),
+            count=12,
+        )
+        # In the previous cycle (2020-01-10 .. 2020-02-10) — must be excluded.
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=org,
+            date=timezone.make_aware(datetime(2020, 1, 20, 9)),
+            count=99,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[org.slug],
+        )
+        with freeze_time(datetime(2020, 2, 25)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 12)
+
+    def test_period_free_tier_previous_cycle_without_subscription(self):
+        # periods_ago=1 for a free-tier org = the prior anchored cycle.
+        org = self._make_org_created(datetime(2020, 1, 10))
+        project = baker.make("projects.Project", organization=org)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=org,
+            date=timezone.make_aware(datetime(2020, 1, 20, 9)),  # prior cycle
+            count=8,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[org.slug],
+        )
+        with freeze_time(datetime(2020, 2, 25)):
+            res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 8)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_period_self_hosted_uses_rolling_window_without_subscription(self):
+        # Self-hosted (BILLING_ENABLED=False): usage is reported over a rolling
+        # 30-day window and must NOT require a StripeSubscription row.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 1, 10)),  # within last 30d
+            count=10,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 10)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_period_self_hosted_previous_window_without_subscription(self):
+        # "Last 30 days" on self-hosted = the prior rolling window, still no sub.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 2, 1, 10)),  # in prior window
+            count=25,
+        )
+        url = reverse(
+            "api:subscription_events_count_for_period",
+            args=[self.organization.slug],
+        )
+        with freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url, {"periods_ago": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["eventCount"], 25)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_events_count_daily_self_hosted_without_subscription(self):
+        # Self-hosted daily chart spans the rolling 30-day window, no sub required.
+        project = baker.make("projects.Project", organization=self.organization)
+        baker.make(
+            "projects.IssueEventProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=15,
+        )
+        baker.make(
+            "projects.LogProjectHourlyStatistic",
+            project=project,
+            organization=self.organization,
+            date=timezone.make_aware(datetime(2020, 3, 10, 8)),
+            count=40,
+        )
         url = reverse(
             "api:subscription_events_count_daily",
             args=[self.organization.slug],
         )
-        res = self.client.get(url)
+        with freeze_time(datetime(2020, 3, 15)):
+            res = self.client.get(url)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json()["data"], [])
+        data = res.json()["data"]
+        self.assertEqual(len(data), 31)  # 2020-02-14 .. 2020-03-15 inclusive
+        mar10 = next(d for d in data if d["date"] == "2020-03-10")
+        self.assertEqual(mar10["eventCount"], 15)
+        self.assertEqual(mar10["logEventCount"], 4.0)  # 40 * 0.1, unfloored
 
     def _make_active_subscription(self, period_start: datetime, period_end: datetime):
         baker.make(

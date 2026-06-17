@@ -38,7 +38,7 @@ from .constants import (
     SubscriptionStatus,
 )
 from .models import StripePrice, StripeProduct, StripeSubscription
-from .utils import compute_cycle, compute_cycle_n_ago, unix_to_datetime
+from .utils import compute_cycle, unix_to_datetime
 
 router = Router()
 
@@ -279,7 +279,9 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
     is_annual = bool(
         price_data.recurring and price_data.recurring.get("interval") == "year"
     )
-    cycle_start, cycle_end = compute_cycle(current_period_start, current_period_end, is_annual)
+    cycle_start, cycle_end = compute_cycle(
+        current_period_start, current_period_end, is_annual
+    )
     subscription = await StripeSubscription.objects.acreate(
         stripe_id=subscription_resp.id,
         status=SubscriptionStatus.ACTIVE,
@@ -340,39 +342,13 @@ async def subscription_events_count_for_period(
         users=request.auth.user_id,
     )
 
-    if periods_ago == 0:
-        period = await get_current_period_dates(org)
-        start, end = period if period else (None, None)
-        counts = await get_event_counts(org.id, start, end)
-        return usage_response(counts)
-
-    subscription = await (
-        StripeSubscription.objects.filter(
-            organization_id=org.id,
-            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
-        )
-        .select_related("price")
-        .order_by("-created")
-        .afirst()
-    )
-
-    zero_response = usage_response(EventCounts())
-
-    if subscription is None:
-        return zero_response
-
-    period = compute_cycle_n_ago(
-        subscription.current_period_start,
-        subscription.current_period_end,
-        subscription.subscription_cycle_start,
-        subscription.subscription_cycle_end,
-        periods_ago=periods_ago,
-    )
+    period = await get_current_period_dates(org, periods_ago)
     if period is None:
-        return zero_response
+        # periods_ago precedes an annual subscription's start.
+        return usage_response(EventCounts())
 
-    period_start, period_end = period
-    counts = await get_event_counts(org.id, period_start, period_end)
+    start, end = period
+    counts = await get_event_counts(org.id, start, end)
     return usage_response(counts)
 
 
@@ -390,22 +366,10 @@ async def subscription_events_count_daily(
         users=request.auth.user_id,
     )
 
-    subscription = await (
-        StripeSubscription.objects.filter(
-            organization_id=org.id,
-            status__in=ACTIVE_SUBSCRIPTION_STATUSES,
-        )
-        .order_by("-created")
-        .afirst()
-    )
-
-    if subscription is None:
+    period = await get_current_period_dates(org)
+    if period is None:
         return {"data": []}
-
-    cycle_start = (
-        subscription.subscription_cycle_start or subscription.current_period_start
-    )
-    cycle_end = subscription.subscription_cycle_end or subscription.current_period_end
+    cycle_start, cycle_end = period
 
     today = timezone.now().date()
     period_start_date = cycle_start.date()

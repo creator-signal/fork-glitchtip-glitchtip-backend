@@ -226,6 +226,14 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     return PortalSession.model_validate_json(response)
 
 
+async def mark_welcome_sent(subscription_id: str) -> None:
+    """Record on the Stripe subscription that the support-license welcome email
+    was sent. The bracket form merges the key, leaving other metadata intact."""
+    await stripe_post(
+        f"subscriptions/{subscription_id}", {"metadata[welcome_sent]": "true"}
+    )
+
+
 async def create_subscription(customer: str, price: str, **kwargs) -> Subscription:
     params = {
         "customer": customer,

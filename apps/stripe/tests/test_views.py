@@ -357,6 +357,65 @@ class TestStripeWebhookView(TestCase):
         STRIPE_WEBHOOK_TOLERANCE=300,
         STRIPE_REGION="",
     )
+    async def test_webhook_clears_primary_subscription_when_canceled(self):
+        """A subscription leaving active status must clear the org's primary pointer."""
+        organization = await Organization.objects.acreate(name="Cancel Org", id=54321)
+        product = await StripeProduct.objects.acreate(
+            stripe_id="prod_cancel", name="P", description="", events=1, is_public=True
+        )
+        price = await StripePrice.objects.acreate(
+            stripe_id="price_cancel", product=product, price=10.00, nickname="P"
+        )
+        now = timezone.now()
+        now_timestamp = int(now.timestamp())
+        subscription_id = "sub_primary_cancel"
+        sub = await StripeSubscription.objects.acreate(
+            stripe_id=subscription_id,
+            organization=organization,
+            price=price,
+            status=SubscriptionStatus.ACTIVE,
+            created=now,
+            current_period_start=now,
+            current_period_end=now,
+            start_date=now,
+        )
+        organization.stripe_primary_subscription = sub
+        await organization.asave(update_fields=["stripe_primary_subscription"])
+
+        payload = self.generate_subscription_event_data(
+            type="customer.subscription.updated",
+            event_id="evt_cancel_test",
+            subscription_id=subscription_id,
+            current_period_start=now_timestamp,
+            current_period_end=now_timestamp + 2592000,
+            price_id=price.stripe_id,
+            product_id=product.stripe_id,
+            status=SubscriptionStatus.CANCELED,
+        )
+        mock_customer_data = {
+            "object": "customer",
+            "id": "cus_test",
+            "email": "test@example.com",
+            "metadata": {"organization_id": str(organization.id)},
+            "name": None,
+        }
+        request = self.generate_stripe_request(payload)
+        with patch(
+            "apps.stripe.views.stripe_get", new_callable=AsyncMock
+        ) as mock_stripe_get:
+            mock_stripe_get.return_value = json.dumps(mock_customer_data)
+            response = await stripe_webhook_view(request)
+        self.assertEqual(response.status_code, 200)
+
+        # The canceled subscription must no longer be the org's primary.
+        await organization.arefresh_from_db()
+        self.assertIsNone(organization.stripe_primary_subscription_id)
+
+    @override_settings(
+        STRIPE_WEBHOOK_SECRET="test_webhook_secret",
+        STRIPE_WEBHOOK_TOLERANCE=300,
+        STRIPE_REGION="",
+    )
     async def test_webhook_ordering_and_deduplication(self):
         """Ensure mistimed and duplicated events are ignored."""
 
