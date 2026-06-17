@@ -1,11 +1,9 @@
 import logging
 
 from asgiref.sync import sync_to_async
-from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.cache import cache
 from django.tasks import task
-from django.utils import timezone
 
 from apps.issue_events.maintenance import (
     delete_issues_in_batches,
@@ -21,37 +19,14 @@ from apps.projects.models import (
 from apps.uptime.models import MonitorCheck, UptimeCheckHourlyStatistic
 
 from .email import InvitationEmail, ThrottleNoticeEmail
-from .models import Organization, get_current_period_dates, get_event_counts
+from .models import (
+    Organization,
+    get_current_period_dates,
+    get_event_counts,
+    get_free_tier_cycle,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def get_free_tier_cycle(created):
-    """
-    Calculate the current billing cycle for a free tier organization.
-    Anchored to the organization's creation date.
-    """
-    now = timezone.now()
-    if created > now:
-        return created, created + relativedelta(months=1)
-
-    # Calculate the number of months between created and now
-    # We want the start date to be in the past (or now) and end date in the future
-    # created + N months <= now < created + N+1 months
-
-    # Simple approach: set year/month to now, keep day
-    # Handle edge cases like Jan 31 -> Feb 28
-
-    # Calculate months difference
-    months_diff = (now.year - created.year) * 12 + now.month - created.month
-
-    candidate_start = created + relativedelta(months=months_diff)
-
-    if candidate_start > now:
-        months_diff -= 1
-        candidate_start = created + relativedelta(months=months_diff)
-
-    return candidate_start, candidate_start + relativedelta(months=1)
 
 
 @task
@@ -69,11 +44,9 @@ async def check_organization_throttle(organization_id: int, bypass_cache: bool =
     ):
         return  # Recent check already performed
 
-    org = await (
-        Organization.objects.select_related(
-            "stripe_primary_subscription__price__product"
-        ).aget(id=organization_id)
-    )
+    org = await Organization.objects.select_related(
+        "stripe_primary_subscription__price__product"
+    ).aget(id=organization_id)
     await _check_and_update_throttle(org)
 
 
@@ -190,9 +163,9 @@ async def delete_organization(organization_id: int):
         LogProjectHourlyStatistic,
         UptimeCheckHourlyStatistic,
     ]:
-        await sync_to_async(
-            model.objects.filter(organization_id=org.id)._raw_delete
-        )("default")
+        await sync_to_async(model.objects.filter(organization_id=org.id)._raw_delete)(
+            "default"
+        )
 
     # Issues have non-partitioned FK dependents (IssueHash, Comment, etc.)
     # that need explicit cleanup — use the issue-aware batch helper.
