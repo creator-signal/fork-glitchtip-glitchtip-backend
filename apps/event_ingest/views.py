@@ -302,7 +302,10 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         project_id=project_id,
                         organization_id=project.organization_id,
                         received=timezone.now(),
-                        logs=[log_item.dict() for log_item in log_items],
+                        logs=[
+                            scrubber.scrub_log(log_item.dict())
+                            for log_item in log_items
+                        ],
                     )
                     await ingest_logs.aenqueue(
                         serialize_for_vtasks(asdict(log_message))

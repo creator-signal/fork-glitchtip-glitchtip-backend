@@ -1,10 +1,12 @@
 from django.test import SimpleTestCase
 
 from ..pii_scrubber import (
+    _MAX_SCRUB_DEPTH,
     PLACEHOLDER,
     Scrubber,
     ScrubConfig,
     get_scrubber,
+    resolve_scrubber,
 )
 
 
@@ -279,3 +281,116 @@ class ConfigTests(SimpleTestCase):
         event = {"extra": {"password": "x"}}
         s.scrub_event(event)
         self.assertEqual(event["extra"]["password"], "***")
+
+
+class HardeningTests(SimpleTestCase):
+    def test_deeply_nested_payload_does_not_recurse_without_bound(self):
+        # Attacker-controlled JSON can be small in bytes but very deep. A chain
+        # this deep would overflow the Python stack (RecursionError -> failed
+        # ingest) without the depth bound; with it, the walk stops descending.
+        s = scrubber()
+        node: dict = {"leaf": "x"}
+        for _ in range(3000):
+            node = {"child": node}
+        # Must not raise RecursionError.
+        s.scrub_event({"extra": node})
+        # Shallow secrets (within the bound) are still scrubbed.
+        shallow = {"extra": {"a": {"b": {"password": "x"}}}}
+        s.scrub_event(shallow)
+        self.assertEqual(shallow["extra"]["a"]["b"]["password"], PLACEHOLDER)
+        self.assertGreater(_MAX_SCRUB_DEPTH, 0)
+
+    def test_placeholder_with_regex_backreference_is_literal(self):
+        # An operator-supplied placeholder containing \g<0> or \1 must be
+        # inserted literally, never interpreted as a regex backreference (which
+        # would re-insert the matched secret or raise).
+        for ph in ("\\g<0>", "\\1"):
+            s = scrubber(placeholder=ph, scrub_emails=True)
+            pem = "-----BEGIN PRIVATE KEY-----\nSECRET\n-----END PRIVATE KEY-----"
+            event = {"extra": {"a": "contact x@y.com", "b": pem}}
+            s.scrub_event(event)
+            self.assertEqual(event["extra"]["a"], "contact " + ph)
+            self.assertNotIn("SECRET", event["extra"]["b"])
+            self.assertEqual(event["extra"]["b"], ph)
+
+    def test_safe_keys_are_token_aware_in_default_mode(self):
+        # safe_keys=["session"] must exempt "session_token" (a per-token match),
+        # not only an exact "session" key.
+        s = scrubber(safe_keys=("session",))
+        event = {"extra": {"session_token": "keep", "password": "scrub"}}
+        s.scrub_event(event)
+        self.assertEqual(event["extra"]["session_token"], "keep")
+        self.assertEqual(event["extra"]["password"], PLACEHOLDER)
+
+    def test_mixed_key_value_list_still_redacts_valid_pairs(self):
+        # One malformed pair (non-string key) must not disable key-redaction
+        # for the rest of the list.
+        s = scrubber()
+        event = {
+            "request": {
+                "headers": [
+                    [None, "weird"],
+                    ["Authorization", "Bearer secret"],
+                    ["Accept", "json"],
+                ]
+            }
+        }
+        s.scrub_event(event)
+        headers = event["request"]["headers"]
+        self.assertEqual(headers[1], ["Authorization", PLACEHOLDER])
+        self.assertEqual(headers[2], ["Accept", "json"])
+
+    def test_additional_secret_tokens(self):
+        s = scrubber()
+        event = {"extra": {"passphrase": "a", "pin": "b", "bearer": "c"}}
+        s.scrub_event(event)
+        self.assertEqual(event["extra"]["passphrase"], PLACEHOLDER)
+        self.assertEqual(event["extra"]["pin"], PLACEHOLDER)
+        self.assertEqual(event["extra"]["bearer"], PLACEHOLDER)
+
+
+class LogScrubbingTests(SimpleTestCase):
+    def test_scrub_log_redacts_flat_body_and_attributes(self):
+        s = scrubber()
+        # LogItemSchema.dict() is flat: body + promoted attribute extras +
+        # structural fields at the top level.
+        log = {
+            "level": "error",
+            "body": "card 4111 1111 1111 1111 declined",
+            "service": "api",
+            "trace_id": "abc123",
+            "db_password": "hunter2",
+            "user_id": "42",
+        }
+        s.scrub_log(log)
+        self.assertNotIn("4111", log["body"])
+        self.assertEqual(log["db_password"], PLACEHOLDER)
+        # structural fields preserved
+        self.assertEqual(log["level"], "error")
+        self.assertEqual(log["service"], "api")
+        self.assertEqual(log["trace_id"], "abc123")
+        self.assertEqual(log["user_id"], "42")
+
+    def test_scrub_log_disabled_is_noop(self):
+        s = Scrubber(ScrubConfig(enabled=False))
+        log = {"body": "x", "password": "y"}
+        s.scrub_log(log)
+        self.assertEqual(log["password"], "y")
+
+
+class ResolveScrubberTests(SimpleTestCase):
+    def test_falsy_configs_resolve_to_disabled(self):
+        self.assertFalse(resolve_scrubber(None, None).config.enabled)
+        self.assertFalse(resolve_scrubber({}, {}).config.enabled)
+
+    def test_project_config_wins_over_default(self):
+        s = resolve_scrubber({"enabled": True}, {"enabled": False})
+        self.assertTrue(s.config.enabled)
+
+    def test_json_string_config_is_parsed_and_cached(self):
+        # The raw-SQL auth path delivers scrub_config as a JSON string.
+        raw = '{"enabled": true}'
+        s1 = resolve_scrubber(raw, None)
+        s2 = resolve_scrubber(raw, None)
+        self.assertTrue(s1.config.enabled)
+        self.assertIs(s1, s2)

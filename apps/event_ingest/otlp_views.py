@@ -28,6 +28,7 @@ from glitchtip.api.exceptions import ThrottleException
 
 from .authentication import get_project_by_key
 from .otlp import decode_otlp_logs
+from .pii_scrubber import resolve_scrubber
 from .rust_envelope import (
     EnvelopeTooBig,
     decompress_body,
@@ -93,11 +94,14 @@ async def otlp_logs_view(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"detail": "Malformed OTLP logs payload"}, status=400)
 
     if log_items:
+        scrubber = resolve_scrubber(
+            project.scrub_config, settings.GLITCHTIP_PII_SCRUB_DEFAULT
+        )
         message = LogIngestTaskMessage(
             project_id=project.id,
             organization_id=project.organization_id,
             received=timezone.now(),
-            logs=log_items,
+            logs=[scrubber.scrub_log(item) for item in log_items],
         )
         await ingest_logs.aenqueue(serialize_for_vtasks(asdict(message)))
 

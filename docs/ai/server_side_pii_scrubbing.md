@@ -35,13 +35,16 @@ value never lands in the broker or DB even transiently.
 
 Wired sites:
 
-- `views.py` — envelope `event`, envelope `transaction`, and the minidump
-  fallback inside `event_envelope_view`; plus the dedicated `minidump_view`.
+- `views.py` — envelope `event`, envelope `transaction`, the minidump fallback
+  inside `event_envelope_view`, and the envelope `log`/`otel_log` items; plus
+  the dedicated `minidump_view`.
 - `api.py` — legacy `/store/` and `/security/` (CSP) endpoints.
+- `otlp_views.py` — native OTLP logs (`POST /v1/logs`).
 
-Not yet wired: **logs** (`ingest_logs`, including OTLP). The engine already has
-an `attributes` section for log items; wiring is left as a follow-up so this PoC
-stays focused on the error/transaction path. See "Left for production".
+Logs are flat (no nested sections — the message `body` and the SDK's promoted
+`attributes` sit at the top level), so they go through a dedicated
+`Scrubber.scrub_log` that walks the whole log dict; structural fields (`level`,
+`service`, `trace_id`, ...) are not sensitive key names so they are preserved.
 
 ### Two mechanisms
 
@@ -68,9 +71,13 @@ stays focused on the error/transaction path. See "Left for production".
 
 The walk is scoped to event sections that can carry user data (`request`,
 `extra`, `user`, `contexts`, `breadcrumbs`, `exception`/`threads` frame vars,
-`tags`, `logentry`, `message`, transaction `spans`, log `attributes`). Within a
-section the walk is fully recursive. Scoping keeps structural fields
-(`event_id`, `level`, `release`, ...) untouched and bounds CPU on the hot path.
+`tags`, `logentry`, `message`, `csp` reports, transaction `spans`). Within a
+section the walk is fully recursive but **depth-bounded** (`_MAX_SCRUB_DEPTH`):
+event payloads are attacker-controlled JSON and the envelope size cap (enforced
+in Rust) bounds bytes, not nesting depth, so without a bound a small-but-deep
+payload could overflow the Python stack and fail ingest. Scoping also keeps
+structural fields (`event_id`, `level`, `release`, ...) untouched and bounds CPU
+on the hot path.
 
 It also understands GlitchTip's `[[key, value], ...]` storage shape for headers
 and query strings (see `IngestRequest` in `schema.py`) and redacts by the pair's
@@ -92,7 +99,7 @@ Per-project, with a fleet-wide fallback. Resolution order:
 | `enabled` | `false` | master switch |
 | `scrub_defaults` | `true` | apply the built-in key denylist |
 | `sensitive_keys` | `[]` | extra whole keys to redact |
-| `safe_keys` | `[]` | allowlist keys that are **never** redacted (wins over denylist) |
+| `safe_keys` | `[]` | allowlist tokens/keys that are **never** redacted (wins over denylist; token-aware, so `["auth"]` exempts `auth_token`) |
 | `aggressive_key_match` | `false` | naive substring matching instead of token-aware (higher recall, more false positives) |
 | `scrub_credit_cards` | `true` | Luhn-validated card redaction |
 | `scrub_private_keys` | `true` | PEM private-key redaction |
@@ -155,8 +162,18 @@ false positives.
   is the recursive walk.
 
 - **Pure-dict engine, no schema coupling.** The same engine scrubs errors,
-  transactions, and (eventually) logs, and is trivially unit-testable without a
+  transactions and logs (errors/transactions via section scoping; logs via
+  `scrub_log`, since they are flat), and is trivially unit-testable without a
   DB.
+
+- **Depth-bounded walk.** The recursive walk stops at `_MAX_SCRUB_DEPTH`
+  because payloads are attacker JSON; a small-but-deeply-nested payload would
+  otherwise overflow the stack and fail ingest (the Rust size cap bounds bytes,
+  not depth).
+
+- **Placeholder inserted via a function replacement**, never as a regex
+  replacement string, so an operator placeholder like `\g<0>` cannot
+  re-insert the matched secret or raise.
 
 ## Performance
 
@@ -165,14 +182,17 @@ request headers/query, `extra`), pure-Python engine, indicative laptop numbers:
 
 | matcher | µs / event |
 |---------|-----------:|
-| disabled (no-op) | ~0 |
-| token-aware (default) | ~350 |
+| disabled (no-op) | ~0.25 |
+| token-aware (default) | ~260 |
 | aggressive substring | ~620 |
 
-So scrubbing an event costs roughly **0.35 ms** of request-path CPU when
+So scrubbing an event costs roughly **0.26 ms** of request-path CPU when
 enabled. The walk is section-scoped and the common case (simple lowercase keys)
-is fast-pathed to plain set lookups, avoiding the regex split. The cost only
-applies to projects with scrubbing enabled.
+is fast-pathed to plain set lookups, avoiding the regex split. When scrubbing
+is **disabled** (the default), the per-event cost is ~0.25 µs:
+`resolve_scrubber` returns a shared disabled scrubber without parsing config,
+and JSON-string configs are memoized so `json.loads` runs once per distinct
+config, not once per event.
 
 **This is the lever for the default decision.** If scrubbing stays opt-in, the
 cost only lands on projects that asked for it and the Python implementation is
@@ -184,16 +204,16 @@ designed to port cleanly.
 
 ## Tests
 
-- `tests/test_pii_scrubber.py` — engine unit tests (key matching, safe-fields,
-  Luhn cards, private keys, header/query pairs, frame vars, breadcrumbs, config
-  parsing incl. the JSON-string path from the raw-SQL auth row).
+- `tests/test_pii_scrubber.py` — engine unit tests (token vs substring key
+  matching, token-aware safe-keys, Luhn cards, private keys, header/query
+  pairs, frame vars, breadcrumbs, log scrubbing, config parsing incl. the
+  JSON-string path from the raw-SQL auth row, the depth bound, and the
+  placeholder-backreference hardening).
 - `tests/test_pii_scrubber_ingest.py` — end-to-end through the real envelope
   endpoint: enabled redacts, disabled passes through, `safe_keys` override.
 
 ## Left for production
 
-- **Logs ingest** wiring (`apps/logs/tasks.py` / OTLP). Engine support exists
-  (`attributes` section); needs the call site.
 - **UI** to edit `scrub_config` (currently DB/admin/API only) and ideally
   org-level defaults (add `Organization.scrub_config`, mirror the project
   fallback) so the org overrides the fleet default the way `scrub_ip_addresses`

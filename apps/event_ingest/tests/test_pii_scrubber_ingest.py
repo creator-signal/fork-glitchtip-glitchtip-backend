@@ -69,15 +69,17 @@ class PiiScrubberIngestTestCase(EventIngestTestCase):
         self.assertEqual(event.data["extra"]["password"], "hunter2")
 
     def test_safe_keys_override(self):
-        self.project.scrub_config = {"enabled": True, "safe_keys": ["auth"]}
+        # "session" is a denylisted token, so "session_token" would normally be
+        # redacted; safe_keys exempts it (token-aware), while "password" is
+        # still scrubbed.
+        self.project.scrub_config = {"enabled": True, "safe_keys": ["session"]}
         self.project.save()
         event = self._ingest(
             {
                 "message": "boom",
                 "level": "error",
-                "extra": {"author": "alice", "password": "hunter2"},
+                "extra": {"session_token": "keep-me", "password": "hunter2"},
             }
         )
-        # "author" exempted by the safe token; "password" still scrubbed.
-        self.assertEqual(event.data["extra"]["author"], "alice")
+        self.assertEqual(event.data["extra"]["session_token"], "keep-me")
         self.assertEqual(event.data["extra"]["password"], "[Filtered]")

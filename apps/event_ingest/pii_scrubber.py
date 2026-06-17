@@ -45,6 +45,11 @@ from functools import lru_cache
 
 PLACEHOLDER = "[Filtered]"
 
+# Maximum nesting depth the recursive walk will descend. Event payloads are
+# attacker-controlled JSON; this bounds stack use so a pathologically deep
+# payload cannot crash ingest. Real events nest only a handful of levels deep.
+_MAX_SCRUB_DEPTH = 48
+
 # Default denylist. A wordlist is not itself an implementation — these are the
 # field names any error tracker has to treat as sensitive, and they line up
 # with what the MIT sentry SDKs scrub client-side so that an event scrubbed
@@ -65,9 +70,12 @@ DEFAULT_KEY_TOKENS: frozenset[str] = frozenset(
     {
         "password",
         "passwd",
+        "passphrase",
         "pwd",
+        "pin",
         "secret",
         "auth",
+        "bearer",
         "credentials",
         "token",
         "session",
@@ -127,9 +135,10 @@ EVENT_SECTIONS: tuple[str, ...] = (
     "tags",
     "logentry",
     "message",
+    "csp",  # security/CSP reports (blocked_uri, document_uri, script_sample)
     "spans",  # transaction events
-    "attributes",  # log items
 )
+# Log items are flat (no sections); they are scrubbed via Scrubber.scrub_log.
 
 # A run of 13–19 digits, optionally separated into groups by spaces or dashes.
 # The Luhn check below removes the bulk of false positives (order ids, etc.).
@@ -286,8 +295,8 @@ class Scrubber:
             if any(safe in nkey for safe in self._safelist):
                 return False
             return any(token in nkey for token in self._denylist)
-        # Token-aware match (default): a safe-key exempts an exact field, then
-        # match the whole normalized key or any single token of it. Catches
+        # Token-aware match (default): a safe key exempts the field, then match
+        # the whole normalized key or any single token of it. Catches
         # ``auth_token``/``apiKey`` without firing on ``author``/``tokenizer``.
         if nkey in self._safelist:
             return False
@@ -296,20 +305,35 @@ class Scrubber:
         # Fast path: a simple lowercase identifier (no separators, no
         # camelCase) is its own single token, so skip the regex split — this
         # covers the bulk of real keys (``username``, ``email``, ``message``).
+        # Its single token equals ``nkey``, already cleared against the
+        # safelist above.
         if key == nkey:
             return nkey in self._key_tokens
-        return any(token in self._key_tokens for token in _split_key(key))
+        tokens = _split_key(key)
+        # safe_keys is token-aware here too: ``safe_keys=["auth"]`` exempts
+        # ``auth_token``, mirroring how the denylist matches tokens.
+        if any(token in self._safelist for token in tokens):
+            return False
+        return any(token in self._key_tokens for token in tokens)
 
     # -- value scrubbing ---------------------------------------------------
 
     def _scrub_string(self, value: str) -> str:
         if self.config.scrub_private_keys and "PRIVATE KEY" in value:
-            value = _PRIVATE_KEY_RE.sub(self.config.placeholder, value)
+            value = _PRIVATE_KEY_RE.sub(self._replace, value)
         if self.config.scrub_credit_cards:
             value = _CARD_RE.sub(self._maybe_redact_card, value)
         if self.config.scrub_emails:
-            value = _EMAIL_RE.sub(self.config.placeholder, value)
+            value = _EMAIL_RE.sub(self._replace, value)
         return value
+
+    def _replace(self, _match: re.Match) -> str:
+        # A function replacement (not a string), so an operator-supplied
+        # ``placeholder`` such as ``\1`` or ``\g<0>`` is inserted literally
+        # rather than interpreted as a regex backreference — which would
+        # otherwise raise (``\1``) or re-insert the matched secret verbatim
+        # (``\g<0>``) and silently defeat the redaction.
+        return self.config.placeholder
 
     def _maybe_redact_card(self, match: re.Match) -> str:
         digits = re.sub(r"[ -]", "", match.group(0))
@@ -317,51 +341,52 @@ class Scrubber:
             return self.config.placeholder
         return match.group(0)
 
-    def _scrub_node(self, value):
+    def _scrub_node(self, value, depth: int):
+        # Depth bound: event payloads are attacker-controlled JSON. The
+        # envelope size cap (enforced in Rust) bounds bytes, not nesting depth,
+        # so a small-but-deeply-nested payload would otherwise overflow the
+        # Python stack (RecursionError -> failed/dropped ingest). Past the
+        # bound we stop descending and leave the subtree untouched.
+        if depth > _MAX_SCRUB_DEPTH:
+            return value
         if isinstance(value, dict):
-            return self._scrub_dict(value)
+            return self._scrub_dict(value, depth)
         if isinstance(value, list):
-            return self._scrub_list(value)
+            return self._scrub_list(value, depth)
         if isinstance(value, str):
             return self._scrub_string(value)
         return value
 
-    def _scrub_dict(self, d: dict) -> dict:
+    def _scrub_dict(self, d: dict, depth: int) -> dict:
         for key, value in d.items():
             if isinstance(key, str) and self._is_sensitive_key(key):
                 d[key] = self.config.placeholder
             else:
-                d[key] = self._scrub_node(value)
+                d[key] = self._scrub_node(value, depth + 1)
         return d
 
-    @staticmethod
-    def _is_key_value_list(lst: list) -> bool:
-        """Detect the ``[[key, value], ...]`` shape GlitchTip stores headers
-        and query strings in (see ``IngestRequest`` in schema.py). These need
-        key-based redaction on element ``[0]`` rather than being treated as an
-        opaque list."""
-        if not lst:
-            return False
-        return all(
-            isinstance(item, (list, tuple))
-            and len(item) >= 2
-            and isinstance(item[0], str)
-            for item in lst
-        )
-
-    def _scrub_list(self, lst: list) -> list:
-        if self._is_key_value_list(lst):
-            for i, pair in enumerate(lst):
-                key = pair[0]
-                rest = list(pair)
-                if self._is_sensitive_key(key):
-                    rest[1] = self.config.placeholder
-                else:
-                    rest[1] = self._scrub_node(rest[1])
-                lst[i] = rest
-            return lst
+    def _scrub_list(self, lst: list, depth: int) -> list:
         for i, item in enumerate(lst):
-            lst[i] = self._scrub_node(item)
+            # The ``[[key, value], ...]`` shape GlitchTip stores headers and
+            # query strings in (see ``IngestRequest`` in schema.py) needs
+            # key-based redaction on element [0]. Detect it per element, so one
+            # malformed pair (e.g. a non-string key) does not disable
+            # key-redaction for the rest of the list.
+            if (
+                isinstance(item, (list, tuple))
+                and len(item) >= 2
+                and isinstance(item[0], str)
+            ):
+                if self._is_sensitive_key(item[0]):
+                    new_value = self.config.placeholder
+                else:
+                    new_value = self._scrub_node(item[1], depth + 1)
+                if isinstance(item, list):
+                    item[1] = new_value  # mutate the pair in place
+                else:
+                    lst[i] = [item[0], new_value, *item[2:]]
+            else:
+                lst[i] = self._scrub_node(item, depth + 1)
         return lst
 
     # -- entry point -------------------------------------------------------
@@ -372,13 +397,34 @@ class Scrubber:
             return payload
         for section in EVENT_SECTIONS:
             if section in payload and payload[section] is not None:
-                payload[section] = self._scrub_node(payload[section])
+                payload[section] = self._scrub_node(payload[section], 0)
         return payload
 
+    def scrub_log(self, log: dict) -> dict:
+        """Scrub a flattened log item (``LogItemSchema.dict()``) in place.
 
-@lru_cache(maxsize=512)
+        Unlike events, logs have no nested sections — the message ``body`` and
+        the SDK's promoted ``attributes`` both sit at the top level (see
+        ``LogItemSchema.normalize_attributes`` in schema.py) — so the whole
+        dict is walked. Structural fields (``level``, ``service``, ``trace_id``
+        ...) are not sensitive key names, so they are preserved and only their
+        free-text values are pattern-scrubbed."""
+        if not self.config.enabled:
+            return log
+        return self._scrub_dict(log, 0)
+
+
+_DISABLED_CONFIG = ScrubConfig()
+
+
+@lru_cache(maxsize=2048)
 def _scrubber_for(config: ScrubConfig) -> Scrubber:
     return Scrubber(config)
+
+
+@lru_cache(maxsize=2048)
+def _scrubber_for_json(data: str) -> Scrubber:
+    return _scrubber_for(ScrubConfig.from_dict(data))
 
 
 def get_scrubber(config: ScrubConfig) -> Scrubber:
@@ -389,10 +435,21 @@ def get_scrubber(config: ScrubConfig) -> Scrubber:
 
 
 def resolve_scrubber(
-    project_config: dict | None, default_config: dict | None
+    project_config: dict | str | None, default_config: dict | str | None
 ) -> Scrubber:
     """Resolve the scrubber for a project: its own ``scrub_config`` wins, and a
     project without one falls back to the fleet-wide default. Returns a
     compiled (cached) scrubber. The result may be disabled — callers can still
-    call ``scrub_event`` unconditionally, it is a no-op when disabled."""
-    return get_scrubber(ScrubConfig.from_dict(project_config or default_config))
+    call ``scrub_event`` unconditionally, it is a no-op when disabled.
+
+    On the hot path the inputs are usually falsy (no config -> disabled) or a
+    JSON string (the raw-SQL auth row returns JSONB undecoded). Both are
+    handled without parsing/compiling per event: the disabled case returns a
+    shared scrubber, and the JSON-string case is memoized on the raw string so
+    ``json.loads`` runs once per distinct config, not once per event."""
+    raw = project_config if project_config else default_config
+    if not raw:
+        return _scrubber_for(_DISABLED_CONFIG)
+    if isinstance(raw, str):
+        return _scrubber_for_json(raw)
+    return _scrubber_for(ScrubConfig.from_dict(raw))

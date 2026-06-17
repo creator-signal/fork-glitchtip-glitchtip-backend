@@ -26,8 +26,11 @@ class Migration(migrations.Migration):
         ),
         # Recreate get_project_auth_info to also return the new scrub_config
         # column (the ingest hot path reads project auth via this function).
+        # Each direction reads a version-pinned SQL file rather than the shared
+        # get_project_auth_info.sql, which migration 0018 reads at runtime —
+        # editing that shared file would retroactively change what 0018 emits.
         RunSQL(
-            sql=get_sql_content(__file__, "get_project_auth_info.sql"),
+            sql=get_sql_content(__file__, "get_project_auth_info_0023.sql"),
             reverse_sql=get_sql_content(__file__, "get_project_auth_info_0018.sql"),
         ),
     ]
