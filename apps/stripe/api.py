@@ -137,12 +137,14 @@ class StripePortalSessionSchema(CamelSchema):
     url: str
 
 
+# Per-category fields are unfloored billed contributions (uptime/logs are floats);
+# `total` is the once-floored billed integer. Clients display these as-is.
 class SubscriptionUsageSchema(CamelSchema):
     total: int
     event_count: int
     transaction_event_count: int
-    uptime_check_event_count: int
-    log_event_count: int
+    uptime_check_event_count: float
+    log_event_count: float
     file_size_mb: int
 
 
@@ -150,8 +152,8 @@ class DailyEventCountEntry(CamelSchema):
     date: date
     event_count: int
     transaction_event_count: int
-    uptime_check_event_count: int
-    log_event_count: int
+    uptime_check_event_count: float
+    log_event_count: float
 
 
 class DailyEventsCountSchema(CamelSchema):
@@ -304,17 +306,13 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
 
 
 def usage_response(counts: EventCounts) -> dict:
-    """Shape EventCounts into the usage API payload.
-
-    Logs and uptime checks are each weighted 0.1, so they are reported as the
-    billed contribution (count // 10), consistent with the daily endpoint.
-    """
+    """Usage payload: per-category billed via billed(), total once-floored."""
     return {
         "total": counts.total_event_count,
         "event_count": counts.issue_event_count,
         "transaction_event_count": counts.transaction_count,
-        "uptime_check_event_count": counts.uptime_check_event_count // 10,
-        "log_event_count": counts.log_count // 10,
+        "uptime_check_event_count": counts.billed("uptime_check_event_count"),
+        "log_event_count": counts.billed("log_count"),
         "file_size_mb": counts.file_size,
     }
 
@@ -425,17 +423,26 @@ async def subscription_events_count_daily(
     uptime_daily = {row["day"]: row["total"] for row in uptime_rows}
     log_daily = {row["day"]: row["total"] for row in log_rows}
 
-    # Build response with one entry per day, filling gaps with zeros
+    # One entry per day, filling gaps with zeros. Per-day values are unfloored
+    # billed contributions, so the daily series sums to the period total.
     data = []
     current = period_start_date
     while current <= period_end_date:
+        day_counts = EventCounts(
+            issue_event_count=issue_daily.get(current, 0),
+            transaction_count=txn_daily.get(current, 0),
+            uptime_check_event_count=uptime_daily.get(current, 0),
+            log_count=log_daily.get(current, 0),
+        )
         data.append(
             {
                 "date": current,
-                "event_count": issue_daily.get(current, 0),
-                "transaction_event_count": txn_daily.get(current, 0),
-                "uptime_check_event_count": uptime_daily.get(current, 0) // 10,
-                "log_event_count": log_daily.get(current, 0) // 10,
+                "event_count": day_counts.issue_event_count,
+                "transaction_event_count": day_counts.transaction_count,
+                "uptime_check_event_count": day_counts.billed(
+                    "uptime_check_event_count"
+                ),
+                "log_event_count": day_counts.billed("log_count"),
             }
         )
         current += timedelta(days=1)
