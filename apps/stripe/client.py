@@ -105,6 +105,11 @@ async def stripe_post(endpoint: str, data: dict) -> str:
     return await _stripe_request("POST", f"{STRIPE_URL}/{endpoint}", data=data)
 
 
+async def stripe_delete(endpoint: str) -> str:
+    """Makes DELETE requests to the Stripe API. Returns response text"""
+    return await _stripe_request("DELETE", f"{STRIPE_URL}/{endpoint}")
+
+
 async def _paginated_stripe_get(
     endpoint: str,
     response_model: Type[StripeListResponse[T]],  # Use the generic type here
@@ -247,4 +252,9 @@ async def create_subscription(customer: str, price: str, **kwargs) -> Subscripti
 
 async def fetch_subscription(id: str) -> Subscription:
     response = await stripe_get("subscriptions/" + id)
+    return Subscription.model_validate_json(response)
+
+
+async def cancel_subscription(id: str) -> Subscription:
+    response = await stripe_delete("subscriptions/" + id)
     return Subscription.model_validate_json(response)
