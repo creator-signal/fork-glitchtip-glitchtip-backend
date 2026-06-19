@@ -27,17 +27,22 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.schema import CamelSchema
 
 from .client import (
+    add_subscription_item,
     create_customer,
     create_portal_session,
     create_session,
     create_subscription,
+    delete_subscription_item,
+    migrate_subscription_to_flexible,
 )
 from .constants import (
     ACTIVE_SUBSCRIPTION_STATUSES,
     CollectionMethod,
     SubscriptionStatus,
 )
+from .exceptions import StripeResourceNotFound
 from .models import StripePrice, StripeProduct, StripeSubscription
+from .overage import cost_cents_for_units, units_for_budget
 from .utils import compute_cycle, unix_to_datetime
 
 router = Router()
@@ -448,3 +453,162 @@ async def subscription_events_count_daily(
         current += timedelta(days=1)
 
     return {"data": data}
+
+
+# --- Metered (overage) billing ---------------------------------------------
+
+
+class OverageStatusSchema(CamelSchema):
+    """Current overage state for an org, for rendering the choice at the limit."""
+
+    enabled: bool
+    eligible: bool  # has an active paid subscription an overage item can attach to
+    configured: bool  # an overage product/price is provisioned in Stripe
+    cap_cents: int
+    cap_units: int
+    quota: int
+    usage: int
+    overage_units: int
+    overage_cost_cents: int
+    throttle_rate: int
+
+
+class OverageConfigIn(CamelSchema):
+    enabled: bool
+    cap_cents: int = 0
+
+
+async def _get_overage_price() -> StripePrice | None:
+    """The provisioned metered overage price, if any (POC assumes one)."""
+    return await (
+        StripePrice.objects.filter(is_metered=True, product__is_overage=True)
+        .select_related("product")
+        .order_by("-stripe_id")
+        .afirst()
+    )
+
+
+@router.get(
+    "subscriptions/{slug:organization_slug}/overage/",
+    response=OverageStatusSchema,
+    by_alias=True,
+)
+async def get_overage_status(request: AuthHttpRequest, organization_slug: str):
+    org = await aget_object_or_404(
+        Organization.objects.select_related(
+            "stripe_primary_subscription__price__product"
+        ),
+        slug=organization_slug,
+        users=request.auth.user_id,
+    )
+    sub = org.stripe_primary_subscription
+    eligible = bool(sub and not sub.price.no_throttle)
+    quota = (
+        sub.price.product.events if eligible else settings.GLITCHTIP_FREE_TIER_EVENTS
+    )
+
+    usage = 0
+    period = await get_current_period_dates(org)
+    if period:
+        usage = (await get_event_counts(org.id, *period)).total_event_count
+
+    cap_units = units_for_budget(org.overage_spend_cap_cents)
+    overage_units = max(0, usage - quota)
+    billed_units = min(overage_units, cap_units) if org.metered_billing_enabled else 0
+
+    return {
+        "enabled": org.metered_billing_enabled,
+        "eligible": eligible,
+        "configured": await _get_overage_price() is not None,
+        "cap_cents": org.overage_spend_cap_cents,
+        "cap_units": cap_units,
+        "quota": quota,
+        "usage": usage,
+        "overage_units": overage_units,
+        "overage_cost_cents": cost_cents_for_units(billed_units),
+        "throttle_rate": org.event_throttle_rate,
+    }
+
+
+@router.post(
+    "organizations/{slug:organization_slug}/overage/",
+    response=OverageStatusSchema,
+    by_alias=True,
+)
+async def configure_overage(
+    request: AuthHttpRequest, organization_slug: str, payload: OverageConfigIn
+):
+    """Enable/disable metered overage billing and set the spend cap (owner-only).
+
+    Enabling attaches the metered overage price as a second subscription item;
+    disabling removes it. Either way a throttle re-check is enqueued so the new
+    headroom (or block) takes effect promptly.
+    """
+    org = await aget_object_or_404(
+        Organization.objects.select_related(
+            "stripe_primary_subscription__price__product"
+        ),
+        slug=organization_slug,
+        organization_users__role=OrganizationUserRole.OWNER,
+        organization_users__user=request.auth.user_id,
+    )
+    sub = org.stripe_primary_subscription
+
+    if payload.enabled:
+        if not sub or sub.price.no_throttle or sub.price.product.events <= 0:
+            return JsonResponse(
+                {"detail": "An active paid plan is required for overage billing."},
+                status=400,
+            )
+        if payload.cap_cents <= 0:
+            return JsonResponse(
+                {"detail": "A positive spend cap is required to enable overage."},
+                status=400,
+            )
+        if payload.cap_cents > settings.GLITCHTIP_OVERAGE_MAX_CAP_CENTS:
+            return JsonResponse(
+                {
+                    "detail": "Spend cap exceeds the maximum of "
+                    f"{settings.GLITCHTIP_OVERAGE_MAX_CAP_CENTS} cents."
+                },
+                status=400,
+            )
+        overage_price = await _get_overage_price()
+        if overage_price is None:
+            return JsonResponse(
+                {"detail": "Overage billing is not configured on this server."},
+                status=400,
+            )
+        if not sub.metered_item_id:
+            # Metered prices require flexible billing mode; migrate if the
+            # subscription is still on classic (no-op if already flexible).
+            await migrate_subscription_to_flexible(sub.stripe_id)
+            item = await add_subscription_item(sub.stripe_id, overage_price.stripe_id)
+            sub.metered_item_id = item.id
+            await sub.asave(update_fields=["metered_item_id"])
+        org.metered_billing_enabled = True
+        org.overage_spend_cap_cents = payload.cap_cents
+        await org.asave(
+            update_fields=["metered_billing_enabled", "overage_spend_cap_cents"]
+        )
+    else:
+        if sub and sub.metered_item_id:
+            try:
+                await delete_subscription_item(sub.metered_item_id)
+            except StripeResourceNotFound:
+                pass
+            sub.metered_item_id = ""
+            sub.overage_units_reported = 0
+            sub.overage_period_start = None
+            await sub.asave(
+                update_fields=[
+                    "metered_item_id",
+                    "overage_units_reported",
+                    "overage_period_start",
+                ]
+            )
+        org.metered_billing_enabled = False
+        await org.asave(update_fields=["metered_billing_enabled"])
+
+    await check_organization_throttle.aenqueue(org.id, bypass_cache=True)
+    return await get_overage_status(request, organization_slug)

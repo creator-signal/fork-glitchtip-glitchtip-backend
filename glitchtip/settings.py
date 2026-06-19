@@ -211,6 +211,28 @@ SEARCH_MAX_LEXEMES = 3800  # Postgres search vectors will truncate after
 
 GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 
+# Metered (overage) billing. Opt-in, off by default per organization. When an
+# org enables it, billable events above its plan quota are reported to a Stripe
+# Billing Meter and charged at the graduated rates below, up to a per-org dollar
+# cap. This schedule is the single source of truth: the provisioning command
+# builds the Stripe tiered price from it, and the throttle logic uses it to
+# convert between overage units and cost. Each tier is (up_to_overage_events,
+# per_event_usd_decimal); the final tier uses up_to=None for "and beyond".
+GLITCHTIP_OVERAGE_METER_EVENT_NAME = env.str(
+    "GLITCHTIP_OVERAGE_METER_EVENT_NAME", "glitchtip_overage_events"
+)
+# Upper bound on a per-org overage spend cap, in cents. Guards against a
+# fat-fingered or malicious cap; also keeps the value within PositiveIntegerField
+# range. Default $1,000,000/cycle — raise per env for very large customers.
+GLITCHTIP_OVERAGE_MAX_CAP_CENTS = env.int(
+    "GLITCHTIP_OVERAGE_MAX_CAP_CENTS", 100_000_000
+)
+GLITCHTIP_OVERAGE_TIERS: list[tuple[int | None, str]] = [
+    (400_000, "0.00015"),  # first 400k overage events: $0.15 / 1k
+    (2_000_000, "0.00010"),  # next, up to 2M total overage: $0.10 / 1k
+    (None, "0.00008"),  # beyond 2M overage: $0.08 / 1k
+]
+
 # Enable/disable logs feature. When False, log events are rejected at ingest.
 GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", True)
 
