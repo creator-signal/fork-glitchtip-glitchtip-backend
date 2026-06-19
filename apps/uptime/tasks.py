@@ -113,7 +113,12 @@ def _next_state(result):
     if result["is_up"]:
         consecutive_down, new_state = 0, True
     else:
-        consecutive_down = (result.get("cached_consecutive_down") or 0) + 1
+        # Cap at threshold: the count is only ever compared >= threshold, so
+        # growing past it is meaningless and would eventually overflow the
+        # smallint column on a long-running outage.
+        consecutive_down = min(
+            (result.get("cached_consecutive_down") or 0) + 1, threshold
+        )
         new_state = False if consecutive_down >= threshold else prev_state
     state_changed = new_state is not None and new_state != prev_state
     is_change = new_state is not None and (
