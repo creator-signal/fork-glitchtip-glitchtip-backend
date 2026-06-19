@@ -9,7 +9,13 @@ from django.utils import timezone
 
 from apps.organizations_ext.models import Organization
 
-from .client import fetch_subscription, list_prices, list_products, list_subscriptions
+from .client import (
+    cancel_subscription,
+    fetch_subscription,
+    list_prices,
+    list_products,
+    list_subscriptions,
+)
 from .constants import (
     ACTIVE_SUBSCRIPTION_STATUSES,
     CollectionMethod,
@@ -261,6 +267,19 @@ class StripeSubscription(StripeModel):
             .order_by("-price__product__events", "-created")
             .afirst()
         )
+
+    @classmethod
+    async def cancel_for_organization(cls, organization: Organization):
+        async for subscription in cls.objects.filter(
+            organization=organization, status__in=ACTIVE_SUBSCRIPTION_STATUSES
+        ):
+            try:
+                await cancel_subscription(subscription.stripe_id)
+            except StripeResourceNotFound:
+                logger.info(
+                    "Subscription %s already absent from Stripe; skipping cancel",
+                    subscription.stripe_id,
+                )
 
     @classmethod
     async def set_primary_subscriptions_for_organizations(
