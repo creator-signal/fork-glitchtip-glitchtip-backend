@@ -598,6 +598,29 @@ class UptimeTestCase(GlitchTipTestCaseMixin, TransactionTestCase):
         self.assertTrue(mon.cached_is_up)
         self.assertEqual(mon.cached_consecutive_down, 0)
 
+    def test_consecutive_down_capped_at_threshold(self):
+        """A long-running outage keeps incrementing the tally; it must stop at
+        confirmation_threshold so it never overflows the smallint column."""
+        with freeze_time("2020-01-01"):
+            mon = baker.make(
+                Monitor,
+                url="https://example.com",
+                monitor_type=MonitorType.GET,
+                confirmation_threshold=2,
+                cached_is_up=False,
+            )
+        now = datetime(2020, 1, 2, 12, 0, tzinfo=dt_timezone.utc)
+        # Already at the threshold and confirmed down; another failure must not
+        # push the counter past the threshold.
+        result = self._down_result(mon, 2, 2)
+        result["latest_is_up"] = False
+        with freeze_time("2020-01-02"):
+            async_to_sync(save_monitor_checks)([result], now)
+
+        mon.refresh_from_db()
+        self.assertFalse(mon.cached_is_up)
+        self.assertEqual(mon.cached_consecutive_down, 2)
+
     @aioresponses()
     def test_confirmation_threshold_delays_notification(self, mocked):
         """With confirmation_threshold=2, no notification fires on the first
