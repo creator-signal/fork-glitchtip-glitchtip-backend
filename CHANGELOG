@@ -1,3 +1,19 @@
+# 6.2.0
+
+- Feat: Native OTLP/HTTP logs ingestion endpoint (POST /v1/logs), with request-body decompression handled in Rust.
+- Feat: Decouple the issue search index from the Issue row — drop `Issue.search_vector` in favor of a partition-pruned `IssueIndex` leaf for faster, partition-aware search.
+- Feat: Add a configurable consecutive-failure threshold before uptime alerts fire.
+- Feat: Fingerprint unknown envelope item types per type during ingest, and ignore `trace_metric` items.
+- Feat: Send a welcome email on support-license activation.
+- Perf: Move all ingest request-body decompression (gzip/deflate/br/zstd) into the Rust core and drop the Python decompression middleware.
+- Fix: Weight uptime checks at 0.1 to match logs in quota accounting, including past-period usage; make usage event weighting a single source of truth.
+- Fix: Assorted Stripe/billing fixes — consistent usage window for self-hosted and free-tier orgs, contiguous historical free-tier billing cycles at month boundaries, clear the primary subscription on cancel, deactivate the subscription on organization delete, and let the `GLITCHTIP_LICENSE_KEY` env var override the stored DB row.
+- Fix: Resolve cursor position through relation paths in API pagination so ordering is correct when sorting by a related field.
+- Fix: Reassemble multi-chunk debug information files in order.
+- Fix: Widen the uptime monitor interval column to fit its 86400-second max, and cap the consecutive-down counter to prevent smallint overflow.
+- Fix: Derive the `SpanStaging` id from server (ingestion) time so retention stays a metadata-only partition drop.
+- Deps: django-async-backend 6.0.7, symbolic 13.3.0, glitchtip-rust 0.2.1.
+
 # 6.1.9
 
 - Feat: Support running with email disabled when SMTP is unconfigured; show the active email transport on the startup banner.
