@@ -14,7 +14,7 @@ from mcp.server.auth.settings import (
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from apps.oauth.provider import GlitchTipOAuthProvider
+from apps.oauth.mcp_provider import GlitchTipOAuthProvider
 from apps.shared.schema.fields import parse_relative_datetime
 
 from . import data, serializers
