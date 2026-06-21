@@ -4,6 +4,7 @@ import io
 import json
 import uuid
 import zipfile
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http.response import HttpResponse
@@ -169,6 +170,99 @@ class SourceCodeTestCase(GlitchTipTransactionTestCase):
         self.assertEqual(Issue.objects.count(), 1)
         issue = Issue.objects.get()
         event = issue.issueevent_set.first()
+        self.assertIn(
+            "firstNumber",
+            event.data["exception"]["values"][0]["stacktrace"]["frames"][0][
+                "context_line"
+            ],
+        )
+
+    def test_sourcemap_cache_reused_across_frames(self):
+        """SourceMapCache is built once per file, not once per stack frame.
+
+        Rebuilding it per frame made ingest of a single event with a large
+        sourcemap and many frames take minutes and peg the worker at 100% CPU.
+        """
+        import apps.event_ingest.javascript_event_processor as jsproc
+
+        jsproc._sourcemap_caches.clear()
+
+        chunk_upload_url = reverse(
+            "api:get_chunk_upload_info", args=[self.organization.slug]
+        )
+        assemble_url = reverse(
+            "api:artifact_bundle_assemble", args=[self.organization.slug]
+        )
+        envelope_url = (
+            reverse("event_envelope", args=[self.project.id])
+            + f"?sentry_key={self.projectkey.public_key}"
+        )
+
+        _res, checksum = self.upload_chunk(chunk_upload_url)
+        self.client.post(
+            assemble_url,
+            {
+                "checksum": checksum,
+                "chunks": [checksum],
+                "projects": [self.project.slug],
+            },
+            content_type="application/json",
+        )
+
+        # Three frames resolving against the same minified file.
+        frame = {
+            "filename": "http://127.0.0.1:8080/assets/minified.js",
+            "function": "?",
+            "in_app": True,
+            "lineno": 1,
+        }
+        data = generate_event(
+            event_type="error",
+            platform="javascript",
+            event={
+                "exception": {
+                    "values": [
+                        {
+                            "type": "Error",
+                            "value": "err",
+                            "stacktrace": {
+                                "frames": [
+                                    {**frame, "colno": 4},
+                                    {**frame, "colno": 16},
+                                    {**frame, "colno": 24},
+                                ]
+                            },
+                        }
+                    ]
+                },
+                "debug_meta": {
+                    "images": [
+                        {
+                            "type": "sourcemap",
+                            "code_file": "http://127.0.0.1:8080/assets/minified.js",
+                            "debug_id": debug_id,
+                        }
+                    ]
+                },
+            },
+            envelope=True,
+        )
+
+        with patch.object(
+            jsproc.SourceMapCache,
+            "from_bytes",
+            wraps=jsproc.SourceMapCache.from_bytes,
+        ) as mock_from_bytes:
+            self.client.post(
+                envelope_url, list_to_envelope(data), content_type="application/json"
+            )
+            task_backends["default"].flush_batches()
+
+        # Built once for the file pair, not once per frame.
+        self.assertEqual(mock_from_bytes.call_count, 1)
+
+        # Symbolication still works: the cached map remaps each frame.
+        event = Issue.objects.get().issueevent_set.first()
         self.assertIn(
             "firstNumber",
             event.data["exception"]["values"][0]["stacktrace"]["frames"][0][
