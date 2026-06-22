@@ -355,6 +355,30 @@ MAINTENANCE_EVENT_FREEZE = env.bool("MAINTENANCE_EVENT_FREEZE", False)
 
 GLITCHTIP_ENABLE_MCP = env.bool("GLITCHTIP_ENABLE_MCP", False)
 
+# URI schemes permitted when redirecting back to an MCP client after the OAuth
+# consent screen. MCP clients are typically native apps (RFC 8252) that register
+# custom-scheme callbacks such as ``cursor://`` or ``vscode://``, which Django's
+# HttpResponseRedirect rejects by default. This allowlist is only defense in
+# depth: the redirect_uri is first exact-matched against the client's registered
+# URIs by the MCP SDK (per the spec's open-redirection requirement) and then
+# carried through the flow as server-signed data, so it is not client-forgeable.
+# Defaults cover http/https (loopback redirects, the RFC-recommended path) plus
+# the custom schemes with documented real-world usage; extend via the env var
+# (comma-separated) for any client whose scheme is not listed here.
+GLITCHTIP_MCP_OAUTH_REDIRECT_SCHEMES = env.list(
+    "GLITCHTIP_MCP_OAUTH_REDIRECT_SCHEMES",
+    str,
+    default=[
+        "http",  # loopback only
+        "https",
+        "cursor",  # Cursor MCP OAuth callback
+        "vscode",  # VS Code URI handler / OAuth callback
+        "vscode-insiders",  # VS Code Insiders URI handler / OAuth callback
+        "vscodium",  # VS Code-family OAuth callback evidence, not MCP-specific
+        "code-oss",  # native Code - OSS URL protocol, not code-server
+    ],
+)
+
 # For development purposes only, prints out inbound event store json
 EVENT_STORE_DEBUG = env.bool("EVENT_STORE_DEBUG", False)
 
