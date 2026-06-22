@@ -218,15 +218,21 @@ GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 # builds the Stripe tiered price from it, and the throttle logic uses it to
 # convert between overage units and cost. Each tier is (up_to_overage_events,
 # per_event_usd_decimal); the final tier uses up_to=None for "and beyond".
-GLITCHTIP_OVERAGE_METER_EVENT_NAME = env.str(
-    "GLITCHTIP_OVERAGE_METER_EVENT_NAME", "glitchtip_overage_events"
-)
+# Name of the Stripe Billing Meter that overage events are reported to. This is
+# the join key between the meter (created by the provisioning command) and the
+# meter events the throttle logic reports — Stripe matches events to a meter by
+# event_name and silently drops events with no matching meter. It is a constant,
+# not env-configurable, on purpose: every instance reporting to the same Stripe
+# account must agree on it, so one shared meter receives all overage. (Stripe
+# routes each event to the right customer by stripe_customer_id, not by which
+# instance sent it.) Re-provisioning a fresh meter is the only reason this would
+# ever change, and Stripe meter event_names are immutable once created.
+GLITCHTIP_OVERAGE_METER_EVENT_NAME = "glitchtip_overage_events"
 # Upper bound on a per-org overage spend cap, in cents. Guards against a
 # fat-fingered or malicious cap; also keeps the value within PositiveIntegerField
-# range. Default $1,000,000/cycle — raise per env for very large customers.
-GLITCHTIP_OVERAGE_MAX_CAP_CENTS = env.int(
-    "GLITCHTIP_OVERAGE_MAX_CAP_CENTS", 100_000_000
-)
+# range. Default $10,000/cycle — a cap this high is effectively a "contact us"
+# case, so raise it per env for the rare very large customer.
+GLITCHTIP_OVERAGE_MAX_CAP_CENTS = env.int("GLITCHTIP_OVERAGE_MAX_CAP_CENTS", 1_000_000)
 GLITCHTIP_OVERAGE_TIERS: list[tuple[int | None, str]] = [
     (400_000, "0.00015"),  # first 400k overage events: $0.15 / 1k
     (2_000_000, "0.00010"),  # next, up to 2M total overage: $0.10 / 1k
