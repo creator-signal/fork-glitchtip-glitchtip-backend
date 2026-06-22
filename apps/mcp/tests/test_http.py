@@ -176,6 +176,12 @@ class MCPHttpIntegrationTest(TestCase):
                 payload = resp.json()
             self.assertIn("result", payload)
             self.assertIn("serverInfo", payload["result"])
+            # The server must advertise that returned event data is untrusted,
+            # DSN-submitted content so a connecting agent treats it as inert
+            # data rather than instructions (prompt-injection mitigation).
+            instructions = payload["result"].get("instructions", "")
+            self.assertIn("DSN", instructions)
+            self.assertIn("untrusted", instructions.lower())
 
     async def test_tools_call_with_valid_token(self):
         app = self._fresh_app()
