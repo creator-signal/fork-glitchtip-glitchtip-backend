@@ -6,6 +6,7 @@
 - Feat: Fingerprint unknown envelope item types per type during ingest, and ignore `trace_metric` items.
 - Feat: Send a welcome email on support-license activation.
 - Perf: Move all ingest request-body decompression (gzip/deflate/br/zstd) into the Rust core and drop the Python decompression middleware.
+- Perf: Parse each JavaScript sourcemap once per event instead of once per stack frame, eliminating worker CPU spikes when ingesting events with large sourcemaps.
 - Fix: Weight uptime checks at 0.1 to match logs in quota accounting, including past-period usage; make usage event weighting a single source of truth.
 - Fix: Assorted Stripe/billing fixes — consistent usage window for self-hosted and free-tier orgs, contiguous historical free-tier billing cycles at month boundaries, clear the primary subscription on cancel, deactivate the subscription on organization delete, and let the `GLITCHTIP_LICENSE_KEY` env var override the stored DB row.
 - Fix: Resolve cursor position through relation paths in API pagination so ordering is correct when sorting by a related field.

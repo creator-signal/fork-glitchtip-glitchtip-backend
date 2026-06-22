@@ -73,6 +73,10 @@ class JavascriptEventProcessor:
         self.release_id = release_id
         self.data = data
         self.debug_bundles = debug_bundles
+        # Parsed sourcemaps memoized for the lifetime of this processor, i.e.
+        # for one event. A new processor is created per event, so this never
+        # outlives the event and needs no eviction or staleness handling.
+        self._sourcemap_caches: dict[tuple[int, int], SourceMapCache] = {}
 
     def get_stacktrace_exceptions(self) -> list["EventException"]:
         data = self.data
@@ -86,23 +90,37 @@ class JavascriptEventProcessor:
             return []
         return [frame for frame in stacktrace.frames if frame is not None and frame.lineno is not None]
 
+    def get_sourcemap_cache(self, minified_source, map_file) -> SourceMapCache:
+        # SourceMapCache.from_bytes() parses the entire minified source and
+        # sourcemap, which is expensive for large bundles (multi-MB React
+        # Native / webpack output). The frames of a single event almost all
+        # resolve against the same bundle, so parsing once per frame rebuilt
+        # the identical cache repeatedly -- enough to peg the ingest worker at
+        # 100% CPU on large maps. Memoize per (minified file id, sourcemap file
+        # id) pair so each bundle is parsed at most once per event.
+        key = (minified_source.id, map_file.id)
+        cache = self._sourcemap_caches.get(key)
+        if cache is None:
+            minified_source.blob.blob.seek(0)
+            map_file.blob.blob.seek(0)
+            cache = SourceMapCache.from_bytes(
+                minified_source.blob.blob.read(),
+                map_file.blob.blob.read(),
+            )
+            self._sourcemap_caches[key] = cache
+        return cache
+
     def lookup_token(self, frame, map_file, minified_source):
         # Required to determine source
         if not frame.abs_path or not frame.lineno or not frame.colno:
             return None
 
-        minified_source.blob.blob.seek(0)
-        map_file.blob.blob.seek(0)
-        cache = SourceMapCache.from_bytes(
-            minified_source.blob.blob.read(),
-            map_file.blob.blob.read(),
-        )
-        token = cache.lookup(
+        cache = self.get_sourcemap_cache(minified_source, map_file)
+        return cache.lookup(
             frame.lineno,
             frame.colno - 1,
             5,  # context_lines
         )
-        return token
 
     def process_frame(self, frame, token):
         frame.lineno = token.line
