@@ -46,10 +46,9 @@ async def get_openid_config(server_url: str) -> dict[str, Any] | None:
     timeout = aiohttp.ClientTimeout(total=OIDC_DISCOVERY_TIMEOUT)
     try:
         async with (
-            aiohttp.ClientSession(
-                timeout=timeout, **settings.AIOHTTP_CONFIG
-            ) as session,
-            session.get(server_url) as resp,
+            aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session,
+            # Per-request timeout overrides AIOHTTP_CONFIG's session default.
+            session.get(server_url, timeout=timeout) as resp,
         ):
             resp.raise_for_status()
             config = await resp.json()
