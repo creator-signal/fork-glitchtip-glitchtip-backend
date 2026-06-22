@@ -13,7 +13,8 @@ from datetime import datetime
 from glitchtip.cold_storage import (
     close_duckdb_read_connection,
     duckdb_quote_path,
-    enumerate_org_parquet_files,
+    duckdb_slot,
+    enumerate_hour_tiered_files,
     get_cold_storage_backend,
     get_duckdb_parquet_path,
     get_duckdb_read_connection,
@@ -22,7 +23,11 @@ from glitchtip.cold_storage import (
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "performance_spans"
+STORAGE_PREFIX = "performance_spans"
+# Trend rollup tier — small per-group hourly aggregates, kept far longer
+# than raw spans (GLITCHTIP_TRANSACTION_RETENTION_DAYS vs
+# GLITCHTIP_SPAN_RAW_RETENTION_DAYS).
+ROLLUP_STORAGE_PREFIX = "performance_spans_rollup"
 
 SPAN_PARQUET_COLUMN_TYPES = {
     "organization_id": "INTEGER",
@@ -43,48 +48,68 @@ def _execute_resilient_query(storage, duckdb_paths, sql_builder, params):
 
     Fast path: query all files at once. If any file is corrupt,
     validates files individually and retries with only valid ones.
-    """
-    paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in duckdb_paths)
-    duck_conn = get_duckdb_read_connection(storage)
-    try:
-        return duck_conn.execute(sql_builder(paths_list), params).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.warning(
-            "Multi-file parquet query failed, validating individual files",
-            exc_info=True,
-        )
 
-    # Identify valid files
-    valid = []
-    for p in duckdb_paths:
-        conn = get_duckdb_read_connection(storage)
+    Runs under the process-wide cold-read concurrency bound; if no slot is
+    available within the timeout, degrades to an empty result.
+    """
+    with duckdb_slot() as slot:
+        if not slot:
+            return []
+
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in duckdb_paths)
+        duck_conn = get_duckdb_read_connection(storage)
         try:
-            conn.execute(
-                f"SELECT 1 FROM read_parquet('{duckdb_quote_path(p)}') LIMIT 0"
-            )
-            valid.append(p)
+            return duck_conn.execute(sql_builder(paths_list), params).fetchall()
         except Exception:
             close_duckdb_read_connection()
-            logger.error("Corrupt parquet file skipped: %s", p, exc_info=True)
+            logger.warning(
+                "Multi-file parquet query failed, validating individual files",
+                exc_info=True,
+            )
 
-    if not valid:
-        return []
+        # Identify valid files
+        valid = []
+        for p in duckdb_paths:
+            conn = get_duckdb_read_connection(storage)
+            try:
+                conn.execute(
+                    f"SELECT 1 FROM read_parquet('{duckdb_quote_path(p)}') LIMIT 0"
+                )
+                valid.append(p)
+            except Exception:
+                close_duckdb_read_connection()
+                logger.error("Corrupt parquet file skipped: %s", p, exc_info=True)
 
-    paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in valid)
-    conn = get_duckdb_read_connection(storage)
-    try:
-        return conn.execute(sql_builder(paths_list), params).fetchall()
-    except Exception:
-        close_duckdb_read_connection()
-        logger.error("Query failed even after file validation", exc_info=True)
-        return []
+        if not valid:
+            return []
+
+        paths_list = ", ".join(f"'{duckdb_quote_path(p)}'" for p in valid)
+        conn = get_duckdb_read_connection(storage)
+        try:
+            return conn.execute(sql_builder(paths_list), params).fetchall()
+        except Exception:
+            close_duckdb_read_connection()
+            logger.error("Query failed even after file validation", exc_info=True)
+            return []
+
+
+def enumerate_span_files(storage, org_id, start_dt, end_dt) -> list[str]:
+    """Enumerate raw span Parquet (T1/T2) for an org over a date range."""
+    return enumerate_hour_tiered_files(
+        storage, STORAGE_PREFIX, org_id, start_dt, end_dt
+    )
 
 
 def _get_duckdb_paths(storage, org_id, start_dt, end_dt):
-    """Get DuckDB-readable paths for an org's parquet files in a date range."""
-    rel_paths = enumerate_org_parquet_files(
-        storage, TABLE_NAME, org_id, start_dt, end_dt
+    """Get DuckDB-readable paths for an org's span Parquet in a date range."""
+    rel_paths = enumerate_span_files(storage, org_id, start_dt, end_dt)
+    return [get_duckdb_parquet_path(storage, p) for p in rel_paths]
+
+
+def _get_rollup_paths(storage, org_id, start_dt, end_dt):
+    """Get DuckDB-readable paths for an org's trend rollup Parquet."""
+    rel_paths = enumerate_hour_tiered_files(
+        storage, ROLLUP_STORAGE_PREFIX, org_id, start_dt, end_dt
     )
     return [get_duckdb_parquet_path(storage, p) for p in rel_paths]
 
@@ -336,10 +361,15 @@ def query_transaction_trend(
     """
     Query daily performance trend for a specific transaction.
 
+    Reads the small hourly **rollup** tier (not raw spans), so it stays
+    cheap over long ranges and works past raw retention.
+
     Returns one row per day with:
     - date: day bucket
-    - count: total spans (all child spans in matching transactions)
-    - transaction_count: distinct transaction/request count (throughput)
+    - count: total spans in matching transactions
+    - transaction_count: approx distinct request count (summed per-hour
+      per-group distincts — slightly over-counts traces spanning hours or
+      multiple span groups; acceptable for a trend)
     - avg_duration: average span duration in ms
     - total_time: sum of all span durations in ms
     """
@@ -350,7 +380,7 @@ def query_transaction_trend(
     if not storage:
         return []
 
-    duckdb_paths = _get_duckdb_paths(storage, org_id, start_dt, end_dt)
+    duckdb_paths = _get_rollup_paths(storage, org_id, start_dt, end_dt)
     if not duckdb_paths:
         return []
 
@@ -366,17 +396,17 @@ def query_transaction_trend(
     def sql_builder(paths_list):
         return f"""
             SELECT
-                DATE_TRUNC('day', timestamp) as date,
-                COUNT(*) as count,
-                COUNT(DISTINCT transaction_id) as transaction_count,
-                AVG(duration) as avg_duration,
-                SUM(duration) as total_time
+                DATE_TRUNC('day', hour_bucket) as date,
+                SUM(count) as count,
+                SUM(transaction_count) as transaction_count,
+                SUM(sum_duration) / NULLIF(SUM(count), 0) as avg_duration,
+                SUM(sum_duration) as total_time
             FROM read_parquet([{paths_list}])
             WHERE transaction_name = $1
-              AND timestamp >= $2
-              AND timestamp < $3
+              AND hour_bucket >= $2
+              AND hour_bucket < $3
               {extra_where}
-            GROUP BY DATE_TRUNC('day', timestamp)
+            GROUP BY DATE_TRUNC('day', hour_bucket)
             ORDER BY date
         """
 

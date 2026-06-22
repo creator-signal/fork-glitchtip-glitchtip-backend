@@ -9,11 +9,11 @@ from mcp.shared.auth import OAuthClientInformationFull
 from model_bakery import baker
 
 from apps.api_tokens.models import APIToken, generate_token
+from apps.oauth.mcp_provider import GlitchTipOAuthProvider
 from apps.oauth.models import OAuthApplication, OAuthRefreshToken
 from apps.oauth.provider import (
     ACCESS_TOKEN_LIFETIME,
     AUTH_CODE_LIFETIME,
-    GlitchTipOAuthProvider,
     _access_cache_key,
     _grant_cache_key,
     _hash_token,

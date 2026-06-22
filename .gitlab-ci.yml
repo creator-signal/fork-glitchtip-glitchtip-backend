@@ -193,6 +193,15 @@ validate_build_arm64:
   extends: .validate_build_base
   tags:
     - saas-linux-medium-arm64
+  # The arm64 runner tag is a GitLab SaaS runner that only the canonical
+  # project has. On forks it resolves to no_matching_runner and the job
+  # reports as failed without ever testing anything, so skip it there and
+  # let the amd64 job carry the build smoke test. Inherit the base rules
+  # for the canonical project.
+  rules:
+    - if: $CI_PROJECT_PATH != "glitchtip/glitchtip-backend"
+      when: never
+    - !reference [.validate_build_base, rules]
   variables:
     BUILD_PLATFORM: linux/arm64
     BUILD_ARCH: arm64

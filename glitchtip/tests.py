@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -13,6 +12,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
+from apps.stripe.models import SupportLicense
 from glitchtip.internal_transport import InternalTransport, _processing_internal
 from glitchtip.partition_manager import PartitionManager, UUID7Helper
 from glitchtip.settings import _is_self_referencing_dsn
@@ -26,6 +26,24 @@ class SettingsTestCase(TestCase):
         with self.assertNumQueries(1):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
+
+    def test_settings_does_not_expose_license_key(self):
+        res = self.client.get(self.url)
+        self.assertNotIn("licenseKey", res.json())
+        self.assertNotIn("license_key", res.json())
+
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=False)
+    def test_i_paid_for_glitchtip_reflects_support_license(self):
+        res = self.client.get(self.url)
+        self.assertFalse(res.json()["iPaidForGlitchTip"])
+        SupportLicense(license_key="sub_xxx").save()
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
+
+    @override_settings(BILLING_ENABLED=False, I_PAID_FOR_GLITCHTIP=True)
+    def test_legacy_i_paid_env_var_still_overrides(self):
+        res = self.client.get(self.url)
+        self.assertTrue(res.json()["iPaidForGlitchTip"])
 
     def test_settings_oidc(self):
         social_app = baker.make(
@@ -62,6 +80,68 @@ class SettingsTestCase(TestCase):
             cache.delete(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
+
+
+class InstanceLicenseTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_instance_license")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_empty_when_unconfigured(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"billingEmail": ""})
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_db_billing_email(self):
+        SupportLicense(license_key="sub_dbKey", billing_email="db@example.com").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": "db@example.com"})
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_returns_empty(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"billingEmail": ""})
+
+
+class SupportLinkTestCase(TestCase):
+    def setUp(self):
+        self.url = reverse("api:get_support_link")
+        self.user = baker.make("users.user")
+
+    def test_requires_auth(self):
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_returns_base_url_when_unlicensed(self):
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"url": "https://glitchtip.com/support"})
+
+    @override_settings(BILLING_ENABLED=False)
+    def test_embeds_license_key_only(self):
+        SupportLicense(license_key="sub_dbKey").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(
+            res.json(), {"url": "https://glitchtip.com/support#sub=sub_dbKey"}
+        )
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_billing_enabled_returns_base_url(self):
+        SupportLicense(license_key="sub_dbKey").save()
+        self.client.force_login(self.user)
+        res = self.client.get(self.url)
+        self.assertEqual(res.json(), {"url": "https://glitchtip.com/support"})
 
 
 class APIRootTestCase(TestCase):
@@ -428,23 +508,6 @@ class PartitionManagerTestCase(TestCase):
             self.assertIn(expected_name, sqls[i + 1])
 
 
-class DecompressBodyMiddlewareCancelledErrorTestCase(TestCase):
-    """CancelledError from client disconnect should return 499, not propagate."""
-
-    def test_cancelled_error_returns_499(self):
-        from django.test import RequestFactory
-
-        from glitchtip.middleware import DecompressBodyMiddleware
-
-        def raise_cancelled(request):
-            raise asyncio.CancelledError
-
-        middleware = DecompressBodyMiddleware(raise_cancelled)
-        request = RequestFactory().get("/")
-        response = middleware(request)
-        self.assertEqual(response.status_code, 499)
-
-
 class DatabaseSettingsTestCase(TestCase):
     def test_database_settings_defaults(self):
         """
@@ -460,8 +523,8 @@ class DatabaseSettingsTestCase(TestCase):
         self.assertEqual(db_settings.get("DISABLE_SERVER_SIDE_CURSORS"), True)
         # In TESTING mode, pool is explicitly set to False
         self.assertEqual(db_settings.get("OPTIONS", {}).get("pool"), False)
-        # Default ENGINE is async-backend's postgresql; assertion guards
-        # against a typo or accidental SQLite fallback.
+        # async-backend's postgresql is the only DB engine; the assertion
+        # guards against a typo or accidental SQLite fallback.
         self.assertEqual(
             db_settings.get("ENGINE"),
             "django_async_backend.db.backends.postgresql",
@@ -1174,3 +1237,44 @@ class ProductionWarningTests(SimpleTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("ALLOWED_HOSTS is the wildcard default", r.stderr)
+
+
+class TaskSignalsTestCase(SimpleTestCase):
+    """The worker has no HTTP middleware, so async DB connections opened
+    by an async task would leak. ``glitchtip.task_signals`` connects a
+    receiver to vtasks' ``task_finished`` / ``task_failure`` signals that
+    closes ``async_connections`` the same way the request middleware does."""
+
+    async def _assert_signal_closes_async_connections(self, signal, **payload):
+        from unittest.mock import AsyncMock
+
+        from django_async_backend.db import async_connections
+
+        with patch.object(
+            async_connections, "close_all", new_callable=AsyncMock
+        ) as close_all:
+            await signal.asend(sender=type(self), **payload)
+            close_all.assert_awaited_once()
+
+    async def test_task_finished_closes_async_connections(self):
+        from django_vtasks.signals import task_finished
+
+        await self._assert_signal_closes_async_connections(
+            task_finished,
+            task_id="x",
+            task_ids=None,
+            name="glitchtip.tests.fake_task",
+            duration=0.0,
+        )
+
+    async def test_task_failure_closes_async_connections(self):
+        from django_vtasks.signals import task_failure
+
+        await self._assert_signal_closes_async_connections(
+            task_failure,
+            task_id="x",
+            task_ids=None,
+            name="glitchtip.tests.fake_task",
+            exception=RuntimeError("boom"),
+            traceback="",
+        )

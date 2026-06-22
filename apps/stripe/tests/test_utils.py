@@ -1,15 +1,65 @@
+import os
+import time
+import unittest
 from datetime import datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import patch
 
 from dateutil.relativedelta import relativedelta
 from django.test import SimpleTestCase
 from django.utils.timezone import make_aware
 
-from apps.stripe.utils import _MAX_CYCLE_MONTHS, compute_cycle, compute_cycle_n_ago
+from apps.stripe.utils import (
+    _MAX_CYCLE_MONTHS,
+    compute_cycle,
+    compute_cycle_n_ago,
+    unix_to_datetime,
+)
 
 
 def dt(year, month, day):
     return make_aware(datetime(year, month, day))
+
+
+@unittest.skipUnless(
+    hasattr(time, "tzset"), "time.tzset() not available on this platform"
+)
+class UnixToDatetimeTests(SimpleTestCase):
+    """`unix_to_datetime` must return a correct UTC moment regardless of
+    the process's local timezone, since deployments may set ``TZ`` to
+    something other than UTC for log readability."""
+
+    def setUp(self):
+        self._saved_tz = os.environ.get("TZ")
+        self.addCleanup(self._restore_tz)
+
+    def _restore_tz(self):
+        if self._saved_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._saved_tz
+        time.tzset()
+
+    def _expected(self, timestamp: int) -> datetime:
+        return datetime.fromtimestamp(timestamp, tz=dt_timezone.utc)
+
+    def test_returns_correct_utc_under_utc_local(self):
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        ts = 1778333083  # 2026-05-09 13:24:43 UTC
+        self.assertEqual(unix_to_datetime(ts), self._expected(ts))
+
+    def test_returns_correct_utc_under_eastern_local(self):
+        os.environ["TZ"] = "America/New_York"
+        time.tzset()
+        ts = 1778333083
+        self.assertEqual(unix_to_datetime(ts), self._expected(ts))
+
+    def test_returns_correct_utc_under_tokyo_local(self):
+        os.environ["TZ"] = "Asia/Tokyo"
+        time.tzset()
+        ts = 1778333083
+        self.assertEqual(unix_to_datetime(ts), self._expected(ts))
 
 
 class ComputeCycleTests(SimpleTestCase):

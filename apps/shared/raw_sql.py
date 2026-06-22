@@ -1,10 +1,7 @@
 """Async raw-SQL helpers for the ingest hot paths (events, logs, spans).
 
-Uses django-async-backend's native async cursor so the event loop keeps
-running while Postgres does its work.
+Uses django-async-backend's native async cursor via ``async_connections``.
 """
-
-from __future__ import annotations
 
 from typing import Any
 
@@ -22,6 +19,17 @@ async def fetchall(
         columns = [c[0] for c in cursor.description]
         rows = await cursor.fetchall()
         return columns, rows
+
+
+async def fetchone(
+    sql: str,
+    params: Any | None = None,
+    db_alias: str = "default",
+) -> tuple | None:
+    """Execute ``sql`` with ``params`` and return a single row (or None)."""
+    async with await async_connections[db_alias].cursor() as cursor:
+        await cursor.execute(sql, params)
+        return await cursor.fetchone()
 
 
 async def execute(

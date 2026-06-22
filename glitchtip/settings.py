@@ -68,13 +68,6 @@ if DEBUG is False:
 if DEBUG and ENABLE_TEST_API:
     ACCOUNT_RATE_LIMITS = False  # Disable for e2e tests
 
-# Enables a synthetic /api/_probe/async/ endpoint (see glitchtip.urls)
-# that runs a small fixed sequence of raw-SQL queries via the async-DB
-# helper. Used by the concurrency benchmarks to measure async-cursor
-# throughput in isolation from the full ingest pipeline. Independent of
-# DEBUG / ENABLE_TEST_API because realistic benches need DEBUG=False.
-ASYNC_PROBE_ENABLED = env.bool("ASYNC_PROBE_ENABLED", False)
-
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Necessary for kubernetes health checks
 POD_IP = env.str("POD_IP", default=None)
@@ -130,20 +123,21 @@ if not DEBUG and not TESTING:
         )
 
 # Limits size (in bytes) of uncompressed event payloads. Mitigates DOS risk.
-# Enforced at decompression time by DecompressBodyMiddleware and is the source
-# of truth for ingest body size. DATA_UPLOAD_MAX_MEMORY_SIZE below sits just
-# above this to give Django's own check a matching ceiling.
+# Enforced at decompression time inside gt_rust (the ingest decompression
+# primitive) and is the source of truth for ingest body size.
+# DATA_UPLOAD_MAX_MEMORY_SIZE below sits just above this to give Django's own
+# check a matching ceiling.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
     5 * 1024 * 1024,  # 5 MB
 )
 
-# Raw request body cap before view handling. For ingest endpoints the
-# DecompressBodyMiddleware enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the
-# decompressed stream and sets CONTENT_LENGTH to that cap, so this setting
-# must be at least as large. Multipart file uploads (minidumps, source-map
-# chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk, so this
-# does not need to cover them.
+# Raw request body cap before view handling. For ingest endpoints gt_rust
+# enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the decompressed bytes, but
+# the *compressed* body Django reads is smaller than that, so this only needs
+# to cover uncompressed ingest bodies. Multipart file uploads (minidumps,
+# source-map chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk,
+# so this does not need to cover them.
 #
 # 15 MB default gives plenty of headroom over the 5 MB ingest cap for any
 # non-ingest JSON bodies (webhooks, bulk invites, assemble manifests) while
@@ -177,6 +171,21 @@ GLITCHTIP_TRANSACTION_RETENTION_DAYS = env.int(
     default=env.int(
         "GLITCHTIP_MAX_TRANSACTION_EVENT_LIFE_DAYS", default=GLITCHTIP_RETENTION_DAYS
     ),
+)
+# Reject transaction/span events whose timestamp is further in the future
+# than this (clearly-broken clients) — bounds garbage so cold-storage
+# hour-bucketing isn't polluted. Clients with badly skewed clocks that
+# previously squeaked through now get HTTP 400 "Event time in the
+# future." on transaction ingest. Not an operator knob.
+GLITCHTIP_TRANSACTION_FUTURE_SKEW = timedelta(hours=1)
+
+# Retention for raw span Parquet (the T1 hourly / T2 daily tiers). Most
+# span data is never read; raw is kept only long enough for recent
+# debugging and point lookups, then dropped. Trend rollups
+# (performance_spans_rollup) are kept for the much longer
+# GLITCHTIP_TRANSACTION_RETENTION_DAYS instead. Operator-tunable.
+GLITCHTIP_SPAN_RAW_RETENTION_DAYS = env.int(
+    "GLITCHTIP_SPAN_RAW_RETENTION_DAYS", default=30
 )
 GLITCHTIP_UPTIME_RETENTION_DAYS = env.int(
     "GLITCHTIP_UPTIME_RETENTION_DAYS",
@@ -599,7 +608,6 @@ MIDDLEWARE += [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "glitchtip.middleware.DecompressBodyMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "allauth.account.middleware.AccountMiddleware",
 ]
@@ -611,8 +619,9 @@ if ENABLE_OBSERVABILITY_API:
     MIDDLEWARE.insert(0, "django_prometheus.middleware.PrometheusBeforeMiddleware")
     MIDDLEWARE.append("django_prometheus.middleware.PrometheusAfterMiddleware")
 
-# All DB I/O goes through django-async-backend. Inserted at the head of
-# the chain so async cursors are returned to the pool before any other
+# DB I/O is routed through django-async-backend (the only DB engine; see
+# the ENGINE assignment in the DATABASES loop below). Inserted at the head
+# of the chain so async cursors are returned to the pool before any other
 # middleware finalises the response.
 MIDDLEWARE.insert(0, "django_async_backend.middleware.close_async_connections")
 
@@ -853,7 +862,9 @@ if str(GLITCHTIP_ENABLE_DUCKDB or "").lower() == "true":
     }
     VTASKS_SCHEDULE["compact-span-chunks"] = {
         "task": "apps.performance.tasks.compact_span_chunks",
-        "schedule": crontab(hour=3, minute=0),
+        # Collapse each day shortly after it seals (now - MAX_AGE - margin)
+        # rather than once daily. Cheap when nothing is newly sealed.
+        "schedule": 15 * 60,
     }
 
 if GLITCHTIP_ENABLE_UPTIME:
@@ -1035,11 +1046,44 @@ EMAIL_INVITE_THROTTLE_COUNT = env.int("EMAIL_THROTTLE_COUNT", 50)
 EMAIL_INVITE_THROTTLE_INTERVAL = env.int("EMAIL_THROTTLE_INTERVAL", 300)  # 5 minutes
 EMAIL_INVITE_REQUIRE_VERIFICATION = env.bool("EMAIL_INVITE_REQUIRE_VERIFICATION", False)
 
+# Email is optional. With no transport configured, email is disabled: nothing
+# is sent, account verification and password reset are off, and /api/settings/
+# omits "email" so the frontend hides email-only UI. Disabling is implicit so a
+# bare install with no MTA doesn't crash on the default smtp -> localhost:25.
+#
+# Auto-enabled by any explicit transport: an EMAIL_* var below, an Anymail
+# provider, or a non-default EMAIL_BACKEND. So pointing at localhost:25 yourself
+# enables it (and fails loudly if broken) -- only the untouched default is
+# "unconfigured". Set EMAIL_ENABLED to override the auto-detection either way.
+_EMAIL_TRANSPORT_ENV_VARS = (
+    "EMAIL_URL",
+    "EMAIL_HOST",
+    "EMAIL_PORT",
+    "EMAIL_HOST_USER",
+    "EMAIL_HOST_PASSWORD",
+    "EMAIL_USE_TLS",
+    "EMAIL_USE_SSL",
+    "EMAIL_TIMEOUT",
+    "EMAIL_FILE_PATH",
+)
+EMAIL_ENABLED = env.bool(
+    "EMAIL_ENABLED",
+    default=TESTING
+    or bool(ANYMAIL)
+    or any(var in os.environ for var in _EMAIL_TRANSPORT_ENV_VARS)
+    or EMAIL_BACKEND != "django.core.mail.backends.smtp.EmailBackend",
+)
+
 AUTH_USER_MODEL = "users.User"
 ACCOUNT_ADAPTER = "glitchtip.adapters.CustomDefaultAccountAdapter"
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+# Without a mail transport an account's email can never be confirmed, so treat
+# it as unverified/untrusted: skip verification entirely rather than minting
+# confirmations that can't be delivered. With email configured, keep allauth's
+# default "optional" behavior (login allowed, confirmation sent in background).
+ACCOUNT_EMAIL_VERIFICATION = "optional" if EMAIL_ENABLED else "none"
 ACCOUNT_REAUTHENTICATION_TIMEOUT = SESSION_COOKIE_AGE  # Disabled for now
 LOGIN_REDIRECT_URL = "/"
 LOGIN_URL = "/login"

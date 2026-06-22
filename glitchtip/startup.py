@@ -3,7 +3,6 @@ GlitchTip startup banner display.
 """
 
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +15,35 @@ LOGO = """\
    ╚═════╝ """
 
 
+def describe_email(settings) -> str:
+    """One-line email transport descriptor for the banner.
+
+    States what's *configured*, never whether it's reachable, and never any
+    secret (host/credentials are left out). See settings.EMAIL_ENABLED.
+    """
+    if not settings.EMAIL_ENABLED:
+        return "disabled (no transport configured)"
+    backend = settings.EMAIL_BACKEND
+    if "anymail" in backend:
+        # anymail.backends.<provider>.EmailBackend
+        parts = backend.split(".")
+        provider = parts[2] if len(parts) > 2 else "anymail"
+        return f"Anymail ({provider})"
+    for needle, label in (
+        ("smtp", "SMTP"),
+        ("console", "console"),
+        ("filebased", "file"),
+        ("locmem", "in-memory"),
+        ("dummy", "dummy"),
+    ):
+        if needle in backend:
+            return label
+    return "enabled"
+
+
 def get_startup_info() -> dict:
     """Gather startup configuration info."""
     from django.conf import settings
-
-    # Determine mode
-    embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
-    if embed_worker:
-        mode = "All-in-one (embedded worker)"
-    else:
-        mode = "Web only"
 
     # Determine cache/queue backend
     cache_backend = settings.CACHES.get("default", {}).get("BACKEND", "")
@@ -39,7 +57,7 @@ def get_startup_info() -> dict:
     return {
         "version": settings.GLITCHTIP_VERSION,
         "url": settings.GLITCHTIP_URL.geturl(),
-        "mode": mode,
+        "email": describe_email(settings),
         "backend": backend,
         "retention_days": settings.GLITCHTIP_RETENTION_DAYS,
     }
@@ -54,7 +72,7 @@ def format_banner(info: dict) -> str:
         f"GlitchTip v{info['version']}",
         "───────────────────────────────",
         f"URL:              {info['url']}",
-        f"Mode:             {info['mode']}",
+        f"Email:            {info['email']}",
         f"Cache/Queue:      {info['backend']}",
         f"Event retention:  {info['retention_days']} days",
     ]

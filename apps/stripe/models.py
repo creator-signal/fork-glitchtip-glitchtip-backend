@@ -9,7 +9,13 @@ from django.utils import timezone
 
 from apps.organizations_ext.models import Organization
 
-from .client import fetch_subscription, list_prices, list_products, list_subscriptions
+from .client import (
+    cancel_subscription,
+    fetch_subscription,
+    list_prices,
+    list_products,
+    list_subscriptions,
+)
 from .constants import (
     ACTIVE_SUBSCRIPTION_STATUSES,
     CollectionMethod,
@@ -153,7 +159,20 @@ class StripeProduct(StripeModel):
             for obj in product_updated:
                 stripe_ids.add(obj.stripe_id)
 
-        result = await StripeProduct.objects.exclude(stripe_id__in=stripe_ids).adelete()
+        # Keep products whose prices are still referenced by a subscription.
+        # StripePrice.product cascades, but StripeSubscription.price is RESTRICT,
+        # so deleting a product archived in Stripe while a (often grandfathered)
+        # subscription still points at one of its prices raises RestrictedError
+        # and aborts the whole sync. Retaining those products is harmless — they
+        # simply stop appearing in Stripe's product list.
+        referenced_product_ids = StripeSubscription.objects.values_list(
+            "price__product_id", flat=True
+        )
+        result = await (
+            StripeProduct.objects.exclude(stripe_id__in=stripe_ids)
+            .exclude(stripe_id__in=referenced_product_ids)
+            .adelete()
+        )
         if result[0]:
             logger.info(f"Deleted {result[0]} products in Django")
 
@@ -248,6 +267,19 @@ class StripeSubscription(StripeModel):
             .order_by("-price__product__events", "-created")
             .afirst()
         )
+
+    @classmethod
+    async def cancel_for_organization(cls, organization: Organization):
+        async for subscription in cls.objects.filter(
+            organization=organization, status__in=ACTIVE_SUBSCRIPTION_STATUSES
+        ):
+            try:
+                await cancel_subscription(subscription.stripe_id)
+            except StripeResourceNotFound:
+                logger.info(
+                    "Subscription %s already absent from Stripe; skipping cancel",
+                    subscription.stripe_id,
+                )
 
     @classmethod
     async def set_primary_subscriptions_for_organizations(
@@ -456,3 +488,31 @@ class StripeSubscription(StripeModel):
         await cls.set_primary_subscriptions_for_organizations(active_organization_ids)
         await cls.update_outdated_subscriptions()
         await cls.remove_inactive_primary_subscriptions()
+
+
+class SupportLicense(models.Model):
+    """Singleton (pk=1): one instance-wide support-plan license per server."""
+
+    license_key = models.CharField(max_length=255, blank=True, default="")
+    billing_email = models.EmailField(blank=True, default="")
+    updated = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    async def load(cls):
+        obj, _ = await cls.objects.aget_or_create(pk=1)
+        return obj
+
+    @classmethod
+    async def resolved(cls) -> tuple[str, str]:
+        if settings.BILLING_ENABLED:
+            return ("", "")
+        # Env var wins and short-circuits the DB query when set. Fall back to
+        # the DB row otherwise. billing_email is DB-only — env carries no email.
+        if settings.GLITCHTIP_LICENSE_KEY:
+            return (settings.GLITCHTIP_LICENSE_KEY, "")
+        db = await cls.load()
+        return (db.license_key, db.billing_email)

@@ -166,12 +166,20 @@ async def heartbeat_check(
         {monitor.organization_id: 1}, monitor_check.start_check
     )
 
-    # Update cached fields on monitor
+    # Update cached fields on monitor. A successful check-in always resets the
+    # consecutive-failure counter that drives confirmation_threshold debouncing.
     monitor.cached_is_up = True
     monitor.cached_last_change = (
         monitor_check.start_check if is_change else monitor.cached_last_change
     )
-    await monitor.asave(update_fields=["cached_is_up", "cached_last_change"])
+    monitor.cached_consecutive_down = 0
+    await monitor.asave(
+        update_fields=[
+            "cached_is_up",
+            "cached_last_change",
+            "cached_consecutive_down",
+        ]
+    )
 
     if monitor.latest_is_up is False:
         last_change = monitor.last_change

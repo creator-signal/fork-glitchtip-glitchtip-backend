@@ -9,14 +9,11 @@ Non-ingest requests pass through to the full Django application unchanged.
 import re
 
 _INGEST_PATH_RE = re.compile(
-    r"^/api/("
-    r"\d+/(envelope|store|minidump|security)|"
-    # Async-DB benchmark endpoints, see glitchtip.async_probe. Routed
-    # through the minimal middleware chain so the bench measures the
-    # async-cursor wire I/O and (for /realistic/) the in-handler Python
-    # CPU between awaits — not AuthenticationMiddleware etc.
-    r"_probe/(async|realistic)"
-    r")/"
+    r"^/(?:"
+    r"api/\d+/(?:envelope|store|minidump|security)/"
+    # Native OTLP/HTTP ingest (optional trailing slash, no /api prefix).
+    r"|v1/(?:logs|traces|metrics)/?$"
+    r")"
 )
 
 
@@ -28,7 +25,9 @@ class IngestDispatcher:
     Ingest endpoints only need:
     - SecurityMiddleware (HSTS headers)
     - CorsMiddleware (browser SDKs send from different origins)
-    - DecompressBodyMiddleware (gzip/br/zstd decompression)
+
+    Request-body decompression (gzip/deflate/br/zstd) is not a middleware:
+    it runs in Rust (gt_rust) at each ingest endpoint's body-read seam.
 
     Skipped for ingest (saves ~8 middleware calls per request):
     - SessionMiddleware
@@ -57,13 +56,12 @@ class IngestDispatcher:
                 @classmethod
                 def _get_middleware_setting(cls):
                     return [
-                        # django-async-backend needs explicit per-request
-                        # cleanup to return pool connections; without it the
-                        # pool saturates after max_size requests.
+                        # async-backend needs explicit per-request cleanup to
+                        # return pool connections; without it the pool
+                        # saturates after max_size requests.
                         "django_async_backend.middleware.close_async_connections",
                         "django.middleware.security.SecurityMiddleware",
                         "corsheaders.middleware.CorsMiddleware",
-                        "glitchtip.middleware.DecompressBodyMiddleware",
                     ]
 
                 def load_middleware(self, is_async=True):

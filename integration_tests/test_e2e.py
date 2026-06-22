@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -6,6 +7,13 @@ import time
 from urllib.parse import urlparse
 
 import requests
+
+GLITCHTIP_CLI_VERSION = "v0.1.0"
+GLITCHTIP_CLI_RELEASE_URL = (
+    "https://gitlab.com/glitchtip/glitchtip-cli/-/jobs/artifacts/"
+    "{version}/raw/artifacts/glitchtip-cli-linux-{arch}"
+    "?job=build-linux-{arch}"
+)
 
 BASE_URL = os.getenv("GLITCHTIP_URL", "http://localhost:8000")
 EMAIL = f"e2e_{int(time.time())}@example.com"
@@ -17,27 +25,22 @@ PROJECT_NAME = "e2e-project"
 session = requests.Session()
 
 
-def install_sentry_cli():
-    if shutil.which("sentry-cli"):
-        print("sentry-cli already installed.")
+def install_glitchtip_cli():
+    if shutil.which("glitchtip-cli"):
+        print("glitchtip-cli already installed.")
         return
 
     bin_dir = os.path.abspath("bin")
-    if not os.path.exists(bin_dir):
-        os.makedirs(bin_dir)
+    os.makedirs(bin_dir, exist_ok=True)
+    binary_path = os.path.join(bin_dir, "glitchtip-cli")
 
-    sentry_cli_path = os.path.join(bin_dir, "sentry-cli")
-    if os.path.exists(sentry_cli_path):
-        print(f"sentry-cli found at {sentry_cli_path}")
-        # Add to PATH
-        os.environ["PATH"] += os.pathsep + bin_dir
-        return
+    if not os.path.exists(binary_path):
+        arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
+        url = GLITCHTIP_CLI_RELEASE_URL.format(version=GLITCHTIP_CLI_VERSION, arch=arch)
+        print(f"Downloading glitchtip-cli {GLITCHTIP_CLI_VERSION} from {url}")
+        subprocess.check_call(["curl", "-sSfL", "-o", binary_path, url])
+        os.chmod(binary_path, 0o755)
 
-    print("Installing sentry-cli...")
-    # Using the official installer
-    # We pipe to bash. We need to set INSTALL_DIR.
-    cmd = f"curl -sL https://sentry.io/get-cli/ | INSTALL_DIR={bin_dir} bash"
-    subprocess.check_call(cmd, shell=True)
     os.environ["PATH"] += os.pathsep + bin_dir
 
 
@@ -173,21 +176,16 @@ def get_dsn(org_slug, project_slug):
 
 
 def send_event(dsn):
-    print("Sending test event via sentry-cli...")
-    # sentry-cli send-event -m "Hello E2E"
-    # We need to set SENTRY_DSN env var
+    print("Sending test event via glitchtip-cli...")
     env = os.environ.copy()
     env["SENTRY_DSN"] = dsn
-    # We might need to ensure the worker has time to be ready?
-    # sentry-cli connects to the ingestion endpoint.
-
-    # We assume 'sentry-cli' is in path now.
     try:
         output = subprocess.check_output(
-            ["sentry-cli", "send-event", "-m", "Hello GlitchTip E2E"], env=env
+            ["glitchtip-cli", "send-event", "-m", "Hello GlitchTip E2E"], env=env
         )
         print(f"Event sent: {output.decode()}")
-        # Output format: "Event sent with ID: <uuid>"
+        # glitchtip-cli prints the event id as the last whitespace-delimited
+        # token on stdout.
         event_id = output.decode().strip().split()[-1]
         return event_id
     except subprocess.CalledProcessError as e:
@@ -229,7 +227,7 @@ def verify_event(org_slug, project_slug, event_id):
 
 
 def run():
-    install_sentry_cli()
+    install_glitchtip_cli()
     wait_for_api()
     register_and_login()
     org = create_org()

@@ -132,6 +132,7 @@ async def delete_team(request: AuthHttpRequest, organization_slug: str, team_slu
             organization_slug, team_slug=team_slug, user_id=request.auth.user_id
         )
         .filter(
+            organization__organization_users__user_id=request.auth.user_id,
             organization__organization_users__role__gte=OrganizationUserRole.ADMIN,
         )
         .adelete()

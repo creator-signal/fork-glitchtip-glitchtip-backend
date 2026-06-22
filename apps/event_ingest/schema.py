@@ -422,14 +422,20 @@ class TransactionEventSchema(LaxIngestSchema):
     @field_validator("start_timestamp")
     @classmethod
     def ensure_time_is_recent(cls, v: datetime) -> datetime:
-        """Validator to ensure the datetime is recent and timezone-aware."""
+        """Reject out-of-retention / far-future timestamps; normalize to UTC.
+
+        Cold-storage compaction is idempotent and seals by ingestion time,
+        so it does not need a tight freshness window — only a loose guard
+        so a broken-clock client can't push garbage years out (which would
+        pollute hour bucketing) or backfill beyond retention.
+        """
         if v.tzinfo is None:
             v = v.replace(tzinfo=timezone.utc)
-        minimum_date = now() - timedelta(
-            days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS
-        )
-        if v < minimum_date:
+        current = now()
+        if v < current - timedelta(days=settings.GLITCHTIP_TRANSACTION_RETENTION_DAYS):
             raise ValueError("Event time too old.")
+        if v > current + settings.GLITCHTIP_TRANSACTION_FUTURE_SKEW:
+            raise ValueError("Event time in the future.")
         return v
 
 
@@ -438,6 +444,17 @@ class EnvelopeHeaderSchema(LaxIngestSchema):
     dsn: str | None = None
     sdk: ClientSDKInfo | None = None
     sent_at: datetime = Field(default_factory=now)
+
+    @field_validator("event_id", mode="before")
+    def empty_event_id_to_none(cls, v: Any) -> Any:
+        # event_id is optional in the envelope spec. Some SDKs (e.g.
+        # sentry-go on client_report envelopes, which have no associated
+        # event) send an empty string rather than omitting the key. The
+        # field default only applies when the key is absent, so coerce a
+        # blank value to None instead of failing UUID parsing.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 SupportedItemType = Literal[
@@ -455,6 +472,7 @@ IgnoredItemType = Literal[
     "replay_video",
     "span",
     "profile_chunk",
+    "trace_metric",
 ]
 SUPPORTED_ITEMS = typing.get_args(SupportedItemType)
 
@@ -779,7 +797,17 @@ def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
     """
     if not isinstance(val, dict):
         return val
-    for suffix in ("string_value", "int_value", "double_value", "bool_value"):
+    # snake_case keys come from protobuf decoding; camelCase from OTLP/JSON.
+    for suffix in (
+        "string_value",
+        "int_value",
+        "double_value",
+        "bool_value",
+        "stringValue",
+        "intValue",
+        "doubleValue",
+        "boolValue",
+    ):
         if suffix in val:
             return val[suffix]
     return val
@@ -787,8 +815,16 @@ def _extract_otel_value(val: dict | str | int | float | bool | None) -> Any:
 
 def otel_log_to_log_item(otel: dict) -> dict:
     """Convert a single OTel log record dict to a LogItemSchema-compatible dict."""
-    # Timestamp: nanoseconds (string or int) → seconds (float)
-    time_unix_nano = otel.get("time_unix_nano") or otel.get("timeUnixNano") or "0"
+    # Timestamp: nanoseconds (string or int) → seconds (float). Fall back to the
+    # observed time when the record carries no original timestamp (valid per the
+    # OTel data model), so such records don't collapse to the 1970 epoch.
+    time_unix_nano = (
+        otel.get("time_unix_nano")
+        or otel.get("timeUnixNano")
+        or otel.get("observed_time_unix_nano")
+        or otel.get("observedTimeUnixNano")
+        or "0"
+    )
     timestamp = int(time_unix_nano) / 1e9
 
     # Body: {"string_value": "..."} or plain string

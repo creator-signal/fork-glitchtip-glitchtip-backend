@@ -22,7 +22,7 @@ from glitchtip.api.authentication import AuthHttpRequest
 from glitchtip.api.permissions import has_permission
 
 from ..constants import EventStatus
-from ..models import Issue, IssueAggregate, IssueEvent, IssueHash
+from ..models import Issue, IssueAggregate, IssueEvent, IssueHash, IssueIndex
 from ..schema import (
     IssueDetailSchema,
     IssueSchema,
@@ -197,11 +197,13 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
     except Issue.DoesNotExist:
         raise Http404()
     update_fields: list[str] = []
+    new_status: int | None = None
 
     if "status" in payload.model_fields_set and payload.status is not None:
-        obj.status = EventStatus.from_string(payload.status)
-        update_fields.append("status")
-        if obj.status == EventStatus.RESOLVED and payload.status_details:
+        new_status = EventStatus.from_string(payload.status)
+        # status lives on the IssueIndex leaf (written below);
+        # resolved_in_release stays on Issue.
+        if new_status == EventStatus.RESOLVED and payload.status_details:
             if payload.status_details.in_release:
                 release = await Release.objects.filter(
                     version=payload.status_details.in_release,
@@ -221,7 +223,7 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
                 if release:
                     obj.resolved_in_release = release
                     update_fields.append("resolved_in_release_id")
-        elif obj.status != EventStatus.RESOLVED:
+        elif new_status != EventStatus.RESOLVED:
             obj.resolved_in_release = None
             update_fields.append("resolved_in_release_id")
 
@@ -235,6 +237,15 @@ async def update_issue_status(qs: QuerySet, issue_id: int, payload: UpdateIssueS
 
     if update_fields:
         await obj.asave(update_fields=update_fields)
+    if new_status is not None:
+        # Include organization_id (the partition key) so the update prunes to a
+        # single hash partition instead of scanning all of them.
+        await IssueIndex.objects.filter(
+            issue_id=obj.id, organization_id=obj.project.organization_id
+        ).aupdate(status=new_status)
+        # Reflect the change on the already-loaded leaf so the serialized
+        # response (which reads issue.status -> index.status) is current.
+        obj.index.status = new_status
     return obj
 
 
@@ -260,18 +271,24 @@ async def list_issues(
     if filters.query:
         try:
             event_id = UUID(filters.query)
+        except ValueError:
+            event_id = None
+        if event_id is not None:
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
-            if not is_uuid7(event_id):
-                org = (
-                    await Organization.objects.filter(slug=organization_slug)
-                    .only("id")
-                    .afirst()
-                )
-                if org:
-                    organization_id = org.id
-        except ValueError:
-            pass
+        if event_id is None or not is_uuid7(event_id):
+            # Both text search (index join) and client-SDK UUIDv4
+            # event-id lookups scan org-partitioned tables. Resolve the
+            # org id so Postgres can prune hash partitions instead of
+            # scanning all of them. A UUIDv7 id already prunes by its
+            # time-range id partition, so it skips this extra lookup.
+            org = (
+                await Organization.objects.filter(slug=organization_slug)
+                .only("id")
+                .afirst()
+            )
+            if org:
+                organization_id = org.id
     return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 
@@ -330,19 +347,22 @@ async def update_issues(
         "update_params": payload.dict(),
     }
 
+    organization_id = (
+        await Organization.objects.filter(slug=organization_slug)
+        .values_list("id", flat=True)
+        .afirst()
+    )
+
     if payload.status:
-        await Issue.objects.filter(id__in=updated_ids).aupdate(
-            status=EventStatus.from_string(payload.status)
-        )
+        # status lives on the IssueIndex leaf; the partition key prunes
+        # the update to a single hash partition.
+        await IssueIndex.objects.filter(
+            issue_id__in=updated_ids, organization_id=organization_id
+        ).aupdate(status=EventStatus.from_string(payload.status))
         if should_enqueue:
             await update_issues_task.aenqueue(**task_kwargs)
 
     if "assigned_to" in payload.model_fields_set:
-        organization_id = (
-            await Organization.objects.filter(slug=organization_slug)
-            .values_list("id", flat=True)
-            .afirst()
-        )
         assignee_org_user, assignee_team = await resolve_assignee(
             payload.assigned_to, organization_id
         )
@@ -376,8 +396,10 @@ async def update_issues(
         ).values_list("id", flat=True)[:1000]:
             event_ids.append(event_id)
         await IssueEvent.objects.filter(id__in=event_ids).aupdate(issue=issue)
-        issue.count = F("count") + len(event_ids)
-        await issue.asave(update_fields=["count"])
+        # count lives on the IssueIndex leaf; include the partition key.
+        await IssueIndex.objects.filter(
+            issue_id=issue.id, organization_id=issue.project.organization_id
+        ).aupdate(count=F("count") + len(event_ids))
 
         if should_enqueue:
             # Pass the target merge issue ID to the task
@@ -412,18 +434,24 @@ async def list_project_issues(
     if filters.query:
         try:
             event_id = UUID(filters.query)
+        except ValueError:
+            event_id = None
+        if event_id is not None:
             request.matching_event_id = event_id
             response["X-Sentry-Direct-Hit"] = "1"
-            if not is_uuid7(event_id):
-                org = (
-                    await Organization.objects.filter(slug=organization_slug)
-                    .only("id")
-                    .afirst()
-                )
-                if org:
-                    organization_id = org.id
-        except ValueError:
-            pass
+        if event_id is None or not is_uuid7(event_id):
+            # Both text search (index join) and client-SDK UUIDv4
+            # event-id lookups scan org-partitioned tables. Resolve the
+            # org id so Postgres can prune hash partitions instead of
+            # scanning all of them. A UUIDv7 id already prunes by its
+            # time-range id partition, so it skips this extra lookup.
+            org = (
+                await Organization.objects.filter(slug=organization_slug)
+                .only("id")
+                .afirst()
+            )
+            if org:
+                organization_id = org.id
     return filter_issue_list(qs, filters, sort, event_id, organization_id)
 
 
@@ -500,7 +528,7 @@ async def issue_stats(
     )
     issues_qs = Issue.objects.filter(
         project__organization_id=organization.id, id__in=filters.groups
-    )[:200]  # Sanity limit
+    ).select_related("index")[:200]  # Sanity limit; leaf for count/last_seen
 
     issue_list = [issue async for issue in issues_qs]
     issue_ids = [issue.id for issue in issue_list]
