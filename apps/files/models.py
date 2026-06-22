@@ -139,7 +139,19 @@ class File(CreatedModel):
         if checksum != self.checksum:
             raise AssembleChecksumMismatch("Checksum mismatch")
 
-        self.blob = file_blobs[0] if file_blobs else None
+        if len(file_blobs) == 1:
+            self.blob = file_blobs[0]
+        elif file_blobs:
+            tf.flush()
+            tf.seek(0)
+            combined_blob, _ = FileBlob.objects.get_or_create(
+                checksum=self.checksum,
+                defaults={"blob": FileObj(tf, name=self.checksum), "size": offset},
+            )
+            tf.seek(0)
+            self.blob = combined_blob
+        else:
+            self.blob = None
 
         if commit:
             self.save()

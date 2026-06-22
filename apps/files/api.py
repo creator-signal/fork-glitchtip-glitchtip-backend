@@ -18,7 +18,6 @@ from glitchtip.api.permissions import has_permission
 
 from .models import FileBlob
 
-# Force just one blob
 CHUNK_UPLOAD_BLOB_SIZE = 32 * 1024 * 1024  # 32MB
 MAX_CHUNKS_PER_REQUEST = 1
 MAX_REQUEST_SIZE = CHUNK_UPLOAD_BLOB_SIZE
