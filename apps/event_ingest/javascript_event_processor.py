@@ -91,13 +91,11 @@ class JavascriptEventProcessor:
         return [frame for frame in stacktrace.frames if frame is not None and frame.lineno is not None]
 
     def get_sourcemap_cache(self, minified_source, map_file) -> SourceMapCache:
-        # SourceMapCache.from_bytes() parses the entire minified source and
-        # sourcemap, which is expensive for large bundles (multi-MB React
-        # Native / webpack output). The frames of a single event almost all
-        # resolve against the same bundle, so parsing once per frame rebuilt
-        # the identical cache repeatedly -- enough to peg the ingest worker at
-        # 100% CPU on large maps. Memoize per (minified file id, sourcemap file
-        # id) pair so each bundle is parsed at most once per event.
+        # SourceMapCache.from_bytes() parses the whole minified source and
+        # sourcemap, which is costly for large bundles. A single event's frames
+        # mostly share one bundle, so memoize per (minified file id, sourcemap
+        # file id) pair to parse each bundle at most once per event rather than
+        # once per frame.
         key = (minified_source.id, map_file.id)
         cache = self._sourcemap_caches.get(key)
         if cache is None:
