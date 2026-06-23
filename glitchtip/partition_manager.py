@@ -11,6 +11,7 @@ and multi-tenant query performance.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -366,7 +367,6 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         Returns:
             Number of partitions dropped
         """
-        import re
         from datetime import timedelta
 
         partitions = self.list_partitions(parent_table)
@@ -500,11 +500,50 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
         # Check what already exists to avoid unnecessary heavy locks.
         range_exists = self.table_exists(partition_name)
         if range_exists and hash_buckets > 0:
-            existing_children = {
-                p["partition_name"] for p in self.list_partitions(partition_name)
-            }
+            existing_children = self.list_partitions(partition_name)
         else:
-            existing_children = set()
+            existing_children = []
+
+        # A hash partition set always tiles the entire keyspace at a single
+        # modulus, and that modulus cannot be changed online (no incremental
+        # bucket add without detach + rewrite). If a range partition already
+        # has hash children at a *different* modulus than the configured
+        # bucket count, it is already 100% complete — every row maps somewhere
+        # — so attempting to create buckets at the new modulus would overlap
+        # the existing ones ("partition ... would overlap partition ..."). In
+        # that case the only correct action is to leave the existing set alone.
+        existing_modulus = None
+        if existing_children:
+            moduli = set()
+            for child in existing_children:
+                bounds = child.get("partition_bounds") or ""
+                match = re.search(r"modulus\s+(\d+)", bounds, re.IGNORECASE)
+                if match:
+                    moduli.add(int(match.group(1)))
+            if len(moduli) == 1:
+                existing_modulus = moduli.pop()
+            elif len(moduli) > 1:
+                # Hash siblings disagree on modulus — an inconsistent set we
+                # must not touch. Leave it for manual inspection.
+                logger.warning(
+                    f"Partition {partition_name} has hash children with "
+                    f"inconsistent moduli {sorted(moduli)}; leaving as-is"
+                )
+                return 0
+
+        if existing_modulus is not None and existing_modulus != hash_buckets:
+            # The range partition is already fully tiled at a modulus that
+            # differs from the configured bucket count. Changing the hash
+            # modulus requires a detach + rewrite, so do nothing here.
+            logger.info(
+                f"Partition {partition_name} already has a complete "
+                f"{existing_modulus}-bucket hash set; configured count "
+                f"({hash_buckets}) differs, leaving as-is "
+                f"(changing hash modulus requires a rewrite)"
+            )
+            return 0
+
+        existing_child_names = {p["partition_name"] for p in existing_children}
 
         sqls = self.create_time_partition(
             parent_table=parent_table,
@@ -522,11 +561,13 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
             sqls_to_execute = sqls
         elif hash_buckets > 0:
             # Range partition exists — only create missing hash children.
+            # Reaching here means existing children (if any) share the
+            # configured modulus, so name-based gap filling is correct.
             # sqls[0] is the range partition, sqls[1:] are h0..hN in order.
             sqls_to_execute = [
                 sql
                 for i, sql in enumerate(sqls[1:])
-                if f"{partition_name}_h{i}" not in existing_children
+                if f"{partition_name}_h{i}" not in existing_child_names
             ]
         else:
             sqls_to_execute = []
