@@ -3,6 +3,7 @@ import logging
 import time
 
 import aiohttp
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.http import (
@@ -18,9 +19,14 @@ from pydantic import ValidationError
 from apps.organizations_ext.models import Organization
 from apps.organizations_ext.tasks import check_organization_throttle
 
-from .client import stripe_get
+from .client import mark_welcome_sent, stripe_get
 from .constants import ACTIVE_SUBSCRIPTION_STATUSES
-from .models import StripePrice, StripeProduct, StripeSubscription
+from .email import SupportLicenseWelcomeEmail
+from .models import (
+    StripePrice,
+    StripeProduct,
+    StripeSubscription,
+)
 from .schema import Customer, Price, Product, StripeEvent, Subscription
 from .utils import compute_cycle, unix_to_datetime
 
@@ -74,26 +80,83 @@ async def update_price(price: Price):
     )
 
 
+async def handle_support_subscription(
+    subscription: Subscription, customer_obj: Customer
+) -> bool:
+    """Handle an instance-wide support-license purchase (no GlitchTip org).
+
+    Returns True if the subscription is a support product (handled), else False
+    so the caller can fall through to its normal missing-org handling.
+
+    Idempotency is the `welcome_sent` flag on the Stripe subscription, not a
+    local row — it rides in on the webhook payload, so the check is free.
+    Send-then-mark (at-least-once): a dropped mark re-sends on Stripe's retry,
+    which beats a record-then-send that can silently lose the only delivery.
+    """
+    if (subscription.metadata or {}).get("welcome_sent"):
+        return True
+
+    price = subscription.items.data[0].price
+    product_id = price.product if isinstance(price.product, str) else None
+    if not product_id:
+        return False
+    product = Product.model_validate_json(await stripe_get(f"products/{product_id}"))
+    if product.metadata.get("product_type", "").lower() != "support":
+        return False
+
+    if subscription.status not in ACTIVE_SUBSCRIPTION_STATUSES:
+        # Not active yet (e.g. incomplete). A later subscription.updated event
+        # fires the welcome once it activates.
+        return True
+    if not settings.EMAIL_ENABLED:
+        return True
+    if not customer_obj.email:
+        # Terminal: active support sub with no customer email — retrying the same
+        # payload can't help, so return (200, to stop Stripe's retries) and alert
+        # with the sub id only (no PII). A later event carrying an email sends.
+        logger.error(
+            f"Support subscription {subscription.id} is active but its customer "
+            "has no email"
+        )
+        return True
+
+    try:
+        await sync_to_async(
+            SupportLicenseWelcomeEmail(license_key=subscription.id).send_email
+        )(customer_obj.email)
+        await mark_welcome_sent(subscription.id)
+    except Exception:
+        # Transient (SMTP/Stripe blip). Re-raise so the webhook 500s and Stripe
+        # retries; the next attempt re-sends. A mark that fails after a good send
+        # just re-sends once on retry — benign.
+        logger.warning(f"Support welcome send/mark failed for {subscription.id}")
+        raise
+    return True
+
+
 async def update_subscription(subscription: Subscription, request: HttpRequest):
     customer_obj = Customer.model_validate_json(
         await stripe_get(f"customers/{subscription.customer}")
     )
-    customer_metadata = customer_obj.metadata
-    if not customer_metadata:
-        logger.warning(f"Customer {customer_obj.id} has no metadata")
-        return
-    try:
-        organization_id = int(
-            customer_metadata.get(
-                "organization_id", customer_metadata.get("djstripe_subscriber")
-            )
-        )
-    except TypeError:
+    customer_metadata = customer_obj.metadata or {}
+    organization_id = None
+    org_id_raw = customer_metadata.get(
+        "organization_id", customer_metadata.get("djstripe_subscriber")
+    )
+    if org_id_raw is not None:
+        try:
+            organization_id = int(org_id_raw)
+        except (TypeError, ValueError):
+            organization_id = None
+
+    if not organization_id:
+        # No GlitchTip org. May be an instance-wide support-license purchase,
+        # handled (welcome email) without an org; otherwise it's a real anomaly.
+        if await handle_support_subscription(subscription, customer_obj):
+            return
         logger.warning(
             f"Customer {customer_obj.id} has no organization_id", exc_info=True
         )
-        return
-    if not organization_id:
         return
 
     # Check region, is it this region or should it be forwarded
@@ -164,7 +227,7 @@ async def update_subscription(subscription: Subscription, request: HttpRequest):
         await check_organization_throttle.aenqueue(organization.id, True)
 
     # Primary subscription should be removed if status is not active
-    elif stripe_subscription.stripe_id is organization.stripe_primary_subscription_id:
+    elif stripe_subscription.stripe_id == organization.stripe_primary_subscription_id:
         organization.stripe_primary_subscription = None
         await organization.asave(update_fields=["stripe_primary_subscription"])
 

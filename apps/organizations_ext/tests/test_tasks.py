@@ -1,5 +1,7 @@
+from unittest.mock import AsyncMock, patch
+
 from asgiref.sync import async_to_sync
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from model_bakery import baker
 
@@ -7,6 +9,8 @@ from apps.issue_events.models import Issue, IssueEvent
 from apps.logs.models import LogEvent
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import Organization
+from apps.stripe.constants import SubscriptionStatus
+from apps.stripe.models import StripeSubscription
 from apps.uptime.models import MonitorCheck
 from glitchtip.partition_manager import UUID7Helper
 
@@ -69,6 +73,32 @@ class DeleteOrganizationTaskTestCase(TestCase):
 
         self.assertFalse(Organization.objects.filter(id=org.id).exists())
         self.assertFalse(MonitorCheck.objects.filter(id=check.id).exists())
+
+    @override_settings(BILLING_ENABLED=True)
+    def test_delete_org_cancels_stripe_subscription(self):
+        """Deleting an org must cancel its active subscription in Stripe."""
+        now = timezone.now()
+        org = baker.make("organizations_ext.Organization")
+        product = baker.make("stripe.StripeProduct", events=1000)
+        price = baker.make("stripe.StripePrice", product=product)
+        subscription = StripeSubscription.objects.create(
+            stripe_id="sub_active",
+            created=now,
+            current_period_start=now,
+            current_period_end=now,
+            start_date=now,
+            price=price,
+            organization=org,
+            status=SubscriptionStatus.ACTIVE,
+        )
+
+        with patch(
+            "apps.stripe.models.cancel_subscription", new_callable=AsyncMock
+        ) as mock_cancel:
+            _delete_organization_sync(org.id)
+
+        mock_cancel.assert_awaited_once_with(subscription.stripe_id)
+        self.assertFalse(Organization.objects.filter(id=org.id).exists())
 
     def test_delete_org_via_api(self):
         """Full round-trip: API soft-deletes, task batch-deletes partitioned data."""

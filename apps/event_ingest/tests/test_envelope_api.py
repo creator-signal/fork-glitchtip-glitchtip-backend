@@ -1,8 +1,10 @@
+import gzip
 import json
 import uuid
 from unittest import mock
 from urllib.parse import urlparse
 
+import sentry_sdk
 from django.core.cache import cache
 from django.tasks import task_backends
 from django.test.client import FakePayload
@@ -11,7 +13,6 @@ from freezegun import freeze_time
 
 from apps.issue_events.models import IssueEvent, UserReport
 from apps.performance.models import TransactionGroup
-from glitchtip.test_utils.async_query_counter import AsyncQueryCounter
 
 from .utils import EventIngestTestCase, list_to_envelope
 
@@ -52,14 +53,36 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         return "\n".join([json.dumps(line) for line in json_data])
 
     def test_envelope_api(self):
-        with AsyncQueryCounter() as q:
-            res = self.client.post(
-                self.url,
-                list_to_envelope(self.django_event),
-                content_type="application/json",
-            )
-            task_backends["default"].flush_batches()
-        self.assertEqual(len(q), 17)
+        # TODO: re-add assertNumQueries once unit tests run on the async
+        # backend. assertNumQueries only observes Django's sync connection and
+        # can't count the ingest queries issued through async_connections.
+        res = self.client.post(
+            self.url,
+            list_to_envelope(self.django_event),
+            content_type="application/json",
+        )
+        task_backends["default"].flush_batches()
+        self.assertContains(res, self.django_event[0]["event_id"])
+        self.assertEqual(self.project.issues.count(), 1)
+        self.assertEqual(IssueEvent.objects.count(), 1)
+
+    def test_envelope_api_gzip(self):
+        """A gzip Content-Encoded envelope is decompressed + framed in Rust.
+
+        DecompressBodyMiddleware is gone, so the view hands the raw compressed
+        body and the Content-Encoding straight to gt_rust's parse_envelope.
+        """
+        payload = list_to_envelope(self.django_event)
+        if isinstance(payload, str):
+            payload = payload.encode()
+        res = self.client.post(
+            self.url,
+            data=gzip.compress(payload),
+            content_type="application/x-sentry-envelope",
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
         self.assertContains(res, self.django_event[0]["event_id"])
         self.assertEqual(self.project.issues.count(), 1)
         self.assertEqual(IssueEvent.objects.count(), 1)
@@ -90,7 +113,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertFalse(TransactionGroup.objects.exists())
 
-        with freeze_time("2020-01-01"):
+        # Fixture transaction is timestamped 2020-12-29T17:51:08Z; freeze
+        # just after so it lands inside the freshness window.
+        with freeze_time("2020-12-29T18:00:00Z"):
             res = self.client.post(
                 self.url,
                 data,
@@ -323,6 +348,44 @@ class EnvelopeAPITestCase(EventIngestTestCase):
             "Should have processed the valid event after ignoring the attachment.",
         )
 
+    def test_envelope_empty_event_id_header(self):
+        """
+        Some SDKs (e.g. sentry-go on client_report envelopes, which have no
+        associated event) send an empty string for the optional event_id
+        header field instead of omitting it. The envelope must still be
+        accepted rather than rejected with a 400 for an invalid UUID.
+        """
+        envelope_header_bytes = json.dumps(
+            {
+                "event_id": "",
+                "sent_at": "2025-04-08T13:09:00Z",
+                "dsn": "https://key@app.example.com/1",
+            }
+        ).encode()
+        report_payload_bytes = json.dumps(
+            {
+                "timestamp": "2025-04-08T13:09:00Z",
+                "discarded_events": [
+                    {"reason": "sample_rate", "category": "transaction", "quantity": 6}
+                ],
+            }
+        ).encode()
+        report_header_bytes = json.dumps(
+            {"type": "client_report", "length": len(report_payload_bytes)}
+        ).encode()
+
+        data = (
+            envelope_header_bytes
+            + b"\n"
+            + report_header_bytes
+            + b"\n"
+            + report_payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(self.url, data, content_type="application/json")
+        self.assertEqual(res.status_code, 200, res.content)
+
     def test_envelope_ignores_log_item_with_length(self):
         """
         Ensure that log items are skipped, but subsequent valid events are being processed.
@@ -435,7 +498,9 @@ class EnvelopeAPITestCase(EventIngestTestCase):
 
         envelope = self.get_string_payload(data)
 
-        with freeze_time("2020-01-01"):
+        # Fixture transaction is timestamped 2020-12-29T17:51:08Z; freeze
+        # just after so it lands inside the freshness window.
+        with freeze_time("2020-12-29T18:00:00Z"):
             res = self.client.post(
                 self.url,
                 envelope,
@@ -632,3 +697,75 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(report.comments, "Anonymous feedback")
         self.assertEqual(report.name, "")
         self.assertEqual(report.email, "")
+
+    @mock.patch("apps.event_ingest.views.sentry_sdk.capture_exception")
+    @mock.patch("apps.event_ingest.views.capture_exception")
+    def test_ignored_trace_metric_item(self, mock_capture, mock_scoped_capture):
+        """
+        A `trace_metric` item is an explicitly ignored type: it must be
+        accepted-and-dropped silently, without capturing any exception, and
+        must not fail the envelope.
+        """
+        payload_bytes = json.dumps({"some": "metric"}).encode()
+        data = (
+            json.dumps({"event_id": uuid.uuid4().hex}).encode()
+            + b"\n"
+            + json.dumps(
+                {
+                    "type": "trace_metric",
+                    "content_type": "application/vnd.sentry.items.trace-metric+json",
+                    "length": len(payload_bytes),
+                }
+            ).encode()
+            + b"\n"
+            + payload_bytes
+            + b"\n"
+        )
+
+        res = self.client.post(
+            self.url, data, content_type="application/x-sentry-envelope"
+        )
+        task_backends["default"].flush_batches()
+
+        self.assertEqual(res.status_code, 200, res.content)
+        mock_capture.assert_not_called()
+        mock_scoped_capture.assert_not_called()
+
+    @mock.patch("apps.event_ingest.views.sentry_sdk.capture_exception")
+    def test_unknown_item_type_fingerprints_per_type(self, mock_capture):
+        """
+        An unknown item type (in neither the supported nor ignored lists)
+        captures an exception fingerprinted by the offending type, so each
+        genuinely-new type surfaces as its own issue rather than folding all
+        unknown types together.
+        """
+        captured_fingerprints = []
+
+        def record_fingerprint(_exc):
+            scope = sentry_sdk.get_current_scope()
+            captured_fingerprints.append(list(scope._fingerprint))
+
+        mock_capture.side_effect = record_fingerprint
+
+        for item_type in ("wholly_made_up_type", "another_made_up_type"):
+            data = (
+                json.dumps({"event_id": uuid.uuid4().hex}).encode()
+                + b"\n"
+                + json.dumps({"type": item_type}).encode()
+                + b"\n"
+                + json.dumps({"foo": "bar"}).encode()
+                + b"\n"
+            )
+            res = self.client.post(
+                self.url, data, content_type="application/x-sentry-envelope"
+            )
+            self.assertEqual(res.status_code, 200, res.content)
+
+        self.assertEqual(mock_capture.call_count, 2)
+        self.assertEqual(
+            captured_fingerprints,
+            [
+                ["envelope-unsupported-item-type", "wholly_made_up_type"],
+                ["envelope-unsupported-item-type", "another_made_up_type"],
+            ],
+        )

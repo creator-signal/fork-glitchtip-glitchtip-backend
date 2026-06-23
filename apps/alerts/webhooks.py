@@ -529,9 +529,97 @@ async def send_issue_as_zulip(
     )
 
 
+async def send_feishu_webhook(url: str, payload: dict) -> None:
+    if not await _is_url_allowed(url):
+        return None
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
+            async with session.post(url, json=payload, timeout=timeout) as resp:
+                return resp
+    except (TimeoutError, aiohttp.ClientError):
+        return None
+
+
+async def send_issue_as_feishu_webhook(
+    url,
+    issues: list,
+    issue_count: int = 1,
+    tags_to_add: list[str] | None = None,
+    **kwargs,
+):
+    title = "GlitchTip Alert"
+    if issue_count > 1:
+        title += f" ({issue_count} issues)"
+
+    elements = []
+    for issue in issues:
+        tags = await gather_issue_tags(issue, tags_to_add)
+        fields = [
+            {
+                "is_short": True,
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**Project**\n{issue.project.name}",
+                },
+            }
+        ]
+        for tag in tags:
+            fields.append(
+                {
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**{tag.label}**\n{tag.value}",
+                    },
+                }
+            )
+
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**[{issue}]({issue.get_detail_url()})**\n{issue.culprit or ''}",
+                },
+                "fields": fields,
+            }
+        )
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": f"View Issue {issue.short_id_display}",
+                        },
+                        "url": issue.get_detail_url(),
+                        "type": "primary",
+                    }
+                ],
+            }
+        )
+        elements.append({"tag": "hr"})
+
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": "red",
+            },
+            "elements": elements,
+        },
+    }
+    return await send_feishu_webhook(url, payload)
+
+
 ISSUE_NOTIFICATION_HANDLERS = {
     RecipientType.GENERAL_WEBHOOK: send_issue_as_webhook,
     RecipientType.DISCORD: send_issue_as_discord_webhook,
+    RecipientType.FEISHU: send_issue_as_feishu_webhook,
     RecipientType.GOOGLE_CHAT: send_issue_as_googlechat_webhook,
     RecipientType.NTFY: send_issue_as_ntfy,
     RecipientType.MICROSOFT_TEAMS: send_issue_as_teams_webhook,
@@ -547,7 +635,7 @@ async def send_test_notification(
 
     issue = await (
         Issue.objects.filter(project=project)
-        .select_related("project__organization")
+        .select_related("project__organization", "index")
         .order_by("-id")
         .afirst()
     )
@@ -586,6 +674,20 @@ async def send_test_notification(
             title=title, description=message, color=0x4B60B4, url="", fields=[]
         )
         return await send_discord_webhook(url, title, [embed])
+    elif recipient_type == RecipientType.FEISHU:
+        payload = {
+            "msg_type": "interactive",
+            "card": {
+                "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "blue",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "plain_text", "content": message}}
+                ],
+            },
+        }
+        return await send_feishu_webhook(url, payload)
     elif recipient_type == RecipientType.GOOGLE_CHAT:
         card = GoogleChatCard()
         card.header = dict(title=title, subtitle=project.name)
@@ -607,7 +709,7 @@ async def send_webhook_notification(
     issues = [
         issue
         async for issue in notification.issues.select_related(
-            "project__organization"
+            "project__organization", "index"
         ).all()[: settings.MAX_ISSUES_PER_ALERT]
     ]
 

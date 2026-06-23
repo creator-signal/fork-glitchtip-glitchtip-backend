@@ -228,6 +228,40 @@ class TransactionIngestTestCase(TransactionTestCase):
         self.assertIn("%s", db_span.description)
 
     @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
+    def test_span_backdated_timestamp_uses_server_time_id(self):
+        """A span whose client clock predates the staging partition horizon
+        must still insert. The id is derived from server (ingestion) time so
+        it lands in a live partition, while the real client time is kept in
+        the timestamp column. Guards against the missing-partition
+        IntegrityError that occurred when the id tracked the client clock.
+        """
+        backdated = timezone.now() - timedelta(days=6)
+        spans = [
+            {
+                "trace_id": "a" * 32,
+                "span_id": "c" * 16,
+                "parent_span_id": "b" * 16,
+                "op": "db",
+                "description": "SELECT * FROM users WHERE id = 1",
+                "start_timestamp": backdated.isoformat(),
+                "timestamp": (backdated + timedelta(milliseconds=15)).isoformat(),
+            }
+        ]
+        # Transaction itself is recent; only the span is backdated.
+        payload = _make_transaction_payload(spans=spans)
+        before = timezone.now()
+        self._ingest([payload])
+
+        span = SpanStaging.objects.get()
+        # Real client event time is preserved in the timestamp column.
+        self.assertAlmostEqual(span.timestamp, backdated, delta=timedelta(seconds=1))
+        # The id (UUIDv7) encodes server ingestion time, not the client clock:
+        # high 48 bits are unix_ts_ms.
+        id_epoch = ((span.id.int >> 80) & 0xFFFFFFFFFFFF) / 1000
+        self.assertAlmostEqual(id_epoch, before.timestamp(), delta=5)
+        self.assertGreater(id_epoch - backdated.timestamp(), 5 * 86400)
+
+    @override_settings(GLITCHTIP_ENABLE_DUCKDB="true")
     def test_span_description_parameterized(self):
         """SQL literals in span descriptions are replaced with %s."""
         base = timezone.now() - timedelta(minutes=1)

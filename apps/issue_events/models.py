@@ -4,6 +4,8 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.db.models import Q
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 from glitchtip.base_models import AggregationModel, CreatedModel, SoftDeleteModel
@@ -18,15 +20,6 @@ from .utils import base32_encode
 def _generate_uuid7():
     """Generate UUIDv7 for IssueEvent default."""
     return UUID7Helper.from_datetime()
-
-
-class DeferedFieldManager(models.Manager):
-    def __init__(self, defered_fields=[]):
-        super().__init__()
-        self.defered_fields = defered_fields
-
-    def get_queryset(self, *args, **kwargs):
-        return super().get_queryset(*args, **kwargs).defer(*self.defered_fields)
 
 
 class TagKey(models.Model):
@@ -90,13 +83,6 @@ class Issue(SoftDeleteModel):
     first_release = models.ForeignKey(
         "releases.Release", blank=True, null=True, on_delete=models.SET_NULL
     )
-    last_release = models.ForeignKey(
-        "releases.Release",
-        blank=True,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name="+",
-    )
     resolved_in_release = models.ForeignKey(
         "releases.Release",
         blank=True,
@@ -121,25 +107,14 @@ class Issue(SoftDeleteModel):
         db_index=False,
     )
     first_seen = models.DateTimeField(default=timezone.now, db_index=True)
-    last_seen = models.DateTimeField(default=timezone.now, db_index=True)
-    count = models.PositiveIntegerField(default=1, editable=False)
     short_id = models.PositiveIntegerField(null=True)
-    level = models.PositiveSmallIntegerField(
-        choices=LogLevel.choices, default=LogLevel.ERROR
-    )
     type = models.PositiveSmallIntegerField(
         choices=IssueEventType.choices, default=IssueEventType.DEFAULT
-    )
-    status = models.PositiveSmallIntegerField(
-        choices=EventStatus.choices, default=EventStatus.UNRESOLVED
     )
     is_public = models.BooleanField(default=False)
     culprit = models.CharField(max_length=1024, blank=True, null=True)
     title = models.CharField(max_length=255)
     metadata = models.JSONField()
-    search_vector = SearchVectorField(editable=False, default="")
-
-    objects = DeferedFieldManager(["search_vector"])
 
     class Meta:
         base_manager_name = "objects"
@@ -155,7 +130,6 @@ class Issue(SoftDeleteModel):
             ),
         ]
         indexes = [
-            GinIndex(fields=["search_vector"]),
             GinIndex(
                 fields=["title"],
                 name="issue_title_trgm_idx",
@@ -172,6 +146,43 @@ class Issue(SoftDeleteModel):
                 name="issue_assigned_team_idx",
             ),
         ]
+
+    # --- Hot-split proxies ---------------------------------------------------
+    # count/last_seen/status/level/last_release live on the one-to-one
+    # IssueIndex leaf (``index``). These read-only proxies preserve
+    # the Issue read API; ORM queries that filter/sort on them must use
+    # ``index__<field>`` and any code reading them in bulk should
+    # ``select_related("index")`` to avoid an extra query per issue.
+    # Writes go through the leaf directly (see process_event / api.issues).
+    @property
+    def last_seen(self):
+        return self.index.last_seen
+
+    @property
+    def count(self):
+        return self.index.count
+
+    @property
+    def status(self):
+        return self.index.status
+
+    @property
+    def level(self):
+        return self.index.level
+
+    @property
+    def last_release(self):
+        return self.index.last_release
+
+    @property
+    def last_release_id(self):
+        return self.index.last_release_id
+
+    def get_status_display(self):
+        return self.index.get_status_display()
+
+    def get_level_display(self):
+        return self.index.get_level_display()
 
     def __str__(self):
         return self.title
@@ -196,6 +207,91 @@ class Issue(SoftDeleteModel):
         if self.short_id is not None:
             return f"{self.project.slug.upper()}-{base32_encode(self.short_id)}"
         return ""
+
+
+class IssueIndex(models.Model):
+    """
+    Hash-partitioned hot/queryable projection of Issue, decoupled from the main
+    Issue table.
+
+    Holds the per-event-updated columns (count, last_seen, last_release) plus
+    status/level and the full-text ``fts_document``. Moving these off the wide
+    Issue row keeps Issue small and near-static (no per-event rewrite) and gives
+    these columns org-partition pruning on the issue-list and search paths.
+    ``Issue`` exposes them through proxy properties (``issue.count`` etc.) that
+    read this related row, so most readers are unchanged; queries and writes go
+    through ``index__*`` / this model directly.
+
+    Fields ordered for alignment (8 / 8 / 8 / 4 / 4 / 2 / 2 then the varlena
+    tsvector); see create_issue_index.sql for the packed layout.
+    """
+
+    # 8-byte. db_constraint=False because a partitioned table can be neither the
+    # target nor (without including the partition key) the source of a DB-level
+    # FK; the constraints are intentionally omitted in SQL. Issue rows are
+    # pre-deleted in delete_issues_in_batches.
+    issue = models.OneToOneField(
+        Issue,
+        on_delete=models.CASCADE,
+        related_name="index",
+        db_constraint=False,
+    )
+    last_release = models.ForeignKey(
+        "releases.Release",
+        blank=True,
+        null=True,
+        on_delete=models.DO_NOTHING,
+        related_name="+",
+        db_constraint=False,
+        db_index=False,
+    )
+    last_seen = models.DateTimeField(default=timezone.now, editable=False)
+
+    # 4-byte
+    organization = models.ForeignKey(
+        "organizations_ext.Organization",
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+    )
+    count = models.PositiveIntegerField(default=1, editable=False)
+
+    # 2-byte. Co-located with last_seen so the default issue-list filter (status)
+    # and sort (last_seen) stay single-table on this leaf after the split.
+    status = models.PositiveSmallIntegerField(
+        choices=EventStatus.choices, default=EventStatus.UNRESOLVED
+    )
+    level = models.PositiveSmallIntegerField(
+        choices=LogLevel.choices, default=LogLevel.ERROR
+    )
+
+    pk = models.CompositePrimaryKey("issue", "organization")
+
+    # Variable-width: keep last so the fixed head packs without padding.
+    fts_document = SearchVectorField(editable=False, default="")
+
+    class Meta:
+        # Only the GIN is declared here (its name is pinned to the raw SQL). The
+        # org-scoped btree indexes are created by the raw SQL too but, like the
+        # hash partitions, are intentionally not part of Django's model state.
+        indexes = [
+            GinIndex(fields=["fts_document"], name="issueindex_fts_gin"),
+        ]
+
+
+@receiver(post_save, sender=Issue)
+def _ensure_issue_index(instance, created, raw=False, **kwargs):
+    """Give every ORM-created Issue its IssueIndex projection row.
+
+    Ingest creates the leaf via raw SQL and does not go through Model.save, so
+    the hot write path never hits this. This covers Issues created through the
+    ORM (tests, admin, future code), keeping the ``issue.index`` invariant
+    that the proxy properties rely on. Idempotent (get_or_create).
+    """
+    if created and not raw:
+        IssueIndex.objects.get_or_create(
+            issue_id=instance.id,
+            organization_id=instance.project.organization_id,
+        )
 
 
 class IssueHash(models.Model):

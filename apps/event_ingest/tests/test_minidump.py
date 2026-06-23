@@ -1,8 +1,11 @@
+import gzip
 import uuid
 
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.tasks import task_backends
 from django.test import TestCase
+from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
 from django.urls import reverse
 
 from apps.event_ingest.minidump_event import (
@@ -108,6 +111,9 @@ class MinidumpToEventTest(TestCase):
         self.assertEqual(images[0]["type"], "elf")
         self.assertEqual(images[0]["image_addr"], "0x400000")
         self.assertEqual(images[0]["image_size"], 0x10000)
+        self.assertEqual(
+            images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1"
+        )
         self.assertEqual(
             images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1"
         )
@@ -242,7 +248,7 @@ class MinidumpViewTest(EventIngestTestCase):
         # Release is stored as a FK, not in event.data
         self.assertTrue(Release.objects.filter(version="1.0.0").exists())
 
-    async def test_missing_file(self):
+    def test_missing_file(self):
         """Request without upload_file_minidump returns 400."""
         res = await self.async_client.post(self.url, {"sentry": "{}"})
         self.assertEqual(res.status_code, 400)

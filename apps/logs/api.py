@@ -470,7 +470,7 @@ def query_cold_storage(
 
     rows = query_cold_parquet_files(
         organization_id=organization_id,
-        table_name="logs_logevent",
+        storage_prefix="logs_logevent",
         select_columns=select_columns,
         where_sql=where_sql,
         params=params,

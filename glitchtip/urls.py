@@ -6,6 +6,7 @@ from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from organizations.backends import invitation_backend
 
+from apps.event_ingest.otlp_views import otlp_logs_view
 from apps.event_ingest.views import event_envelope_view, minidump_view
 from apps.stripe.views import stripe_webhook_view
 
@@ -26,6 +27,11 @@ urlpatterns = [
     ),
     path("api/<int:project_id>/envelope/", event_envelope_view, name="event_envelope"),
     path("api/<int:project_id>/minidump/", minidump_view, name="minidump"),
+    # Native OTLP/HTTP ingest. OTel exporters POST to <endpoint>/v1/logs (the
+    # trailing slash is optional and tolerated); the project is resolved from
+    # the DSN key in the auth header. Routed through the minimal ingest
+    # middleware — see ingest_asgi.py.
+    re_path(r"^v1/logs/?$", otlp_logs_view, name="otlp_logs"),
     path("api/", RedirectView.as_view(url="/profile/auth-tokens")),
     # OSS Sentry compat - redirect the non-api prefix url to the more typical api prefix
     path(
@@ -42,22 +48,6 @@ urlpatterns = [
         name="stripe_webhook_with_type",
     ),
 ]
-
-# Synthetic async-DB benchmark endpoint. Mounted only when the flag is
-# set so it doesn't appear in the URL conf for normal deployments. The
-# IngestDispatcher routes /api/_probe/ through the minimal middleware
-# chain — see glitchtip/ingest_asgi.py.
-if getattr(settings, "ASYNC_PROBE_ENABLED", False):
-    from .async_probe import async_probe, realistic_probe
-
-    urlpatterns += [
-        path("api/_probe/async/", async_probe, name="async_probe"),
-        path(
-            "api/_probe/realistic/",
-            realistic_probe,
-            name="realistic_probe",
-        ),
-    ]
 
 if "django.contrib.admin" in settings.INSTALLED_APPS:
     if settings.GLITCHTIP_INSTANCE_NAME:

@@ -9,7 +9,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from apps.issue_events.models import EventStatus, Issue
+from apps.issue_events.models import EventStatus, Issue, IssueIndex
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.projects.models import ProjectAlertStatus
 from glitchtip.test_utils.test_case import (
@@ -199,8 +199,7 @@ class AlertTestCase(GlitchTipTransactionTestCase):
 
         # Mark resolved
         issue = Issue.objects.first()
-        issue.status = EventStatus.RESOLVED
-        issue.save()
+        IssueIndex.objects.filter(issue=issue).update(status=EventStatus.RESOLVED)
 
         # Send a second event
         data["event_id"] = "cf536c31b68a473f97e579507ce155e4"

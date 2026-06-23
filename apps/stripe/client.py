@@ -105,6 +105,11 @@ async def stripe_post(endpoint: str, data: dict) -> str:
     return await _stripe_request("POST", f"{STRIPE_URL}/{endpoint}", data=data)
 
 
+async def stripe_delete(endpoint: str) -> str:
+    """Makes DELETE requests to the Stripe API. Returns response text"""
+    return await _stripe_request("DELETE", f"{STRIPE_URL}/{endpoint}")
+
+
 async def _paginated_stripe_get(
     endpoint: str,
     response_model: Type[StripeListResponse[T]],  # Use the generic type here
@@ -207,7 +212,7 @@ async def create_session(
         + "/"
         + organization_slug
         + "/settings/subscription?session_id={CHECKOUT_SESSION_ID}",
-        "cancel_url": domain + "",
+        "cancel_url": domain + "/" + organization_slug + "/settings/subscription",
     }
     response = await stripe_post("checkout/sessions", params)
     return Session.model_validate_json(response)
@@ -226,6 +231,14 @@ async def create_portal_session(customer_id: str, organization_slug: str):
     return PortalSession.model_validate_json(response)
 
 
+async def mark_welcome_sent(subscription_id: str) -> None:
+    """Record on the Stripe subscription that the support-license welcome email
+    was sent. The bracket form merges the key, leaving other metadata intact."""
+    await stripe_post(
+        f"subscriptions/{subscription_id}", {"metadata[welcome_sent]": "true"}
+    )
+
+
 async def create_subscription(customer: str, price: str, **kwargs) -> Subscription:
     params = {
         "customer": customer,
@@ -239,4 +252,9 @@ async def create_subscription(customer: str, price: str, **kwargs) -> Subscripti
 
 async def fetch_subscription(id: str) -> Subscription:
     response = await stripe_get("subscriptions/" + id)
+    return Subscription.model_validate_json(response)
+
+
+async def cancel_subscription(id: str) -> Subscription:
+    response = await stripe_delete("subscriptions/" + id)
     return Subscription.model_validate_json(response)

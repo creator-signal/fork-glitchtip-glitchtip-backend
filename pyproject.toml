@@ -6,10 +6,8 @@ authors = ["David Burke"]
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "Brotli>=1.2.0",
-    "zstandard>=0.23.0; python_version < '3.14'",
     "django~=6.0",
-    "django-vtasks[valkey]~=2.0",
+    "django-vtasks[valkey]~=2.1.2",
     "django-allauth[mfa,socialaccount]~=65.0",
     "django-cors-headers~=4.0",
     "django-environ~=0.11",
@@ -24,7 +22,7 @@ dependencies = [
     "user-agents~=2.1",
     "django-ipware~=7.0",
     "anonymizeip~=1.0",
-    "symbolic~=12.18.0",
+    "symbolic~=13.3.0",
     "aiohttp~=3.7",
     "google-cloud-logging~=3.0",
     "django-prometheus~=2.2",
@@ -39,14 +37,16 @@ dependencies = [
     "django-postgres-partition>=0.1.4",
     "pyyaml>=6.0.2", # allauth openapi spec
     "granian[reload,uvloop]>=2.6.0",
-    "django-vcache>=2.1.1",
+    "django-vcache>=2.2.0",
+    "glitchtip-rust>=0.2.1",
     "uuid6>=2024.1.12",
     "mcp[cli]>=1.9",
     "duckdb>=1.2.0",
     "minidump>=0.0.24",
     "arro3-core~=0.8",
     "arro3-io~=0.8",
-    "django-async-backend",
+    "django-async-backend~=6.0",
+    "opentelemetry-proto~=1.0",
 ]
 
 [dependency-groups]
@@ -54,7 +54,7 @@ dev = [
     "locust~=2.10",
     "freezegun~=1.1",
     "model-bakery-async~=1.23",
-    "django-debug-toolbar~=6.0",
+    "django-debug-toolbar~=7.0",
     "django-stubs[compatible-mypy]~=6.0",
     "django-sslserver~=0.22",
     "aioresponses~=0.7",
