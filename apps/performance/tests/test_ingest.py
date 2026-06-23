@@ -290,3 +290,19 @@ class TransactionIngestTestCase(TransactionTestCase):
         self._ingest([_make_transaction_payload()])
         group = TransactionGroup.objects.first()
         self.assertEqual(group.organization_id, self.organization.id)
+
+    def test_nul_byte_in_transaction_name_stripped(self):
+        """A NUL (0x00) byte in the SDK-supplied transaction name is stripped
+        before the group-lookup SELECT runs (Postgres rejects NUL in text
+        params), so ingest does not raise and the group is created clean."""
+        payload = _make_transaction_payload(
+            transaction_name="/api/\x00bad/", op="http.\x00server", method="G\x00ET"
+        )
+        # Must not raise DataError from the unnest text[] bind params.
+        self._ingest([payload])
+
+        self.assertEqual(TransactionGroup.objects.count(), 1)
+        group = TransactionGroup.objects.first()
+        self.assertEqual(group.transaction, "/api/bad/")
+        self.assertEqual(group.op, "http.server")
+        self.assertEqual(group.method, "GET")
