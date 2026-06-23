@@ -1,6 +1,7 @@
 import re
 import uuid
 
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -37,7 +38,10 @@ def get_event_json_url(organization_slug: str, issue_id: int, event_id: str) -> 
 class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         super().create_logged_in_user()
+        self.async_client.force_login(self.user)
 
+    # Kept synchronous: assertNumQueries cannot observe queries issued on the
+    # async DB connection used by the async test client.
     def test_multi_page_list(self):
         first_event = baker.make("issue_events.IssueEvent", issue__project=self.project)
         baker.make(
@@ -74,6 +78,7 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertEqual(res.json()[-1]["id"], first_event.id.hex)
         self.assertNotContains(res, last_event.id.hex)
 
+    # Kept synchronous: see note on test_multi_page_list.
     def test_single_page_list(self):
         """
         Single page query should not hit DB for count
@@ -93,70 +98,70 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertContains(res, last_event.id.hex)
         self.assertContains(res, first_event.id.hex)
 
-    def test_retrieve(self):
-        issue = baker.make("issue_events.issue", project=self.project)
+    async def test_retrieve(self):
+        issue = await baker.amake("issue_events.issue", project=self.project)
         org = self.project.organization
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent", issue=issue, organization=org, _quantity=10
         )
-        previous_event = baker.make(
+        previous_event = await baker.amake(
             "issue_events.IssueEvent", issue=issue, organization=org
         )
-        latest_event = baker.make(
+        latest_event = await baker.amake(
             "issue_events.IssueEvent", issue=issue, organization=org
         )
         url = get_issue_event_url(issue.id, "a" * 32)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 404)
 
         url = get_issue_event_url(issue.id, latest_event.id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, latest_event.id.hex)
 
         url = get_latest_issue_event_url(issue.id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         event_details = res.json()
         self.assertEqual(event_details["id"], latest_event.id.hex)
         self.assertEqual(event_details["previousEventID"], previous_event.id.hex)
 
-    def test_retrieve_by_sentry_event_id(self):
+    async def test_retrieve_by_sentry_event_id(self):
         """Lookup by client-provided sentry SDK event_id (UUIDv4) should work."""
-        issue = baker.make("issue_events.issue", project=self.project)
+        issue = await baker.amake("issue_events.issue", project=self.project)
         sentry_event_id = uuid.uuid4()
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=issue,
             event_id=sentry_event_id,
             organization=self.organization,
         )
         url = get_issue_event_url(issue.id, sentry_event_id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["eventID"], sentry_event_id.hex)
 
         # Also test the JSON endpoint
         url = get_event_json_url(self.organization.slug, issue.id, sentry_event_id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["event_id"], sentry_event_id.hex)
 
-    def test_relative_event_ordering(self):
-        issue = baker.make("issue_events.issue", project=self.project)
-        baker.make("issue_events.IssueEvent", issue=issue)
-        event1 = baker.make("issue_events.IssueEvent", issue=issue)
-        event2 = baker.make("issue_events.IssueEvent", issue=issue)
-        event3 = baker.make("issue_events.IssueEvent", issue=issue)
-        baker.make("issue_events.IssueEvent", issue=issue)
+    async def test_relative_event_ordering(self):
+        issue = await baker.amake("issue_events.issue", project=self.project)
+        await baker.amake("issue_events.IssueEvent", issue=issue)
+        event1 = await baker.amake("issue_events.IssueEvent", issue=issue)
+        event2 = await baker.amake("issue_events.IssueEvent", issue=issue)
+        event3 = await baker.amake("issue_events.IssueEvent", issue=issue)
+        await baker.amake("issue_events.IssueEvent", issue=issue)
         url = get_issue_event_url(issue.id, event2.id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         event_details = res.json()
         self.assertEqual(event_details["nextEventID"], event3.id.hex)
         self.assertEqual(event_details["previousEventID"], event1.id.hex)
 
-    def test_authentication(self):
+    async def test_authentication(self):
         url = get_list_issue_event_url(1)
-        self.client.logout()
-        res = self.client.get(url)
+        await sync_to_async(self.async_client.logout)()
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 401)
 
 

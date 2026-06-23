@@ -108,7 +108,9 @@ class MinidumpToEventTest(TestCase):
         self.assertEqual(images[0]["type"], "elf")
         self.assertEqual(images[0]["image_addr"], "0x400000")
         self.assertEqual(images[0]["image_size"], 0x10000)
-        self.assertEqual(images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1")
+        self.assertEqual(
+            images[0]["debug_id"], "01020304-0506-0708-090a-0b0c0d0e0f10-1"
+        )
 
     def test_sentry_metadata_merged(self):
         data = self._load_fixture()
@@ -240,24 +242,24 @@ class MinidumpViewTest(EventIngestTestCase):
         # Release is stored as a FK, not in event.data
         self.assertTrue(Release.objects.filter(version="1.0.0").exists())
 
-    def test_missing_file(self):
+    async def test_missing_file(self):
         """Request without upload_file_minidump returns 400."""
-        res = self.client.post(self.url, {"sentry": "{}"})
+        res = await self.async_client.post(self.url, {"sentry": "{}"})
         self.assertEqual(res.status_code, 400)
         self.assertIn("Missing", res.json()["detail"])
 
-    def test_invalid_magic(self):
+    async def test_invalid_magic(self):
         """Non-minidump file returns 400."""
         from django.core.files.uploadedfile import SimpleUploadedFile
 
         uploaded = SimpleUploadedFile(
             "crash.dmp", b"NOT_A_MINIDUMP_FILE", content_type="application/octet-stream"
         )
-        res = self.client.post(self.url, {"upload_file_minidump": uploaded})
+        res = await self.async_client.post(self.url, {"upload_file_minidump": uploaded})
         self.assertEqual(res.status_code, 400)
         self.assertIn("Invalid minidump", res.json()["detail"])
 
-    def test_bad_sentry_key(self):
+    async def test_bad_sentry_key(self):
         """Invalid sentry_key returns 403."""
         url = (
             reverse("minidump", args=[self.project.id])
@@ -268,10 +270,10 @@ class MinidumpViewTest(EventIngestTestCase):
         uploaded = SimpleUploadedFile(
             "crash.dmp", self.minidump_data, content_type="application/octet-stream"
         )
-        res = self.client.post(url, {"upload_file_minidump": uploaded})
+        res = await self.async_client.post(url, {"upload_file_minidump": uploaded})
         self.assertEqual(res.status_code, 403)
 
-    def test_method_not_allowed(self):
+    async def test_method_not_allowed(self):
         """GET returns 405."""
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertEqual(res.status_code, 405)

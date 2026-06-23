@@ -10,13 +10,14 @@ from glitchtip.test_utils.test_case import GlitchTipTestCase
 class StatsV2APITestCase(GlitchTipTestCase):
     def setUp(self):
         self.create_user_and_project()
+        self.async_client.force_login(self.user)
         self.url = reverse("api:stats_v2", args=[self.organization.slug])
 
-    def test_get(self):
-        baker.make("issue_events.IssueEvent", issue__project=self.project)
+    async def test_get(self):
+        await baker.amake("issue_events.IssueEvent", issue__project=self.project)
         start = timezone.now() - timezone.timedelta(hours=2)
         end = timezone.now()
-        res = self.client.get(
+        res = await self.async_client.get(
             self.url,
             {"category": "error", "start": start, "end": end, "field": "sum(quantity)"},
         )

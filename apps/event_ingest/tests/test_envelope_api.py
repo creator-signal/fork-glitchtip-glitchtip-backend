@@ -410,11 +410,11 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         ]
 
     @mock.patch("django.http.HttpRequest.body", new_callable=mock.PropertyMock)
-    def test_request_data_too_big(self, mock_body):
+    async def test_request_data_too_big(self, mock_body):
         from django.core.exceptions import RequestDataTooBig
 
         mock_body.side_effect = RequestDataTooBig("Payload too large")
-        res = self.client.post(
+        res = await self.async_client.post(
             self.url,
             list_to_envelope(self.django_event),
             content_type="application/json",

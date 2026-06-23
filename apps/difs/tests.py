@@ -55,10 +55,11 @@ class DifsAssembleAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_difs_assemble_with_dif_existed(self):
-        file = baker.make("files.File", checksum=self.checksum)
-        baker.make(
+    async def test_difs_assemble_with_dif_existed(self):
+        file = await baker.amake("files.File", checksum=self.checksum)
+        await baker.amake(
             "difs.DebugInformationFile",
             project=self.project,
             file=file,
@@ -66,13 +67,13 @@ class DifsAssembleAPITestCase(GlitchTestCase):
 
         expected_response = {self.checksum: {"state": "ok", "missingChunks": []}}
 
-        response = self.client.post(
+        response = await self.async_client.post(
             self.url, self.data, content_type="application/json"
         )
         self.assertEqual(response.json(), expected_response)
 
-    def test_difs_assemble_with_missing_chunks(self):
-        baker.make("files.FileBlob", checksum=self.chunks[0])
+    async def test_difs_assemble_with_missing_chunks(self):
+        await baker.amake("files.FileBlob", checksum=self.chunks[0])
 
         data = {
             self.checksum: {
@@ -86,16 +87,18 @@ class DifsAssembleAPITestCase(GlitchTestCase):
             self.checksum: {"state": "not_found", "missingChunks": [self.chunks[1]]}
         }
 
-        response = self.client.post(self.url, data, content_type="application/json")
+        response = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(response.json(), expected_response)
 
-    def test_difs_assemble_without_missing_chunks(self):
+    async def test_difs_assemble_without_missing_chunks(self):
         for chunk in self.chunks:
-            baker.make("files.FileBlob", checksum=chunk)
+            await baker.amake("files.FileBlob", checksum=chunk)
 
         expected_response = {self.checksum: {"state": "created", "missingChunks": []}}
 
-        response = self.client.post(
+        response = await self.async_client.post(
             self.url, self.data, content_type="application/json"
         )
         self.assertEqual(response.json(), expected_response)
@@ -113,6 +116,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
     @contextlib.contextmanager
     def patch(self):
@@ -130,7 +134,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
             ZipFile.return_value.__enter__.return_value = uploaded_zip_file
             yield
 
-    def test_post(self):
+    async def test_post(self):
         """
         It should return the expected response
         """
@@ -140,7 +144,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         data = {"file": upload_file}
 
         with self.patch():
-            response = self.client.post(self.url, data)
+            response = await self.async_client.post(self.url, data)
 
         expected_response = [
             {
@@ -161,16 +165,16 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(response.json(), expected_response)
 
-    def test_post_existing_file(self):
+    async def test_post_existing_file(self):
         """
         It should success and return the expected response
         """
 
-        baker.make("files.FileBlob", checksum=self.checksum)
+        await baker.amake("files.FileBlob", checksum=self.checksum)
 
-        fileobj = baker.make("files.File", checksum=self.checksum)
+        fileobj = await baker.amake("files.File", checksum=self.checksum)
 
-        dif = baker.make(
+        dif = await baker.amake(
             "difs.DebugInformationFile", file=fileobj, project=self.project
         )
 
@@ -180,7 +184,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         data = {"file": upload_file}
 
         with self.patch():
-            response = self.client.post(self.url, data)
+            response = await self.async_client.post(self.url, data)
 
         expected_response = [
             {
@@ -201,24 +205,24 @@ class DsymsAPIViewTestCase(GlitchTestCase):
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(response.json(), expected_response)
 
-    def test_post_invalid_zip_file(self):
+    async def test_post_invalid_zip_file(self):
         upload_file = SimpleUploadedFile(
             "example.zip", b"random_content", content_type="multipart/form-data"
         )
         data = {"file": upload_file}
-        response = self.client.post(self.url, data)
+        response = await self.async_client.post(self.url, data)
 
         expected_response = {"detail": "Invalid file type uploaded"}
 
         self.assertEqual(response.json(), expected_response)
         self.assertEqual(response.status_code, 400)
 
-    def test_get(self):
+    async def test_get(self):
         """
         It should return a list of debug information files
         """
-        fileobj = baker.make("files.File", checksum=self.checksum, size=1234)
-        dif = baker.make(
+        fileobj = await baker.amake("files.File", checksum=self.checksum, size=1234)
+        dif = await baker.amake(
             "difs.DebugInformationFile",
             project=self.project,
             file=fileobj,
@@ -231,7 +235,7 @@ class DsymsAPIViewTestCase(GlitchTestCase):
             },
         )
 
-        response = self.client.get(self.url)
+        response = await self.async_client.get(self.url)
         self.assertEqual(response.status_code, 200)
 
         res_data = response.json()

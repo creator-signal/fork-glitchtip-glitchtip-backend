@@ -1,7 +1,6 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from asgiref.sync import async_to_sync
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -28,21 +27,22 @@ class StripeAPITestCase(TestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_list_stripe_products(self):
+    async def test_list_stripe_products(self):
         url = reverse("api:list_stripe_products")
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, self.product.name)
 
-    def test_list_stripe_products_excludes_non_public_prices(self):
-        public_price = baker.make(
+    async def test_list_stripe_products_excludes_non_public_prices(self):
+        public_price = await baker.amake(
             "stripe.StripePrice",
             product=self.product,
             price=10,
             is_public=True,
             interval="month",
         )
-        private_price = baker.make(
+        private_price = await baker.amake(
             "stripe.StripePrice",
             product=self.product,
             price=8,
@@ -50,42 +50,42 @@ class StripeAPITestCase(TestCase):
             interval="month",
         )
         url = reverse("api:list_stripe_products")
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         body = res.content.decode()
         self.assertIn(public_price.stripe_id, body)
         self.assertNotIn(private_price.stripe_id, body)
 
-    def test_get_stripe_subscription(self):
-        sub = baker.make(
+    async def test_get_stripe_subscription(self):
+        sub = await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
             status=SubscriptionStatus.ACTIVE,
         )
         url = reverse("api:get_stripe_subscription", args=[self.organization.slug])
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, sub.stripe_id)
 
     @patch("apps.stripe.api.create_session")
-    def test_create_stripe_session(self, mock_create_session):
+    async def test_create_stripe_session(self, mock_create_session):
         url = reverse("api:create_stripe_session", args=[self.organization.slug])
         mock_create_session.return_value = {"url": "test"}
-        res = self.client.post(
+        res = await self.async_client.post(
             url, {"price": self.price.stripe_id}, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
 
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
-    def test_manage_billing(self, mock_create_portal_session):
+    async def test_manage_billing(self, mock_create_portal_session):
         mock_create_portal_session.return_value = {"url": "test"}
         url = reverse(
             "api:stripe_billing_portal_session", args=[self.organization.slug]
         )
-        res = self.client.post(url, {}, content_type="application/json")
+        res = await self.async_client.post(url, {}, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         mock_create_portal_session.assert_called_once()
 
     @patch("apps.stripe.api.create_subscription")
-    def test_stripe_create_subscription(self, mock_create_subscription):
+    async def test_stripe_create_subscription(self, mock_create_subscription):
         period_start = 1681564800
         period_end = 1684243200
         mock_create_subscription.return_value.id = "test"
@@ -98,31 +98,32 @@ class StripeAPITestCase(TestCase):
         item.price.recurring = {"interval": "month"}
         mock_create_subscription.return_value.items.data = [item]
         url = reverse("api:stripe_create_subscription")
-        res = self.client.post(
+        res = await self.async_client.post(
             url,
             {"organization": str(self.organization.id), "price": self.price.stripe_id},
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
         mock_create_subscription.assert_called_once()
-        sub = StripeSubscription.objects.get(stripe_id="test")
+        sub = await StripeSubscription.objects.aget(stripe_id="test")
         self.assertEqual(sub.subscription_cycle_start, unix_to_datetime(period_start))
         self.assertEqual(sub.subscription_cycle_end, unix_to_datetime(period_end))
 
-
-    def test_subscription_events_count_for_period_current(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        baker.make(
+    async def test_subscription_events_count_for_period_current(self):
+        project = await baker.amake(
+            "projects.Project", organization=self.organization
+        )
+        await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
             status=SubscriptionStatus.ACTIVE,
             current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
             current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
         )
-        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+        await StripeSubscription.set_primary_subscriptions_for_organizations(
             {self.organization.id}
         )
-        baker.make(
+        await baker.amake(
             "projects.IssueEventProjectHourlyStatistic",
             project=project,
             organization=self.organization,
@@ -133,25 +134,27 @@ class StripeAPITestCase(TestCase):
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
         )
-        res = self.client.get(url)  # periods_ago=0 default
+        res = await self.async_client.get(url)  # periods_ago=0 default
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["eventCount"], 10)
         self.assertIn("total", data)
 
-    def test_subscription_events_count_for_period_previous(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        baker.make(
+    async def test_subscription_events_count_for_period_previous(self):
+        project = await baker.amake(
+            "projects.Project", organization=self.organization
+        )
+        await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
             status=SubscriptionStatus.ACTIVE,
             current_period_start=timezone.make_aware(datetime(2020, 2, 1)),
             current_period_end=timezone.make_aware(datetime(2020, 3, 1)),
         )
-        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+        await StripeSubscription.set_primary_subscriptions_for_organizations(
             {self.organization.id}
         )
-        baker.make(
+        await baker.amake(
             "projects.IssueEventProjectHourlyStatistic",
             project=project,
             organization=self.organization,
@@ -162,71 +165,73 @@ class StripeAPITestCase(TestCase):
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
         )
-        res = self.client.get(url, {"periods_ago": 1})
+        res = await self.async_client.get(url, {"periods_ago": 1})
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["eventCount"], 25)
         self.assertEqual(data["total"], 25)
 
-    def test_subscription_events_count_for_period_retention_limit(self):
+    async def test_subscription_events_count_for_period_retention_limit(self):
         url = reverse(
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
         )
         # periods_ago=4 → 120 days, exceeds default retention
-        res = self.client.get(url, {"periods_ago": 4})
+        res = await self.async_client.get(url, {"periods_ago": 4})
         self.assertEqual(res.status_code, 400)
         # periods_ago=1 should always pass even with low retention configured
         with self.settings(GLITCHTIP_RETENTION_DAYS=14):
-            res = self.client.get(url, {"periods_ago": 1})
+            res = await self.async_client.get(url, {"periods_ago": 1})
         self.assertEqual(res.status_code, 200)
 
-    def test_subscription_events_count_for_period_no_subscription(self):
+    async def test_subscription_events_count_for_period_no_subscription(self):
         url = reverse(
             "api:subscription_events_count_for_period",
             args=[self.organization.slug],
         )
-        res = self.client.get(url, {"periods_ago": 1})
+        res = await self.async_client.get(url, {"periods_ago": 1})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["total"], 0)
 
-    def test_events_count_daily(self):
-        project = baker.make("projects.Project", organization=self.organization)
+    async def test_events_count_daily(self):
+        project = await baker.amake(
+            "projects.Project", organization=self.organization
+        )
         period_start = timezone.make_aware(datetime(2020, 1, 1))
         period_end = timezone.make_aware(datetime(2020, 2, 1))
-        baker.make(
+        await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
             status=SubscriptionStatus.ACTIVE,
             current_period_start=period_start,
             current_period_end=period_end,
         )
-        async_to_sync(StripeSubscription.set_primary_subscriptions_for_organizations)(
+        await StripeSubscription.set_primary_subscriptions_for_organizations(
             {self.organization.id}
         )
         # Create stats on two different days
-        baker.make(
+        await baker.amake(
             "projects.IssueEventProjectHourlyStatistic",
             project=project,
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 5, 10)),
             count=15,
         )
-        baker.make(
+        await baker.amake(
             "projects.IssueEventProjectHourlyStatistic",
             project=project,
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 5, 14)),
             count=5,
         )
-        baker.make(
+        await baker.amake(
             "projects.TransactionEventProjectHourlyStatistic",
             project=project,
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 10, 8)),
             count=30,
         )
-        baker.make(
+        await baker.amake(
             "projects.LogProjectHourlyStatistic",
             project=project,
             organization=self.organization,
@@ -239,7 +244,7 @@ class StripeAPITestCase(TestCase):
             args=[self.organization.slug],
         )
         with freeze_time(datetime(2020, 1, 15)):
-            res = self.client.get(url)
+            res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()["data"]
         # Should have entries from Jan 1 through Jan 15 (today)
@@ -262,11 +267,11 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(jan1["uptimeCheckEventCount"], 0)
         self.assertEqual(jan1["logEventCount"], 0)
 
-    def test_events_count_daily_no_subscription(self):
+    async def test_events_count_daily_no_subscription(self):
         url = reverse(
             "api:subscription_events_count_daily",
             args=[self.organization.slug],
         )
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["data"], [])

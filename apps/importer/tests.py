@@ -1,4 +1,5 @@
 from aioresponses import aioresponses
+from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
@@ -78,22 +79,23 @@ class ImporterTestCase(GlitchTipTestCaseMixin, TestCase):
         self.assertTrue(Team.objects.filter(slug="team").exists())
 
     @aioresponses()
-    def test_invalid_org(self, m):
-        self.create_logged_in_user()
+    async def test_invalid_org(self, m):
+        await sync_to_async(self.create_logged_in_user)()
+        await sync_to_async(self.async_client.force_login)(self.user)
         url = reverse("api:importer")
         data = {
             "url": self.url,
             "authToken": self.auth_token,
             "organizationSlug": "foo",
         }
-        res = self.client.post(url, data)
+        res = await self.async_client.post(url, data)
         self.assertEqual(res.status_code, 400)
-        other_user = baker.make("users.User")
-        other_org = baker.make("Organization", name="foo")
-        other_org.add_user(other_user)
-        res = self.client.post(url, data)
+        other_user = await baker.amake("users.User")
+        other_org = await baker.amake("Organization", name="foo")
+        await sync_to_async(other_org.add_user)(other_user)
+        res = await self.async_client.post(url, data)
         self.assertEqual(res.status_code, 400)
-        other_org.add_user(self.user)
+        await sync_to_async(other_org.add_user)(self.user)
         m.get(self.url + "api/0/", payload={"user": {"username": "foo"}})
-        res = self.client.post(url, data)
+        res = await self.async_client.post(url, data)
         self.assertEqual(res.status_code, 400)

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -27,8 +28,8 @@ class SettingsTestCase(TestCase):
             res = self.client.get(self.url)  # Check that no auth is necessary
         self.assertEqual(res.status_code, 200)
 
-    def test_settings_oidc(self):
-        social_app = baker.make(
+    async def test_settings_oidc(self):
+        social_app = await baker.amake(
             "socialaccount.socialapp",
             provider="openid_connect",
             provider_id="my-openid",
@@ -42,7 +43,7 @@ class SettingsTestCase(TestCase):
             "nextcloud",
             "digitalocean",
         ]:
-            baker.make(
+            await baker.amake(
                 "socialaccount.socialapp",
                 provider=provider,
             )
@@ -52,14 +53,14 @@ class SettingsTestCase(TestCase):
 
         from glitchtip.oidc_discovery import _cache_key
 
-        cache.set(
+        await sync_to_async(cache.set)(
             _cache_key("https://example.com"),
             {"authorization_endpoint": "https://example.com/authorize"},
         )
         try:
-            res = self.client.get(self.url)
+            res = await self.async_client.get(self.url)
         finally:
-            cache.delete(_cache_key("https://example.com"))
+            await sync_to_async(cache.delete)(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
 
@@ -71,18 +72,18 @@ class APIRootTestCase(TestCase):
     def test_anon(self):
         self.assertContains(self.client.get(self.url), "version")
 
-    def test_user(self):
-        user = baker.make("users.user")
-        self.client.force_login(user)
-        res = self.client.get(self.url)
+    async def test_user(self):
+        user = await baker.amake("users.user")
+        await sync_to_async(self.async_client.force_login)(user)
+        res = await self.async_client.get(self.url)
         self.assertContains(res, user.email)
 
-    def test_token(self):
-        user = baker.make("users.user")
-        auth_token = baker.make("api_tokens.APIToken", user=user)
+    async def test_token(self):
+        user = await baker.amake("users.user")
+        auth_token = await baker.amake("api_tokens.APIToken", user=user)
 
         headers = {"Authorization": f"Bearer {auth_token.token}"}
-        res = self.client.get(self.url, headers=headers)
+        res = await self.async_client.get(self.url, headers=headers)
         self.assertContains(res, auth_token.token)
         self.assertContains(res, user.email)
 

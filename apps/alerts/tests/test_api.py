@@ -1,6 +1,7 @@
 from unittest import mock
 
 import aiohttp
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -15,27 +16,28 @@ from ..models import ProjectAlert
 class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.create_logged_in_user()
+        self.async_client.force_login(self.user)
 
-    def test_project_alerts_list(self):
-        alert = baker.make(
+    async def test_project_alerts_list(self):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
 
         # Should not show up
-        baker.make("alerts.ProjectAlert", timespan_minutes=60)
+        await baker.amake("alerts.ProjectAlert", timespan_minutes=60)
         # Second team could cause duplicates
-        team2 = baker.make("teams.Team", organization=self.organization)
-        team2.members.add(self.org_user)
-        self.project.teams.add(team2)
+        team2 = await baker.amake("teams.Team", organization=self.organization)
+        await team2.members.aadd(self.org_user)
+        await self.project.teams.aadd(team2)
 
         url = reverse(
             "api:list_project_alerts", args=[self.organization.slug, self.project.slug]
         )
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, alert.id)
         self.assertEqual(len(res.json()), 1)
 
-    def test_project_alerts_create(self):
+    async def test_project_alerts_create(self):
         url = reverse(
             "api:create_project_alert", args=[self.organization.slug, self.project.slug]
         )
@@ -79,17 +81,20 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "uptime": True,
             "alertRecipients": recipients,
         }
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
-        project_alert = ProjectAlert.objects.filter(name="foo", uptime=True).first()
+        project_alert = await ProjectAlert.objects.filter(
+            name="foo", uptime=True
+        ).afirst()
         self.assertEqual(project_alert.timespan_minutes, data["timespanMinutes"])
-        self.assertEqual(project_alert.project, self.project)
+        self.assertEqual(project_alert.project_id, self.project.id)
         # Check that all recipients were created
-        self.assertEqual(project_alert.alertrecipient_set.count(), 6)
-        for i, recipient in enumerate(project_alert.alertrecipient_set.all()):
+        self.assertEqual(await project_alert.alertrecipient_set.acount(), 6)
+        created = [r async for r in project_alert.alertrecipient_set.all()]
+        for i, recipient in enumerate(created):
             self.assertEqual(recipient.tags_to_add, recipients[i]["tagsToAdd"])
 
-    def test_project_alerts_create_invalid_recipient_type(self):
+    async def test_project_alerts_create_invalid_recipient_type(self):
         url = reverse(
             "api:create_project_alert", args=[self.organization.slug, self.project.slug]
         )
@@ -100,11 +105,11 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "uptime": True,
             "alertRecipients": [{"recipientType": "invalid", "url": ""}],
         }
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
 
-    def test_project_alerts_update_all_types(self):
-        alert = baker.make(
+    async def test_project_alerts_update_all_types(self):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
         url = reverse(
@@ -141,18 +146,21 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "quantity": 2,
             "alertRecipients": recipients,
         }
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
-        alert.refresh_from_db()
-        self.assertEqual(alert.alertrecipient_set.count(), 4)
-        for i, recipient in enumerate(alert.alertrecipient_set.all()):
+        await alert.arefresh_from_db()
+        self.assertEqual(await alert.alertrecipient_set.acount(), 4)
+        updated = [r async for r in alert.alertrecipient_set.all()]
+        for i, recipient in enumerate(updated):
             self.assertEqual(recipient.tags_to_add, recipients[i]["tagsToAdd"])
 
-    def test_project_alerts_create_permissions(self):
-        user = baker.make("users.user")
-        org_user = self.organization.add_user(user, OrganizationUserRole.MEMBER)
+    async def test_project_alerts_create_permissions(self):
+        user = await baker.amake("users.user")
+        org_user = await sync_to_async(self.organization.add_user)(
+            user, OrganizationUserRole.MEMBER
+        )
 
-        self.client.force_login(user)
+        await sync_to_async(self.async_client.force_login)(user)
         url = reverse(
             "api:create_project_alert", args=[self.organization.slug, self.project.slug]
         )
@@ -163,28 +171,28 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "uptime": True,
             "alertRecipients": [{"recipientType": "email", "url": ""}],
         }
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         # Member without project team membership cannot create alerts
         self.assertEqual(res.status_code, 404)
 
         org_user.role = OrganizationUserRole.ADMIN
-        org_user.save()
+        await org_user.asave()
         # Add second team to ensure we don't get MultipleObjectsReturned
-        team2 = baker.make("teams.Team", organization=self.organization)
-        team2.members.add(org_user)
-        self.project.teams.add(team2)
+        team2 = await baker.amake("teams.Team", organization=self.organization)
+        await team2.members.aadd(org_user)
+        await self.project.teams.aadd(team2)
 
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
 
         org_user.role = OrganizationUserRole.MEMBER
-        org_user.save()
-        res = self.client.get(url)
+        await org_user.asave()
+        res = await self.async_client.get(url)
         # Members can still view alerts
         self.assertEqual(len(res.json()), 1)
 
-    def test_project_alerts_update(self):
-        alert = baker.make(
+    async def test_project_alerts_update(self):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
         url = reverse(
@@ -199,7 +207,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 {"recipientType": "discord", "url": "https://example.com"},
             ],
         }
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, data["alertRecipients"][0]["url"])
 
         # Webhooks require url
@@ -208,58 +216,58 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 {"recipientType": "discord", "url": ""},
             ],
         }
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
 
-    def test_project_alerts_update_auth(self):
+    async def test_project_alerts_update_auth(self):
         """Cannot update alert on project that user does not belong to"""
-        alert = baker.make("alerts.ProjectAlert", timespan_minutes=60)
+        alert = await baker.amake("alerts.ProjectAlert", timespan_minutes=60)
         url = reverse(
             "api:update_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
         data = {"timespanMinutes": 500, "quantity": 2}
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 404)
 
-    def test_project_alerts_delete(self):
-        alert = baker.make(
+    async def test_project_alerts_delete(self):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
         url = reverse(
             "api:delete_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        res = self.client.delete(url, content_type="application/json")
+        res = await self.async_client.delete(url, content_type="application/json")
         self.assertEqual(res.status_code, 204)
-        self.assertEqual(ProjectAlert.objects.count(), 0)
+        self.assertEqual(await ProjectAlert.objects.acount(), 0)
 
-    def test_delete_with_second_team(self):
-        alert = baker.make(
+    async def test_delete_with_second_team(self):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
         url = reverse(
             "api:delete_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        team2 = baker.make("teams.Team", organization=self.organization)
-        team2.members.add(self.org_user)
-        self.project.teams.add(team2)
-        res = self.client.delete(url, content_type="application/json")
+        team2 = await baker.amake("teams.Team", organization=self.organization)
+        await team2.members.aadd(self.org_user)
+        await self.project.teams.aadd(team2)
+        res = await self.async_client.delete(url, content_type="application/json")
         self.assertEqual(res.status_code, 204)
-        self.assertEqual(ProjectAlert.objects.count(), 0)
+        self.assertEqual(await ProjectAlert.objects.acount(), 0)
 
     @mock.patch("aiohttp.ClientSession")
-    def test_test_project_alert(self, MockSession):
+    async def test_test_project_alert(self, MockSession):
         from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
 
         mock_constructor, mock_post = _mock_aiohttp_session()
         MockSession.side_effect = mock_constructor
 
-        alert = baker.make(
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        baker.make(
+        await baker.amake(
             "alerts.AlertRecipient",
             alert=alert,
             recipient_type=RecipientType.GENERAL_WEBHOOK,
@@ -269,7 +277,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "api:test_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        res = self.client.post(url)
+        res = await self.async_client.post(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)
@@ -278,16 +286,16 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         mock_post.assert_called_once()
 
     @mock.patch("aiohttp.ClientSession")
-    def test_test_project_alert_skips_email(self, MockSession):
+    async def test_test_project_alert_skips_email(self, MockSession):
         from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
 
         mock_constructor, mock_post = _mock_aiohttp_session()
         MockSession.side_effect = mock_constructor
 
-        alert = baker.make(
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        baker.make(
+        await baker.amake(
             "alerts.AlertRecipient",
             alert=alert,
             recipient_type=RecipientType.EMAIL,
@@ -297,7 +305,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "api:test_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        res = self.client.post(url)
+        res = await self.async_client.post(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)
@@ -309,11 +317,11 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
         new_callable=mock.AsyncMock,
         side_effect=Exception("Connection refused"),
     )
-    def test_test_project_alert_error(self, _mock_send):
-        alert = baker.make(
+    async def test_test_project_alert_error(self, _mock_send):
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        baker.make(
+        await baker.amake(
             "alerts.AlertRecipient",
             alert=alert,
             recipient_type=RecipientType.NTFY,
@@ -323,14 +331,14 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "api:test_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        res = self.client.post(url)
+        res = await self.async_client.post(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["status"], "error")
         self.assertEqual(data[0]["message"], "Connection refused")
 
-    def test_project_alerts_create_zulip(self):
+    async def test_project_alerts_create_zulip(self):
         """Zulip recipient stores config fields correctly."""
         url = reverse(
             "api:create_project_alert", args=[self.organization.slug, self.project.slug]
@@ -351,10 +359,10 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 }
             ],
         }
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 201)
-        alert = ProjectAlert.objects.get(name="zulip-test")
-        recipient = alert.alertrecipient_set.first()
+        alert = await ProjectAlert.objects.aget(name="zulip-test")
+        recipient = await alert.alertrecipient_set.afirst()
         self.assertEqual(recipient.recipient_type, "zulip")
         self.assertEqual(recipient.url, "https://zulip.example.com/")
         self.assertEqual(recipient.config["bot_email"], "bot@zulip.example.com")
@@ -369,12 +377,12 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             zulip_recipient["config"]["bot_email"], "bot@zulip.example.com"
         )
 
-    def test_project_alerts_update_zulip_config(self):
+    async def test_project_alerts_update_zulip_config(self):
         """Updating a Zulip recipient's config (e.g. rotating API key) works."""
-        alert = baker.make(
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        baker.make(
+        await baker.amake(
             "alerts.AlertRecipient",
             alert=alert,
             recipient_type=RecipientType.ZULIP,
@@ -404,25 +412,25 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
                 }
             ],
         }
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
-        alert.refresh_from_db()
-        self.assertEqual(alert.alertrecipient_set.count(), 1)
-        recipient = alert.alertrecipient_set.first()
+        await alert.arefresh_from_db()
+        self.assertEqual(await alert.alertrecipient_set.acount(), 1)
+        recipient = await alert.alertrecipient_set.afirst()
         self.assertEqual(recipient.config["api_key"], "new-rotated-key")
 
     @mock.patch("aiohttp.ClientSession")
-    def test_test_project_alert_zulip(self, MockSession):
+    async def test_test_project_alert_zulip(self, MockSession):
         """Test endpoint works with Zulip recipient, passing config."""
         from apps.alerts.tests.test_webhooks import _mock_aiohttp_session
 
         mock_constructor, mock_post = _mock_aiohttp_session()
         MockSession.side_effect = mock_constructor
 
-        alert = baker.make(
+        alert = await baker.amake(
             "alerts.ProjectAlert", project=self.project, timespan_minutes=60
         )
-        baker.make(
+        await baker.amake(
             "alerts.AlertRecipient",
             alert=alert,
             recipient_type=RecipientType.ZULIP,
@@ -438,7 +446,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             "api:test_project_alert",
             args=[self.organization.slug, self.project.slug, alert.pk],
         )
-        res = self.client.post(url)
+        res = await self.async_client.post(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)

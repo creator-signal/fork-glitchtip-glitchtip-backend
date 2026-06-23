@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -39,17 +40,18 @@ class ProjectsAPITestCase(TestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_projects_api_list(self):
+    async def test_projects_api_list(self):
         # Ensure project annotate_is_member works with two teams on one project
-        baker.make(
+        await baker.amake(
             "teams.Team",
             organization=self.organization,
             members=[self.org_user],
             projects=[self.project],
         )
 
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertContains(res, self.organization.name)
         data = res.json()[0]
         self.assertIsInstance(data["id"], str)
@@ -62,29 +64,31 @@ class ProjectsAPITestCase(TestCase):
         # When an org is soft deleted, that org's projects should not show up in list,
         # even if they haven't been soft deleted yet
         self.organization.is_deleted = True
-        self.organization.save()
-        res = self.client.get(self.url)
+        await self.organization.asave()
+        res = await self.async_client.get(self.url)
         self.assertEqual(res.json(), [])
 
-    def test_default_ordering(self):
+    async def test_default_ordering(self):
         projectA = self.project
-        projectZ = baker.make(
+        projectZ = await baker.amake(
             "projects.Project", organization=self.organization, name="Z Proj"
         )
-        baker.make("projects.Project", organization=self.organization, name="B Proj")
-        res = self.client.get(self.url)
+        await baker.amake(
+            "projects.Project", organization=self.organization, name="B Proj"
+        )
+        res = await self.async_client.get(self.url)
         data = res.json()
         self.assertEqual(data[0]["name"], projectA.name)
         self.assertEqual(data[2]["name"], projectZ.name)
 
-    def test_projects_api_retrieve(self):
-        res = self.client.get(self.detail_url)
+    async def test_projects_api_retrieve(self):
+        res = await self.async_client.get(self.detail_url)
         self.assertTrue(res.json()["firstEvent"])
 
-    def test_projects_api_update(self):
+    async def test_projects_api_update(self):
         self.assertEqual(self.project.event_throttle_rate, 0)
         self.assertEqual(self.project.platform, None)
-        res = self.client.put(
+        res = await self.async_client.put(
             self.update_url,
             {
                 "name": "New Name",
@@ -94,49 +98,49 @@ class ProjectsAPITestCase(TestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        self.project.refresh_from_db()
+        await self.project.arefresh_from_db()
         self.assertEqual(self.project.name, "New Name")
         self.assertEqual(self.project.event_throttle_rate, 50)
         self.assertEqual(self.project.platform, "python")
 
-    def test_projects_pagination(self):
+    async def test_projects_pagination(self):
         """
         Test link header pagination
         """
         page_size = 50
         firstProject = self.project
-        baker.make(
+        await baker.amake(
             "projects.Project",
             organization=self.organization,
             name="B",
             _quantity=page_size,
         )
-        lastProject = baker.make(
+        lastProject = await baker.amake(
             "projects.Project",
             organization=self.organization,
             name="Last Alphabetically",
         )
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertNotContains(res, lastProject.name)
         self.assertContains(res, firstProject.name)
         link_header = res.get("Link")
         self.assertIn('results="true"', link_header)
 
-    def test_project_isolation(self):
+    async def test_project_isolation(self):
         """Users should only access projects in their organization"""
-        user2 = baker.make("users.user")
-        org2 = baker.make("organizations_ext.Organization")
-        org2.add_user(user2)
+        user2 = await baker.amake("users.user")
+        org2 = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(org2.add_user)(user2)
         project1 = self.project
-        project2 = baker.make("projects.Project", organization=org2)
+        project2 = await baker.amake("projects.Project", organization=org2)
 
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertContains(res, project1.name)
         self.assertNotContains(res, project2.name)
 
-    def test_project_delete(self):
+    async def test_project_delete(self):
         """Projects should get soft deleted"""
-        project = baker.make(
+        project = await baker.amake(
             "projects.Project",
             organization=self.organization,
             name="To Delete",
@@ -144,18 +148,20 @@ class ProjectsAPITestCase(TestCase):
         )
 
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 204)
         with self.assertRaises(Project.DoesNotExist):
-            project.refresh_from_db()
+            await project.arefresh_from_db()
 
-    def test_project_invalid_delete(self):
+    async def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(self.user, OrganizationUserRole.ADMIN)
-        project = baker.make("projects.Project")
+        organization = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(organization.add_user)(
+            self.user, OrganizationUserRole.ADMIN
+        )
+        project = await baker.amake("projects.Project")
         url = reverse("api:delete_project", args=[organization.slug, project.slug])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
 
 
@@ -166,73 +172,78 @@ class TeamProjectsAPITestCase(TestCase):
         self.organization.add_user(self.user, OrganizationUserRole.ADMIN)
         self.team = baker.make("teams.Team", organization=self.organization)
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
         self.url = reverse(
             "api:list_team_projects", args=[self.organization.slug, self.team.slug]
         )
 
-    def test_list(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        project.teams.add(self.team)
-        not_my_project = baker.make("projects.Project")
-        res = self.client.get(self.url)
+    async def test_list(self):
+        project = await baker.amake(
+            "projects.Project", organization=self.organization
+        )
+        await project.teams.aadd(self.team)
+        not_my_project = await baker.amake("projects.Project")
+        res = await self.async_client.get(self.url)
         self.assertContains(res, project.name)
         self.assertNotContains(res, not_my_project.name)
 
         # If a user is in multiple orgs, that user will have multiple org users.
         # Make sure endpoint doesn't show projects from other orgs
-        second_org = baker.make("organizations_ext.Organization")
-        second_org.add_user(self.user, OrganizationUserRole.ADMIN)
-        project_in_second_org = baker.make("projects.Project", organization=second_org)
-        res = self.client.get(self.url)
+        second_org = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(second_org.add_user)(self.user, OrganizationUserRole.ADMIN)
+        project_in_second_org = await baker.amake(
+            "projects.Project", organization=second_org
+        )
+        res = await self.async_client.get(self.url)
         self.assertNotContains(res, project_in_second_org.name)
 
         # Only show projects that are associated with the team in the URL.
         # If a project is on another team in the same org, it should not show
-        project_teamless = baker.make(
+        project_teamless = await baker.amake(
             "projects.Project", organization=self.organization
         )
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertNotContains(res, project_teamless)
 
-    def test_create(self):
+    async def test_create(self):
         data = {"name": "test-team"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
         res = self.assertContains(res, data["name"], status_code=201)
 
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertContains(res, data["name"])
-        self.assertEqual(ProjectKey.objects.all().count(), 1)
+        self.assertEqual(await ProjectKey.objects.acount(), 1)
 
-    def test_projects_api_create_unique_slug(self):
+    async def test_projects_api_create_unique_slug(self):
         name = "test project"
         data = {"name": name}
-        res = self.client.post(self.url, data, content_type="application/json")
-        first_project = Project.objects.get()
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
+        first_project = await Project.objects.aget()
+        res = await self.async_client.post(self.url, data, content_type="application/json")
         self.assertContains(res, name, status_code=201)
-        projects = Project.objects.all()
+        projects = [p async for p in Project.objects.all()]
         self.assertNotEqual(projects[0].slug, projects[1].slug)
-        self.assertEqual(ProjectKey.objects.all().count(), 2)
+        self.assertEqual(await ProjectKey.objects.acount(), 2)
 
-        org2 = baker.make("organizations_ext.Organization")
-        org2_project = Project.objects.create(name=name, organization=org2)
+        org2 = await baker.amake("organizations_ext.Organization")
+        org2_project = await Project.objects.acreate(name=name, organization=org2)
         # The same slug can exist between multiple organizations
         self.assertEqual(first_project.slug, org2_project.slug)
 
-    def test_projects_api_project_has_team(self):
+    async def test_projects_api_project_has_team(self):
         """
         The frontend UI requires you to assign a new project to a team, so make sure
         that the new project has a team associated with it
         """
         name = "test project"
         data = {"name": name}
-        self.client.post(self.url, data, content_type="application/json")
-        project = Project.objects.first()
-        self.assertEqual(project.teams.all().count(), 1)
+        await self.async_client.post(self.url, data, content_type="application/json")
+        project = await Project.objects.afirst()
+        self.assertEqual(await project.teams.acount(), 1)
 
-    def test_project_reserved_words(self):
+    async def test_project_reserved_words(self):
         data = {"name": "new"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
         self.assertContains(res, "new-1", status_code=201)
-        self.client.post(self.url, data)
-        self.assertFalse(Project.objects.filter(slug="new").exists())
+        await self.async_client.post(self.url, data)
+        self.assertFalse(await Project.objects.filter(slug="new").aexists())

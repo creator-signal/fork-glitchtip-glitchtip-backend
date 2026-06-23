@@ -82,14 +82,16 @@ class StoreAPITestCase(EventIngestTestCase):
         )
 
     @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=1)
-    def test_check_throttle(self):
-        baker.make(
+    async def test_check_throttle(self):
+        await baker.amake(
             "organizations_ext.OrganizationOwner",
             organization=self.organization,
             organization_user__user__email="t@example.com",
         )
         data = self.get_json_data("events/test_data/py_error.json")
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
         # We know the throttle was checked when this simplistic lock is set
         self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))

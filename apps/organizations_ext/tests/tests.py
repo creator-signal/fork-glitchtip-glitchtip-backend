@@ -1,5 +1,6 @@
 from unittest import mock
 
+from asgiref.sync import sync_to_async
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
@@ -84,12 +85,15 @@ class OrganizationRegistrationSettingQueryTestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
         self.url = reverse("api:list_organizations")
 
     @override_settings(ENABLE_ORGANIZATION_CREATION=False)
-    def test_organizations_closed_registration_first_organization_create(self):
+    async def test_organizations_closed_registration_first_organization_create(self):
         data = {"name": "test"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 201)
 
 
@@ -97,22 +101,23 @@ class OrganizationsFilterTestCase(TestCase):
     def setUp(self):
         self.user = baker.make("users.user")
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
         self.url = reverse("api:list_organizations")
 
-    def test_default_ordering(self):
-        organizationA = baker.make(
+    async def test_default_ordering(self):
+        organizationA = await baker.amake(
             "organizations_ext.Organization", name="A Organization"
         )
-        organizationZ = baker.make(
+        organizationZ = await baker.amake(
             "organizations_ext.Organization", name="Z Organization"
         )
-        organizationB = baker.make(
+        organizationB = await baker.amake(
             "organizations_ext.Organization", name="B Organization"
         )
-        organizationA.add_user(self.user)
-        organizationB.add_user(self.user)
-        organizationZ.add_user(self.user)
-        res = self.client.get(self.url)
+        await sync_to_async(organizationA.add_user)(self.user)
+        await sync_to_async(organizationB.add_user)(self.user)
+        await sync_to_async(organizationZ.add_user)(self.user)
+        res = await self.async_client.get(self.url)
         data = res.json()
         self.assertEqual(data[0]["name"], organizationA.name)
         self.assertEqual(data[2]["name"], organizationZ.name)
