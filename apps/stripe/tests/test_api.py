@@ -168,14 +168,14 @@ class StripeAPITestCase(TestCase):
             date=timezone.make_aware(datetime(2020, 1, 15, 10)),
             count=25,
         )
-        baker.make(
+        await baker.amake(
             "projects.LogProjectHourlyStatistic",
             project=project,
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 15, 10)),
             count=40,
         )
-        baker.make(
+        await baker.amake(
             "uptime.UptimeCheckHourlyStatistic",
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 15, 10)),
@@ -265,7 +265,7 @@ class StripeAPITestCase(TestCase):
             date=timezone.make_aware(datetime(2020, 1, 10, 8)),
             count=40,
         )
-        baker.make(
+        await baker.amake(
             "uptime.UptimeCheckHourlyStatistic",
             organization=self.organization,
             date=timezone.make_aware(datetime(2020, 1, 10, 8)),

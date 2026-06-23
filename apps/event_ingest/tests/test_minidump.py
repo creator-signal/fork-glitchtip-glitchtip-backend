@@ -248,7 +248,34 @@ class MinidumpViewTest(EventIngestTestCase):
         # Release is stored as a FK, not in event.data
         self.assertTrue(Release.objects.filter(version="1.0.0").exists())
 
-    def test_missing_file(self):
+    def test_upload_minidump_gzipped(self):
+        """A gzip Content-Encoded multipart upload is decompressed in Rust.
+
+        With DecompressBodyMiddleware gone, the view decompresses the body via
+        gt_rust before Django parses request.FILES.
+        """
+        uploaded = SimpleUploadedFile(
+            "crash.dmp", self.minidump_data, content_type="application/octet-stream"
+        )
+        body = encode_multipart(
+            BOUNDARY,
+            {"upload_file_minidump": uploaded, "sentry": '{"release":"1.0.0"}'},
+        )
+        res = self.client.generic(
+            "POST",
+            self.url,
+            data=gzip.compress(body),
+            content_type=MULTIPART_CONTENT,
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        self.assertEqual(res.status_code, 200)
+        uuid.UUID(res.json()["id"])
+        task_backends["default"].flush_batches()
+        event = IssueEvent.objects.first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.data["platform"], "native")
+
+    async def test_missing_file(self):
         """Request without upload_file_minidump returns 400."""
         res = await self.async_client.post(self.url, {"sentry": "{}"})
         self.assertEqual(res.status_code, 400)
