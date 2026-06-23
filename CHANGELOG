@@ -1,3 +1,7 @@
+# Unreleased
+
+- Perf: Parse each JavaScript sourcemap once per event instead of once per stack frame, eliminating worker CPU spikes when ingesting events with large sourcemaps.
+
 # 6.2.0
 
 - Feat: Native OTLP/HTTP logs ingestion endpoint (POST /v1/logs), with request-body decompression handled in Rust.
