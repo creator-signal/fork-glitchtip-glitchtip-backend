@@ -1616,7 +1616,14 @@ async def process_transaction_events(
         if request and request.method:
             method = request.method
 
-        transaction_name = event.transaction[:1024]
+        # Sanitize before building the key: these values become text[] bind
+        # params in the group lookup SELECT (via unnest), and Postgres rejects
+        # NUL (0x00) bytes in text. The transaction name is SDK-supplied and
+        # user-controlled, so strip bad chars here to keep BOTH the lookup and
+        # the subsequent INSERT operating on the same clean values.
+        transaction_name = remove_bad_chars(event.transaction)[:1024]
+        op = remove_bad_chars(op)
+        method = remove_bad_chars(method)
         key: GroupKey = (ingest_event.project_id, transaction_name, op, method)
         unique_keys.setdefault(key, ingest_event.organization_id)
         event_data.append((ingest_event, transaction_name, op, trace_status, key))
