@@ -530,16 +530,28 @@ FOR VALUES FROM ({range_from}) TO ({range_to});"""
                     f"inconsistent moduli {sorted(moduli)}; leaving as-is"
                 )
                 return 0
+            else:
+                # Children exist but none expose a hash modulus — e.g. the
+                # range partition was sub-partitioned by RANGE/LIST instead of
+                # HASH, or has some other unexpected structure. Creating HASH
+                # children here would clash with the existing strategy, so do
+                # not touch it. Generating no DDL also avoids a heavy lock.
+                logger.warning(
+                    f"Partition {partition_name} has children with no hash "
+                    f"modulus; leaving as-is (unexpected partition structure)"
+                )
+                return 0
 
         if existing_modulus is not None and existing_modulus != hash_buckets:
             # The range partition is already fully tiled at a modulus that
-            # differs from the configured bucket count. Changing the hash
-            # modulus requires a detach + rewrite, so do nothing here.
+            # differs from the configured bucket count. A hash set always
+            # covers the whole keyspace at its modulus, and that modulus
+            # cannot be changed online (detach + rewrite required), so do
+            # nothing here regardless of how many children are present.
             logger.info(
-                f"Partition {partition_name} already has a complete "
-                f"{existing_modulus}-bucket hash set; configured count "
-                f"({hash_buckets}) differs, leaving as-is "
-                f"(changing hash modulus requires a rewrite)"
+                f"Partition {partition_name} has a {existing_modulus}-bucket "
+                f"hash set; configured count ({hash_buckets}) differs, leaving "
+                f"as-is (changing hash modulus requires a rewrite)"
             )
             return 0
 

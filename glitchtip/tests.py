@@ -544,6 +544,9 @@ class PartitionCreationDDLTestCase(TransactionTestCase):
             )
 
     def tearDown(self):
+        # Discard any aborted-transaction state from a failed assertion so the
+        # cleanup DROP runs on a healthy connection and never masks the failure.
+        connection.close()
         with connection.cursor() as cursor:
             cursor.execute(f"DROP TABLE IF EXISTS {self.PARENT} CASCADE;")
         super().tearDown()
@@ -673,6 +676,52 @@ class PartitionCreationDDLTestCase(TransactionTestCase):
         )
         self.assertEqual(result, 0)
         self.assertEqual(self._child_moduli(partition_name), [4])
+
+    def test_skips_when_children_have_no_hash_modulus(self):
+        """
+        A range partition whose existing child is NOT a hash partition (e.g.
+        sub-partitioned by RANGE/LIST, or any unexpected structure) must be
+        left untouched rather than have hash children forced onto it.
+        """
+        partition_name = f"{self.PARENT}_20260702"
+        start = datetime(2026, 7, 2, tzinfo=timezone.utc)
+        end = datetime(2026, 7, 3, tzinfo=timezone.utc)
+
+        # Build a range partition that is itself sub-partitioned by LIST, with
+        # one list child — so its children carry no hash "modulus" bound.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                CREATE TABLE {partition_name} PARTITION OF {self.PARENT}
+                FOR VALUES FROM ('2026-07-02') TO ('2026-07-03')
+                PARTITION BY LIST (organization_id);
+                """
+            )
+            cursor.execute(
+                f"""
+                CREATE TABLE {partition_name}_org1 PARTITION OF {partition_name}
+                FOR VALUES IN (1);
+                """
+            )
+
+        with self.assertLogs("glitchtip.partition_manager", level="WARNING") as logs:
+            result = self.manager.execute_partition_creation(
+                parent_table=self.PARENT,
+                partition_name=partition_name,
+                start_date=start,
+                end_date=end,
+                hash_buckets=4,
+                key_type="datetime",
+            )
+
+        self.assertEqual(result, 0)
+        # No hash children were created; the single list child is untouched.
+        self.assertEqual(self._child_moduli(partition_name), [])
+        self.assertEqual(len(self.manager.list_partitions(partition_name)), 1)
+        self.assertTrue(
+            any("leaving as-is" in message for message in logs.output),
+            logs.output,
+        )
 
 
 class DatabaseSettingsTestCase(TestCase):
