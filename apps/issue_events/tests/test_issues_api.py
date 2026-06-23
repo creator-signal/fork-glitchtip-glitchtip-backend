@@ -13,7 +13,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from glitchtip.test_utils.issue import make_issue
+from glitchtip.test_utils.issue import amake_issue, arefresh_issue
 from glitchtip.test_utils.test_case import (
     APIPermissionTestCase,
     GlitchTestCase,
@@ -49,7 +49,7 @@ class IssueAPITestCase(GlitchTestCase):
         self.async_client.force_login(self.user)
 
     async def test_retrieve(self):
-        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        issue = await amake_issue(project=self.project, short_id=1)
         event = await baker.amake("issue_events.IssueEvent", issue=issue)
         await baker.amake(
             "issue_events.UserReport",
@@ -169,7 +169,7 @@ class IssueAPITestCase(GlitchTestCase):
     async def test_sort(self):
         issue1 = await baker.amake("issue_events.Issue", project=self.project)
         issue2 = await baker.amake("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue2).update(count=2)
+        await IssueIndex.objects.filter(issue=issue2).aupdate(count=2)
         issue3 = await baker.amake("issue_events.Issue", project=self.project)
 
         res = await self.async_client.get(self.list_url)
@@ -205,7 +205,7 @@ class IssueAPITestCase(GlitchTestCase):
             await baker.amake("issue_events.Issue", project=self.project) for _ in range(3)
         ]
         for i, issue in enumerate(issues):
-            IssueIndex.objects.filter(issue=issue).update(
+            await IssueIndex.objects.filter(issue=issue).aupdate(
                 count=i + 1, last_seen=base + datetime.timedelta(hours=i)
             )
 
@@ -218,7 +218,7 @@ class IssueAPITestCase(GlitchTestCase):
             ("&sort=last_seen", [issues[0].id, issues[1].id]),
             ("&sort=-count", [issues[2].id, issues[1].id]),
         ):
-            res = self.async_client.get(self.list_url + f"?limit=2{sort}")
+            res = await self.async_client.get(self.list_url + f"?limit=2{sort}")
             self.assertEqual(res.status_code, 200, msg=f"sort={sort!r}: {res.content}")
             page1 = [item["id"] for item in res.json()]
             self.assertEqual(page1, [str(i) for i in expected_first_page])
@@ -227,35 +227,27 @@ class IssueAPITestCase(GlitchTestCase):
             # Follow the next link and assert the two pages together cover every
             # issue exactly once (no row dropped or duplicated across the cursor).
             next_url = re.search(r'<([^>]+)>; rel="next"', res["Link"]).group(1)
-            res2 = self.async_client.get(next_url)
+            res2 = await self.async_client.get(next_url)
             self.assertEqual(res2.status_code, 200)
             page2 = [item["id"] for item in res2.json()]
             self.assertEqual(sorted(page1 + page2), sorted(str(i.id) for i in issues))
 
-    def _set_search_document(self, issue, text):
+    async def _set_search_document(self, issue, text):
         """Populate an issue's IssueIndex row (the full-text store).
 
         Two steps: the SearchVector expression is applied via update() (it does
         not resolve through Model.save()).
         """
-        IssueIndex.objects.get_or_create(
+        await IssueIndex.objects.aget_or_create(
             issue=issue, organization_id=self.organization.id
         )
-        IssueIndex.objects.filter(issue=issue).update(
+        await IssueIndex.objects.filter(issue=issue).aupdate(
             fts_document=SearchVector(Value(text))
         )
 
     async def test_search(self):
         issue = await baker.amake("issue_events.Issue", project=self.project)
-        self._set_search_document(issue, "apple sauce")
-        event = await baker.amake("issue_events.IssueEvent", issue=issue)
-        other_issue = await baker.maake("issue_events.Issue", project=self.project)
-    async def test_search(self):
-        issue = await baker.amake(
-            "issue_events.Issue",
-            project=self.project,
-            search_vector=SearchVector(Value("apple sauce")),
-        )
+        await self._set_search_document(issue, "apple sauce")
         event = await baker.amake("issue_events.IssueEvent", issue=issue)
         other_issue = await baker.amake("issue_events.Issue", project=self.project)
 
@@ -308,14 +300,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
         # A later event extends the issue's search document (same as ingest's
         # append path appending to fts_document).
-        self._set_search_document(issue, "apple sauce plum sauce")
-        res = self.async_client.get(self.list_url + '?query=is:unresolved "plum sauce"')
-        await Issue.objects.filter(id=issue.id).aupdate(
-            search_vector=SearchVector(
-                PipeConcat(F("search_vector"), SearchVector(Value(event3.data["name"])))
-            )
-        )
-        issue.search_vector = SearchVector(Value("apple sauce plum "))
+        await self._set_search_document(issue, "apple sauce plum sauce")
         res = await self.async_client.get(
             self.list_url + '?query=is:unresolved "plum sauce"'
         )
@@ -334,19 +319,19 @@ class IssueAPITestCase(GlitchTestCase):
         """
         issue = await baker.amake("issue_events.Issue", project=self.project)
         # The post_save signal already created the leaf row; just set the vector.
-        IssueIndex.objects.filter(issue=issue).update(
+        await IssueIndex.objects.filter(issue=issue).aupdate(
             fts_document=SearchVector(Value("kangaroo marsupial"))
         )
         other_issue = await baker.amake("issue_events.Issue", project=self.project)
 
-        def ids(query):
-            res = self.async_client.aget(self.list_url + "?query=" + query)
+        async def ids(query):
+            res = await self.async_client.get(self.list_url + "?query=" + query)
             self.assertEqual(res.status_code, 200)
             return {int(row["id"]) for row in res.json()}
 
-        self.assertEqual(ids("is:unresolved kangaroo"), {issue.id})
-        self.assertNotIn(other_issue.id, ids("is:unresolved kangaroo"))
-        self.assertEqual(ids('is:unresolved "kangaroo marsupial"'), {issue.id})
+        self.assertEqual(await ids("is:unresolved kangaroo"), {issue.id})
+        self.assertNotIn(other_issue.id, await ids("is:unresolved kangaroo"))
+        self.assertEqual(await ids('is:unresolved "kangaroo marsupial"'), {issue.id})
 
     async def test_search_unmatched_quote(self):
         """Queries with unmatched quotes should not raise ValueError"""
@@ -363,7 +348,7 @@ class IssueAPITestCase(GlitchTestCase):
             project=self.project,
             title=issue_str,
         )
-        self._set_search_document(issue, issue_str)
+        await self._set_search_document(issue, issue_str)
         res = await self.async_client.get(self.list_url + "?query=is:unresolved f*o")
         self.assertContains(res, issue.title)
         res = await self.async_client.get(self.list_url + "?query=is:unresolved f*x")
@@ -704,9 +689,9 @@ class IssueAPITestCase(GlitchTestCase):
         level_fatal = LogLevel.FATAL
 
         issue1 = await baker.amake("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue1).update(level=level_warning)
+        await IssueIndex.objects.filter(issue=issue1).aupdate(level=level_warning)
         issue2 = await baker.amake("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue2).update(level=level_fatal)
+        await IssueIndex.objects.filter(issue=issue2).aupdate(level=level_fatal)
         await baker.amake("issue_events.Issue", project=self.project)
 
         res = await self.async_client.get(
@@ -735,7 +720,7 @@ class IssueAPITestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
 
     async def test_resolve_with_status_details_in_release(self):
@@ -754,7 +739,7 @@ class IssueAPITestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
         self.assertEqual(issue.resolved_in_release_id, release.id)
 
@@ -780,7 +765,7 @@ class IssueAPITestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
         self.assertEqual(issue.resolved_in_release_id, latest_release.id)
 
@@ -830,7 +815,7 @@ class IssueAPITestCase(GlitchTestCase):
             organization=self.project.organization,
             version="1.0.0",
         )
-        issue = make_issue(
+        issue = await amake_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
             resolved_in_release=release,
@@ -842,7 +827,7 @@ class IssueAPITestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         self.assertIsNone(issue.resolved_in_release_id)
 
@@ -857,7 +842,7 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 404)
 
     async def test_organizations_issue_update(self):
-        issue = await baker.amake("issue_events.Issue", project=self.project)
+        issue = await amake_issue(project=self.project)
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         data = {"status": "resolved"}
         res = await self.async_client.put(
@@ -866,7 +851,7 @@ class IssueAPITestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
 
     async def test_bulk_update(self):
@@ -879,9 +864,9 @@ class IssueAPITestCase(GlitchTestCase):
         data = {"status": status_to_set.label}
         res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, status_to_set.label)
-        issues = [i async for i in Issue.objects.all()]
-        self.assertEqual(issues[0].status, status_to_set)
-        self.assertEqual(issues[1].status, status_to_set)
+        async for issue in Issue.objects.all():
+            index = await IssueIndex.objects.aget(issue_id=issue.pk)
+            self.assertEqual(index.status, status_to_set)
 
     async def test_bulk_delete_via_ids(self):
         """Bulk delete Issues with ids"""
@@ -902,7 +887,9 @@ class IssueAPITestCase(GlitchTestCase):
         )
         # count lives on the IssueIndex leaf; set it to the number of
         # events we create per issue.
-        IssueIndex.objects.filter(issue__in=issues).update(count=issue_event_count)
+        await IssueIndex.objects.filter(issue__in=issues).aupdate(
+            count=issue_event_count
+        )
         await baker.amake(
             "issue_events.IssueEvent",
             issue=issues[0],
@@ -922,10 +909,9 @@ class IssueAPITestCase(GlitchTestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(await Issue.objects.filter(is_deleted=False).acount(), 1)
-        self.assertEqual(
-            (await Issue.objects.aget(is_deleted=False)).count,
-            2 * issue_event_count,
-        )
+        merged = await Issue.objects.aget(is_deleted=False)
+        merged_index = await IssueIndex.objects.aget(issue_id=merged.pk)
+        self.assertEqual(merged_index.count, 2 * issue_event_count)
 
     async def test_bulk_delete_via_search(self):
         """Bulk delete Issues via search string"""
@@ -949,8 +935,8 @@ class IssueAPITestCase(GlitchTestCase):
         data = {"status": status_to_set.label}
         res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, status_to_set.label)
-        await issue1.arefresh_from_db()
-        await issue2.arefresh_from_db()
+        await arefresh_issue(issue1)
+        await arefresh_issue(issue2)
         self.assertEqual(issue1.status, status_to_set)
         self.assertEqual(issue2.status, EventStatus.UNRESOLVED)
 
@@ -1098,7 +1084,7 @@ class IssueAPITestCase(GlitchTestCase):
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        await issue.arefresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
         self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
 
@@ -1135,7 +1121,7 @@ class IssueAPITestCase(GlitchTestCase):
         now = timezone.now()
 
         # Issue with stats both inside and outside the 24h window
-        issue_with_stats = make_issue(project=self.project, count=100)
+        issue_with_stats = await amake_issue(project=self.project, count=100)
         # This stat is recent and should be in the response
         recent_stat = await baker.amake(
             "issue_events.IssueAggregate",
@@ -1152,7 +1138,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Issue with no recent statistics
-        issue_without_stats = make_issue(project=self.project, count=50)
+        issue_without_stats = await amake_issue(project=self.project, count=50)
 
         # Issue belonging to another organization that should not appear
         await baker.amake("issue_events.Issue")
@@ -1204,7 +1190,7 @@ class IssueAPITestCase(GlitchTestCase):
         now = timezone.now()
 
         # Create an issue to test against
-        issue = make_issue(project=self.project, count=250)
+        issue = await amake_issue(project=self.project, count=250)
 
         # Stat from 2 days ago (should be included)
         await baker.amake(

@@ -42,13 +42,15 @@ class TeamAPITestCase(TestCase):
         in the org. Regression: the role check matched any admin in the org
         rather than the requesting user (self.user here is the org admin)."""
         member = await baker.amake("users.user")
-        self.organization.add_user(member, role=OrganizationUserRole.MEMBER)
+        await sync_to_async(self.organization.add_user)(
+            member, role=OrganizationUserRole.MEMBER
+        )
         team = await baker.amake("teams.Team", organization=self.organization)
-        self.client.force_login(member)
+        await sync_to_async(self.async_client.force_login)(member)
         url = reverse("api:delete_team", args=[self.organization.slug, team.slug])
         res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
-        self.assertTrue(Team.objects.filter(id=team.id).exists())
+        self.assertTrue(await Team.objects.filter(id=team.id).aexists())
 
     async def test_update(self):
         team = await baker.amake("teams.Team", organization=self.organization)
