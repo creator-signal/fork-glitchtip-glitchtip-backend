@@ -1,7 +1,6 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from django.test import TestCase
 from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
 from django.urls import reverse

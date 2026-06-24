@@ -1,7 +1,6 @@
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
-
-from asgiref.sync import sync_to_async
 from model_bakery import baker
 
 from glitchtip.test_utils import generators  # noqa: F401

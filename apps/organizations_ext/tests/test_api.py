@@ -1,8 +1,7 @@
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
-
 from model_bakery import baker
-from asgiref.sync import sync_to_async
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.organizations_ext.models import OrganizationUser

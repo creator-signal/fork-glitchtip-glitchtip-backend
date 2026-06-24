@@ -1,7 +1,6 @@
 from unittest import mock
 
 from asgiref.sync import sync_to_async
-from django.test import TestCase, override_settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
