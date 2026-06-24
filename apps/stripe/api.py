@@ -581,10 +581,9 @@ async def configure_overage(
                 status=400,
             )
         if not sub.metered_item_id:
-            # Reuse an existing metered item if Stripe already has one: a prior
-            # crash between attaching it and saving its id here would leave an
-            # orphan we'd otherwise double up on. The idempotency key stops a
-            # retry or concurrent enable from attaching a duplicate.
+            # Stripe is the source of truth: a crash between attaching the item
+            # and saving its id here leaves an orphan that Stripe would reject as
+            # a duplicate on retry, so reuse it instead of re-adding.
             fetched = await fetch_subscription(sub.stripe_id)
             _, existing = select_subscription_items(fetched.items)
             if existing:
@@ -594,9 +593,7 @@ async def configure_overage(
                 # subscription is still on classic (no-op if already flexible).
                 await migrate_subscription_to_flexible(sub.stripe_id)
                 item = await add_subscription_item(
-                    sub.stripe_id,
-                    overage_price.stripe_id,
-                    idempotency_key=f"overage-attach-{sub.stripe_id}",
+                    sub.stripe_id, overage_price.stripe_id
                 )
                 sub.metered_item_id = item.id
             await sub.asave(update_fields=["metered_item_id"])
