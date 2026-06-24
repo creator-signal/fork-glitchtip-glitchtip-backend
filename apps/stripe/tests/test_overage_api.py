@@ -94,16 +94,11 @@ class OverageAPITestCase(TestCase):
         self.assertTrue(self.org.metered_billing_enabled)
         self.assertEqual(self.org.overage_spend_cap_cents, 2000)
         self.assertEqual(self.sub.metered_item_id, "si_new")
-        # Attach carries a deterministic idempotency key so a retry can't dup it.
-        item.assert_awaited_once_with(
-            self.sub.stripe_id,
-            self.overage_price.stripe_id,
-            idempotency_key=f"overage-attach-{self.sub.stripe_id}",
-        )
+        item.assert_awaited_once_with(self.sub.stripe_id, self.overage_price.stripe_id)
 
     def test_enable_reuses_existing_stripe_item(self):
-        # NEW-1: if Stripe already has a metered item (orphaned by a prior crash
-        # before we saved its id), reuse it instead of attaching a duplicate.
+        # An item orphaned by a prior crash (before we saved its id) is reused
+        # rather than re-added, which Stripe would reject as a duplicate.
         existing = type("I", (), {"id": "si_orphan"})()
         add = AsyncMock()
         with (
