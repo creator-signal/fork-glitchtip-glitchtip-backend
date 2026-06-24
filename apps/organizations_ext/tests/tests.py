@@ -48,26 +48,26 @@ class OrganizationModelTestCase(TestCase):
         self.assertEqual(await organization.users.acount(), 2)
         self.assertEqual(await organization.owners.acount(), 1)
 
-    async def test_email_missing_organization_owner_fallback(self):
+    def test_email_missing_organization_owner_fallback(self):
         """
         When OrganizationOwner record is missing, email property should
         fall back to first user with OWNER role and log a warning.
         """
-        user = await baker.amake("users.user")
-        organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization.add_user)(user)
+        user = baker.make("users.user")
+        organization = baker.make("organizations_ext.Organization")
+        organization.add_user(user)
 
         # Verify the owner exists first
         self.assertTrue(
-            await OrganizationOwner.objects.filter(organization=organization).aexists()
+            OrganizationOwner.objects.filter(organization=organization).exists()
         )
         self.assertEqual(organization.email, user.email)
 
         # Delete the OrganizationOwner to simulate the data integrity issue
-        await OrganizationOwner.objects.filter(organization=organization).adelete()
+        OrganizationOwner.objects.filter(organization=organization).delete()
 
         # Refresh from DB to clear cached relation
-        await organization.arefresh_from_db()
+        organization.refresh_from_db()
 
         # Verify fallback works and warning is logged
         with mock.patch("apps.organizations_ext.models.logger") as mock_logger:
@@ -76,16 +76,16 @@ class OrganizationModelTestCase(TestCase):
             mock_logger.warning.assert_called_once()
             self.assertIn("no OrganizationOwner", mock_logger.warning.call_args[0][0])
 
-    async def test_email_no_owner_at_all(self):
+    def test_email_no_owner_at_all(self):
         """
         When organization has no OrganizationOwner and no users with OWNER role,
         email property should return None.
         """
-        organization = await baker.amake("organizations_ext.Organization")
+        organization = baker.make("organizations_ext.Organization")
 
         # Add a user but not as owner
-        user = await baker.amake("users.user")
-        await baker.amake(
+        user = baker.make("users.user")
+        baker.make(
             "organizations_ext.OrganizationUser",
             user=user,
             organization=organization,
