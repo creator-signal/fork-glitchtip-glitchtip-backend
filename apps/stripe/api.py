@@ -595,10 +595,9 @@ async def configure_overage(
             update_fields=["metered_billing_enabled", "overage_spend_cap_cents"]
         )
     else:
-        # Keep the item attached and the counter intact: the meter aggregates
-        # per customer for the whole cycle, so detaching and re-adding would
-        # re-bill usage already reported. Disabling stops new reporting; a
-        # dormant item bills zero.
+        # Keep the item attached and counter intact. The meter aggregates per
+        # customer for the whole cycle, so detaching/resetting re-bills usage
+        # already reported. A dormant item bills zero.
         org.metered_billing_enabled = False
         await org.asave(update_fields=["metered_billing_enabled"])
 
