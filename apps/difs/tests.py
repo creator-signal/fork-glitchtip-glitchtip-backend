@@ -9,6 +9,7 @@ from django.core.files import File as DjangoFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from model_bakery import baker
+from pydantic import ValidationError
 
 from apps.difs.stacktrace_processor import (
     StacktraceProcessor,
@@ -1121,3 +1122,19 @@ class NormalizeDebugIdTestCase(GlitchTestCase):
         self.assertEqual(meta.images[0].image_addr, "0x100000")
         self.assertIsInstance(meta.images[1], NativeDebugImage)
         self.assertIsInstance(meta.images[2], OtherDebugImage)
+
+    def test_native_debug_image_accepts_breakpad_format(self):
+        """33-char Breakpad-style debug_id (32 hex + appendix) should validate."""
+        from apps.event_ingest.schema import NativeDebugImage
+
+        breakpad_id = "114f8cb943bc5bf52c409cabe92c09240"  # 33 chars, appendix "0"
+        image = NativeDebugImage(type="wasm", debug_id=breakpad_id)
+        self.assertIsNotNone(image.debug_id)
+        self.assertEqual(len(str(image.debug_id).replace("-", "")), 32)
+
+    def test_native_debug_image_still_rejects_garbage(self):
+        """Genuinely invalid debug_id should still fail validation as before."""
+        from apps.event_ingest.schema import NativeDebugImage
+
+        with self.assertRaises(ValidationError):
+            NativeDebugImage(type="wasm", debug_id="not-a-debug-id-at-all")

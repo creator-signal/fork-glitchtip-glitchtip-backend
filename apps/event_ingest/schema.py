@@ -21,6 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from symbolic import normalize_debug_id
+
 from apps.issue_events.constants import IssueEventType
 from apps.shared.schema.error import EventProcessingError
 
@@ -128,6 +130,27 @@ class EventTemplate(LaxIngestSchema):
     post_context: list[str] | None = None
 
 
+
+def _normalize_native_debug_id(v):
+    """
+    Native SDKs (macho/elf/pe/pe_dotnet/wasm) may send Breakpad-style debug
+    IDs: 32 hex chars plus a trailing appendix/age character (e.g. a "0"),
+    making a 33-char string that uuid.UUID() rejects outright.
+
+    normalize_debug_id (symbolic/Rust) already knows how to canonicalize
+    these formats; route through it before Pydantic's UUID coercion runs.
+    """
+    if v is None or isinstance(v, uuid.UUID):
+        return v
+    try:
+        normalized = normalize_debug_id(str(v))
+    except Exception:
+        # Let Pydantic's own UUID validation produce the real error
+        # for genuinely malformed input.
+        return v
+    return normalized if normalized is not None else v
+
+
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class SourceMapImage(BaseModel):
     type: Literal["sourcemap"]
@@ -144,7 +167,9 @@ class JvmDebugImage(BaseModel):
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class NativeDebugImage(BaseModel):
     type: Literal["macho", "elf", "pe", "pe_dotnet", "wasm"]
-    debug_id: uuid.UUID | None = None
+    debug_id: Annotated[
+        uuid.UUID | None, BeforeValidator(_normalize_native_debug_id)
+    ] = None
     debug_checksum: str | None = None
     image_addr: str | None = None
     image_size: int | None = None
