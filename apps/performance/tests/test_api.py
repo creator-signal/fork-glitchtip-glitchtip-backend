@@ -1,12 +1,11 @@
 from datetime import timedelta
 
+from asgiref.sync import sync_to_async
 from django.utils import timezone
+from model_bakery import baker
 
 from apps.performance.models import TransactionGroup
 from glitchtip.test_utils.test_case import GlitchTestCase
-
-from asgiref.sync import sync_to_async
-from model_bakery import baker
 
 
 class TransactionGroupAPITestCase(GlitchTestCase):

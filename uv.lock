@@ -888,15 +888,15 @@ wheels = [
 
 [[package]]
 name = "django-debug-toolbar"
-version = "6.3.0"
+version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "sqlparse" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/ea/b62673424dd72d2dbf5adf4145281a421d5792f47380d9bc8e3b11e1a769/django_debug_toolbar-6.3.0.tar.gz", hash = "sha256:f830a86fe02e17f625a22cfbed24a5bd1500762e201ec959c50efb0f9327282b", size = 334079, upload-time = "2026-04-02T16:07:01.385Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/ac/3ac674f99c64bfbcd9ae3d7f5f3577f23ea52884e5ac36842e1f024dce03/django_debug_toolbar-7.0.0.tar.gz", hash = "sha256:ef7494c5b459c149e87cc2da88d86e944064945e86bd7b2d879093586b5fefbf", size = 359560, upload-time = "2026-06-19T00:21:23.346Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/9e/d8c3c845f4b5ccac7377c19f4049e7e00c6f121846a81f69a497b45734df/django_debug_toolbar-6.3.0-py3-none-any.whl", hash = "sha256:a199ce3d0f884739a9096835ad417479fede05f3b3c4824bc8b354721ba8f629", size = 298304, upload-time = "2026-04-02T16:06:59.617Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/ab/684a56624f9ed35127e203e52d2c241f3b7b70d37cfa8cb2ba4fc8e1e8d7/django_debug_toolbar-7.0.0-py3-none-any.whl", hash = "sha256:656161388ce48384276342eeb16d532113ec670816fa1546cc3753730aa51b3d", size = 302038, upload-time = "2026-06-19T00:21:21.531Z" },
 ]
 
 [[package]]
@@ -1539,7 +1539,7 @@ requires-dist = [
     { name = "pydantic", extras = ["email"], specifier = "~=2.11" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "sentry-sdk", specifier = "~=2.20" },
-    { name = "symbolic", specifier = "~=13.1.1" },
+    { name = "symbolic", specifier = "~=13.3.0" },
     { name = "user-agents", specifier = "~=2.1" },
     { name = "uuid6", specifier = ">=2024.1.12" },
     { name = "uwsgi", specifier = "~=2.0" },
@@ -1551,7 +1551,7 @@ requires-dist = [
 dev = [
     { name = "aioresponses", specifier = "~=0.7" },
     { name = "coverage", specifier = ">=7.13.4" },
-    { name = "django-debug-toolbar", specifier = "~=6.0" },
+    { name = "django-debug-toolbar", specifier = "~=7.0" },
     { name = "django-sslserver", specifier = "~=0.22" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = "~=6.0" },
     { name = "freezegun", specifier = "~=1.1" },
@@ -3704,17 +3704,17 @@ wheels = [
 
 [[package]]
 name = "symbolic"
-version = "13.1.1"
+version = "13.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "milksnake" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/11/0b/9b36c5173ede2984aada0b225e5a94e6aa8dbc10274b7f690c1c0861e59a/symbolic-13.1.1.tar.gz", hash = "sha256:ecff36be208ae22cff38d6fb1f1591e73680e52bf5c9fdccb37d7a5b6788814b", size = 6175619, upload-time = "2026-05-28T14:12:28.546Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/43/b6b4db6379a1da36cc1fa9e6f014f4c42ac53ae9c351ab2aef2837359802/symbolic-13.3.1.tar.gz", hash = "sha256:e2abbbde27e0904c3f59a9635f278a5bcc28191b21dc0089ca646587f3262ec6", size = 6186348, upload-time = "2026-06-19T12:34:50.076Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/2d/8b11c28070f21bee62b2aaae6f345a8bd811ddc0918826097ff16b86c413/symbolic-13.1.1-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:c07dba86b4f352b6aaf80d93e2ae39669ce8456fbac2992e3cf153ab673da733", size = 2564603, upload-time = "2026-05-28T14:12:19.72Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/a5/9cca1b8de23dc98852fc100233aa8e60679cdfba868499304d6e655a4404/symbolic-13.1.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:fac90575bcb24db4f8cfcbd0fd39402c61efe79c929e30f8d8c922c56c3f7565", size = 2341249, upload-time = "2026-05-28T14:12:21.239Z" },
-    { url = "https://files.pythonhosted.org/packages/98/9f/e082fcf2af4500ac055cf4476fc292902e78fd0081926a72789abc29083b/symbolic-13.1.1-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:8b5d749d3fe0860547cefcf1e6b2909a328cb3c05a2ad33b58bba8075b71c0ca", size = 16865300, upload-time = "2026-05-28T14:12:23.106Z" },
-    { url = "https://files.pythonhosted.org/packages/a5/72/a7cb7558c253839b00c2773c68b797a9833c0ada2a85b21c6326d2f653ca/symbolic-13.1.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:d93c4e6f9ec40ab5454230e5e9fe59b6f53f1662cb3ba06b02e4ad0882f5f829", size = 19146791, upload-time = "2026-05-28T14:12:26.394Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/b5/63b62d18b85fa91f21fbe4d6a97504eccf993b818d1108c7477fbafe7058/symbolic-13.3.1-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:46f64738e2dd4b93b1c24a74d13b3e0d2f197a9b55d3813d58f221a4f7fa458c", size = 2557590, upload-time = "2026-06-19T12:34:43.451Z" },
+    { url = "https://files.pythonhosted.org/packages/67/e3/dd95cef63c59ac3beabcc16e838d48110e32eaf770776d5e41fd8f28d629/symbolic-13.3.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:06d7314135e7ef62825a557fc1145aab53ecbfcc4c6bbf37dab8d4495863bc61", size = 2340221, upload-time = "2026-06-19T12:34:45.026Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/70/0955fe68d921599376d5876240108cdd80bded794612892ea77dd699f590/symbolic-13.3.1-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:e71cc468197c3da689bb1eac23ec69b8a4c6f6ab21eac1959dc3b32e8e801a78", size = 16881004, upload-time = "2026-06-19T12:34:46.226Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/8e/65d31d5f770117123a413131ef66defedc73f2d631f5ca33f454a54ccde9/symbolic-13.3.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:3ec2c72ab88848537e6bfd7040bfd498fbfa53357e3b5702fc56149bbd896b97", size = 19165082, upload-time = "2026-06-19T12:34:48.297Z" },
 ]
 
 [[package]]

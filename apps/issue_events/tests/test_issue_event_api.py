@@ -2,7 +2,6 @@ import re
 import uuid
 from datetime import timedelta
 
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone

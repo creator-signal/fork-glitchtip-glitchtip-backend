@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.urls import reverse
 from model_bakery import baker
 
