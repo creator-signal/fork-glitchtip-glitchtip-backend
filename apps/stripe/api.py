@@ -32,7 +32,6 @@ from .client import (
     create_portal_session,
     create_session,
     create_subscription,
-    delete_subscription_item,
     migrate_subscription_to_flexible,
 )
 from .constants import (
@@ -40,7 +39,6 @@ from .constants import (
     CollectionMethod,
     SubscriptionStatus,
 )
-from .exceptions import StripeResourceNotFound
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .overage import cost_cents_for_units, units_for_budget
 from .utils import compute_cycle, unix_to_datetime
@@ -592,21 +590,10 @@ async def configure_overage(
             update_fields=["metered_billing_enabled", "overage_spend_cap_cents"]
         )
     else:
-        if sub and sub.metered_item_id:
-            try:
-                await delete_subscription_item(sub.metered_item_id)
-            except StripeResourceNotFound:
-                pass
-            sub.metered_item_id = ""
-            sub.overage_units_reported = 0
-            sub.overage_period_start = None
-            await sub.asave(
-                update_fields=[
-                    "metered_item_id",
-                    "overage_units_reported",
-                    "overage_period_start",
-                ]
-            )
+        # Keep the item attached and the counter intact: the meter aggregates
+        # per customer for the whole cycle, so detaching and re-adding would
+        # re-bill usage already reported. Disabling stops new reporting; a
+        # dormant item bills zero.
         org.metered_billing_enabled = False
         await org.asave(update_fields=["metered_billing_enabled"])
 
