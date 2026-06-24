@@ -69,10 +69,8 @@ async def check_all_organizations_throttle():
 def _progressive_throttle(usage: int, start: int, width: int) -> int:
     """Ramp 0 → 10 → 50 → 100 as usage climbs past ``start`` over ``width``.
 
-    Mirrors the historical base behavior (over quota → 10%, over 1.5× → 50%,
-    over 2× → 100%) when called with ``start = width = quota``. The metered path
-    reuses it anchored past the paid overage budget (``start = quota + cap``).
-    Integer arithmetic only — usage can reach 100M+.
+    With ``start = width = quota`` this is the base behavior (over quota → 10%,
+    1.5× → 50%, 2× → 100%); the metered path anchors it past the paid budget.
     """
     if usage > start + width:
         return 100
@@ -86,20 +84,12 @@ def _progressive_throttle(usage: int, start: int, width: int) -> int:
 async def _report_overage(
     org: Organization, sub, cycle_start, billable_units: int
 ) -> None:
-    """Report the cumulative billable overage to Stripe as an additive delta.
+    """Report cumulative billable overage to Stripe as an additive delta.
 
-    Meter events sum per cycle, so we only ever send the increase since the last
-    report. The counter resets when the billing cycle rolls over. We never report
-    beyond ``billable_units`` (already capped at the org's spend ceiling), so the
-    invoice cannot exceed the cap.
-
-    A per-subscription cache lock serializes reporting: concurrent throttle
-    checks (the ingest-sampled task, the webhook/API ``bypass_cache`` calls, and
-    the periodic sweep) could otherwise each read a stale counter and report
-    overlapping deltas under different idempotency keys, summing to an
-    over-charge in Stripe. The lock holder re-reads the persisted counter so its
-    delta is computed against the latest value; a check that can't get the lock
-    skips this round (a later check catches up).
+    Meter events sum per cycle, so we only send the increase since the last
+    report; the counter resets on cycle rollover. A per-subscription cache lock
+    serializes concurrent throttle checks so they can't report overlapping
+    deltas under different idempotency keys and over-charge.
     """
     from apps.stripe.client import create_meter_event
     from apps.stripe.models import StripeSubscription
