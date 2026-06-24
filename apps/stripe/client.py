@@ -66,17 +66,25 @@ def param_helper(data: AIODictParams) -> AIOTupleParams:
     return params
 
 
-async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
+async def _stripe_request(
+    method: str, url: str, idempotency_key: str | None = None, **kwargs: Any
+) -> str:
     """Issue a Stripe API request, retrying transient failures with backoff.
 
     Honors Stripe's ``Stripe-Should-Retry`` response header when present; otherwise
     retries on 429 and 5xx. Each attempt opens its own ``ClientSession`` to avoid
     reusing a connection that may have been poisoned by the prior failure.
+
+    ``idempotency_key`` is sent as Stripe's ``Idempotency-Key`` header so the
+    internal retry above (and any caller retry) cannot duplicate a write.
     """
+    headers = HEADERS
+    if idempotency_key is not None:
+        headers = {**HEADERS, "Idempotency-Key": idempotency_key}
     for attempt in range(MAX_RETRIES + 1):
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
             async with session.request(
-                method, url, headers=HEADERS, timeout=STRIPE_TIMEOUT, **kwargs
+                method, url, headers=headers, timeout=STRIPE_TIMEOUT, **kwargs
             ) as response:
                 if response.status == 200:
                     return await response.text()
@@ -115,9 +123,13 @@ async def stripe_get(
     return await _stripe_request("GET", f"{STRIPE_URL}/{endpoint}", params=params)
 
 
-async def stripe_post(endpoint: str, data: dict) -> str:
+async def stripe_post(
+    endpoint: str, data: dict, idempotency_key: str | None = None
+) -> str:
     """Makes POST requests to the Stripe API. Returns response text"""
-    return await _stripe_request("POST", f"{STRIPE_URL}/{endpoint}", data=data)
+    return await _stripe_request(
+        "POST", f"{STRIPE_URL}/{endpoint}", data=data, idempotency_key=idempotency_key
+    )
 
 
 async def stripe_delete(endpoint: str) -> str:
@@ -376,12 +388,17 @@ async def migrate_subscription_to_flexible(subscription_id: str) -> None:
 
 
 async def add_subscription_item(
-    subscription_id: str, price_id: str
+    subscription_id: str, price_id: str, idempotency_key: str | None = None
 ) -> SubscriptionItem:
-    """Attach ``price_id`` to a subscription as an additional item."""
+    """Attach ``price_id`` to a subscription as an additional item.
+
+    Pass ``idempotency_key`` so a retry can't attach a duplicate (double-billing)
+    item within Stripe's idempotency window.
+    """
     response = await stripe_post(
         "subscription_items",
         {"subscription": subscription_id, "price": price_id},
+        idempotency_key=idempotency_key,
     )
     return SubscriptionItem.model_validate_json(response)
 

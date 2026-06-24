@@ -33,6 +33,7 @@ from .client import (
     create_session,
     create_subscription,
     delete_subscription_item,
+    fetch_subscription,
     migrate_subscription_to_flexible,
 )
 from .constants import (
@@ -43,7 +44,7 @@ from .constants import (
 from .exceptions import StripeResourceNotFound
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .overage import cost_cents_for_units, units_for_budget
-from .utils import compute_cycle, unix_to_datetime
+from .utils import compute_cycle, select_subscription_items, unix_to_datetime
 
 router = Router()
 
@@ -580,11 +581,24 @@ async def configure_overage(
                 status=400,
             )
         if not sub.metered_item_id:
-            # Metered prices require flexible billing mode; migrate if the
-            # subscription is still on classic (no-op if already flexible).
-            await migrate_subscription_to_flexible(sub.stripe_id)
-            item = await add_subscription_item(sub.stripe_id, overage_price.stripe_id)
-            sub.metered_item_id = item.id
+            # Reuse an existing metered item if Stripe already has one: a prior
+            # crash between attaching it and saving its id here would leave an
+            # orphan we'd otherwise double up on. The idempotency key stops a
+            # retry or concurrent enable from attaching a duplicate.
+            fetched = await fetch_subscription(sub.stripe_id)
+            _, existing = select_subscription_items(fetched.items)
+            if existing:
+                sub.metered_item_id = existing.id
+            else:
+                # Metered prices require flexible billing mode; migrate if the
+                # subscription is still on classic (no-op if already flexible).
+                await migrate_subscription_to_flexible(sub.stripe_id)
+                item = await add_subscription_item(
+                    sub.stripe_id,
+                    overage_price.stripe_id,
+                    idempotency_key=f"overage-attach-{sub.stripe_id}",
+                )
+                sub.metered_item_id = item.id
             await sub.asave(update_fields=["metered_item_id"])
         org.metered_billing_enabled = True
         org.overage_spend_cap_cents = payload.cap_cents
