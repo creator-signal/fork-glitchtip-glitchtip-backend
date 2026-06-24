@@ -46,13 +46,13 @@ class ErrorPageEmbedTestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(UserReport.objects.filter(project=self.project).exists())
 
-    def test_submit_report_with_issue(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
-        event = baker.make("issue_events.IssueEvent", issue=issue)
+    async def test_submit_report_with_issue(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
+        event = await baker.amake("issue_events.IssueEvent", issue=issue)
         params = f"?dsn={self.project_key.get_dsn()}&eventId={event.id.hex}"
         data = {"name": "Test Name", "email": "test@example.com", "comments": "hmm"}
-        res = self.client.post(self.url + params, data)
+        res = await self.async_client.post(self.url + params, data)
         self.assertEqual(res.status_code, 200)
-        created_report = UserReport.objects.filter(issue=issue).first()
+        created_report = await UserReport.objects.filter(issue=issue).afirst()
         self.assertEqual(created_report.comments, data["comments"])
         self.assertEqual(created_report.name, data["name"])

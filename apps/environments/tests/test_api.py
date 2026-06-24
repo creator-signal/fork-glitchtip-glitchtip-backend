@@ -10,42 +10,43 @@ from ..models import EnvironmentProject
 class EnvironmentTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.create_logged_in_user()
+        self.async_client.force_login(self.user)
         self.url = reverse("api:list_environments", args=[self.organization.slug])
 
-    def test_environments(self):
-        environment = baker.make(
+    async def test_environments(self):
+        environment = await baker.amake(
             "environments.Environment", organization=self.organization
         )
-        baker.make(
+        await baker.amake(
             "environments.EnvironmentProject",
             environment=environment,
             project=self.project,
         )
-        other_environment = baker.make("environments.Environment")
-        baker.make(
+        other_environment = await baker.amake("environments.Environment")
+        await baker.amake(
             "environments.EnvironmentProject",
             environment=other_environment,
             project=self.project,
         )
 
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertContains(res, environment.name)
         self.assertNotContains(res, other_environment.name)
 
-    def test_hide_environments(self):
-        environment_project1 = baker.make(
+    async def test_hide_environments(self):
+        environment_project1 = await baker.amake(
             "environments.EnvironmentProject",
             project=self.project,
             environment__organization=self.organization,
             is_hidden=False,
         )
-        environment_project2 = baker.make(
+        environment_project2 = await baker.amake(
             "environments.EnvironmentProject",
             project=self.project,
             environment__organization=self.organization,
             is_hidden=True,
         )
-        res = self.client.get(self.url + "?visibility=visible")
+        res = await self.async_client.get(self.url + "?visibility=visible")
         self.assertContains(res, environment_project1.environment.name)
         self.assertNotContains(res, environment_project2.environment.name)
 
@@ -53,30 +54,31 @@ class EnvironmentTestCase(GlitchTipTestCaseMixin, TestCase):
 class EnvironmentProjectTestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.create_logged_in_user()
+        self.async_client.force_login(self.user)
 
-    def test_environment_projects(self):
+    async def test_environment_projects(self):
         url = reverse(
             "api:list_environment_projects",
             args=[self.organization.slug, self.project.slug],
         )
-        environment_project = baker.make(
+        environment_project = await baker.amake(
             "environments.EnvironmentProject",
             project=self.project,
             environment__organization=self.organization,
         )
-        other_environment_project = baker.make("environments.EnvironmentProject")
-        another_environment_project = baker.make(
+        other_environment_project = await baker.amake("environments.EnvironmentProject")
+        another_environment_project = await baker.amake(
             "environments.EnvironmentProject",
             environment__organization=self.organization,
         )
 
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, environment_project.environment.name)
         self.assertNotContains(res, other_environment_project.environment.name)
         self.assertNotContains(res, another_environment_project.environment.name)
 
-    def test_make_hidden(self):
-        environment_project = baker.make(
+    async def test_make_hidden(self):
+        environment_project = await baker.amake(
             "environments.EnvironmentProject",
             is_hidden=False,
             project=self.project,
@@ -91,6 +93,10 @@ class EnvironmentProjectTestCase(GlitchTipTestCaseMixin, TestCase):
             ],
         )
         data = {"name": environment_project.environment.name, "isHidden": True}
-        res = self.client.put(detail_url, data, content_type="application/json")
+        res = await self.async_client.put(
+            detail_url, data, content_type="application/json"
+        )
         self.assertContains(res, "true")
-        self.assertTrue(EnvironmentProject.objects.filter(is_hidden=True).exists())
+        self.assertTrue(
+            await EnvironmentProject.objects.filter(is_hidden=True).aexists()
+        )

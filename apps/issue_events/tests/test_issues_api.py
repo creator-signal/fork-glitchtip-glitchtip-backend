@@ -4,6 +4,7 @@ import re
 import uuid
 from timeit import default_timer as timer
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.db.models import Value
@@ -12,7 +13,7 @@ from django.utils import timezone
 from freezegun import freeze_time
 from model_bakery import baker
 
-from glitchtip.test_utils.issue import make_issue
+from glitchtip.test_utils.issue import amake_issue, arefresh_issue
 from glitchtip.test_utils.test_case import (
     APIPermissionTestCase,
     GlitchTestCase,
@@ -45,24 +46,25 @@ class IssueAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_retrieve(self):
-        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
-        event = baker.make("issue_events.IssueEvent", issue=issue)
-        baker.make(
+    async def test_retrieve(self):
+        issue = await amake_issue(project=self.project, short_id=1)
+        event = await baker.amake("issue_events.IssueEvent", issue=issue)
+        await baker.amake(
             "issue_events.UserReport",
             project=self.project,
             issue=issue,
             event_id=event.id.hex,
             _quantity=1,
         )
-        baker.make("issue_events.Comment", issue=issue, _quantity=3)
+        await baker.amake("issue_events.Comment", issue=issue, _quantity=3)
         url = reverse(
             "api:get_issue",
             kwargs={"issue_id": issue.id},
         )
 
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
 
         self.assertEqual(
@@ -76,51 +78,53 @@ class IssueAPITestCase(GlitchTestCase):
         )
         self.assertEqual(data.get("permalink"), expected_permalink)
 
-    def test_retrieve_with_first_release(self):
-        release = baker.make(
+    async def test_retrieve_with_first_release(self):
+        release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="1.0.0",
         )
-        release.projects.add(self.project)
-        issue = baker.make(
+        await release.projects.aadd(self.project)
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             short_id=1,
             first_release=release,
         )
         url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
         self.assertIsNotNone(data.get("firstRelease"))
         self.assertEqual(data["firstRelease"]["version"], "1.0.0")
         self.assertEqual(data["firstRelease"]["shortVersion"], "1.0.0")
         self.assertIn("dateCreated", data["firstRelease"])
 
-    def test_retrieve_without_first_release(self):
-        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
+    async def test_retrieve_without_first_release(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
         url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
         self.assertIsNone(data.get("firstRelease"))
 
-    def test_list(self):
-        res = self.client.get(self.list_url)
+    async def test_list(self):
+        res = await self.async_client.get(self.list_url)
         self.assertEqual(res.status_code, 200)
 
-        not_my_issue = baker.make("issue_events.Issue")
-        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
-        baker.make("issue_events.IssueEvent", issue=issue)
-        res = self.client.get(self.list_url)
+        not_my_issue = await baker.amake("issue_events.Issue")
+        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        await baker.amake("issue_events.IssueEvent", issue=issue)
+        res = await self.async_client.get(self.list_url)
         self.assertContains(res, issue.title)
         self.assertNotContains(res, not_my_issue.title)
         self.assertEqual(len(res.json()), 1)
 
-    def test_project_issue_list(self):
-        not_my_project = baker.make("projects.Project", organization=self.organization)
-        not_my_issue = baker.make("issue_events.Issue", project=not_my_project)
-        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
-        baker.make("issue_events.IssueEvent", issue=issue)
+    async def test_project_issue_list(self):
+        not_my_project = await baker.amake(
+            "projects.Project", organization=self.organization
+        )
+        not_my_issue = await baker.amake("issue_events.Issue", project=not_my_project)
+        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        await baker.amake("issue_events.IssueEvent", issue=issue)
 
         url = reverse(
             "api:list_project_issues",
@@ -129,32 +133,32 @@ class IssueAPITestCase(GlitchTestCase):
                 "project_slug": self.project.slug,
             },
         )
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, issue.title)
         self.assertNotContains(res, not_my_issue.title)
         self.assertEqual(len(res.json()), 1)
 
-    def test_filter_by_date(self):
+    async def test_filter_by_date(self):
         """
         A user should be able to filter by start and end datetimes.
         In the future, this should filter events, not first_seen.
         """
-        issue1 = baker.make(
+        issue1 = await baker.amake(
             "issue_events.Issue",
             first_seen=timezone.make_aware(timezone.datetime(1999, 1, 1)),
             project=self.project,
         )
-        issue2 = baker.make(
+        issue2 = await baker.amake(
             "issue_events.Issue",
             first_seen=timezone.make_aware(timezone.datetime(2010, 1, 1)),
             project=self.project,
         )
-        issue3 = baker.make(
+        issue3 = await baker.amake(
             "issue_events.Issue",
             first_seen=timezone.make_aware(timezone.datetime(2020, 1, 1)),
             project=self.project,
         )
-        res = self.client.get(
+        res = await self.async_client.get(
             self.list_url
             + "?start=2000-01-01T05:00:00.000Z&end=2019-01-01T05:00:00.000Z"
         )
@@ -162,30 +166,32 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertNotContains(res, issue1.title)
         self.assertNotContains(res, issue3.title)
 
-    def test_sort(self):
-        issue1 = baker.make("issue_events.Issue", project=self.project)
-        issue2 = baker.make("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue2).update(count=2)
-        issue3 = baker.make("issue_events.Issue", project=self.project)
+    async def test_sort(self):
+        issue1 = await baker.amake("issue_events.Issue", project=self.project)
+        issue2 = await baker.amake("issue_events.Issue", project=self.project)
+        await IssueIndex.objects.filter(issue=issue2).aupdate(count=2)
+        issue3 = await baker.amake("issue_events.Issue", project=self.project)
 
-        res = self.client.get(self.list_url)
+        res = await self.async_client.get(self.list_url)
         self.assertEqual(res.json()[0]["id"], str(issue3.id))
 
-        res = self.client.get(self.list_url + "?sort=-count")
+        res = await self.async_client.get(self.list_url + "?sort=-count")
         self.assertEqual(res.json()[0]["id"], str(issue2.id))
 
-        res = self.client.get(self.list_url + "?sort=priority")
+        res = await self.async_client.get(self.list_url + "?sort=priority")
         self.assertEqual(res.json()[0]["id"], str(issue1.id))
 
-        res = self.client.get(self.list_url + "?sort=-priority")
+        res = await self.async_client.get(self.list_url + "?sort=-priority")
         self.assertEqual(res.json()[0]["id"], str(issue2.id))
 
-    def test_priority_environment(self):
-        baker.make("issue_events.Issue", project=self.project)
-        res = self.client.get(self.list_url + "?sort=-priority&environment=env")
+    async def test_priority_environment(self):
+        await baker.amake("issue_events.Issue", project=self.project)
+        res = await self.async_client.get(
+            self.list_url + "?sort=-priority&environment=env"
+        )
         self.assertEqual(res.status_code, 200)
 
-    def test_paginated_list_sorted_by_index_field(self):
+    async def test_paginated_list_sorted_by_index_field(self):
         """The list sorts by count/last_seen, which live on the IssueIndex leaf
         (``index__count`` / ``index__last_seen``). The cursor paginator builds
         the next-page position from the last row on the page, so a result set
@@ -196,10 +202,10 @@ class IssueAPITestCase(GlitchTestCase):
         # filter) is unambiguous: issues[0] is oldest/smallest, issues[2] newest.
         base = timezone.make_aware(timezone.datetime(2020, 1, 1))
         issues = [
-            baker.make("issue_events.Issue", project=self.project) for _ in range(3)
+            await baker.amake("issue_events.Issue", project=self.project) for _ in range(3)
         ]
         for i, issue in enumerate(issues):
-            IssueIndex.objects.filter(issue=issue).update(
+            await IssueIndex.objects.filter(issue=issue).aupdate(
                 count=i + 1, last_seen=base + datetime.timedelta(hours=i)
             )
 
@@ -212,7 +218,7 @@ class IssueAPITestCase(GlitchTestCase):
             ("&sort=last_seen", [issues[0].id, issues[1].id]),
             ("&sort=-count", [issues[2].id, issues[1].id]),
         ):
-            res = self.client.get(self.list_url + f"?limit=2{sort}")
+            res = await self.async_client.get(self.list_url + f"?limit=2{sort}")
             self.assertEqual(res.status_code, 200, msg=f"sort={sort!r}: {res.content}")
             page1 = [item["id"] for item in res.json()]
             self.assertEqual(page1, [str(i) for i in expected_first_page])
@@ -221,46 +227,52 @@ class IssueAPITestCase(GlitchTestCase):
             # Follow the next link and assert the two pages together cover every
             # issue exactly once (no row dropped or duplicated across the cursor).
             next_url = re.search(r'<([^>]+)>; rel="next"', res["Link"]).group(1)
-            res2 = self.client.get(next_url)
+            res2 = await self.async_client.get(next_url)
             self.assertEqual(res2.status_code, 200)
             page2 = [item["id"] for item in res2.json()]
             self.assertEqual(sorted(page1 + page2), sorted(str(i.id) for i in issues))
 
-    def _set_search_document(self, issue, text):
+    async def _set_search_document(self, issue, text):
         """Populate an issue's IssueIndex row (the full-text store).
 
         Two steps: the SearchVector expression is applied via update() (it does
         not resolve through Model.save()).
         """
-        IssueIndex.objects.get_or_create(
+        await IssueIndex.objects.aget_or_create(
             issue=issue, organization_id=self.organization.id
         )
-        IssueIndex.objects.filter(issue=issue).update(
+        await IssueIndex.objects.filter(issue=issue).aupdate(
             fts_document=SearchVector(Value(text))
         )
 
-    def test_search(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
-        self._set_search_document(issue, "apple sauce")
-        event = baker.make("issue_events.IssueEvent", issue=issue)
-        other_issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_search(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
+        await self._set_search_document(issue, "apple sauce")
+        event = await baker.amake("issue_events.IssueEvent", issue=issue)
+        other_issue = await baker.amake("issue_events.Issue", project=self.project)
 
-        res = self.client.get(self.list_url + "?query=is:unresolved apple+sauce")
+        res = await self.async_client.get(
+            self.list_url + "?query=is:unresolved apple+sauce"
+        )
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
         # Not sure how to do this in Ninja without always removing None field values
         # self.assertNotContains(res, "matchingEventId")
         self.assertNotIn("X-Sentry-Direct-Hit", res.headers)
 
-        res = self.client.get(self.list_url + "?query=is:unresolved apple sauce")
+        res = await self.async_client.get(
+            self.list_url + "?query=is:unresolved apple sauce"
+        )
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
 
-        res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
+        res = await self.async_client.get(
+            self.list_url + '?query=is:unresolved "apple sauce"'
+        )
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
 
-        res = self.client.get(self.list_url + "?query=" + event.id.hex)
+        res = await self.async_client.get(self.list_url + "?query=" + event.id.hex)
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
         self.assertContains(res, "matchingEventId")
@@ -269,217 +281,231 @@ class IssueAPITestCase(GlitchTestCase):
 
         # Search by client-provided sentry SDK event_id (UUIDv4)
         sentry_event_id = uuid.uuid4()
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=issue,
             event_id=sentry_event_id,
             organization=self.organization,
         )
-        res = self.client.get(self.list_url + "?query=" + sentry_event_id.hex)
+        res = await self.async_client.get(
+            self.list_url + "?query=" + sentry_event_id.hex
+        )
         self.assertContains(res, issue.title)
         self.assertNotContains(res, other_issue.title)
         self.assertContains(res, "matchingEventId")
         self.assertEqual(res.headers.get("X-Sentry-Direct-Hit"), "1")
 
-        event3 = baker.make(
+        event3 = await baker.amake(
             "issue_events.IssueEvent", issue=issue, data={"name": "plum sauce"}
         )
         # A later event extends the issue's search document (same as ingest's
         # append path appending to fts_document).
-        self._set_search_document(issue, "apple sauce plum sauce")
-        res = self.client.get(self.list_url + '?query=is:unresolved "plum sauce"')
+        await self._set_search_document(issue, "apple sauce plum sauce")
+        res = await self.async_client.get(
+            self.list_url + '?query=is:unresolved "plum sauce"'
+        )
         self.assertContains(res, event3.issue.title)
-        res = self.client.get(self.list_url + '?query=is:unresolved "apple sauce"')
+        res = await self.async_client.get(
+            self.list_url + '?query=is:unresolved "apple sauce"'
+        )
         self.assertContains(res, event.issue.title)
 
-    def test_search_via_decoupled_index(self):
+    async def test_search_via_decoupled_index(self):
         """
         Search resolves through IssueIndex.fts_document, the sole
         full-text store now that Issue.search_vector is dropped. Guards
         against the index being populated with a corrupted (re-tokenized)
         tsvector and against the org-scoped partition-pruning join.
         """
-        issue = baker.make("issue_events.Issue", project=self.project)
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         # The post_save signal already created the leaf row; just set the vector.
-        IssueIndex.objects.filter(issue=issue).update(
+        await IssueIndex.objects.filter(issue=issue).aupdate(
             fts_document=SearchVector(Value("kangaroo marsupial"))
         )
-        other_issue = baker.make("issue_events.Issue", project=self.project)
+        other_issue = await baker.amake("issue_events.Issue", project=self.project)
 
-        def ids(query):
-            res = self.client.get(self.list_url + "?query=" + query)
+        async def ids(query):
+            res = await self.async_client.get(self.list_url + "?query=" + query)
             self.assertEqual(res.status_code, 200)
             return {int(row["id"]) for row in res.json()}
 
-        self.assertEqual(ids("is:unresolved kangaroo"), {issue.id})
-        self.assertNotIn(other_issue.id, ids("is:unresolved kangaroo"))
-        self.assertEqual(ids('is:unresolved "kangaroo marsupial"'), {issue.id})
+        self.assertEqual(await ids("is:unresolved kangaroo"), {issue.id})
+        self.assertNotIn(other_issue.id, await ids("is:unresolved kangaroo"))
+        self.assertEqual(await ids('is:unresolved "kangaroo marsupial"'), {issue.id})
 
-    def test_search_unmatched_quote(self):
+    async def test_search_unmatched_quote(self):
         """Queries with unmatched quotes should not raise ValueError"""
-        baker.make("issue_events.Issue", project=self.project)
-        res = self.client.get(
+        await baker.amake("issue_events.Issue", project=self.project)
+        res = await self.async_client.get(
             self.list_url + "?query=SMTPAuthenticationError: (534, b'5.7.8"
         )
         self.assertEqual(res.status_code, 200)
 
-    def test_search_wildcard(self):
+    async def test_search_wildcard(self):
         issue_str = "The foo want to the bar"
-        issue = baker.make(
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             title=issue_str,
         )
-        self._set_search_document(issue, issue_str)
-        res = self.client.get(self.list_url + "?query=is:unresolved f*o")
+        await self._set_search_document(issue, issue_str)
+        res = await self.async_client.get(self.list_url + "?query=is:unresolved f*o")
         self.assertContains(res, issue.title)
-        res = self.client.get(self.list_url + "?query=is:unresolved f*x")
+        res = await self.async_client.get(self.list_url + "?query=is:unresolved f*x")
         self.assertNotContains(res, issue.title)
 
-    def test_list_relative_datetime_filter(self):
+    async def test_list_relative_datetime_filter(self):
         now = timezone.now()
         last_minute = now - datetime.timedelta(minutes=1)
         with freeze_time(last_minute):
-            baker.make("issue_events.IssueEvent", issue__project=self.project)
+            await baker.amake("issue_events.IssueEvent", issue__project=self.project)
 
         two_minutes_ago = now - datetime.timedelta(minutes=2)
         with freeze_time(two_minutes_ago):
-            baker.make("issue_events.IssueEvent", issue__project=self.project)
+            await baker.amake("issue_events.IssueEvent", issue__project=self.project)
 
         yesterday = now - datetime.timedelta(days=1)
         with freeze_time(yesterday):
-            baker.make("issue_events.IssueEvent", issue__project=self.project)
+            await baker.amake("issue_events.IssueEvent", issue__project=self.project)
 
         url = self.list_url
         with freeze_time(now):
-            res = self.client.get(url, {"start": "now-1m"})
+            res = await self.async_client.get(url, {"start": "now-1m"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()), 1)
 
         with freeze_time(now):
-            res = self.client.get(url, {"start": "now-2m"})
+            res = await self.async_client.get(url, {"start": "now-2m"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()), 2)
 
         with freeze_time(now):
-            res = self.client.get(url, {"start": "now-24h", "end": "now"})
+            res = await self.async_client.get(url, {"start": "now-24h", "end": "now"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()), 3)
 
         with freeze_time(now):
-            res = self.client.get(url, {"end": "now-3m"})
+            res = await self.async_client.get(url, {"end": "now-3m"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()), 1)
 
-    def test_tag_space(self):
+    async def test_tag_space(self):
         tag_name = "os.name"
         tag_value = "Linux Vista"
-        event = baker.make(
+        event = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_name: tag_value, "foo": "bar"},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key__key=tag_name,
             tag_value__value=tag_value,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key__key="foo",
             tag_value__value="bar",
         )
-        event2 = baker.make(
+        event2 = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_name: "BananaOS 7"},
         )
 
-        res = self.client.get(
+        res = await self.async_client.get(
             self.list_url + f'?query={tag_name}:"Linux+Vista" foo:bar'
         )
         self.assertContains(res, event.issue.title)
         self.assertNotContains(res, event2.issue.title)
 
-    def test_filter_by_tag(self):
+    async def test_filter_by_tag(self):
         tag_browser = "browser.name"
         tag_value_firefox = "Firefox"
         tag_value_chrome = "Chrome"
         tag_value_cthulhu = "Cthulhu"
         tag_mythic_animal = "mythic_animal"
 
-        key_browser = baker.make("issue_events.TagKey", key=tag_browser)
-        key_mythic_animal = baker.make("issue_events.TagKey", key=tag_mythic_animal)
-        value_firefox = baker.make("issue_events.TagValue", value=tag_value_firefox)
-        value_chrome = baker.make("issue_events.TagValue", value=tag_value_chrome)
-        value_cthulhu = baker.make("issue_events.TagValue", value=tag_value_cthulhu)
+        key_browser = await baker.amake("issue_events.TagKey", key=tag_browser)
+        key_mythic_animal = await baker.amake(
+            "issue_events.TagKey", key=tag_mythic_animal
+        )
+        value_firefox = await baker.amake(
+            "issue_events.TagValue", value=tag_value_firefox
+        )
+        value_chrome = await baker.amake(
+            "issue_events.TagValue", value=tag_value_chrome
+        )
+        value_cthulhu = await baker.amake(
+            "issue_events.TagValue", value=tag_value_cthulhu
+        )
 
-        event_only_firefox = baker.make(
+        event_only_firefox = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_browser: tag_value_firefox},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_only_firefox.issue,
             tag_key=key_browser,
             tag_value=value_firefox,
         )
 
-        event_only_firefox2 = baker.make(
+        event_only_firefox2 = await baker.amake(
             "issue_events.IssueEvent",
             issue=event_only_firefox.issue,
             tags={tag_mythic_animal: tag_value_cthulhu},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_only_firefox2.issue,
             tag_key=key_mythic_animal,
             tag_value=value_cthulhu,
         )
 
-        event_firefox_chrome = baker.make(
+        event_firefox_chrome = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_browser: tag_value_firefox},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_firefox_chrome.issue,
             tag_key=key_browser,
             tag_value=value_firefox,
         )
 
-        event_firefox_chrome2 = baker.make(
+        event_firefox_chrome2 = await baker.amake(
             "issue_events.IssueEvent",
             issue=event_firefox_chrome.issue,
             tags={tag_browser: tag_value_chrome},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_firefox_chrome2.issue,
             tag_key=key_browser,
             tag_value=value_chrome,
         )
 
-        event_no_tags = baker.make(
+        event_no_tags = await baker.amake(
             "issue_events.IssueEvent", issue__project=self.project
         )
 
-        event_browser_chrome_mythic_animal_firefox = baker.make(
+        event_browser_chrome_mythic_animal_firefox = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_mythic_animal: tag_value_firefox, tag_browser: tag_value_chrome},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_browser_chrome_mythic_animal_firefox.issue,
             tag_key=key_mythic_animal,
             tag_value=value_firefox,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event_browser_chrome_mythic_animal_firefox.issue,
             tag_key=key_browser,
@@ -487,7 +513,9 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         url = self.list_url
-        res = self.client.get(url + f'?query={tag_browser}:"{tag_value_firefox}"')
+        res = await self.async_client.get(
+            url + f'?query={tag_browser}:"{tag_value_firefox}"'
+        )
         self.assertContains(res, event_only_firefox.issue.title)
         self.assertContains(res, event_firefox_chrome.issue.title)
         self.assertNotContains(res, event_no_tags.issue.title)
@@ -496,7 +524,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Browser is Firefox AND Chrome
-        res = self.client.get(
+        res = await self.async_client.get(
             url
             + f"?query={tag_browser}:{tag_value_firefox} {tag_browser}:{tag_value_chrome}"
         )
@@ -508,14 +536,16 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Browser mythic_animal is Firefox
-        res = self.client.get(url + f"?query={tag_mythic_animal}:{tag_value_firefox}")
+        res = await self.async_client.get(
+            url + f"?query={tag_mythic_animal}:{tag_value_firefox}"
+        )
         self.assertNotContains(res, event_only_firefox.issue.title)
         self.assertNotContains(res, event_firefox_chrome.issue.title)
         self.assertNotContains(res, event_no_tags.issue.title)
         self.assertContains(res, event_browser_chrome_mythic_animal_firefox.issue.title)
 
         # Browser is Chrome AND mythic_animal is Firefox
-        res = self.client.get(
+        res = await self.async_client.get(
             url
             + f"?query={tag_browser}:{tag_value_chrome} {tag_mythic_animal}:{tag_value_firefox}"
         )
@@ -525,7 +555,7 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertContains(res, event_browser_chrome_mythic_animal_firefox.issue.title)
 
         # Browser is Firefox AND mythic_animal is Firefox
-        res = self.client.get(
+        res = await self.async_client.get(
             url
             + f"?query={tag_browser}:{tag_value_firefox} {tag_mythic_animal}:{tag_value_firefox}"
         )
@@ -536,112 +566,114 @@ class IssueAPITestCase(GlitchTestCase):
             res, event_browser_chrome_mythic_animal_firefox.issue.title
         )
 
-    def test_filter_by_tag_distinct(self):
+    async def test_filter_by_tag_distinct(self):
         tag_browser = "browser.name"
         tag_value = "Firefox"
         tag_value2 = "Chrome"
 
-        key_browser = baker.make("issue_events.TagKey", key=tag_browser)
-        value = baker.make("issue_events.TagValue", value=tag_value)
-        value2 = baker.make("issue_events.TagValue", value=tag_value2)
+        key_browser = await baker.amake("issue_events.TagKey", key=tag_browser)
+        value = await baker.amake("issue_events.TagValue", value=tag_value)
+        value2 = await baker.amake("issue_events.TagValue", value=tag_value2)
 
-        event = baker.make(
+        event = await baker.amake(
             "issue_events.IssueEvent",
             issue__project=self.project,
             tags={tag_browser: tag_value},
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key=key_browser,
             tag_value=value,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=event.issue,
             tags={tag_browser: tag_value},
             _quantity=2,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key=key_browser,
             tag_value=value,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=event.issue,
             tags={tag_browser: tag_value},
             _quantity=5,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key=key_browser,
             tag_value=value,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key=key_browser,
             tag_value=value2,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=event.issue,
             tags={tag_browser: tag_value2},
             _quantity=5,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=event.issue,
             tag_key=key_browser,
             tag_value=value2,
         )
 
-        res = self.client.get(self.list_url + f'?query={tag_browser}:"{tag_value}"')
+        res = await self.async_client.get(
+            self.list_url + f'?query={tag_browser}:"{tag_value}"'
+        )
         self.assertEqual(len(res.json()), 1)
 
-    def test_filter_environment(self):
+    async def test_filter_environment(self):
         environment1_name = "prod"
         environment2_name = "staging"
 
-        key_environment = baker.make("issue_events.TagKey", key="environment")
-        environment1_value = baker.make(
+        key_environment = await baker.amake("issue_events.TagKey", key="environment")
+        environment1_value = await baker.amake(
             "issue_events.TagValue", value=environment1_name
         )
-        environment2_value = baker.make(
+        environment2_value = await baker.amake(
             "issue_events.TagValue", value=environment2_name
         )
-        environment3_value = baker.make("issue_events.TagValue", value="dev")
-        issue1 = baker.make(
+        environment3_value = await baker.amake("issue_events.TagValue", value="dev")
+        issue1 = await baker.amake(
             "issue_events.Issue",
             project=self.project,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue1,
             tag_key=key_environment,
             tag_value=environment1_value,
         )
-        issue2 = baker.make(
+        issue2 = await baker.amake(
             "issue_events.Issue",
             project=self.project,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue2,
             tag_key=key_environment,
             tag_value=environment2_value,
         )
-        issue3 = baker.make("issue_events.Issue", project=self.project)
-        baker.make(
+        issue3 = await baker.amake("issue_events.Issue", project=self.project)
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue3,
             tag_key=key_environment,
             tag_value=environment3_value,
         )
-        res = self.client.get(
+        res = await self.async_client.get(
             self.list_url
             + f"?environment={environment1_name}&environment={environment2_name}"
         )
@@ -649,264 +681,273 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(len(data), 2)
         self.assertNotIn(str(issue3.id), [data[0]["id"], data[1]["id"]])
 
-    def test_filter_by_level(self):
+    async def test_filter_by_level(self):
         """
         A user should be able to filter by issue levels.
         """
         level_warning = LogLevel.WARNING
         level_fatal = LogLevel.FATAL
 
-        issue1 = baker.make("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue1).update(level=level_warning)
-        issue2 = baker.make("issue_events.Issue", project=self.project)
-        IssueIndex.objects.filter(issue=issue2).update(level=level_fatal)
-        baker.make("issue_events.Issue", project=self.project)
+        issue1 = await baker.amake("issue_events.Issue", project=self.project)
+        await IssueIndex.objects.filter(issue=issue1).aupdate(level=level_warning)
+        issue2 = await baker.amake("issue_events.Issue", project=self.project)
+        await IssueIndex.objects.filter(issue=issue2).aupdate(level=level_fatal)
+        await baker.amake("issue_events.Issue", project=self.project)
 
-        res = self.client.get(self.list_url + f"?query=level:{level_warning.label}")
+        res = await self.async_client.get(
+            self.list_url + f"?query=level:{level_warning.label}"
+        )
         data = res.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["id"], str(issue1.id))
 
-        res = self.client.get(self.list_url + f"?query=level:{level_fatal.label}")
+        res = await self.async_client.get(
+            self.list_url + f"?query=level:{level_fatal.label}"
+        )
         data = res.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["id"], str(issue2.id))
 
-        res = self.client.get(self.list_url)
+        res = await self.async_client.get(self.list_url)
         self.assertEqual(len(res.json()), 3)
 
-    def test_issue_update(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_issue_update(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"status": "resolved"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk),
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
 
-    def test_resolve_with_status_details_in_release(self):
+    async def test_resolve_with_status_details_in_release(self):
         """PUT with statusDetails.inRelease sets resolved_in_release"""
-        release = baker.make(
+        release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="1.0.0",
         )
-        release.projects.add(self.project)
-        issue = baker.make("issue_events.Issue", project=self.project)
+        await release.projects.aadd(self.project)
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"status": "resolved", "statusDetails": {"inRelease": "1.0.0"}}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk),
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
-        self.assertEqual(issue.resolved_in_release, release)
+        self.assertEqual(issue.resolved_in_release_id, release.id)
 
-    def test_resolve_with_status_details_in_next_release(self):
+    async def test_resolve_with_status_details_in_next_release(self):
         """PUT with statusDetails.inNextRelease sets resolved_in_release to latest release"""
-        older_release = baker.make(
+        older_release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="0.9.0",
         )
-        older_release.projects.add(self.project)
-        latest_release = baker.make(
+        await older_release.projects.aadd(self.project)
+        latest_release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="1.0.0",
         )
-        latest_release.projects.add(self.project)
-        issue = baker.make("issue_events.Issue", project=self.project)
+        await latest_release.projects.aadd(self.project)
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"status": "resolved", "statusDetails": {"inNextRelease": True}}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk),
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
-        self.assertEqual(issue.resolved_in_release, latest_release)
+        self.assertEqual(issue.resolved_in_release_id, latest_release.id)
 
-    def test_status_details_in_response(self):
+    async def test_status_details_in_response(self):
         """Resolved issue with resolved_in_release shows statusDetails.inRelease in GET"""
-        release = baker.make(
+        release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="1.0.0",
         )
-        release.projects.add(self.project)
-        issue = make_issue(
+        await release.projects.aadd(self.project)
+        issue = await amake_issue(
             project=self.project,
             short_id=1,
             status=EventStatus.RESOLVED,
             resolved_in_release=release,
         )
         url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
         self.assertEqual(data["statusDetails"], {"inRelease": "1.0.0"})
 
-    def test_last_release_in_response(self):
+    async def test_last_release_in_response(self):
         """Issue with last_release shows lastRelease object in GET"""
-        release = baker.make(
+        release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="2.0.0",
         )
-        release.projects.add(self.project)
-        issue = make_issue(
+        await release.projects.aadd(self.project)
+        issue = await amake_issue(
             project=self.project,
             short_id=1,
             last_release=release,
         )
         url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
         self.assertIsNotNone(data.get("lastRelease"))
         self.assertEqual(data["lastRelease"]["version"], "2.0.0")
         self.assertEqual(data["lastRelease"]["shortVersion"], "2.0.0")
 
-    def test_unresolve_clears_resolved_in_release(self):
+    async def test_unresolve_clears_resolved_in_release(self):
         """Un-resolving an issue should clear resolved_in_release"""
-        release = baker.make(
+        release = await baker.amake(
             "releases.Release",
             organization=self.project.organization,
             version="1.0.0",
         )
-        issue = make_issue(
+        issue = await amake_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
             resolved_in_release=release,
         )
         data = {"status": "unresolved"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk),
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
-        self.assertIsNone(issue.resolved_in_release)
+        self.assertIsNone(issue.resolved_in_release_id)
 
-    def test_issue_delete(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
-        not_my_issue = baker.make("issue_events.Issue")
+    async def test_issue_delete(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
+        not_my_issue = await baker.amake("issue_events.Issue")
 
-        res = self.client.delete(get_issue_url(issue.id))
+        res = await self.async_client.delete(get_issue_url(issue.id))
         self.assertEqual(res.status_code, 204)
 
-        res = self.client.delete(get_issue_url(not_my_issue.id))
+        res = await self.async_client.delete(get_issue_url(not_my_issue.id))
         self.assertEqual(res.status_code, 404)
 
-    def test_organizations_issue_update(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_organizations_issue_update(self):
+        issue = await amake_issue(project=self.project)
         self.assertEqual(issue.status, EventStatus.UNRESOLVED)
         data = {"status": "resolved"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_organization_issue_url(self.organization.slug, issue.pk),
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
 
-    def test_bulk_update(self):
+    async def test_bulk_update(self):
         """Bulk update only supports Issue status"""
-        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+        issues = await baker.amake(
+            "issue_events.Issue", project=self.project, _quantity=2
+        )
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
         status_to_set = EventStatus.RESOLVED
         data = {"status": status_to_set.label}
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, status_to_set.label)
-        issues = Issue.objects.all()
-        self.assertEqual(issues[0].status, status_to_set)
-        self.assertEqual(issues[1].status, status_to_set)
+        async for issue in Issue.objects.all():
+            index = await IssueIndex.objects.aget(issue_id=issue.pk)
+            self.assertEqual(index.status, status_to_set)
 
-    def test_bulk_delete_via_ids(self):
+    async def test_bulk_delete_via_ids(self):
         """Bulk delete Issues with ids"""
-        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+        issues = await baker.amake(
+            "issue_events.Issue", project=self.project, _quantity=2
+        )
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
-        self.client.delete(url)
-        issues = Issue.objects.count()
+        await self.async_client.delete(url)
+        issues = await Issue.objects.acount()
         self.assertEqual(issues, 0)
 
-    def test_issue_merge(self):
+    async def test_issue_merge(self):
         issue_event_count = 2
-        issues = baker.make(
+        issues = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             _quantity=2,
         )
         # count lives on the IssueIndex leaf; set it to the number of
         # events we create per issue.
-        IssueIndex.objects.filter(issue__in=issues).update(count=issue_event_count)
-        baker.make(
+        await IssueIndex.objects.filter(issue__in=issues).aupdate(
+            count=issue_event_count
+        )
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=issues[0],
             _quantity=issue_event_count,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=issues[1],
             _quantity=issue_event_count,
         )
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
         data = {"merge": 1}
-        res = self.client.put(
+        res = await self.async_client.put(
             url,
             data,
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(Issue.objects.filter(is_deleted=False).count(), 1)
-        self.assertEqual(
-            Issue.objects.get(is_deleted=False).count,
-            2 * issue_event_count,
-        )
+        self.assertEqual(await Issue.objects.filter(is_deleted=False).acount(), 1)
+        merged = await Issue.objects.aget(is_deleted=False)
+        merged_index = await IssueIndex.objects.aget(issue_id=merged.pk)
+        self.assertEqual(merged_index.count, 2 * issue_event_count)
 
-    def test_bulk_delete_via_search(self):
+    async def test_bulk_delete_via_search(self):
         """Bulk delete Issues via search string"""
-        project2 = baker.make("projects.Project", organization=self.organization)
-        project2.teams.add(self.team)
-        issue1 = baker.make(Issue, project=self.project)
-        issue2 = baker.make(Issue, project=project2)
+        project2 = await baker.amake("projects.Project", organization=self.organization)
+        await project2.teams.aadd(self.team)
+        issue1 = await baker.amake(Issue, project=self.project)
+        issue2 = await baker.amake(Issue, project=project2)
         url = f"{self.list_url}?query=is:unresolved&project={self.project.id}"
-        self.client.delete(url)
-        self.assertFalse(Issue.objects.filter(id=issue1.id).exists())
-        self.assertTrue(Issue.objects.filter(id=issue2.id).exists())
+        await self.async_client.delete(url)
+        self.assertFalse(await Issue.objects.filter(id=issue1.id).aexists())
+        self.assertTrue(await Issue.objects.filter(id=issue2.id).aexists())
 
-    def test_bulk_update_query(self):
+    async def test_bulk_update_query(self):
         """Bulk update only supports Issue status"""
-        project2 = baker.make("projects.Project", organization=self.organization)
-        project2.teams.add(self.team)
-        issue1 = baker.make(Issue, project=self.project)
-        issue2 = baker.make(Issue, project=project2)
+        project2 = await baker.amake("projects.Project", organization=self.organization)
+        await project2.teams.aadd(self.team)
+        issue1 = await baker.amake(Issue, project=self.project)
+        issue2 = await baker.amake(Issue, project=project2)
         url = f"{self.list_url}?query=is:unresolved&project={self.project.id}"
         status_to_set = EventStatus.RESOLVED
         data = {"status": status_to_set.label}
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, status_to_set.label)
-        issue1.refresh_from_db()
-        issue2.refresh_from_db()
+        await arefresh_issue(issue1)
+        await arefresh_issue(issue2)
         self.assertEqual(issue1.status, status_to_set)
         self.assertEqual(issue2.status, EventStatus.UNRESOLVED)
 
-    def test_assign_to_user_by_id(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_to_user_by_id(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": f"user:{self.user.id}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
         self.assertIsNone(issue.assigned_to_team_id)
         body = res.json()
@@ -914,148 +955,152 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(body["assignedTo"]["id"], str(self.user.id))
         self.assertEqual(body["assignedTo"]["email"], self.user.email)
 
-    def test_assign_to_user_by_email(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_to_user_by_email(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": self.user.email}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
 
-    def test_assign_to_team(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_to_team(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": f"team:{self.team.slug}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertIsNone(issue.assigned_to_org_user_id)
         self.assertEqual(issue.assigned_to_team_id, self.team.id)
         body = res.json()
         self.assertEqual(body["assignedTo"]["type"], "team")
         self.assertEqual(body["assignedTo"]["slug"], self.team.slug)
 
-    def test_unassign(self):
-        issue = baker.make(
+    async def test_unassign(self):
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             assigned_to_org_user=self.org_user,
         )
         data = {"assignedTo": None}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertIsNone(issue.assigned_to_org_user_id)
         self.assertIsNone(issue.assigned_to_team_id)
         self.assertIsNone(res.json()["assignedTo"])
 
-    def test_assign_switches_team_to_user(self):
-        issue = baker.make(
+    async def test_assign_switches_team_to_user(self):
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             assigned_to_team=self.team,
         )
         data = {"assignedTo": f"user:{self.user.id}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
         self.assertIsNone(issue.assigned_to_team_id)
 
-    def test_assign_unassigns_when_membership_removed(self):
+    async def test_assign_unassigns_when_membership_removed(self):
         """Removing an OrganizationUser SET_NULLs their issue assignments."""
-        other_user = baker.make("users.user")
-        other_org_user = self.organization.add_user(other_user)
-        issue = baker.make(
+        other_user = await baker.amake("users.user")
+        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             assigned_to_org_user=other_org_user,
         )
-        other_org_user.delete()
-        issue.refresh_from_db()
+        await other_org_user.adelete()
+        await issue.arefresh_from_db()
         self.assertIsNone(issue.assigned_to_org_user_id)
 
-    def test_assign_user_not_in_org_is_not_found(self):
-        other_user = baker.make("users.user")
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_user_not_in_org_is_not_found(self):
+        other_user = await baker.amake("users.user")
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": f"user:{other_user.id}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 404)
-        issue.refresh_from_db()
+        await issue.arefresh_from_db()
         self.assertIsNone(issue.assigned_to_org_user_id)
 
-    def test_assign_team_from_other_org_is_not_found(self):
-        other_team = baker.make("teams.Team")
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_team_from_other_org_is_not_found(self):
+        other_team = await baker.amake("teams.Team")
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": f"team:{other_team.slug}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 404)
 
-    def test_assign_unknown_user_is_not_found(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_unknown_user_is_not_found(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": "nobody@nowhere.invalid"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 404)
 
-    def test_assign_pending_invite_is_not_found(self):
+    async def test_assign_pending_invite_is_not_found(self):
         """Pending invites (OrganizationUser.user is None) are not assignable."""
-        pending = baker.make(
+        pending = await baker.amake(
             "organizations_ext.OrganizationUser",
             organization=self.organization,
             user=None,
             email="pending@example.com",
         )
-        issue = baker.make("issue_events.Issue", project=self.project)
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": pending.email}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 404)
 
-    def test_assign_bad_user_id_format(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_assign_bad_user_id_format(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
         data = {"assignedTo": "user:notanumber"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 400)
 
-    def test_assign_without_status_keeps_status(self):
-        issue = make_issue(
+    async def test_assign_without_status_keeps_status(self):
+        issue = await amake_issue(
             project=self.project,
             status=EventStatus.RESOLVED,
         )
         data = {"assignedTo": f"user:{self.user.id}"}
-        res = self.client.put(
+        res = await self.async_client.put(
             get_issue_url(issue.pk), data, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
-        issue.refresh_from_db()
+        await arefresh_issue(issue)
         self.assertEqual(issue.status, EventStatus.RESOLVED)
         self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
 
-    def test_bulk_assign(self):
-        issues = baker.make("issue_events.Issue", project=self.project, _quantity=2)
+    async def test_bulk_assign(self):
+        issues = await baker.amake(
+            "issue_events.Issue", project=self.project, _quantity=2
+        )
         url = f"{self.list_url}?id={issues[0].id}&id={issues[1].id}"
         data = {"assignedTo": f"user:{self.user.id}"}
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
-        for issue in Issue.objects.filter(id__in=[i.id for i in issues]):
+        async for issue in Issue.objects.filter(id__in=[i.id for i in issues]):
             self.assertEqual(issue.assigned_to_org_user_id, self.org_user.id)
 
+    # Kept synchronous: uses transaction.atomic() to contain the IntegrityError,
+    # which is a sync-only context manager.
     def test_db_constraint_rejects_both_user_and_team(self):
         from django.db import IntegrityError, transaction
 
@@ -1069,23 +1114,23 @@ class IssueAPITestCase(GlitchTestCase):
                 )
 
     @freeze_time("2025-06-19T17:47:00Z")
-    def test_issue_stats_endpoint(self):
+    async def test_issue_stats_endpoint(self):
         """
         Test retrieving 24-hour statistics for a set of issues.
         """
         now = timezone.now()
 
         # Issue with stats both inside and outside the 24h window
-        issue_with_stats = make_issue(project=self.project, count=100)
+        issue_with_stats = await amake_issue(project=self.project, count=100)
         # This stat is recent and should be in the response
-        recent_stat = baker.make(
+        recent_stat = await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue_with_stats,
             date=now - datetime.timedelta(hours=2),
             count=5,
         )
         # This stat is old and should be filtered out
-        baker.make(
+        await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue_with_stats,
             date=now - datetime.timedelta(hours=25),
@@ -1093,10 +1138,10 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Issue with no recent statistics
-        issue_without_stats = make_issue(project=self.project, count=50)
+        issue_without_stats = await amake_issue(project=self.project, count=50)
 
         # Issue belonging to another organization that should not appear
-        baker.make("issue_events.Issue")
+        await baker.amake("issue_events.Issue")
 
         # Make the API request
         # Construct the URL and query parameters
@@ -1106,7 +1151,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
         query_params = f"?groups={issue_with_stats.id}&groups={issue_without_stats.id}"
 
-        res = self.client.get(url + query_params)
+        res = await self.async_client.get(url + query_params)
 
         # Assertions
         self.assertEqual(res.status_code, 200)
@@ -1138,17 +1183,17 @@ class IssueAPITestCase(GlitchTestCase):
         )  # Should be an empty list
 
     @freeze_time("2025-06-19T17:47:00Z")
-    def test_issue_stats_endpoint_14d(self):
+    async def test_issue_stats_endpoint_14d(self):
         """
         Test retrieving 14-day statistics, ensuring data is grouped by day.
         """
         now = timezone.now()
 
         # Create an issue to test against
-        issue = make_issue(project=self.project, count=250)
+        issue = await amake_issue(project=self.project, count=250)
 
         # Stat from 2 days ago (should be included)
-        baker.make(
+        await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue,
             date=now - datetime.timedelta(days=2, hours=5),
@@ -1156,13 +1201,13 @@ class IssueAPITestCase(GlitchTestCase):
         )
 
         # Two stats from 5 days ago (should be aggregated into one point)
-        baker.make(
+        await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue,
             date=now - datetime.timedelta(days=5, hours=8),
             count=20,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue,
             date=now - datetime.timedelta(days=5, hours=12),
@@ -1170,7 +1215,7 @@ class IssueAPITestCase(GlitchTestCase):
         )  # Total for this day should be 35
 
         # Stat from 15 days ago (should be excluded from the result)
-        baker.make(
+        await baker.amake(
             "issue_events.IssueAggregate",
             issue=issue,
             date=now - datetime.timedelta(days=15),
@@ -1183,7 +1228,7 @@ class IssueAPITestCase(GlitchTestCase):
         )
         query_params = f"?groups={issue.id}&statsPeriod=14d"
 
-        res = self.client.get(url + query_params)
+        res = await self.async_client.get(url + query_params)
 
         self.assertEqual(res.status_code, 200)
         response_data = res.json()
@@ -1227,30 +1272,31 @@ class IssueCommitsAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_list_issue_commits_no_release(self):
-        issue = baker.make("issue_events.Issue", project=self.project, short_id=1)
+    async def test_list_issue_commits_no_release(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
         url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
 
-    def test_list_issue_commits_release_no_commits(self):
-        release = baker.make(
+    async def test_list_issue_commits_release_no_commits(self):
+        release = await baker.amake(
             "releases.Release", organization=self.organization, data={}
         )
-        issue = baker.make(
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             short_id=1,
             first_release=release,
         )
         url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
 
-    def test_list_issue_commits(self):
+    async def test_list_issue_commits(self):
         commits = [
             {
                 "id": "abc123",
@@ -1265,19 +1311,19 @@ class IssueCommitsAPITestCase(GlitchTestCase):
                 "authorEmail": "",
             },
         ]
-        release = baker.make(
+        release = await baker.amake(
             "releases.Release",
             organization=self.organization,
             data={"commits": commits},
         )
-        issue = baker.make(
+        issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
             short_id=1,
             first_release=release,
         )
         url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 2)
@@ -1286,9 +1332,9 @@ class IssueCommitsAPITestCase(GlitchTestCase):
         self.assertEqual(data[0]["authorName"], "Alice")
         self.assertEqual(data[1]["id"], "def456")
 
-    def test_list_issue_commits_not_found(self):
+    async def test_list_issue_commits_not_found(self):
         url = reverse("api:list_issue_commits", kwargs={"issue_id": 99999})
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 404)
 
 
@@ -1315,47 +1361,48 @@ class IssueEventTagsAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
     def get_url(self, issue_id: int) -> str:
         return reverse("api:list_issue_tags", kwargs={"issue_id": issue_id})
 
-    def test_issue_tags(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
+    async def test_issue_tags(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
 
-        key_foo = baker.make("issue_events.TagKey", key="foo")
-        key_animal = baker.make("issue_events.TagKey", key="animal")
-        value_bar = baker.make("issue_events.TagValue", value="bar")
-        value_cat = baker.make("issue_events.TagValue", value="cat")
-        value_dog = baker.make("issue_events.TagValue", value="dog")
+        key_foo = await baker.amake("issue_events.TagKey", key="foo")
+        key_animal = await baker.amake("issue_events.TagKey", key="animal")
+        value_bar = await baker.amake("issue_events.TagValue", value="bar")
+        value_cat = await baker.amake("issue_events.TagValue", value="cat")
+        value_dog = await baker.amake("issue_events.TagValue", value="dog")
 
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key=key_foo,
             tag_value=value_bar,
             count=2,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key=key_foo,
             tag_value=value_bar,
             count=1,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key=key_animal,
             tag_value=value_cat,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key=key_animal,
             tag_value=value_dog,
             count=4,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key=key_foo,
@@ -1364,7 +1411,7 @@ class IssueEventTagsAPITestCase(GlitchTestCase):
         )
 
         url = self.get_url(issue.id)
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
 
         # Order is random
@@ -1385,28 +1432,30 @@ class IssueEventTagsAPITestCase(GlitchTestCase):
         self.assertEqual(foo["topValues"][0]["count"], 4)
         self.assertEqual(foo["uniqueValues"], 2)
 
-    def test_issue_tags_filter(self):
-        issue = baker.make("issue_events.Issue", project=self.project)
-        value_bar = baker.make("issue_events.TagValue", value="bar")
-        baker.make(
+    async def test_issue_tags_filter(self):
+        issue = await baker.amake("issue_events.Issue", project=self.project)
+        value_bar = await baker.amake("issue_events.TagValue", value="bar")
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key__key="foo",
             tag_value=value_bar,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueTag",
             issue=issue,
             tag_key__key="lol",
             tag_value=value_bar,
         )
-        baker.make(
+        await baker.amake(
             "issue_events.IssueEvent", issue=issue, tags={"foo": "bar", "lol": "bar"}
         )
         url = self.get_url(issue.id)
-        res = self.client.get(url + "?key=foo")
+        res = await self.async_client.get(url + "?key=foo")
         self.assertEqual(len(res.json()), 1)
 
+    # Kept synchronous: assertNumQueries cannot observe queries issued on the
+    # async DB connection used by the async test client.
     def test_issue_tags_performance(self):
         issue = baker.make("issue_events.Issue", project=self.project)
         key_foo = baker.make("issue_events.TagKey", key="foo")

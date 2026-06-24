@@ -11,64 +11,75 @@ from ..models import Repository
 class RepositoryAPITestCase(GlitchTipTestCaseMixin, TestCase):
     def setUp(self):
         self.create_logged_in_user()
+        self.async_client.force_login(self.user)
         self.url = reverse(
             "api:list_repositories",
             kwargs={"organization_slug": self.organization.slug},
         )
 
-    def test_list_empty(self):
-        res = self.client.get(self.url)
+    async def test_list_empty(self):
+        res = await self.async_client.get(self.url)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), [])
 
-    def test_list(self):
-        repo = Repository.objects.create(organization=self.organization, name="my-repo")
-        res = self.client.get(self.url)
+    async def test_list(self):
+        repo = await Repository.objects.acreate(
+            organization=self.organization, name="my-repo"
+        )
+        res = await self.async_client.get(self.url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["name"], repo.name)
         self.assertIn("dateCreated", data[0])
 
-    def test_list_scoped_to_organization(self):
-        Repository.objects.create(organization=self.organization, name="my-repo")
-        other_org = baker.make("organizations_ext.Organization")
-        Repository.objects.create(organization=other_org, name="other-repo")
+    async def test_list_scoped_to_organization(self):
+        await Repository.objects.acreate(organization=self.organization, name="my-repo")
+        other_org = await baker.amake("organizations_ext.Organization")
+        await Repository.objects.acreate(organization=other_org, name="other-repo")
 
-        res = self.client.get(self.url)
+        res = await self.async_client.get(self.url)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["name"], "my-repo")
 
-    def test_create(self):
+    async def test_create(self):
         data = {
             "name": "my-repo",
             "url": "https://gitlab.com/org/my-repo",
         }
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 201)
         body = res.json()
         self.assertEqual(body["name"], "my-repo")
         self.assertEqual(body["url"], "https://gitlab.com/org/my-repo")
         self.assertTrue(
-            Repository.objects.filter(
+            await Repository.objects.filter(
                 organization=self.organization, name="my-repo"
-            ).exists()
+            ).aexists()
         )
 
-    def test_create_minimal(self):
+    async def test_create_minimal(self):
         data = {"name": "minimal-repo"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 201)
         body = res.json()
         self.assertEqual(body["name"], "minimal-repo")
         self.assertEqual(body["status"], "active")
 
-    def test_create_duplicate_name(self):
-        Repository.objects.create(organization=self.organization, name="dup-repo")
+    async def test_create_duplicate_name(self):
+        await Repository.objects.acreate(
+            organization=self.organization, name="dup-repo"
+        )
         data = {"name": "dup-repo"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 409)
 
 
