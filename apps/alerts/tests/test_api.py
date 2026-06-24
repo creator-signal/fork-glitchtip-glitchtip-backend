@@ -160,7 +160,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
             user, OrganizationUserRole.MEMBER
         )
 
-        await sync_to_async(self.async_client.force_login)(user)
+        await self.async_client.aforce_login(user)
         url = reverse(
             "api:create_project_alert", args=[self.organization.slug, self.project.slug]
         )

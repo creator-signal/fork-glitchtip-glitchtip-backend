@@ -32,42 +32,42 @@ class EventCountsTestCase(SimpleTestCase):
 
 
 class OrganizationModelTestCase(TestCase):
-    def test_email(self):
+    async def test_email(self):
         """Billing email address"""
-        user = baker.make("users.user")
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(user)
+        user = await baker.amake("users.user")
+        organization = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(organization.add_user)(user)
 
         # Org 1 has two users and only one of which is an owner
-        user2 = baker.make("users.user")
-        organization2 = baker.make("organizations_ext.Organization")
-        organization2.add_user(user2)
-        organization.add_user(user2)
+        user2 = await baker.amake("users.user")
+        organization2 = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(organization2.add_user)(user2)
+        await sync_to_async(organization.add_user)(user2)
 
         self.assertEqual(organization.email, user.email)
-        self.assertEqual(organization.users.count(), 2)
-        self.assertEqual(organization.owners.count(), 1)
+        self.assertEqual(await organization.users.acount(), 2)
+        self.assertEqual(await organization.owners.acount(), 1)
 
-    def test_email_missing_organization_owner_fallback(self):
+    async def test_email_missing_organization_owner_fallback(self):
         """
         When OrganizationOwner record is missing, email property should
         fall back to first user with OWNER role and log a warning.
         """
-        user = baker.make("users.user")
-        organization = baker.make("organizations_ext.Organization")
-        organization.add_user(user)
+        user = await baker.amake("users.user")
+        organization = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(organization.add_user)(user)
 
         # Verify the owner exists first
         self.assertTrue(
-            OrganizationOwner.objects.filter(organization=organization).exists()
+            await OrganizationOwner.objects.filter(organization=organization).aexists()
         )
         self.assertEqual(organization.email, user.email)
 
         # Delete the OrganizationOwner to simulate the data integrity issue
-        OrganizationOwner.objects.filter(organization=organization).delete()
+        await OrganizationOwner.objects.filter(organization=organization).adelete()
 
         # Refresh from DB to clear cached relation
-        organization.refresh_from_db()
+        await organization.arefresh_from_db()
 
         # Verify fallback works and warning is logged
         with mock.patch("apps.organizations_ext.models.logger") as mock_logger:
@@ -76,16 +76,16 @@ class OrganizationModelTestCase(TestCase):
             mock_logger.warning.assert_called_once()
             self.assertIn("no OrganizationOwner", mock_logger.warning.call_args[0][0])
 
-    def test_email_no_owner_at_all(self):
+    async def test_email_no_owner_at_all(self):
         """
         When organization has no OrganizationOwner and no users with OWNER role,
         email property should return None.
         """
-        organization = baker.make("organizations_ext.Organization")
+        organization = await baker.amake("organizations_ext.Organization")
 
         # Add a user but not as owner
-        user = baker.make("users.user")
-        baker.make(
+        user = await baker.amake("users.user")
+        await baker.amake(
             "organizations_ext.OrganizationUser",
             user=user,
             organization=organization,
@@ -95,12 +95,12 @@ class OrganizationModelTestCase(TestCase):
         with mock.patch("apps.organizations_ext.models.logger"):
             self.assertIsNone(organization.email)
 
-    def test_slug_reserved_words(self):
+    async def test_slug_reserved_words(self):
         """Reserve some words for frontend routing needs"""
         word = "login"
-        organization = baker.make("organizations_ext.Organization", name=word)
+        organization = await baker.amake("organizations_ext.Organization", name=word)
         self.assertNotEqual(organization.slug, word)
-        organization = baker.make("organizations_ext.Organization", name=word)
+        organization = await baker.amake("organizations_ext.Organization", name=word)
 
 
 class OrganizationRegistrationSettingQueryTestCase(TestCase):

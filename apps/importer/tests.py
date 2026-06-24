@@ -81,7 +81,7 @@ class ImporterTestCase(GlitchTipTestCaseMixin, TestCase):
     @aioresponses()
     async def test_invalid_org(self, m):
         await sync_to_async(self.create_logged_in_user)()
-        await sync_to_async(self.async_client.force_login)(self.user)
+        await self.async_client.aforce_login(self.user)
         url = reverse("api:importer")
         data = {
             "url": self.url,

@@ -15,7 +15,7 @@ class APITokenTests(TestCase):
         return reverse("api:delete_api_token", args=[id])
 
     async def test_create(self):
-        await sync_to_async(self.async_client.force_login)(self.user)
+        await self.async_client.aforce_login(self.user)
         scope_name = "member:read"
         data = {"scopes": [scope_name]}
         res = await self.async_client.post(
@@ -24,7 +24,7 @@ class APITokenTests(TestCase):
         self.assertContains(res, scope_name, status_code=201)
 
     async def test_list(self):
-        await sync_to_async(self.async_client.force_login)(self.user)
+        await self.async_client.aforce_login(self.user)
         api_token = await baker.amake("api_tokens.APIToken", user=self.user)
         other_api_token = await baker.amake("api_tokens.APIToken")
         res = await self.async_client.get(self.url)
@@ -32,7 +32,7 @@ class APITokenTests(TestCase):
         self.assertNotContains(res, other_api_token.token)
 
     async def test_destroy(self):
-        await sync_to_async(self.async_client.force_login)(self.user)
+        await self.async_client.aforce_login(self.user)
         api_token = await baker.amake("api_tokens.APIToken", user=self.user)
         url = self.get_detail_url(api_token.id)
         self.assertTrue(await self.user.apitoken_set.aexists())

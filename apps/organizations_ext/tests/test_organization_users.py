@@ -134,12 +134,12 @@ class OrganizationUsersTestCase(TestCase):
         url = reverse("api:get_accept_invite", args=[org_user_id, token])
 
         # Check that we can determine organization name from GET request to accept invite endpoint
-        await sync_to_async(self.async_client.logout)()
+        await self.async_client.alogout()
         res = await self.async_client.get(url)
         self.assertContains(res, self.organization.name)
 
         user = await baker.amake("users.user")
-        await sync_to_async(self.async_client.force_login)(user)
+        await self.async_client.aforce_login(user)
         data = {"acceptInvite": True}
         res = await self.async_client.post(url, data, content_type="application/json")
         self.assertContains(res, self.organization.name)
@@ -156,7 +156,7 @@ class OrganizationUsersTestCase(TestCase):
     )
     async def test_organization_users_create_throttle(self):
         cache_key = f"email_invite_throttle_{self.user.id}"
-        await sync_to_async(cache.delete)(cache_key)
+        await cache.adelete(cache_key)
         data = {
             "email": "new@example.com",
             "orgRole": OrganizationUserRole.MANAGER.label.lower(),
@@ -440,7 +440,7 @@ class OrganizationUsersTestCase(TestCase):
         other_user = await baker.amake("users.user")
         other_org_user = await sync_to_async(self.organization.add_user)(other_user)
 
-        await sync_to_async(self.async_client.force_login)(other_user)
+        await self.async_client.aforce_login(other_user)
 
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 

@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
@@ -22,20 +21,20 @@ class WizardTestCase(GlitchTipTestCaseMixin, TestCase):
         wizard_hash = res.json().get("hash")
         self.assertEqual(len(wizard_hash), 64)
         key = SETUP_WIZARD_CACHE_KEY + wizard_hash
-        self.assertEqual(await sync_to_async(cache.get)(key), SETUP_WIZARD_CACHE_EMPTY)
+        self.assertEqual(await cache.aget(key), SETUP_WIZARD_CACHE_EMPTY)
 
     async def test_set_token(self):
         res = await self.async_client.get(self.url)
         wizard_hash = res.json().get("hash")
 
-        await sync_to_async(self.async_client.force_login)(self.user)
+        await self.async_client.aforce_login(self.user)
         res = await self.async_client.post(
             self.url_set_token, {"hash": wizard_hash}, content_type="application/json"
         )
         self.assertEqual(res.status_code, 200)
 
         key = SETUP_WIZARD_CACHE_KEY + wizard_hash
-        self.assertTrue((await sync_to_async(cache.get)(key))["apiKeys"])
+        self.assertTrue((await cache.aget(key))["apiKeys"])
         self.assertTrue(await self.user.apitoken_set.aexists())
 
         res = await self.async_client.get(self.url + wizard_hash + "/")

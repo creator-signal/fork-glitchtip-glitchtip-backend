@@ -71,14 +71,14 @@ class SettingsTestCase(TestCase):
 
         from glitchtip.oidc_discovery import _cache_key
 
-        await sync_to_async(cache.set)(
+        await cache.aset(
             _cache_key("https://example.com"),
             {"authorization_endpoint": "https://example.com/authorize"},
         )
         try:
             res = await self.async_client.get(self.url)
         finally:
-            await sync_to_async(cache.delete)(_cache_key("https://example.com"))
+            await cache.adelete(_cache_key("https://example.com"))
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
 
@@ -154,7 +154,7 @@ class APIRootTestCase(TestCase):
 
     async def test_user(self):
         user = await baker.amake("users.user")
-        await sync_to_async(self.async_client.force_login)(user)
+        await self.async_client.aforce_login(user)
         res = await self.async_client.get(self.url)
         self.assertContains(res, user.email)
 

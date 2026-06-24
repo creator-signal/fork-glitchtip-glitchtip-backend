@@ -261,7 +261,7 @@ class LogsAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_list_logs_unauthorized(self):
         """Test that logs require authentication"""
-        await sync_to_async(self.async_client.logout)()
+        await self.async_client.alogout()
 
         url = reverse(
             "api:list_logs", kwargs={"organization_slug": self.organization.slug}

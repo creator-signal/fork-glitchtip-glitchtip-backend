@@ -5,6 +5,9 @@ from django.utils import timezone
 from apps.performance.models import TransactionGroup
 from glitchtip.test_utils.test_case import GlitchTestCase
 
+from asgiref.sync import sync_to_async
+from model_bakery import baker
+
 
 class TransactionGroupAPITestCase(GlitchTestCase):
     @classmethod
@@ -180,14 +183,11 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         group = await self.create_group()
 
         # Create a second user in a different organization
-        from asgiref.sync import sync_to_async
-        from model_bakery import baker
-
         user_b = await baker.amake("users.user")
         org_b = await baker.amake("organizations_ext.Organization")
         await sync_to_async(org_b.add_user)(user_b)
 
-        await sync_to_async(self.async_client.force_login)(user_b)
+        await self.async_client.aforce_login(user_b)
 
         # List endpoint — should return empty
         list_url = f"/api/0/organizations/{self.organization.slug}/transaction-groups/"

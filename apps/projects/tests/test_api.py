@@ -164,39 +164,39 @@ class ProjectsAPITestCase(TestCase):
         res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
 
-    def test_project_delete_requires_admin_role(self):
+    async def test_project_delete_requires_admin_role(self):
         """A non-admin member cannot delete a project, even when the org has an
         admin. Regression: the role check matched any admin in the org rather
         than the requesting user, so a plain member could delete via a session.
         """
-        member = baker.make("users.user")
-        self.organization.add_user(member, role=OrganizationUserRole.MEMBER)
-        project = baker.make(
+        member = await baker.amake("users.user")
+        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        project = await baker.amake(
             "projects.Project",
             organization=self.organization,
             name="Member Protected",
             first_event=timezone.now(),
         )
-        self.client.force_login(member)
+        await self.async_client.aforce_login(member)
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
-        project.refresh_from_db()  # still present
+        await project.arefresh_from_db() 
 
-    def test_project_key_delete_requires_admin_role(self):
+    async def test_project_key_delete_requires_admin_role(self):
         """A non-admin member cannot delete a project key, even when the org has
         an admin (same role-check regression as project deletion)."""
-        member = baker.make("users.user")
-        self.organization.add_user(member, role=OrganizationUserRole.MEMBER)
-        key = baker.make("projects.ProjectKey", project=self.project)
-        self.client.force_login(member)
+        member = await baker.amake("users.user")
+        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        key = await baker.amake("projects.ProjectKey", project=self.project)
+        await self.async_client.aforce_login(member)
         url = reverse(
             "api:delete_project_key",
             args=[self.organization.slug, self.project.slug, key.public_key],
         )
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
-        self.assertTrue(ProjectKey.objects.filter(id=key.id).exists())
+        self.assertTrue(await ProjectKey.objects.filter(id=key.id).aexists())
 
 
 class TeamProjectsAPITestCase(TestCase):

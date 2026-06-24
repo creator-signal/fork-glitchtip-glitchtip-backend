@@ -46,7 +46,7 @@ class TeamAPITestCase(TestCase):
             member, role=OrganizationUserRole.MEMBER
         )
         team = await baker.amake("teams.Team", organization=self.organization)
-        await sync_to_async(self.async_client.force_login)(member)
+        await self.async_client.aforce_login(member)
         url = reverse("api:delete_team", args=[self.organization.slug, team.slug])
         res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
@@ -257,7 +257,7 @@ class TeamAPITestCase(TestCase):
             "projects.Project", organization=self.organization
         )
         user = await baker.amake("users.user")
-        await sync_to_async(self.async_client.force_login)(user)
+        await self.async_client.aforce_login(user)
         await sync_to_async(self.organization.add_user)(
             user, OrganizationUserRole.MEMBER
         )

@@ -7,7 +7,6 @@ works because those are not Issue fields anymore. ``make_issue`` bakes the Issue
 leaf, keeping the in-memory relation consistent for direct attribute asserts.
 """
 
-from asgiref.sync import sync_to_async
 from model_bakery import baker
 
 from apps.issue_events.models import IssueIndex
@@ -53,7 +52,7 @@ async def arefresh_issue(issue):
     proxy read would hit the sync ORM. Re-prime the cache so leaf-backed
     attributes stay readable from async tests.
     """
-    await sync_to_async(issue.refresh_from_db)()
+    await issue.arefresh_from_db()
     issue._state.fields_cache.pop("index", None)
     issue._state.fields_cache["index"] = await IssueIndex.objects.aget(
         issue_id=issue.pk

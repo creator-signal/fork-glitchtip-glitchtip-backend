@@ -92,7 +92,7 @@ class StoreAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
         # We know the throttle was checked when this simplistic lock is set
-        self.assertTrue(cache.get(f"org-throttle-{self.organization.id}"))
+        self.assertTrue(await cache.aget(f"org-throttle-{self.organization.id}"))
 
     @override_settings(STRIPE_ENABLED=True, GLITCHTIP_THROTTLE_CHECK_INTERVAL=100000000)
     async def test_check_no_throttle(self):
@@ -102,4 +102,4 @@ class StoreAPITestCase(EventIngestTestCase):
         )
         self.assertEqual(res.status_code, 200)
         # We know the throttle was not checked when this simplistic lock isn't set
-        self.assertFalse(cache.get(f"org-throttle-{self.organization.id}"))
+        self.assertFalse(await cache.aget(f"org-throttle-{self.organization.id}"))

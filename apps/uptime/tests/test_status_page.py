@@ -22,7 +22,7 @@ class StatusPageTestCase(GlitchTestCase):
         res = await self.async_client.get(url)
         self.assertContains(res, status_page.name)
 
-        await sync_to_async(self.async_client.logout)()
+        await self.async_client.alogout()
         res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 404)
 

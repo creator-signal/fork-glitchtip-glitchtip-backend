@@ -197,7 +197,7 @@ class IssueEventAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_authentication(self):
         url = get_list_issue_event_url(1)
-        await sync_to_async(self.async_client.logout)()
+        await self.async_client.alogout()
         res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 401)
 
