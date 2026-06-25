@@ -148,7 +148,6 @@ class File(CreatedModel):
                 checksum=self.checksum,
                 defaults={"blob": FileObj(tf, name=self.checksum), "size": offset},
             )
-            tf.seek(0)
             self.blob = combined_blob
         else:
             self.blob = None
