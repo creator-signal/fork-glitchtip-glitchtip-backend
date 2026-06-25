@@ -1,14 +1,22 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID
 
 from django.conf import settings
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.db import connection
+from django.test import (
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import reverse
 from model_bakery import baker
 
@@ -506,6 +514,231 @@ class PartitionManagerTestCase(TestCase):
         for i in range(4):
             expected_name = f"issue_events_issueaggregate_20250115_h{i}"
             self.assertIn(expected_name, sqls[i + 1])
+
+
+class PartitionCreationDDLTestCase(TransactionTestCase):
+    """
+    Exercise execute_partition_creation against a real partitioned table.
+
+    These are catalog-level operations (CREATE TABLE ... PARTITION OF, then
+    reading pg_inherits/pg_class), so they need a real Postgres backend rather
+    than mocked SQL generation.
+    """
+
+    # Disposable parent table created/dropped per test.
+    PARENT = "test_partition_ddl_parent"
+
+    def setUp(self):
+        super().setUp()
+        self.manager = PartitionManager()
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP TABLE IF EXISTS {self.PARENT} CASCADE;")
+            # RANGE on a date column, sub-partitioned by HASH on organization_id
+            # to mirror the events tables (TIME -> HASH).
+            cursor.execute(
+                f"""
+                CREATE TABLE {self.PARENT} (
+                    organization_id bigint NOT NULL,
+                    date date NOT NULL
+                ) PARTITION BY RANGE (date);
+                """
+            )
+
+    def tearDown(self):
+        # Discard any aborted-transaction state from a failed assertion so the
+        # cleanup DROP runs on a healthy connection and never masks the failure.
+        connection.close()
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP TABLE IF EXISTS {self.PARENT} CASCADE;")
+        super().tearDown()
+
+    @contextmanager
+    def _assert_partition_logs(self, level):
+        """assertLogs on the partition manager that survives the settings-level
+        ``logging.disable(logging.WARNING)`` applied during tests (see
+        ``glitchtip/settings.py``). That global disable suppresses INFO and
+        WARNING records regardless of ``assertLogs``'s own handler, so lift it
+        for the duration of the assertion and restore it afterwards.
+        """
+        previous = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        try:
+            with self.assertLogs("glitchtip.partition_manager", level=level) as logs:
+                yield logs
+        finally:
+            logging.disable(previous)
+
+    def _child_moduli(self, partition_name):
+        """Return the sorted set of hash moduli among a partition's children."""
+        moduli = set()
+        for child in self.manager.list_partitions(partition_name):
+            match = re.search(
+                r"modulus\s+(\d+)", child.get("partition_bounds") or "", re.IGNORECASE
+            )
+            if match:
+                moduli.add(int(match.group(1)))
+        return sorted(moduli)
+
+    def test_skips_when_existing_modulus_differs(self):
+        """
+        A range partition pre-created at modulus 4 must NOT gain modulus-16
+        children when the configured bucket count is raised to 16 — that would
+        raise 'partition ... would overlap partition ...'. The existing mod-4
+        set is already complete and must be left intact.
+        """
+        partition_name = f"{self.PARENT}_20260629"
+        start = datetime(2026, 6, 29, tzinfo=timezone.utc)
+        end = datetime(2026, 6, 30, tzinfo=timezone.utc)
+
+        # Pre-create the range partition with 4 hash buckets (old bucket count).
+        created = self.manager.execute_partition_creation(
+            parent_table=self.PARENT,
+            partition_name=partition_name,
+            start_date=start,
+            end_date=end,
+            hash_buckets=4,
+            key_type="datetime",
+        )
+        self.assertEqual(created, 5)  # 1 range + 4 hash children
+        self.assertEqual(self._child_moduli(partition_name), [4])
+
+        # Now run again with the raised bucket count. This must be a no-op.
+        with self._assert_partition_logs("INFO") as logs:
+            result = self.manager.execute_partition_creation(
+                parent_table=self.PARENT,
+                partition_name=partition_name,
+                start_date=start,
+                end_date=end,
+                hash_buckets=16,
+                key_type="datetime",
+            )
+
+        self.assertEqual(result, 0)
+        # The existing mod-4 set is untouched (no mod-16 children created).
+        self.assertEqual(self._child_moduli(partition_name), [4])
+        self.assertEqual(len(self.manager.list_partitions(partition_name)), 4)
+        self.assertTrue(
+            any("leaving as-is" in message for message in logs.output),
+            logs.output,
+        )
+
+    def test_fills_genuinely_missing_bucket_at_matching_modulus(self):
+        """
+        The healthy gap-fill path still works: if a range partition has hash
+        children at the configured modulus but one bucket is missing, the
+        missing bucket is created.
+        """
+        partition_name = f"{self.PARENT}_20260630"
+        start = datetime(2026, 6, 30, tzinfo=timezone.utc)
+        end = datetime(2026, 7, 1, tzinfo=timezone.utc)
+
+        # Create the range partition plus 3 of the 4 hash children, leaving
+        # remainder 3 missing.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                CREATE TABLE {partition_name} PARTITION OF {self.PARENT}
+                FOR VALUES FROM ('2026-06-30') TO ('2026-07-01')
+                PARTITION BY HASH (organization_id);
+                """
+            )
+            for remainder in range(3):
+                cursor.execute(
+                    f"""
+                    CREATE TABLE {partition_name}_h{remainder}
+                    PARTITION OF {partition_name}
+                    FOR VALUES WITH (MODULUS 4, REMAINDER {remainder});
+                    """
+                )
+
+        self.assertEqual(len(self.manager.list_partitions(partition_name)), 3)
+
+        # Gap-fill at the matching modulus should create exactly the one
+        # missing bucket.
+        result = self.manager.execute_partition_creation(
+            parent_table=self.PARENT,
+            partition_name=partition_name,
+            start_date=start,
+            end_date=end,
+            hash_buckets=4,
+            key_type="datetime",
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(len(self.manager.list_partitions(partition_name)), 4)
+        self.assertEqual(self._child_moduli(partition_name), [4])
+
+    def test_matching_modulus_complete_set_is_noop(self):
+        """A complete set at the configured modulus creates nothing."""
+        partition_name = f"{self.PARENT}_20260701"
+        start = datetime(2026, 7, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 7, 2, tzinfo=timezone.utc)
+
+        self.manager.execute_partition_creation(
+            parent_table=self.PARENT,
+            partition_name=partition_name,
+            start_date=start,
+            end_date=end,
+            hash_buckets=4,
+            key_type="datetime",
+        )
+
+        result = self.manager.execute_partition_creation(
+            parent_table=self.PARENT,
+            partition_name=partition_name,
+            start_date=start,
+            end_date=end,
+            hash_buckets=4,
+            key_type="datetime",
+        )
+        self.assertEqual(result, 0)
+        self.assertEqual(self._child_moduli(partition_name), [4])
+
+    def test_skips_when_children_have_no_hash_modulus(self):
+        """
+        A range partition whose existing child is NOT a hash partition (e.g.
+        sub-partitioned by RANGE/LIST, or any unexpected structure) must be
+        left untouched rather than have hash children forced onto it.
+        """
+        partition_name = f"{self.PARENT}_20260702"
+        start = datetime(2026, 7, 2, tzinfo=timezone.utc)
+        end = datetime(2026, 7, 3, tzinfo=timezone.utc)
+
+        # Build a range partition that is itself sub-partitioned by LIST, with
+        # one list child — so its children carry no hash "modulus" bound.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                CREATE TABLE {partition_name} PARTITION OF {self.PARENT}
+                FOR VALUES FROM ('2026-07-02') TO ('2026-07-03')
+                PARTITION BY LIST (organization_id);
+                """
+            )
+            cursor.execute(
+                f"""
+                CREATE TABLE {partition_name}_org1 PARTITION OF {partition_name}
+                FOR VALUES IN (1);
+                """
+            )
+
+        with self._assert_partition_logs("WARNING") as logs:
+            result = self.manager.execute_partition_creation(
+                parent_table=self.PARENT,
+                partition_name=partition_name,
+                start_date=start,
+                end_date=end,
+                hash_buckets=4,
+                key_type="datetime",
+            )
+
+        self.assertEqual(result, 0)
+        # No hash children were created; the single list child is untouched.
+        self.assertEqual(self._child_moduli(partition_name), [])
+        self.assertEqual(len(self.manager.list_partitions(partition_name)), 1)
+        self.assertTrue(
+            any("leaving as-is" in message for message in logs.output),
+            logs.output,
+        )
 
 
 class DatabaseSettingsTestCase(TestCase):
