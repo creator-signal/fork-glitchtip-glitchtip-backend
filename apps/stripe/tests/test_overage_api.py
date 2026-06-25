@@ -72,6 +72,11 @@ class OverageAPITestCase(TestCase):
     def test_enable_attaches_item_and_sets_cap(self):
         item = AsyncMock(return_value=type("I", (), {"id": "si_new"})())
         with (
+            patch("apps.stripe.api.fetch_subscription", new_callable=AsyncMock),
+            patch(
+                "apps.stripe.api.select_subscription_items",
+                new=MagicMock(return_value=(None, None)),
+            ),
             patch("apps.stripe.api.add_subscription_item", new=item),
             patch(
                 "apps.stripe.api.migrate_subscription_to_flexible",
@@ -90,6 +95,33 @@ class OverageAPITestCase(TestCase):
         self.assertEqual(self.org.overage_spend_cap_cents, 2000)
         self.assertEqual(self.sub.metered_item_id, "si_new")
         item.assert_awaited_once_with(self.sub.stripe_id, self.overage_price.stripe_id)
+
+    def test_enable_reuses_existing_stripe_item(self):
+        # An item orphaned by a prior crash (before we saved its id) is reused
+        # rather than re-added, which Stripe would reject as a duplicate.
+        existing = type("I", (), {"id": "si_orphan"})()
+        add = AsyncMock()
+        with (
+            patch("apps.stripe.api.fetch_subscription", new_callable=AsyncMock),
+            patch(
+                "apps.stripe.api.select_subscription_items",
+                new=MagicMock(return_value=(None, existing)),
+            ),
+            patch("apps.stripe.api.add_subscription_item", new=add),
+            patch(
+                "apps.stripe.api.migrate_subscription_to_flexible",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "apps.stripe.api.check_organization_throttle",
+                new=MagicMock(aenqueue=AsyncMock()),
+            ),
+        ):
+            res = self._configure({"enabled": True, "capCents": 2000})
+        self.assertEqual(res.status_code, 200)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.metered_item_id, "si_orphan")
+        add.assert_not_awaited()
 
     def test_enable_requires_positive_cap(self):
         with patch(
