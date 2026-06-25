@@ -99,7 +99,7 @@ async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
         delay = BASE_RETRY_DELAY * (2**attempt) + random.uniform(0, BASE_RETRY_DELAY)
         await asyncio.sleep(delay)
 
-    raise StripeError("exhausted retries", status=0)
+    raise StripeError("exhausted retries", status=503)
 
 
 async def stripe_get(
