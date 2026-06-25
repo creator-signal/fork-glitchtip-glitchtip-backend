@@ -14,6 +14,7 @@ from apps.issue_events.constants import IssueEventType
 from glitchtip.partition_manager import UUID7Helper
 
 from .authentication import EventAuthHttpRequest, event_auth
+from .pii_scrubber import resolve_scrubber
 from .schema import (
     CSPIssueEventSchema,
     EventIngestSchema,
@@ -70,11 +71,14 @@ async def event_store(
             payload.user = EventUser(ip_address=client_ip)
 
     issue_type = IssueEventType.ERROR if payload.exception else IssueEventType.DEFAULT
+    scrubber = resolve_scrubber(
+        request.auth.scrub_config, settings.GLITCHTIP_PII_SCRUB_DEFAULT
+    )
     primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
-        payload=payload.dict() | {"type": issue_type},
+        payload=scrubber.scrub_event(payload.dict() | {"type": issue_type}),
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
         uuid=primary_id.hex,
@@ -103,11 +107,14 @@ async def event_security(
             event.user.ip_address = client_ip
         else:
             event.user = EventUser(ip_address=client_ip)
+    scrubber = resolve_scrubber(
+        request.auth.scrub_config, settings.GLITCHTIP_PII_SCRUB_DEFAULT
+    )
     primary_id = UUID7Helper.from_datetime()
     issue_event = IngestTaskMessage(
         project_id=project_id,
         organization_id=request.auth.organization_id,
-        payload=event.dict(by_alias=True),
+        payload=scrubber.scrub_event(event.dict(by_alias=True)),
         received=timezone.now(),
         update_first_event=request.auth.first_event is None,
         uuid=primary_id.hex,

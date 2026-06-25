@@ -39,6 +39,7 @@ class ProjectAuthInfo:
     organization_id: int
     first_event: datetime | None
     organization: OrganizationInfo
+    scrub_config: dict | None = None
 
     @property
     def should_scrub_ip_addresses(self):
@@ -190,6 +191,7 @@ async def get_project(request: HttpRequest) -> ProjectAuthInfo | None:
             scrub_ip_addresses=row[6],
         ),
         first_event=row[7],
+        scrub_config=row[8],
     )
 
     if (
@@ -292,6 +294,7 @@ async def get_project_by_key(request: HttpRequest) -> ProjectAuthInfo:
             scrub_ip_addresses=organization.scrub_ip_addresses,
         ),
         first_event=project.first_event,
+        scrub_config=project.scrub_config,
     )
     org_throttle = organization.event_throttle_rate
     project_throttle = project.event_throttle_rate
