@@ -32,12 +32,16 @@ class AuthenticationTestCase(TransactionTestCase):
             + f"?sentry_key={self.project_key.public_key}"
         )
 
-    def test_org_throttle(self):
-        res = self.client.post(self.url, [{}], content_type="application/json")
+    async def test_org_throttle(self):
+        res = await self.async_client.post(
+            self.url, [{}], content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
         self.organization.event_throttle_rate = 100
-        self.organization.save()
-        res = self.client.post(self.url, [{}], content_type="application/json")
+        await self.organization.asave()
+        res = await self.async_client.post(
+            self.url, [{}], content_type="application/json"
+        )
         self.assertEqual(res.headers.get("Retry-After"), "600")
         self.assertEqual(res.status_code, 429)
 
@@ -45,7 +49,7 @@ class AuthenticationTestCase(TransactionTestCase):
         with self.assertRaises(NoReverseMatch):
             reverse("event_envelope", args=[f"{self.project.id}''"])
 
-    def test_invalid_dsn_does_not_block_valid_dsn(self):
+    async def test_invalid_dsn_does_not_block_valid_dsn(self):
         """A request with a bad sentry_key must not block a valid DSN on the
         same project. Protects against a trivial DoS where any public
         project_id + random key locks out the project's real traffic.
@@ -54,14 +58,20 @@ class AuthenticationTestCase(TransactionTestCase):
         bad_url = (
             reverse("event_envelope", args=[self.project.id]) + f"?sentry_key={bad_key}"
         )
-        res = self.client.post(bad_url, [{}], content_type="application/json")
+        res = await self.async_client.post(
+            bad_url, [{}], content_type="application/json"
+        )
         self.assertEqual(res.status_code, 403)
 
         # Valid DSN on the same project must still be accepted while the
         # invalid-DSN block is in its TTL window.
-        res = self.client.post(self.url, [{}], content_type="application/json")
+        res = await self.async_client.post(
+            self.url, [{}], content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
 
         # The bad key stays blocked (served from cache, no DB hit).
-        res = self.client.post(bad_url, [{}], content_type="application/json")
+        res = await self.async_client.post(
+            bad_url, [{}], content_type="application/json"
+        )
         self.assertEqual(res.status_code, 403)

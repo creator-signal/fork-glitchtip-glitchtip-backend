@@ -1,5 +1,6 @@
 from unittest import mock
 
+from asgiref.sync import sync_to_async
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -21,20 +22,21 @@ class UptimeAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_list(self, mocked):
-        monitor = baker.make(
+    async def test_list(self, mocked):
+        monitor = await baker.amake(
             "uptime.Monitor", organization=self.organization, url="http://example.com"
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
             is_up=False,
             start_check="2021-09-19T15:39:31Z",
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -44,17 +46,17 @@ class UptimeAPITestCase(GlitchTestCase):
         )
         monitor.cached_is_up = True
         monitor.cached_last_change = parse_datetime("2021-09-19T15:40:31Z")
-        monitor.save(update_fields=["cached_is_up", "cached_last_change"])
-        res = self.client.get(self.list_url)
+        await monitor.asave(update_fields=["cached_is_up", "cached_last_change"])
+        res = await self.async_client.get(self.list_url)
         self.assertContains(res, monitor.name)
         data = res.json()
         self.assertEqual(data[0]["isUp"], True)
         self.assertEqual(data[0]["lastChange"], "2021-09-19T15:40:31Z")
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_list_aggregation(self, _):
+    async def test_list_aggregation(self, _):
         """Test up and down event aggregations"""
-        monitor = baker.make(
+        monitor = await baker.amake(
             "uptime.Monitor", organization=self.organization, url="http://example.com"
         )
         start_time = timezone.now()
@@ -65,7 +67,7 @@ class UptimeAPITestCase(GlitchTestCase):
                 is_up = True
             current_time = start_time + timezone.timedelta(minutes=i)
             with freeze_time(current_time):
-                baker.make(
+                await baker.amake(
                     "uptime.MonitorCheck",
                     monitor=monitor,
                     organization=monitor.organization,
@@ -73,9 +75,12 @@ class UptimeAPITestCase(GlitchTestCase):
                     start_check=current_time,
                 )
         with freeze_time(current_time):
-            res = self.client.get(self.list_url)
+            res = await self.async_client.get(self.list_url)
         self.assertEqual(len(res.json()[0]["checks"]), 60)
 
+    # Kept synchronous: relies on captureOnCommitCallbacks + a sync mock
+    # assertion. on_commit callbacks fired by the async request run on the
+    # async DB connection, which the sync capture context cannot observe.
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_http_monitor(self, mocked):
         data = {
@@ -100,6 +105,7 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.confirmation_threshold, 1)
         mocked.enqueue.assert_called_once()
 
+    # Kept synchronous: see note on test_create_http_monitor.
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_monitor_confirmation_threshold(self, mocked):
         data = {
@@ -139,7 +145,7 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertEqual(monitor.url, "example.com:80")
         mocked.enqueue.assert_called_once()
 
-    def test_create_port_monitor_validation(self):
+    async def test_create_port_monitor_validation(self):
         """Port monitor URLs should be converted to domain:port format, with protocol removed"""
         data = {
             "monitorType": "TCP Port",
@@ -150,10 +156,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "timeout": None,
             "interval": 60,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.list_url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 422)
 
-    def test_create_invalid(self):
+    async def test_create_invalid(self):
         data = {
             "monitorType": "Ping",
             "name": "Test",
@@ -164,7 +172,9 @@ class UptimeAPITestCase(GlitchTestCase):
             "timeout": None,
             "project": self.project.pk,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.list_url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 422)
 
         data = {
@@ -177,9 +187,12 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": self.project.pk,
             "timeout": 999,
         }
-        res = self.client.post(self.list_url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.list_url, data, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 422)
 
+    # Kept synchronous: see note on test_create_http_monitor.
     @mock.patch("apps.uptime.tasks.perform_checks")
     def test_create_max_interval(self, mocked):
         """A one-day interval (86400) is allowed by the validator and must not
@@ -236,14 +249,14 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertTrue(Monitor.objects.filter(expected_status=None).exists())
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_monitor_retrieve(self, _):
+    async def test_monitor_retrieve(self, _):
         """Test monitor details endpoint. Unlike the list view,
         checks here should include response time for the frontend graph"""
-        environment = baker.make(
+        environment = await baker.amake(
             "environments.Environment", organization=self.organization
         )
 
-        monitor = baker.make(
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
@@ -252,7 +265,7 @@ class UptimeAPITestCase(GlitchTestCase):
         )
 
         now = timezone.now()
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -260,7 +273,7 @@ class UptimeAPITestCase(GlitchTestCase):
             is_change=True,
             start_check="2021-09-19T15:39:31Z",
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -270,10 +283,10 @@ class UptimeAPITestCase(GlitchTestCase):
         )
         monitor.cached_is_up = True
         monitor.cached_last_change = now
-        monitor.save(update_fields=["cached_is_up", "cached_last_change"])
+        await monitor.asave(update_fields=["cached_is_up", "cached_last_change"])
 
         url = reverse("api:get_monitor", args=[self.organization.slug, monitor.pk])
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()
         self.assertEqual(data["isUp"], True)
         self.assertEqual(parse_datetime(data["lastChange"]), now)
@@ -281,13 +294,13 @@ class UptimeAPITestCase(GlitchTestCase):
         self.assertIn("responseTime", data["checks"][0])
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_monitor_checks_list(self, _):
-        monitor = baker.make(
+    async def test_monitor_checks_list(self, _):
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -299,22 +312,22 @@ class UptimeAPITestCase(GlitchTestCase):
             "api:list_monitor_checks", args=[self.organization.slug, monitor.pk]
         )
 
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, "2021-09-19T15:39:31Z")
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_monitor_checks_is_change_baseline(self, _):
+    async def test_monitor_checks_is_change_baseline(self, _):
         """When all is_change=True records have been pruned (e.g. partition
         retention on a 100% uptime monitor), the is_change=true filter should
         still return at least one record — the most recent check should be
         marked as a baseline change."""
-        monitor = baker.make(
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
         )
         # Simulate post-pruning state: only is_change=False checks remain
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -322,7 +335,7 @@ class UptimeAPITestCase(GlitchTestCase):
             is_change=False,
             start_check="2021-09-19T15:39:31Z",
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -336,16 +349,16 @@ class UptimeAPITestCase(GlitchTestCase):
         )
 
         # Without filter, all checks are returned
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertEqual(len(res.json()), 2)
 
         # With is_change=true, should return nothing (no baseline yet)
-        res = self.client.get(url + "?is_change=true")
+        res = await self.async_client.get(url + "?is_change=true")
         self.assertEqual(len(res.json()), 0)
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_monitor_update(self, _):
-        monitor = baker.make(
+    async def test_monitor_update(self, _):
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
@@ -366,7 +379,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": str(self.project.id),
         }
 
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["projectID"], str(self.project.id))
         self.assertEqual(res.json()["url"], "https://differentexample.com")
@@ -382,7 +395,7 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": str(self.project.id),
         }
 
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 422)
 
         data = {
@@ -396,14 +409,14 @@ class UptimeAPITestCase(GlitchTestCase):
             "project": str(self.project.id),
         }
 
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["monitorType"], "GET")
         self.assertEqual(res.json()["expectedBody"], "")
         self.assertEqual(res.json()["timeout"], None)
 
-    def test_monitor_delete(self):
-        monitor = baker.make(
+    async def test_monitor_delete(self):
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             url="http://example.com",
@@ -411,7 +424,7 @@ class UptimeAPITestCase(GlitchTestCase):
             monitor_type="Ping",
             expected_status=None,
         )
-        baker.make(
+        await baker.amake(
             "uptime.MonitorCheck",
             monitor=monitor,
             organization=monitor.organization,
@@ -420,13 +433,13 @@ class UptimeAPITestCase(GlitchTestCase):
         )
 
         url = reverse("api:delete_monitor", args=[self.organization.slug, monitor.pk])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 204)
-        self.assertEqual(Monitor.objects.count(), 0)
-        self.assertEqual(MonitorCheck.objects.count(), 0)
+        self.assertEqual(await Monitor.objects.acount(), 0)
+        self.assertEqual(await MonitorCheck.objects.acount(), 0)
 
-        another_org = baker.make("organizations_ext.Organization")
-        another_monitor = baker.make(
+        another_org = await baker.amake("organizations_ext.Organization")
+        another_monitor = await baker.amake(
             "uptime.Monitor",
             organization=another_org,
             url="http://example.com",
@@ -436,29 +449,29 @@ class UptimeAPITestCase(GlitchTestCase):
         )
 
         url = reverse("api:delete_monitor", args=[another_org.slug, another_monitor.pk])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
 
     @mock.patch("apps.uptime.tasks.perform_checks")
-    def test_list_isolation(self, _):
+    async def test_list_isolation(self, _):
         """Users should only access monitors in their organization"""
-        user2 = baker.make("users.user")
-        org2 = baker.make("organizations_ext.Organization")
-        org2.add_user(user2)
-        monitor1 = baker.make(
+        user2 = await baker.amake("users.user")
+        org2 = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(org2.add_user)(user2)
+        monitor1 = await baker.amake(
             "uptime.Monitor", url="http://example.com", organization=self.organization
         )
-        monitor2 = baker.make(
+        monitor2 = await baker.amake(
             "uptime.Monitor", url="http://example.com", organization=org2
         )
 
-        res = self.client.get(self.list_url)
+        res = await self.async_client.get(self.list_url)
         self.assertContains(res, monitor1.name)
         self.assertNotContains(res, monitor2.name)
 
-    def test_create_isolation(self):
+    async def test_create_isolation(self):
         """Users should only make monitors in their organization"""
-        org2 = baker.make("organizations_ext.Organization")
+        org2 = await baker.amake("organizations_ext.Organization")
 
         url = reverse("api:list_monitors", args=[org2.slug])
         data = {
@@ -469,5 +482,5 @@ class UptimeAPITestCase(GlitchTestCase):
             "interval": 60,
             "project": self.project.pk,
         }
-        res = self.client.post(url, data)
+        res = await self.async_client.post(url, data)
         self.assertEqual(res.status_code, 400)

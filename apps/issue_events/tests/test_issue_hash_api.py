@@ -16,9 +16,10 @@ class IssueAPITestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_list_issue_hashes(self):
-        baker.make(
+    async def test_list_issue_hashes(self):
+        await baker.amake(
             "issue_events.IssueEvent",
             issue=self.issue_hash.issue,
             hashes=[self.issue_hash.value.hex],
@@ -30,10 +31,10 @@ class IssueAPITestCase(GlitchTestCase):
                 "issue_id": self.issue_hash.issue_id,
             },
         )
-        res = self.client.get(list_url)
+        res = await self.async_client.get(list_url)
         self.assertEqual(res.json()[0]["id"], self.issue_hash.value.hex)
 
-    def test_delete_issue_hashes(self):
+    async def test_delete_issue_hashes(self):
         list_url = reverse(
             "api:list_issue_hashes",
             kwargs={
@@ -41,8 +42,10 @@ class IssueAPITestCase(GlitchTestCase):
                 "issue_id": self.issue_hash.issue_id,
             },
         )
-        res = self.client.delete(
+        res = await self.async_client.delete(
             list_url, query_params={"id": [self.issue_hash.value.hex]}
         )
         self.assertEqual(res.status_code, 202)
-        self.assertFalse(IssueHash.objects.filter(id=self.issue_hash.id).exists())
+        self.assertFalse(
+            await IssueHash.objects.filter(id=self.issue_hash.id).aexists()
+        )

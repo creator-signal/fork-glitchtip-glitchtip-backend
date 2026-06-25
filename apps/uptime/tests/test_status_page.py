@@ -11,61 +11,64 @@ class StatusPageTestCase(GlitchTestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_status_page(self):
-        status_page = baker.make(
+    async def test_status_page(self):
+        status_page = await baker.amake(
             "uptime.StatusPage", organization=self.organization, is_public=False
         )
         url = status_page.get_absolute_url()
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, status_page.name)
 
-        self.client.logout()
-        res = self.client.get(url)
+        await self.async_client.alogout()
+        res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 404)
 
         status_page.is_public = True
-        status_page.save()
-        res = self.client.get(url)
+        await status_page.asave()
+        res = await self.async_client.get(url)
         self.assertContains(res, status_page.name)
 
-    def test_status_page_with_monitors(self):
+    async def test_status_page_with_monitors(self):
         """Monitors should be cached and displayed on the status page.
 
         Regression test: caching Monitor model instances directly fails
         with msgpack-based cache backends (vcache). The view must cache
         serializable dicts instead.
         """
-        status_page = baker.make(
+        status_page = await baker.amake(
             "uptime.StatusPage",
             organization=self.organization,
             is_public=True,
         )
-        monitor = baker.make(
+        monitor = await baker.amake(
             "uptime.Monitor",
             organization=self.organization,
             name="Test Monitor",
         )
-        status_page.monitors.add(monitor)
+        await status_page.monitors.aadd(monitor)
 
         url = status_page.get_absolute_url()
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, "Test Monitor")
 
         # Second request should serve from cache
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, "Test Monitor")
 
-    def test_status_page_api(self):
-        status_page = baker.make("uptime.StatusPage", organization=self.organization)
-        other_status_page = baker.make("uptime.StatusPage")
+    async def test_status_page_api(self):
+        status_page = await baker.amake(
+            "uptime.StatusPage", organization=self.organization
+        )
+        other_status_page = await baker.amake("uptime.StatusPage")
         url = reverse("api:list_status_pages", args=(self.organization.slug,))
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertContains(res, status_page.name)
         self.assertNotContains(res, other_status_page.name)
 
-    def test_status_page_api_create(self):
+    async def test_status_page_api_create(self):
         url = reverse("api:create_status_page", args=(self.organization.slug,))
         data = {"name": "foo"}
-        res = self.client.post(url, data, content_type="application/json")
+        res = await self.async_client.post(url, data, content_type="application/json")
         self.assertContains(res, data["name"], status_code=201)

@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -16,10 +17,11 @@ class OrganizationsAPITestCase(TestCase):
 
     def setUp(self):
         self.client.force_login(self.user)
+        self.async_client.force_login(self.user)
 
-    def test_organizations_list(self):
-        not_my_organization = baker.make("organizations_ext.Organization")
-        res = self.client.get(self.url)
+    async def test_organizations_list(self):
+        not_my_organization = await baker.amake("organizations_ext.Organization")
+        res = await self.async_client.get(self.url)
         self.assertContains(res, self.organization.slug)
         self.assertNotContains(res, not_my_organization.slug)
         self.assertIsInstance(res.json()[0]["id"], str)
@@ -27,11 +29,11 @@ class OrganizationsAPITestCase(TestCase):
             "teams" in res.json()[0].keys(), "List view shouldn't contain teams"
         )
 
-    def test_organizations_retrieve(self):
-        project = baker.make("projects.Project", organization=self.organization)
-        team = baker.make("teams.Team", organization=self.organization)
+    async def test_organizations_retrieve(self):
+        project = await baker.amake("projects.Project", organization=self.organization)
+        team = await baker.amake("teams.Team", organization=self.organization)
         url = reverse("api:get_organization", args=[self.organization.slug])
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         self.assertIsInstance(res.json()["id"], str)
         self.assertContains(res, self.organization.name)
         self.assertContains(res, project.name)
@@ -46,80 +48,91 @@ class OrganizationsAPITestCase(TestCase):
             "Org projects should contain teams id/name",
         )
 
-    def test_organizations_retrieve_access(self):
+    async def test_organizations_retrieve_access(self):
         """
         Ensure 'access' field reflects correct organization user's role
         """
         self.org_user.role = OrganizationUserRole.MEMBER
-        self.org_user.save()
+        await self.org_user.asave()
 
-        organization_2 = baker.make("organizations_ext.Organization")
-        organization_2.add_user(self.user)
+        organization_2 = await baker.amake("organizations_ext.Organization")
+        await sync_to_async(organization_2.add_user)(self.user)
 
         url = reverse("api:get_organization", args=[organization_2.slug])
-        res = self.client.get(url)
+        res = await self.async_client.get(url)
         data = res.json()["access"]
         owner_scopes = OrganizationUserRole.get_role(OrganizationUserRole.OWNER)[
             "scopes"
         ]
         self.assertCountEqual(data, owner_scopes)
 
-    def test_organizations_create(self):
+    async def test_organizations_create(self):
         data = {"name": "test"}
-        res = self.client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(self.url, data, content_type="application/json")
         self.assertContains(res, data["name"], status_code=201)
         self.assertEqual(
-            OrganizationUser.objects.filter(organization__name=data["name"]).count(), 1
+            await OrganizationUser.objects.filter(
+                organization__name=data["name"]
+            ).acount(),
+            1,
         )
 
-    def test_organizations_create_closed_registration_superuser(self):
+    async def test_organizations_create_closed_registration_superuser(self):
         data = {"name": "test"}
 
         with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            res = self.client.post(self.url, data, content_type="application/json")
+            res = await self.async_client.post(
+                self.url, data, content_type="application/json"
+            )
         self.assertEqual(res.status_code, 403)
 
         self.user.is_superuser = True
-        self.user.save()
+        await self.user.asave()
 
         with self.settings(ENABLE_ORGANIZATION_CREATION=False):
-            res = self.client.post(self.url, data, content_type="application/json")
+            res = await self.async_client.post(
+                self.url, data, content_type="application/json"
+            )
         self.assertEqual(res.status_code, 201)
 
-    def test_organizations_update(self):
+    async def test_organizations_update(self):
         data = {"name": "edit"}
         url = reverse("api:get_organization", args=[self.organization.slug])
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, data["name"])
         self.assertTrue(
-            OrganizationUser.objects.filter(organization__name=data["name"]).exists()
+            await OrganizationUser.objects.filter(
+                organization__name=data["name"]
+            ).aexists()
         )
 
-    def test_organizations_update_without_permissions(self):
+    async def test_organizations_update_without_permissions(self):
         """
         Ensure queryset with role_required checks the correct organization user's role
         """
-        organization_2 = baker.make("organizations_ext.Organization")
+        organization_2 = await baker.amake("organizations_ext.Organization")
 
-        org_2_user = organization_2.add_user(self.user)
+        org_2_user = await sync_to_async(organization_2.add_user)(self.user)
         org_2_user.role = OrganizationUserRole.MEMBER
-        org_2_user.save()
+        await org_2_user.asave()
 
         data = {"name": "edit"}
         url = reverse("api:update_organization", args=[organization_2.slug])
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 403)
 
         org_2_user.role = OrganizationUserRole.OWNER
-        org_2_user.save()
+        await org_2_user.asave()
 
-        res = self.client.put(url, data, content_type="application/json")
+        res = await self.async_client.put(url, data, content_type="application/json")
         self.assertContains(res, data["name"])
         self.assertTrue(
-            OrganizationUser.objects.filter(organization__name=data["name"]).exists()
+            await OrganizationUser.objects.filter(
+                organization__name=data["name"]
+            ).aexists()
         )
 
-    def test_organizations_delete_without_permissions(self):
+    async def test_organizations_delete_without_permissions(self):
         """
         Ensure queryset with role_required checks the correct organization user's role.
         Deletion is soft-delete: org is marked is_deleted=True, then async task hard-deletes.
@@ -127,43 +140,43 @@ class OrganizationsAPITestCase(TestCase):
         """
         from apps.organizations_ext.models import Organization
 
-        organization_2 = baker.make("organizations_ext.Organization")
+        organization_2 = await baker.amake("organizations_ext.Organization")
 
-        org_2_user = organization_2.add_user(self.user)
+        org_2_user = await sync_to_async(organization_2.add_user)(self.user)
         org_2_user.role = OrganizationUserRole.MEMBER
-        org_2_user.save()
+        await org_2_user.asave()
 
         url = reverse("api:delete_organization", args=[organization_2.slug])
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 403)
 
         org_2_user.role = OrganizationUserRole.OWNER
-        org_2_user.save()
+        await org_2_user.asave()
 
         org_2_id = organization_2.id
-        res = self.client.delete(url)
+        res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 204)
 
         # With immediate task backend, org is fully deleted after the API call
-        self.assertFalse(Organization.objects.filter(id=org_2_id).exists())
+        self.assertFalse(await Organization.objects.filter(id=org_2_id).aexists())
 
-    def test_organizations_soft_delete(self):
+    async def test_organizations_soft_delete(self):
         """Test that Organization.delete() sets is_deleted=True before task runs."""
         from apps.organizations_ext.models import Organization
 
-        organization_2 = baker.make("organizations_ext.Organization")
+        organization_2 = await baker.amake("organizations_ext.Organization")
         org_2_id = organization_2.id
 
         # Directly set is_deleted to verify the queryset filter works
         organization_2.is_deleted = True
-        organization_2.save(update_fields=["is_deleted"])
+        await organization_2.asave(update_fields=["is_deleted"])
 
-        organization_2.refresh_from_db()
+        await organization_2.arefresh_from_db()
         self.assertTrue(organization_2.is_deleted)
 
         # Soft-deleted org should not appear in filtered queries
         self.assertFalse(
-            Organization.objects.filter(is_deleted=False, id=org_2_id).exists()
+            await Organization.objects.filter(is_deleted=False, id=org_2_id).aexists()
         )
         # But should still exist in unfiltered queries
-        self.assertTrue(Organization.objects.filter(id=org_2_id).exists())
+        self.assertTrue(await Organization.objects.filter(id=org_2_id).aexists())
