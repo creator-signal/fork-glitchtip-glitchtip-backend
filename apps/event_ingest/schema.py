@@ -1,4 +1,5 @@
 import logging
+import re
 import typing
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -20,8 +21,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from symbolic import normalize_debug_id
 
 from apps.issue_events.constants import IssueEventType
 from apps.shared.schema.error import EventProcessingError
@@ -131,24 +130,38 @@ class EventTemplate(LaxIngestSchema):
 
 
 
+_BREAKPAD_APPENDIX_RE = re.compile(r"^[0-9a-fA-F]{33}$")
+
+
 def _normalize_native_debug_id(v):
     """
     Native SDKs (macho/elf/pe/pe_dotnet/wasm) may send Breakpad-style debug
-    IDs: 32 hex chars plus a trailing appendix/age character (e.g. a "0"),
-    making a 33-char string that uuid.UUID() rejects outright.
+    IDs: 32 hex chars plus a trailing appendix/age character (commonly "0",
+    but can be any hex digit), producing a 33-char string that uuid.UUID()
+    rejects outright.
 
-    normalize_debug_id (symbolic/Rust) already knows how to canonicalize
-    these formats; route through it before Pydantic's UUID coercion runs.
+    Try a plain UUID parse first (the common case, and cheap -- avoids
+    unnecessary work on the hot ingest path). Only on failure, check for
+    the 33-char Breakpad shape and strip the trailing appendix before
+    retrying as a UUID.
     """
     if v is None or isinstance(v, uuid.UUID):
         return v
+    s = str(v)
     try:
-        normalized = normalize_debug_id(str(v))
-    except Exception:
-        # Let Pydantic's own UUID validation produce the real error
-        # for genuinely malformed input.
-        return v
-    return normalized if normalized is not None else v
+        return uuid.UUID(s)
+    except ValueError:
+        pass
+
+    cleaned = s.replace("-", "")
+    if _BREAKPAD_APPENDIX_RE.fullmatch(cleaned):
+        try:
+            return uuid.UUID(cleaned[:32])
+        except ValueError:
+            pass
+
+    # Genuinely invalid -- let Pydantic's own validation produce the error.
+    return v
 
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
