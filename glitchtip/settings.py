@@ -214,6 +214,14 @@ GLITCHTIP_FREE_TIER_EVENTS = env.int("GLITCHTIP_FREE_TIER_EVENTS", 1000)
 # Enable/disable logs feature. When False, log events are rejected at ingest.
 GLITCHTIP_ENABLE_LOGS = env.bool("GLITCHTIP_ENABLE_LOGS", True)
 
+# Fleet-wide default for server-side PII scrubbing at ingest. A project's own
+# `scrub_config` (JSON on the Project model) overrides this; when a project has
+# none, this default applies. Set GLITCHTIP_PII_SCRUB_DEFAULT to a JSON object
+# matching apps.event_ingest.pii_scrubber.ScrubConfig to turn scrubbing on for
+# every project at once, e.g. '{"enabled": true, "scrub_emails": false}'.
+# Default {} means scrubbing is off unless a project opts in.
+GLITCHTIP_PII_SCRUB_DEFAULT = env.json("GLITCHTIP_PII_SCRUB_DEFAULT", {})
+
 # Enable/disable uptime monitoring. When False, uptime checks are not dispatched
 # and uptime API endpoints are not registered.
 GLITCHTIP_ENABLE_UPTIME = env.bool("GLITCHTIP_ENABLE_UPTIME", True)
