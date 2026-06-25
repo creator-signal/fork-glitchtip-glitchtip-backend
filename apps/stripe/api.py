@@ -605,10 +605,9 @@ async def configure_overage(
                 # may leak internals, so log those and return a generic message.
                 if e.type == "card_error":
                     return JsonResponse({"detail": e.message}, status=402)
-                logger.error(
-                    "Overage enable failed for org %s: %s (status=%s type=%s code=%s)",
+                logger.exception(
+                    "Overage enable failed for org %s (status=%s type=%s code=%s)",
                     org.id,
-                    e.message,
                     e.status,
                     e.type,
                     e.code,
