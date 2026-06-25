@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID
@@ -551,6 +552,22 @@ class PartitionCreationDDLTestCase(TransactionTestCase):
             cursor.execute(f"DROP TABLE IF EXISTS {self.PARENT} CASCADE;")
         super().tearDown()
 
+    @contextmanager
+    def _assert_partition_logs(self, level):
+        """assertLogs on the partition manager that survives the settings-level
+        ``logging.disable(logging.WARNING)`` applied during tests (see
+        ``glitchtip/settings.py``). That global disable suppresses INFO and
+        WARNING records regardless of ``assertLogs``'s own handler, so lift it
+        for the duration of the assertion and restore it afterwards.
+        """
+        previous = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        try:
+            with self.assertLogs("glitchtip.partition_manager", level=level) as logs:
+                yield logs
+        finally:
+            logging.disable(previous)
+
     def _child_moduli(self, partition_name):
         """Return the sorted set of hash moduli among a partition's children."""
         moduli = set()
@@ -586,7 +603,7 @@ class PartitionCreationDDLTestCase(TransactionTestCase):
         self.assertEqual(self._child_moduli(partition_name), [4])
 
         # Now run again with the raised bucket count. This must be a no-op.
-        with self.assertLogs("glitchtip.partition_manager", level="INFO") as logs:
+        with self._assert_partition_logs("INFO") as logs:
             result = self.manager.execute_partition_creation(
                 parent_table=self.PARENT,
                 partition_name=partition_name,
@@ -704,7 +721,7 @@ class PartitionCreationDDLTestCase(TransactionTestCase):
                 """
             )
 
-        with self.assertLogs("glitchtip.partition_manager", level="WARNING") as logs:
+        with self._assert_partition_logs("WARNING") as logs:
             result = self.manager.execute_partition_creation(
                 parent_table=self.PARENT,
                 partition_name=partition_name,
