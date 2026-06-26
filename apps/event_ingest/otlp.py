@@ -87,7 +87,7 @@ def _to_log_item_dicts(records: list[dict], resource_attrs: list[dict]) -> list[
         # Resource attrs first so a same-key record attribute overrides them.
         rec["attributes"] = resource_attrs + (rec.get("attributes") or [])
         converted = otel_log_to_log_item(rec)
-        items.append(LogItemSchema(**converted).dict())
+        items.append(LogItemSchema(**converted).model_dump())
     return items
 
 
