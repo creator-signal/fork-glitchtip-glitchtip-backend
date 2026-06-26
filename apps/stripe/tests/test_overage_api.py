@@ -8,6 +8,7 @@ from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
 from apps.stripe.constants import SubscriptionStatus
+from apps.stripe.exceptions import StripeError
 from apps.stripe.models import StripeSubscription
 
 QUOTA = 100_000
@@ -122,6 +123,48 @@ class OverageAPITestCase(TestCase):
         self.sub.refresh_from_db()
         self.assertEqual(self.sub.metered_item_id, "si_orphan")
         add.assert_not_awaited()
+
+    def test_enable_card_error_returns_402(self):
+        # A declined card surfaces Stripe's message to the owner, not a 500.
+        declined = StripeError(
+            "Your card was declined.", status=402, type="card_error"
+        )
+        with (
+            patch("apps.stripe.api.fetch_subscription", new_callable=AsyncMock),
+            patch(
+                "apps.stripe.api.select_subscription_items",
+                new=MagicMock(return_value=(None, None)),
+            ),
+            patch(
+                "apps.stripe.api.migrate_subscription_to_flexible",
+                new=AsyncMock(side_effect=declined),
+            ),
+        ):
+            res = self._configure({"enabled": True, "capCents": 2000})
+        self.assertEqual(res.status_code, 402)
+        self.assertEqual(res.json()["detail"], "Your card was declined.")
+        self.org.refresh_from_db()
+        self.assertFalse(self.org.metered_billing_enabled)
+
+    def test_enable_other_stripe_error_is_generic_502(self):
+        # Backend Stripe errors must not leak their detail to the owner.
+        boom = StripeError("internal detail", status=500, type="api_error")
+        with (
+            patch("apps.stripe.api.fetch_subscription", new_callable=AsyncMock),
+            patch(
+                "apps.stripe.api.select_subscription_items",
+                new=MagicMock(return_value=(None, None)),
+            ),
+            patch(
+                "apps.stripe.api.migrate_subscription_to_flexible",
+                new=AsyncMock(side_effect=boom),
+            ),
+        ):
+            res = self._configure({"enabled": True, "capCents": 2000})
+        self.assertEqual(res.status_code, 502)
+        self.assertNotIn("internal detail", res.json()["detail"])
+        self.org.refresh_from_db()
+        self.assertFalse(self.org.metered_billing_enabled)
 
     def test_enable_requires_positive_cap(self):
         with patch(

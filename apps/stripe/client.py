@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import random
 from decimal import Decimal
 from typing import Any, AsyncGenerator, Type, TypeAlias, TypeVar
@@ -11,7 +10,7 @@ from pydantic import BaseModel
 
 from apps.organizations_ext.models import Organization
 
-from .exceptions import StripeResourceNotFound
+from .exceptions import StripeError, StripeResourceNotFound
 from .schema import (
     Customer,
     Meter,
@@ -47,8 +46,6 @@ BASE_RETRY_DELAY = 0.5
 # per attempt; _stripe_request retries up to MAX_RETRIES on 429/5xx.
 STRIPE_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
-logger = logging.getLogger(__name__)
-
 AIOTupleParams: TypeAlias = list[tuple[str, str]]
 AIODictParams: TypeAlias = dict[str, int | str | list[int | str]]
 T = TypeVar("T", bound=BaseModel)
@@ -83,10 +80,7 @@ async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
                 if response.status == 404:
                     raise StripeResourceNotFound()
 
-                error_data = await response.json()
-                error_message = error_data.get("error", {}).get(
-                    "message", "Unknown error"
-                )
+                error = (await response.json()).get("error", {})
 
                 should_retry_header = response.headers.get("Stripe-Should-Retry")
                 if should_retry_header is not None:
@@ -95,14 +89,17 @@ async def _stripe_request(method: str, url: str, **kwargs: Any) -> str:
                     should_retry = response.status in RETRY_STATUSES
 
                 if not should_retry or attempt >= MAX_RETRIES:
-                    raise Exception(
-                        f"Stripe API Error: {response.status} - {error_message}"
+                    raise StripeError(
+                        error.get("message", "Unknown error"),
+                        status=response.status,
+                        type=error.get("type", ""),
+                        code=error.get("code", ""),
                     )
 
         delay = BASE_RETRY_DELAY * (2**attempt) + random.uniform(0, BASE_RETRY_DELAY)
         await asyncio.sleep(delay)
 
-    raise Exception("Stripe API Error: exhausted retries")
+    raise StripeError("exhausted retries", status=503)
 
 
 async def stripe_get(
@@ -360,19 +357,14 @@ async def migrate_subscription_to_flexible(subscription_id: str) -> None:
     """Migrate a classic-billing-mode subscription to flexible billing mode.
 
     Metered prices require flexible billing mode. Migration is one-way and needs
-    a payment method on the customer (paying subscriptions have one). Calling it
-    on an already-flexible subscription errors harmlessly, which we tolerate —
-    the subsequent metered-item attach is the real gate.
+    a payment method on the customer. Re-running on an already-flexible
+    subscription is a harmless no-op, so any error here is real (e.g. no card on
+    file) and propagates to the caller.
     """
-    try:
-        await stripe_post(
-            f"subscriptions/{subscription_id}/migrate",
-            {"billing_mode[type]": "flexible"},
-        )
-    except StripeResourceNotFound:
-        raise
-    except Exception:
-        logger.info("Flexible billing-mode migration skipped for %s", subscription_id)
+    await stripe_post(
+        f"subscriptions/{subscription_id}/migrate",
+        {"billing_mode[type]": "flexible"},
+    )
 
 
 async def add_subscription_item(

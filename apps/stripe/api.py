@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from django.conf import settings
@@ -40,9 +41,12 @@ from .constants import (
     CollectionMethod,
     SubscriptionStatus,
 )
+from .exceptions import StripeError
 from .models import StripePrice, StripeProduct, StripeSubscription
 from .overage import cost_cents_for_units, units_for_budget
 from .utils import compute_cycle, select_subscription_items, unix_to_datetime
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -579,21 +583,38 @@ async def configure_overage(
                 status=400,
             )
         if not sub.metered_item_id:
-            # Stripe is the source of truth: a crash between attaching the item
-            # and saving its id here leaves an orphan that Stripe would reject as
-            # a duplicate on retry, so reuse it instead of re-adding.
-            fetched = await fetch_subscription(sub.stripe_id)
-            _, existing = select_subscription_items(fetched.items)
-            if existing:
-                sub.metered_item_id = existing.id
-            else:
-                # Metered prices require flexible billing mode; migrate if the
-                # subscription is still on classic (no-op if already flexible).
-                await migrate_subscription_to_flexible(sub.stripe_id)
-                item = await add_subscription_item(
-                    sub.stripe_id, overage_price.stripe_id
+            try:
+                # Stripe is the source of truth: a crash between attaching the
+                # item and saving its id here leaves an orphan that Stripe would
+                # reject as a duplicate on retry, so reuse it instead of re-adding.
+                fetched = await fetch_subscription(sub.stripe_id)
+                _, existing = select_subscription_items(fetched.items)
+                if existing:
+                    sub.metered_item_id = existing.id
+                else:
+                    # Metered prices require flexible billing mode; migrate if the
+                    # subscription is still on classic (no-op if already flexible).
+                    await migrate_subscription_to_flexible(sub.stripe_id)
+                    item = await add_subscription_item(
+                        sub.stripe_id, overage_price.stripe_id
+                    )
+                    sub.metered_item_id = item.id
+            except StripeError as e:
+                # Card declines are safe to show the owner; other Stripe errors
+                # may leak internals, so log those and return a generic message.
+                if e.type == "card_error":
+                    return JsonResponse({"detail": e.message}, status=402)
+                logger.exception(
+                    "Overage enable failed for org %s (status=%s type=%s code=%s)",
+                    org.id,
+                    e.status,
+                    e.type,
+                    e.code,
                 )
-                sub.metered_item_id = item.id
+                return JsonResponse(
+                    {"detail": "Could not enable overage billing. Please try again."},
+                    status=502,
+                )
             await sub.asave(update_fields=["metered_item_id"])
         org.metered_billing_enabled = True
         org.overage_spend_cap_cents = payload.cap_cents
