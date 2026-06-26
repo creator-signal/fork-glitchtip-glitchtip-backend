@@ -398,18 +398,25 @@ def _is_self_referencing_dsn(sentry_dsn, glitchtip_url):
 
 
 if SENTRY_DSN:
-    import asyncio
     import inspect
 
-    # Python 3.14+ deprecation warning mitigation for Sentry SDK
-    asyncio.iscoroutinefunction = inspect.iscoroutinefunction
-
     import sentry_sdk
-
     from django.http import UnreadablePostError
     from sentry_sdk.integrations.asyncio import AsyncioIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.django import views as _sentry_django_views
     from sentry_sdk.integrations.modules import ModulesIntegration
+
+    # Sentry's Django integration binds the deprecated asyncio.iscoroutinefunction
+    # alias in django/views.py and calls it once per request inside
+    # sentry_patched_make_view_atomic. On Python 3.14 that alias runs the warnings
+    # machinery (frame inspection + message formatting) on every call even when the
+    # DeprecationWarning is filtered out, churning the heap on every request. Point
+    # that one module-level name at the non-deprecated inspect.iscoroutinefunction
+    # instead of mutating the asyncio module globally. Sentry already guards
+    # django/asgi.py the same way but missed views.py; see
+    # https://github.com/getsentry/sentry-python/issues/6085
+    _sentry_django_views.iscoroutinefunction = inspect.iscoroutinefunction
 
     from glitchtip.internal_transport import InternalTransport
 
