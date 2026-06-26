@@ -65,7 +65,19 @@ class BatchedDeleteSanityTestCase(TransactionTestCase):
         try:
             cur = raw.cursor()
             while not stop_event.is_set():
-                cur.execute("SELECT count(*) FROM pg_locks")
+                # Scope to THIS test's database. pg_locks is cluster-wide, so a
+                # bare count(*) sums every parallel test worker's locks (each
+                # worker runs in its own test DB) — which conflates unrelated
+                # concurrent tests and makes the threshold depend on driver
+                # connection footprint rather than on whether *this* delete
+                # batches. Counting only the current database measures the
+                # batching we actually care about.
+                cur.execute(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE database = ("
+                    "  SELECT oid FROM pg_database WHERE datname = current_database()"
+                    ")"
+                )
                 results.append(cur.fetchone()[0])
                 time.sleep(0.05)
         finally:

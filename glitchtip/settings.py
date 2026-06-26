@@ -801,13 +801,20 @@ if env.str("DATABASE_HOST", None):
             "PORT": env.str("DATABASE_PORT", "5432"),
         }
     )
+# Database engine. Defaults to the async-backend (psycopg) used in production.
+# Opt-in: set DATABASE_ENGINE=gt_rust.django_backend to run the ORM on the Rust
+# Postgres driver instead — one shared tokio pool serving sync + async, on the
+# same runtime as the valkey driver. Behavior is unchanged unless switched.
+DATABASE_ENGINE = env.str(
+    "DATABASE_ENGINE", "django_async_backend.db.backends.postgresql"
+)
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
     # async-backend's postgresql backend extends Django's stock postgresql
     # and adds an AsyncDatabaseWrapper that ``async_connections`` discovers
     # via load_backend. Sync paths (ORM, migrations, admin) still go through
-    # psycopg unchanged.
-    db_config["ENGINE"] = "django_async_backend.db.backends.postgresql"
+    # psycopg unchanged. gt_rust.django_backend is the drop-in Rust equivalent.
+    db_config["ENGINE"] = DATABASE_ENGINE
     db_config.setdefault("CONN_MAX_AGE", env.int("DATABASE_CONN_MAX_AGE", 0))
     db_config.setdefault(
         "CONN_HEALTH_CHECKS", env.bool("DATABASE_CONN_HEALTH_CHECKS", False)
