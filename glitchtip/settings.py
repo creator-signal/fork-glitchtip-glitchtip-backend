@@ -398,8 +398,16 @@ def _is_self_referencing_dsn(sentry_dsn, glitchtip_url):
 
 
 if SENTRY_DSN:
+    import asyncio
+    import inspect
+
+    # Python 3.14+ deprecation warning mitigation for Sentry SDK
+    asyncio.iscoroutinefunction = inspect.iscoroutinefunction
+
     import sentry_sdk
+
     from django.http import UnreadablePostError
+    from sentry_sdk.integrations.asyncio import AsyncioIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.modules import ModulesIntegration
 
@@ -476,7 +484,7 @@ if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         transport=InternalTransport if _is_self_referencing else None,
-        integrations=[DjangoIntegration()],
+        integrations=[DjangoIntegration(), AsyncioIntegration()],
         disabled_integrations=_disabled_integrations,
         before_send=before_send,
         release=release,
