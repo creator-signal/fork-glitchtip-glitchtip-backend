@@ -380,6 +380,11 @@ async def subscription_events_count_daily(
     async def collect(queryset):
         return [row async for row in queryset.aiterator()]
 
+    # NOTE: these four aggregates share one async connection per alias, so the
+    # gather does not run them in parallel at the DB — same-alias async ORM
+    # calls serialize over the single connection. The gather is kept for tidy
+    # concurrent-style collection, not for query parallelism; true parallelism
+    # would need independent connections, not worth it for this billing path.
     issue_rows, txn_rows, uptime_rows, log_rows = await asyncio.gather(
         collect(
             IssueEventProjectHourlyStatistic.objects.filter(

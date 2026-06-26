@@ -1,3 +1,5 @@
+import asyncio
+
 from asgiref.sync import sync_to_async
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
@@ -60,11 +62,20 @@ class Notification(CreatedModel):
     issues = models.ManyToManyField("issue_events.Issue")
 
     async def send_notifications(self):
-        has_recipients = False
-        async for recipient in self.project_alert.alertrecipient_set.all():
-            has_recipients = True
-            await recipient.send(self)
-        if not has_recipients:
+        recipients = [
+            recipient async for recipient in self.project_alert.alertrecipient_set.all()
+        ]
+        if recipients:
+            # Each recipient is an independent outbound webhook/email POST with
+            # no data dependency between them, so fan them out concurrently
+            # rather than paying the sum of their round-trips. return_exceptions
+            # keeps one slow or failing destination from blocking the others
+            # (individual webhook senders already swallow timeouts/client errors).
+            await asyncio.gather(
+                *(recipient.send(self) for recipient in recipients),
+                return_exceptions=True,
+            )
+        else:
             await sync_to_async(send_email_notification)(self)
         self.is_sent = True
         await self.asave()
