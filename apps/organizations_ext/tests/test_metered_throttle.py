@@ -141,3 +141,26 @@ class MeteredThrottleTestCase(TestCase):
         mock_meter = self._run(org, 250_000)  # > 2x quota -> 100%
         self.assertEqual(self._throttle(org), 100)
         mock_meter.assert_not_awaited()
+
+    def test_toggle_off_then_on_does_not_rereport(self):
+        # Mid-cycle double-charge regression: after reporting overage, a
+        # disable + re-enable within the same cycle must report only the new
+        # delta, never the units already metered.
+        org, sub = self._make_org()
+        self._run(org, 150_000)  # reports 50,000; counter -> 50,000
+
+        # Disable mirrors the API: flag off, counter and item left intact.
+        org.metered_billing_enabled = False
+        org.save(update_fields=["metered_billing_enabled"])
+        self._run(org, 170_000)  # disabled -> no report
+        sub.refresh_from_db()
+        self.assertEqual(sub.overage_units_reported, 50_000)
+
+        # Re-enable in the same cycle and grow usage; only the increment reports.
+        org.metered_billing_enabled = True
+        org.save(update_fields=["metered_billing_enabled"])
+        mock_meter = self._run(org, 180_000)  # overage 80,000; delta 30,000
+        mock_meter.assert_awaited_once()
+        self.assertEqual(mock_meter.await_args.args[2], 30_000)
+        sub.refresh_from_db()
+        self.assertEqual(sub.overage_units_reported, 80_000)

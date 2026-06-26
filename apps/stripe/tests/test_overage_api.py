@@ -187,29 +187,27 @@ class OverageAPITestCase(TestCase):
         self.org.refresh_from_db()
         self.assertFalse(self.org.metered_billing_enabled)
 
-    def test_disable_removes_item(self):
+    def test_disable_keeps_item_and_counter(self):
+        # Disabling must not detach the item or reset the counter: the meter is
+        # cumulative per customer for the cycle, so a re-enable would otherwise
+        # re-bill already-reported usage (the mid-cycle double-charge bug).
         self.sub.metered_item_id = "si_old"
         self.sub.overage_units_reported = 1234
         self.sub.save()
         self.org.metered_billing_enabled = True
         self.org.save()
 
-        delete = AsyncMock()
-        with (
-            patch("apps.stripe.api.delete_subscription_item", new=delete),
-            patch(
-                "apps.stripe.api.check_organization_throttle",
-                new=MagicMock(aenqueue=AsyncMock()),
-            ),
+        with patch(
+            "apps.stripe.api.check_organization_throttle",
+            new=MagicMock(aenqueue=AsyncMock()),
         ):
             res = self._configure({"enabled": False})
         self.assertEqual(res.status_code, 200)
         self.org.refresh_from_db()
         self.sub.refresh_from_db()
         self.assertFalse(self.org.metered_billing_enabled)
-        self.assertEqual(self.sub.metered_item_id, "")
-        self.assertEqual(self.sub.overage_units_reported, 0)
-        delete.assert_awaited_once_with("si_old")
+        self.assertEqual(self.sub.metered_item_id, "si_old")
+        self.assertEqual(self.sub.overage_units_reported, 1234)
 
     def test_non_owner_cannot_configure(self):
         member = baker.make("users.user")
