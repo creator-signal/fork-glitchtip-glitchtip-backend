@@ -162,6 +162,6 @@ class InternalTransport(Transport):
             project_id=key.project_id,
             organization_id=key.project.organization_id,
             received=received,
-            logs=[log_item.dict() for log_item in log_payload.items],
+            logs=[log_item.model_dump() for log_item in log_payload.items],
         )
         ingest_logs.enqueue(serialize_for_vtasks(asdict(log_message)))
