@@ -303,7 +303,7 @@ async def event_envelope_view(request: EventAuthHttpRequest, project_id: int):
                         organization_id=project.organization_id,
                         received=timezone.now(),
                         logs=[
-                            scrubber.scrub_log(log_item.dict())
+                            scrubber.scrub_log(log_item.model_dump())
                             for log_item in log_items
                         ],
                     )

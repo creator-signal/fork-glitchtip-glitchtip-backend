@@ -31,7 +31,7 @@ many teams intentionally capture it for debugging and it is not the server's
 call to discard it. Operators tune the key matcher with ``safe_keys`` (an
 allowlist that always wins) and ``sensitive_keys`` (extra keys to redact).
 
-The matcher works on the plain ``dict`` produced by ``model.dict()`` — it has
+The matcher works on the plain ``dict`` produced by ``model.model_dump()`` — it has
 no dependency on the Pydantic schema, so the same engine scrubs errors,
 transactions and (eventually) logs. It mutates the dict in place; callers own
 that dict (it is freshly built per event), so in-place mutation is both safe
@@ -401,7 +401,7 @@ class Scrubber:
         return payload
 
     def scrub_log(self, log: dict) -> dict:
-        """Scrub a flattened log item (``LogItemSchema.dict()``) in place.
+        """Scrub a flattened log item (``LogItemSchema.model_dump()``) in place.
 
         Unlike events, logs have no nested sections — the message ``body`` and
         the SDK's promoted ``attributes`` both sit at the top level (see
