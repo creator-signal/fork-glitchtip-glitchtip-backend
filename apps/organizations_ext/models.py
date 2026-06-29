@@ -344,7 +344,6 @@ class Organization(SharedBaseModel, OrganizationBase):
         await user_added.asend(sender=self, user=user)
         return org_user
 
-
     @property
     def owners(self):
         return self.users.filter(

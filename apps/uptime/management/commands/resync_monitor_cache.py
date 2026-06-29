@@ -33,11 +33,11 @@ WHERE m.id = sub.monitor_id;
 
 
 class Command(BaseCommand):
-    help = "Re-sync cached_is_up and cached_last_change on Monitor from MonitorCheck data"
+    help = (
+        "Re-sync cached_is_up and cached_last_change on Monitor from MonitorCheck data"
+    )
 
     def handle(self, *args, **options):
         with connection.cursor() as cursor:
             cursor.execute(RESYNC_SQL)
-            self.stdout.write(
-                self.style.SUCCESS(f"Updated {cursor.rowcount} monitors")
-            )
+            self.stdout.write(self.style.SUCCESS(f"Updated {cursor.rowcount} monitors"))

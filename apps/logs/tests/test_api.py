@@ -128,9 +128,7 @@ class LogsAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_list_logs_filter_by_project(self):
         """Test filtering logs by project"""
-        project2 = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project2 = await baker.amake("projects.Project", organization=self.organization)
         await project2.teams.aadd(self.team)
 
         await self.create_log(project=self.project, body="Project 1 log")

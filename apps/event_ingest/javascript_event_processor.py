@@ -81,14 +81,20 @@ class JavascriptEventProcessor:
     def get_stacktrace_exceptions(self) -> list["EventException"]:
         data = self.data
         if data.exception and not isinstance(data.exception, list):
-            return [exception for exception in data.exception.values if exception.stacktrace]
+            return [
+                exception for exception in data.exception.values if exception.stacktrace
+            ]
         return []
 
     def get_valid_frames(self, exception: "EventException") -> list["StackTraceFrame"]:
         stacktrace = exception.stacktrace
         if not stacktrace:
             return []
-        return [frame for frame in stacktrace.frames if frame is not None and frame.lineno is not None]
+        return [
+            frame
+            for frame in stacktrace.frames
+            if frame is not None and frame.lineno is not None
+        ]
 
     def get_sourcemap_cache(self, minified_source, map_file) -> SourceMapCache:
         # SourceMapCache.from_bytes() parses the whole minified source and

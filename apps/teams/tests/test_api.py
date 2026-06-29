@@ -41,9 +41,7 @@ class TeamAPITestCase(TestCase):
         in the org. Regression: the role check matched any admin in the org
         rather than the requesting user (self.user here is the org admin)."""
         member = await baker.amake("users.user")
-        await self.organization.aadd_user(
-            member, role=OrganizationUserRole.MEMBER
-        )
+        await self.organization.aadd_user(member, role=OrganizationUserRole.MEMBER)
         team = await baker.amake("teams.Team", organization=self.organization)
         await self.async_client.aforce_login(member)
         url = reverse("api:delete_team", args=[self.organization.slug, team.slug])
@@ -64,9 +62,7 @@ class TeamAPITestCase(TestCase):
 
     async def test_list(self):
         url = reverse("api:list_teams", args=[self.organization.slug])
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         team = await baker.amake(
             "teams.Team", organization=self.organization, projects=[project]
         )
@@ -216,9 +212,7 @@ class TeamAPITestCase(TestCase):
         self.assertEqual(res.status_code, 201)
 
     async def test_list_project_teams(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         url = reverse(
             "api:list_project_teams", args=[self.organization.slug, project.slug]
         )
@@ -257,9 +251,7 @@ class TeamAPITestCase(TestCase):
         )
         user = await baker.amake("users.user")
         await self.async_client.aforce_login(user)
-        await self.organization.aadd_user(
-            user, OrganizationUserRole.MEMBER
-        )
+        await self.organization.aadd_user(user, OrganizationUserRole.MEMBER)
         url = reverse(
             "api:add_team_to_project",
             kwargs={
@@ -272,9 +264,7 @@ class TeamAPITestCase(TestCase):
         self.assertFalse(await new_project.teams.aexists())
 
     async def test_delete_team_from_project(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         team = await baker.amake(
             "teams.Team", organization=self.organization, projects=[project]
         )

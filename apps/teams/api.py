@@ -246,9 +246,12 @@ async def modify_member_for_team(
 async def add_member_to_team(
     request: AuthHttpRequest, organization_slug: str, member_id: MeID, team_slug: str
 ):
-    return Status(201, await modify_member_for_team(
-        organization_slug, member_id, team_slug, request.auth.user_id, True
-    ))
+    return Status(
+        201,
+        await modify_member_for_team(
+            organization_slug, member_id, team_slug, request.auth.user_id, True
+        ),
+    )
 
 
 @router.delete(

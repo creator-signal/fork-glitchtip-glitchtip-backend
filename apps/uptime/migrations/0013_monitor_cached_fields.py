@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('uptime', '0012_add_monitorcheck_indexes'),
+        ("uptime", "0012_add_monitorcheck_indexes"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='monitor',
-            name='cached_is_up',
+            model_name="monitor",
+            name="cached_is_up",
             field=models.BooleanField(default=None, null=True),
         ),
         migrations.AddField(
-            model_name='monitor',
-            name='cached_last_change',
+            model_name="monitor",
+            name="cached_last_change",
             field=models.DateTimeField(default=None, null=True),
         ),
     ]

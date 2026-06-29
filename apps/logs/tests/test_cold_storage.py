@@ -64,7 +64,6 @@ class DuckDBAvailabilityTestCase(TestCase):
         self.assertFalse(is_duckdb_available())
 
 
-
 class ColdStoragePathTestCase(TestCase):
     """Test cold storage path generation."""
 

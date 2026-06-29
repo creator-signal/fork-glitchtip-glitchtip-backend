@@ -166,9 +166,7 @@ class OrganizationUsersTestCase(TestCase):
         )
         self.assertEqual(res.status_code, 403)
 
-        await self.user.emailaddress_set.acreate(
-            email="new@example.com", verified=True
-        )
+        await self.user.emailaddress_set.acreate(email="new@example.com", verified=True)
 
         res = await self.async_client.post(
             self.members_url, data, content_type="application/json"
@@ -284,9 +282,7 @@ class OrganizationUsersTestCase(TestCase):
     async def test_organization_users_create_without_permissions(self):
         """Admin cannot add users to org"""
         other_user = await baker.amake("users.user")
-        await self.organization.aadd_user(
-            other_user, role=OrganizationUserRole.MANAGER
-        )
+        await self.organization.aadd_user(other_user, role=OrganizationUserRole.MANAGER)
         self.org_user.role = OrganizationUserRole.ADMIN
         await self.org_user.asave()
         data = {

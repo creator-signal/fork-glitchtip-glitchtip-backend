@@ -30,9 +30,7 @@ class Command(BaseCommand):
             return
 
         deleted = 0
-        batch = list(
-            orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
-        )
+        batch = list(orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE])
         while batch:
             for row in batch:
                 if row.blob:
@@ -42,15 +40,11 @@ class Command(BaseCommand):
                         self.stderr.write(
                             f"Warning: failed to delete storage for FileBlob {row.id}: {e}"
                         )
-            FileBlob.objects.filter(
-                id__in=[row.id for row in batch]
-            ).delete()
+            FileBlob.objects.filter(id__in=[row.id for row in batch]).delete()
 
             deleted += len(batch)
             self.stdout.write(f"Deleted {deleted} orphaned FileBlobs so far...")
-            batch = list(
-                orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE]
-            )
+            batch = list(orphaned_qs.values_list("id", "blob", named=True)[:BATCH_SIZE])
 
         if deleted:
             self.stdout.write(

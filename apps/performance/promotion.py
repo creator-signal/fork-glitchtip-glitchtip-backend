@@ -226,9 +226,7 @@ async def promote_spans() -> tuple[int, bool]:
     if total_promoted:
         logger.info("Promoted %d span rows to cold storage", total_promoted)
     if total_dropped:
-        logger.info(
-            "Dropped %d whacky/stale span rows during promotion", total_dropped
-        )
+        logger.info("Dropped %d whacky/stale span rows during promotion", total_dropped)
     return total_promoted, truncated
 
 
@@ -534,13 +532,9 @@ def _compact_org_date(
             continue
         hour_start = day_start + timedelta(hours=int(hh))
         try:
-            _write_hour_rollup(
-                storage, f"{date_path}/{hf}", rollup_file, hour_start
-            )
+            _write_hour_rollup(storage, f"{date_path}/{hf}", rollup_file, hour_start)
         except Exception:
-            logger.error(
-                "Failed recovery rollup %s/%s", date_dir, hh, exc_info=True
-            )
+            logger.error("Failed recovery rollup %s/%s", date_dir, hh, exc_info=True)
 
     compacted = 0
     for hh in hour_dirs:
@@ -569,9 +563,7 @@ def _compact_org_date(
             _delete_subtree(storage, chunk_dir)
             continue
 
-        if not _duckdb_copy(
-            storage, [f"{chunk_dir}/{c}" for c in chunks], hour_file
-        ):
+        if not _duckdb_copy(storage, [f"{chunk_dir}/{c}" for c in chunks], hour_file):
             continue  # slot saturated — retry next run, chunks intact
 
         try:

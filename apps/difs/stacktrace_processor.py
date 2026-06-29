@@ -282,9 +282,7 @@ class StacktraceProcessor:
             # debug_meta), estimate the image base so relative offsets
             # land inside the symbol cache.
             estimated_base = 0
-            if frames and not any(
-                f.get("image_addr") for f in frames if f
-            ):
+            if frames and not any(f.get("image_addr") for f in frames if f):
                 addrs = [
                     parse_addr(f.get("instruction_addr"))
                     for f in frames

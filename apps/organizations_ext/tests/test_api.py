@@ -67,7 +67,9 @@ class OrganizationsAPITestCase(TestCase):
 
     async def test_organizations_create(self):
         data = {"name": "test"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, data["name"], status_code=201)
         self.assertEqual(
             await OrganizationUser.objects.filter(

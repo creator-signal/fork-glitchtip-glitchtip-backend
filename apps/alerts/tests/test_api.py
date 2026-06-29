@@ -155,9 +155,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_project_alerts_create_permissions(self):
         user = await baker.amake("users.user")
-        org_user = await self.organization.aadd_user(
-            user, OrganizationUserRole.MEMBER
-        )
+        org_user = await self.organization.aadd_user(user, OrganizationUserRole.MEMBER)
 
         await self.async_client.aforce_login(user)
         url = reverse(

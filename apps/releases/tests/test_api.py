@@ -21,9 +21,7 @@ class ReleaseAPITestCase(GlitchTestCase):
         data = {"version": "1.0", "projects": [self.project.slug]}
         res = await self.async_client.post(url, data, content_type="application/json")
         self.assertContains(res, data["version"], status_code=201)
-        self.assertTrue(
-            await Release.objects.filter(version=data["version"]).aexists()
-        )
+        self.assertTrue(await Release.objects.filter(version=data["version"]).aexists())
 
     async def test_create_duplicate(self):
         """Creating a release with the same version should be idempotent."""
@@ -40,14 +38,10 @@ class ReleaseAPITestCase(GlitchTestCase):
             "api:list_releases",
             kwargs={"organization_slug": self.organization.slug},
         )
-        release1 = await baker.amake(
-            "releases.Release", organization=self.organization
-        )
+        release1 = await baker.amake("releases.Release", organization=self.organization)
         release2 = await baker.amake("releases.Release")
         organization2 = await baker.amake("organizations_ext.Organization")
-        await organization2.aadd_user(
-            self.user, OrganizationUserRole.ADMIN
-        )
+        await organization2.aadd_user(self.user, OrganizationUserRole.ADMIN)
         release3 = await baker.amake("releases.Release", organization=organization2)
         res = await self.async_client.get(url)
         self.assertContains(res, release1.version)
@@ -116,9 +110,7 @@ class ReleaseAPITestCase(GlitchTestCase):
                 "project_slug": self.project.slug,
             },
         )
-        project2 = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project2 = await baker.amake("projects.Project", organization=self.organization)
         release1 = await baker.amake(
             "releases.Release",
             organization=self.organization,
@@ -261,7 +253,9 @@ class ReleaseAPITestCase(GlitchTestCase):
             },
             {"id": "def456", "message": "add feature"},
         ]
-        res = await self.async_client.post(url, commits, content_type="application/json")
+        res = await self.async_client.post(
+            url, commits, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["commitCount"], 2)
@@ -279,7 +273,9 @@ class ReleaseAPITestCase(GlitchTestCase):
             },
         )
         commits = [{"id": f"commit-{i}"} for i in range(1100)]
-        res = await self.async_client.post(url, commits, content_type="application/json")
+        res = await self.async_client.post(
+            url, commits, content_type="application/json"
+        )
         self.assertEqual(res.status_code, 200)
         await release.arefresh_from_db()
         self.assertEqual(release.commit_count, 1100)

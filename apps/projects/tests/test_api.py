@@ -155,9 +155,7 @@ class ProjectsAPITestCase(TestCase):
     async def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
         organization = await baker.amake("organizations_ext.Organization")
-        await organization.aadd_user(
-            self.user, OrganizationUserRole.ADMIN
-        )
+        await organization.aadd_user(self.user, OrganizationUserRole.ADMIN)
         project = await baker.amake("projects.Project")
         url = reverse("api:delete_project", args=[organization.slug, project.slug])
         res = await self.async_client.delete(url)
@@ -180,7 +178,7 @@ class ProjectsAPITestCase(TestCase):
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
         res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
-        await project.arefresh_from_db() 
+        await project.arefresh_from_db()
 
     async def test_project_key_delete_requires_admin_role(self):
         """A non-admin member cannot delete a project key, even when the org has
@@ -211,9 +209,7 @@ class TeamProjectsAPITestCase(TestCase):
         )
 
     async def test_list(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         await project.teams.aadd(self.team)
         not_my_project = await baker.amake("projects.Project")
         res = await self.async_client.get(self.url)
@@ -240,7 +236,9 @@ class TeamProjectsAPITestCase(TestCase):
 
     async def test_create(self):
         data = {"name": "test-team"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         res = self.assertContains(res, data["name"], status_code=201)
 
         res = await self.async_client.get(self.url)
@@ -250,9 +248,13 @@ class TeamProjectsAPITestCase(TestCase):
     async def test_projects_api_create_unique_slug(self):
         name = "test project"
         data = {"name": name}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         first_project = await Project.objects.aget()
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, name, status_code=201)
         projects = [p async for p in Project.objects.all()]
         self.assertNotEqual(projects[0].slug, projects[1].slug)
@@ -276,7 +278,9 @@ class TeamProjectsAPITestCase(TestCase):
 
     async def test_project_reserved_words(self):
         data = {"name": "new"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, "new-1", status_code=201)
         await self.async_client.post(self.url, data)
         self.assertFalse(await Project.objects.filter(slug="new").aexists())
