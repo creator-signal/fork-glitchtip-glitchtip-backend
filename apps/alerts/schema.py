@@ -84,7 +84,7 @@ class ProjectAlertIn(CamelSchema, ModelSchema):
 
     class Meta:
         model = ProjectAlert
-        fields = ["name", "timespan_minutes", "quantity", "uptime"]
+        fields = ["name", "timespan_minutes", "quantity", "uptime", "environment"]
 
 
 class ProjectAlertSchema(CamelSchema, ModelSchema):
