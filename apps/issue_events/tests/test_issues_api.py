@@ -4,7 +4,6 @@ import re
 import uuid
 from timeit import default_timer as timer
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.db.models import Value
@@ -1013,7 +1012,7 @@ class IssueAPITestCase(GlitchTestCase):
     async def test_assign_unassigns_when_membership_removed(self):
         """Removing an OrganizationUser SET_NULLs their issue assignments."""
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
         issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,

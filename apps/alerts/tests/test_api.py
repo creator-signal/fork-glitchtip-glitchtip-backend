@@ -1,7 +1,6 @@
 from unittest import mock
 
 import aiohttp
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -156,7 +155,7 @@ class AlertAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_project_alerts_create_permissions(self):
         user = await baker.amake("users.user")
-        org_user = await sync_to_async(self.organization.add_user)(
+        org_user = await self.organization.aadd_user(
             user, OrganizationUserRole.MEMBER
         )
 

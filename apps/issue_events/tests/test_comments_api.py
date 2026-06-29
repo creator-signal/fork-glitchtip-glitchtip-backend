@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.shortcuts import reverse
 from model_bakery import baker
 
@@ -52,7 +51,7 @@ class CommentsApiTestCase(GlitchTipTestCase):
 
     async def test_comments_list_deleted_user(self):
         user2 = await baker.amake("users.User")
-        await sync_to_async(self.organization.add_user)(user2)
+        await self.organization.aadd_user(user2)
         comment = await baker.amake(
             "issue_events.Comment",
             issue=self.issue,

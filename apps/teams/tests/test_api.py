@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -42,7 +41,7 @@ class TeamAPITestCase(TestCase):
         in the org. Regression: the role check matched any admin in the org
         rather than the requesting user (self.user here is the org admin)."""
         member = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(
+        await self.organization.aadd_user(
             member, role=OrganizationUserRole.MEMBER
         )
         team = await baker.amake("teams.Team", organization=self.organization)
@@ -72,7 +71,7 @@ class TeamAPITestCase(TestCase):
             "teams.Team", organization=self.organization, projects=[project]
         )
         other_organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(other_organization.add_user)(self.user)
+        await other_organization.aadd_user(self.user)
         other_team = await baker.amake("teams.Team", organization=other_organization)
         res = await self.async_client.get(url)
         self.assertContains(res, team.slug)
@@ -102,8 +101,8 @@ class TeamAPITestCase(TestCase):
         self.assertEqual(res.status_code, 400)
 
         admin_user = await baker.amake("users.user")
-        await sync_to_async(organization.add_user)(admin_user)  # First user is admin
-        await sync_to_async(organization.add_user)(self.user)
+        await organization.aadd_user(admin_user)  # First user is admin
+        await organization.aadd_user(self.user)
         res = await self.async_client.post(url, data)
         # Not an admin
         self.assertEqual(res.status_code, 400)
@@ -189,7 +188,7 @@ class TeamAPITestCase(TestCase):
 
         # Can't add someone else with open membership when not admin
         other_user = await baker.amake("users.User")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
         url = reverse(
             "api:add_member_to_team",
             args=[self.organization.slug, other_org_user.id, team.slug],
@@ -258,7 +257,7 @@ class TeamAPITestCase(TestCase):
         )
         user = await baker.amake("users.user")
         await self.async_client.aforce_login(user)
-        await sync_to_async(self.organization.add_user)(
+        await self.organization.aadd_user(
             user, OrganizationUserRole.MEMBER
         )
         url = reverse(

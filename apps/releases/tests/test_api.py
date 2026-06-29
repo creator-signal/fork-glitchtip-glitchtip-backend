@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.urls import reverse
 from model_bakery import baker
 
@@ -46,7 +45,7 @@ class ReleaseAPITestCase(GlitchTestCase):
         )
         release2 = await baker.amake("releases.Release")
         organization2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization2.add_user)(
+        await organization2.aadd_user(
             self.user, OrganizationUserRole.ADMIN
         )
         release3 = await baker.amake("releases.Release", organization=organization2)

@@ -1,7 +1,6 @@
 from urllib.parse import unquote
 
 from allauth.mfa.models import Authenticator
-from asgiref.sync import sync_to_async
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -116,12 +115,12 @@ class UsersTestCase(GlitchTestCase):
     async def test_organization_members_list(self):
         other_user = await baker.amake("users.user")
         other_organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(other_organization.add_user)(
+        await other_organization.aadd_user(
             other_user, OrganizationUserRole.ADMIN
         )
 
         user2 = await baker.amake("users.User")
-        await sync_to_async(self.organization.add_user)(
+        await self.organization.aadd_user(
             user2, OrganizationUserRole.MEMBER
         )
         url = reverse("api:list_organization_members", args=[self.organization.slug])

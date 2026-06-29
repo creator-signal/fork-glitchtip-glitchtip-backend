@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -130,7 +129,7 @@ class ProjectsAPITestCase(TestCase):
         """Users should only access projects in their organization"""
         user2 = await baker.amake("users.user")
         org2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(org2.add_user)(user2)
+        await org2.aadd_user(user2)
         project1 = self.project
         project2 = await baker.amake("projects.Project", organization=org2)
 
@@ -156,7 +155,7 @@ class ProjectsAPITestCase(TestCase):
     async def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
         organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization.add_user)(
+        await organization.aadd_user(
             self.user, OrganizationUserRole.ADMIN
         )
         project = await baker.amake("projects.Project")
@@ -170,7 +169,7 @@ class ProjectsAPITestCase(TestCase):
         than the requesting user, so a plain member could delete via a session.
         """
         member = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        await self.organization.aadd_user(member, role=OrganizationUserRole.MEMBER)
         project = await baker.amake(
             "projects.Project",
             organization=self.organization,
@@ -187,7 +186,7 @@ class ProjectsAPITestCase(TestCase):
         """A non-admin member cannot delete a project key, even when the org has
         an admin (same role-check regression as project deletion)."""
         member = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        await self.organization.aadd_user(member, role=OrganizationUserRole.MEMBER)
         key = await baker.amake("projects.ProjectKey", project=self.project)
         await self.async_client.aforce_login(member)
         url = reverse(
@@ -224,7 +223,7 @@ class TeamProjectsAPITestCase(TestCase):
         # If a user is in multiple orgs, that user will have multiple org users.
         # Make sure endpoint doesn't show projects from other orgs
         second_org = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(second_org.add_user)(self.user, OrganizationUserRole.ADMIN)
+        await second_org.aadd_user(self.user, OrganizationUserRole.ADMIN)
         project_in_second_org = await baker.amake(
             "projects.Project", organization=second_org
         )
