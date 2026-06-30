@@ -1,7 +1,7 @@
 import logging
-import re
 import typing
 import uuid
+from symbolic import normalize_debug_id
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
@@ -130,20 +130,17 @@ class EventTemplate(LaxIngestSchema):
 
 
 
-_BREAKPAD_APPENDIX_RE = re.compile(r"^[0-9a-fA-F]{33}$")
-
-
 def _normalize_native_debug_id(v):
     """
-    Native SDKs (macho/elf/pe/pe_dotnet/wasm) may send Breakpad-style debug
-    IDs: 32 hex chars plus a trailing appendix/age character (commonly "0",
-    but can be any hex digit), producing a 33-char string that uuid.UUID()
-    rejects outright.
+    Native SDKs may send Breakpad-style debug IDs: 32 hex chars plus a
+    trailing appendix/age character, producing a 33-char string that
+    uuid.UUID() rejects.
 
-    Try a plain UUID parse first (the common case, and cheap -- avoids
-    unnecessary work on the hot ingest path). Only on failure, check for
-    the 33-char Breakpad shape and strip the trailing appendix before
-    retrying as a UUID.
+    Try a plain UUID parse first (fast path, handles the vast majority of
+    inputs). Fall back to normalize_debug_id (symbolic/Rust) for anything
+    that fails -- it handles all Breakpad/debug ID format variants and
+    returns "<uuid>-<appendix>" for non-zero ages, so we strip the suffix
+    and parse the UUID part.
     """
     if v is None or isinstance(v, uuid.UUID):
         return v
@@ -152,15 +149,15 @@ def _normalize_native_debug_id(v):
         return uuid.UUID(s)
     except ValueError:
         pass
-
-    cleaned = s.replace("-", "")
-    if _BREAKPAD_APPENDIX_RE.fullmatch(cleaned):
-        try:
-            return uuid.UUID(cleaned[:32])
-        except ValueError:
-            pass
-
-    # Genuinely invalid -- let Pydantic's own validation produce the error.
+    try:
+        normalized = normalize_debug_id(s)
+        if normalized:
+            try:
+                return uuid.UUID(normalized)
+            except ValueError:
+                return uuid.UUID(normalized.rsplit("-", 1)[0])
+    except Exception:
+        pass
     return v
 
 
