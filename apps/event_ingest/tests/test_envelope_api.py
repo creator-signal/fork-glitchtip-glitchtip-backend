@@ -125,6 +125,32 @@ class EnvelopeAPITestCase(EventIngestTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(TransactionGroup.objects.exists())
 
+    def test_transaction_hourly_stat_buckets_by_received_not_client_time(self):
+        # A backdated client clock must still count in the hour the
+        # transaction arrived, else paid usage is under-counted at period edges.
+        from apps.projects.models import TransactionEventProjectHourlyStatistic
+
+        with open("events/test_data/transactions/django_simple.json") as f:
+            data = json.load(f)
+        # Backdate the client timestamps ~2.5h before "now" (within retention).
+        data[2]["start_timestamp"] = "2020-12-29T15:30:00Z"
+        data[2]["timestamp"] = "2020-12-29T15:30:01Z"
+        payload = self.get_string_payload(data)
+
+        with freeze_time("2020-12-29T18:00:00Z"):
+            res = self.client.post(
+                self.url,
+                payload,
+                content_type="application/x-sentry-envelope",
+            )
+            task_backends["default"].flush_batches()
+        self.assertEqual(res.status_code, 200)
+
+        stats = list(TransactionEventProjectHourlyStatistic.objects.all())
+        self.assertEqual(len(stats), 1)
+        # Received at 18:00Z -> must bucket in the 18:00 hour, not client's 15:00.
+        self.assertEqual(stats[0].date.hour, 18)
+
     def test_invalid_dsn(self):
         url = reverse("event_envelope", args=[self.project.id]) + "?sentry_key=aaaa"
         data = self.get_payload("events/test_data/transactions/django_simple.json")

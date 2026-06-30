@@ -1698,8 +1698,11 @@ async def process_transaction_events(
         if _is_error_status(trace_status):
             group_error_counts[group.id] += 1
 
-        # Hourly project statistics
-        hour_received = event.start_timestamp.replace(minute=0, second=0, microsecond=0)
+        # Bucket by server-received time (like issue events) so a backdated
+        # client clock can't push usage out of the billing window.
+        hour_received = ingest_event.received.replace(
+            minute=0, second=0, microsecond=0
+        )
         project_stats = data_stats[hour_received][ingest_event.project_id]
         project_stats["count"] += 1
         project_stats["organization_id"] = ingest_event.organization_id
