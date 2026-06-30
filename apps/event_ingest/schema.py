@@ -1,7 +1,6 @@
 import logging
 import typing
 import uuid
-from symbolic import normalize_debug_id
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
@@ -21,6 +20,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from symbolic import normalize_debug_id
 
 from apps.issue_events.constants import IssueEventType
 from apps.shared.schema.error import EventProcessingError
