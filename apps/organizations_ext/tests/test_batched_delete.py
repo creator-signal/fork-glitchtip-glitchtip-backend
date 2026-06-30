@@ -194,10 +194,10 @@ class BatchedDeleteSanityTestCase(TransactionTestCase):
         self.assertFalse(Project.objects.filter(id=project.id).exists())
         self.assertEqual(IssueEvent.objects.filter(organization_id=org.id).count(), 0)
         self.assertEqual(LogEvent.objects.filter(organization_id=org.id).count(), 0)
+        self.assertEqual(MonitorCheck.objects.filter(organization_id=org.id).count(), 0)
         self.assertEqual(
-            MonitorCheck.objects.filter(organization_id=org.id).count(), 0
+            Issue.objects.filter(project__organization_id=org.id).count(), 0
         )
-        self.assertEqual(Issue.objects.filter(project__organization_id=org.id).count(), 0)
         self.assertEqual(
             IssueAggregate.objects.filter(organization_id=org.id).count(), 0
         )
@@ -214,8 +214,7 @@ class BatchedDeleteSanityTestCase(TransactionTestCase):
             peak = max(lock_samples)
             avg = sum(lock_samples) / len(lock_samples)
             print(
-                f"\n  Lock samples: {len(lock_samples)}, "
-                f"peak: {peak}, avg: {avg:.0f}"
+                f"\n  Lock samples: {len(lock_samples)}, peak: {peak}, avg: {avg:.0f}"
             )
             # In local test DB max_locks_per_transaction * max_connections
             # gives the hard ceiling.  With batching we should stay well
@@ -274,8 +273,7 @@ class BatchedDeleteSanityTestCase(TransactionTestCase):
 
         cascade_peak = max(lock_samples) if lock_samples else 0
         print(
-            f"\n  Cascade baseline — samples: {len(lock_samples)}, "
-            f"peak: {cascade_peak}"
+            f"\n  Cascade baseline — samples: {len(lock_samples)}, peak: {cascade_peak}"
         )
         # This isn't an assertion — just showing the number for comparison.
         # On prod with 2700 partitions this would be ~10x higher.

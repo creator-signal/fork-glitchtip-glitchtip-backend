@@ -21,9 +21,7 @@ return members
 
 
 async def process_alert(project_alert_id: int, issue_ids: list[int]):
-    notification = await Notification.objects.acreate(
-        project_alert_id=project_alert_id
-    )
+    notification = await Notification.objects.acreate(project_alert_id=project_alert_id)
     await notification.issues.aset(issue_ids)
     await send_notification.aenqueue(notification.pk)
 

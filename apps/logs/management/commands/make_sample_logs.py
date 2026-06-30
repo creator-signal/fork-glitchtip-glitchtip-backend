@@ -181,7 +181,14 @@ class Command(MakeSampleCommand):
             )
 
             hour = log_timestamp.replace(minute=0, second=0, microsecond=0)
-            stats[(hour, level, compute_hash_bucket(service), compute_hash_bucket(environment))] += 1
+            stats[
+                (
+                    hour,
+                    level,
+                    compute_hash_bucket(service),
+                    compute_hash_bucket(environment),
+                )
+            ] += 1
 
             if (i + 1) % 1000 == 0:
                 self.progress_tick()

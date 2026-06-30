@@ -32,7 +32,6 @@ WHERE m.id = sub.monitor_id;
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("uptime", "0013_monitor_cached_fields"),
     ]

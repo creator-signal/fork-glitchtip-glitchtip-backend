@@ -4,19 +4,32 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('stripe', '0015_stripeprice_is_public'),
+        ("stripe", "0015_stripeprice_is_public"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='SupportLicense',
+            name="SupportLicense",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('license_key', models.CharField(blank=True, default='', max_length=255)),
-                ('billing_email', models.EmailField(blank=True, default='', max_length=254)),
-                ('updated', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "license_key",
+                    models.CharField(blank=True, default="", max_length=255),
+                ),
+                (
+                    "billing_email",
+                    models.EmailField(blank=True, default="", max_length=254),
+                ),
+                ("updated", models.DateTimeField(auto_now=True)),
             ],
         ),
     ]

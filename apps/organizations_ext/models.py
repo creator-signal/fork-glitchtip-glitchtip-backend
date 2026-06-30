@@ -324,6 +324,26 @@ class Organization(SharedBaseModel, OrganizationBase):
         user_added.send(sender=self, user=user)
         return org_user
 
+    async def aadd_user(self, user, role=OrganizationUserRole.MEMBER):
+        """
+        Adds a new user asynchronously. If it's the first user, then
+        makes them an admin and the owner.
+        """
+        users_count = await self.users.acount()
+        if users_count == 0:
+            role = OrganizationUserRole.OWNER
+        org_user = await self._org_user_model.objects.acreate(
+            user=user, organization=self, role=role
+        )
+        if users_count == 0:
+            await self._org_owner_model.objects.acreate(
+                organization=self, organization_user=org_user
+            )
+
+        # User added signal
+        await user_added.asend(sender=self, user=user)
+        return org_user
+
     @property
     def owners(self):
         return self.users.filter(

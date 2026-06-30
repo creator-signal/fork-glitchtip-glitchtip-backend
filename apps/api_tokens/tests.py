@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -48,7 +47,7 @@ class APITokenTests(TestCase):
     async def test_token_auth(self):
         """Token based auth should not be able to create it's own token"""
         organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization.add_user)(self.user)
+        await organization.aadd_user(self.user)
         auth_token = await baker.amake("api_tokens.APIToken", user=self.user)
 
         auth_headers = {"HTTP_AUTHORIZATION": f"Bearer {auth_token.token}"}

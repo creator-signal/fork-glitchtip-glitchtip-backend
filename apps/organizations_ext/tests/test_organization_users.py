@@ -1,6 +1,5 @@
 import json
 
-from asgiref.sync import sync_to_async
 from django.core import mail
 from django.core.cache import cache
 from django.db import transaction
@@ -64,7 +63,7 @@ class OrganizationUsersTestCase(TestCase):
     async def test_organization_members_detail(self):
         other_user = await baker.amake("users.user")
         other_organization = await baker.amake("organizations_ext.Organization")
-        other_org_user = await sync_to_async(other_organization.add_user)(other_user)
+        other_org_user = await other_organization.aadd_user(other_user)
         team = await baker.amake("teams.Team", organization=self.organization)
         await team.members.aadd(self.org_user)
 
@@ -167,9 +166,7 @@ class OrganizationUsersTestCase(TestCase):
         )
         self.assertEqual(res.status_code, 403)
 
-        await self.user.emailaddress_set.acreate(
-            email="new@example.com", verified=True
-        )
+        await self.user.emailaddress_set.acreate(email="new@example.com", verified=True)
 
         res = await self.async_client.post(
             self.members_url, data, content_type="application/json"
@@ -285,9 +282,7 @@ class OrganizationUsersTestCase(TestCase):
     async def test_organization_users_create_without_permissions(self):
         """Admin cannot add users to org"""
         other_user = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(
-            other_user, role=OrganizationUserRole.MANAGER
-        )
+        await self.organization.aadd_user(other_user, role=OrganizationUserRole.MANAGER)
         self.org_user.role = OrganizationUserRole.ADMIN
         await self.org_user.asave()
         data = {
@@ -306,7 +301,7 @@ class OrganizationUsersTestCase(TestCase):
         """
 
         organization_2 = await baker.amake("organizations_ext.Organization")
-        org_2_user = await sync_to_async(organization_2.add_user)(self.user)
+        org_2_user = await organization_2.aadd_user(self.user)
         org_2_user.role = OrganizationUserRole.ADMIN
         await org_2_user.asave()
 
@@ -353,7 +348,7 @@ class OrganizationUsersTestCase(TestCase):
 
     async def test_organization_users_update(self):
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
 
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
@@ -378,7 +373,7 @@ class OrganizationUsersTestCase(TestCase):
         self.org_user.role = OrganizationUserRole.ADMIN
         await self.org_user.asave()
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
 
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
@@ -389,7 +384,7 @@ class OrganizationUsersTestCase(TestCase):
 
     async def test_organization_users_delete(self):
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
 
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
@@ -408,7 +403,7 @@ class OrganizationUsersTestCase(TestCase):
         )
 
         third_user = await baker.amake("users.user")
-        third_org_user = await sync_to_async(self.organization.add_user)(third_user)
+        third_org_user = await self.organization.aadd_user(third_user)
         change_ownership_url = (
             self.get_org_member_detail_url(self.organization.slug, third_org_user.pk)
             + "set_owner/"
@@ -426,7 +421,7 @@ class OrganizationUsersTestCase(TestCase):
         self.org_user.role = OrganizationUserRole.ADMIN
         await self.org_user.asave()
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
 
         url = self.get_org_member_detail_url(self.organization.slug, other_org_user.pk)
 
@@ -438,7 +433,7 @@ class OrganizationUsersTestCase(TestCase):
 
     async def test_organization_users_delete_self(self):
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
 
         await self.async_client.aforce_login(other_user)
 
@@ -452,7 +447,7 @@ class OrganizationUsersTestCase(TestCase):
 
     async def test_organization_members_set_owner(self):
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
         random_org_user = await baker.amake("organizations_ext.OrganizationUser")
 
         url = reverse(

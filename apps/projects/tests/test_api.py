@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -130,7 +129,7 @@ class ProjectsAPITestCase(TestCase):
         """Users should only access projects in their organization"""
         user2 = await baker.amake("users.user")
         org2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(org2.add_user)(user2)
+        await org2.aadd_user(user2)
         project1 = self.project
         project2 = await baker.amake("projects.Project", organization=org2)
 
@@ -156,9 +155,7 @@ class ProjectsAPITestCase(TestCase):
     async def test_project_invalid_delete(self):
         """Cannot delete projects that are not in the organization the user is an admin of"""
         organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization.add_user)(
-            self.user, OrganizationUserRole.ADMIN
-        )
+        await organization.aadd_user(self.user, OrganizationUserRole.ADMIN)
         project = await baker.amake("projects.Project")
         url = reverse("api:delete_project", args=[organization.slug, project.slug])
         res = await self.async_client.delete(url)
@@ -170,7 +167,7 @@ class ProjectsAPITestCase(TestCase):
         than the requesting user, so a plain member could delete via a session.
         """
         member = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        await self.organization.aadd_user(member, role=OrganizationUserRole.MEMBER)
         project = await baker.amake(
             "projects.Project",
             organization=self.organization,
@@ -181,13 +178,13 @@ class ProjectsAPITestCase(TestCase):
         url = reverse("api:delete_project", args=[self.organization.slug, project.slug])
         res = await self.async_client.delete(url)
         self.assertEqual(res.status_code, 404)
-        await project.arefresh_from_db() 
+        await project.arefresh_from_db()
 
     async def test_project_key_delete_requires_admin_role(self):
         """A non-admin member cannot delete a project key, even when the org has
         an admin (same role-check regression as project deletion)."""
         member = await baker.amake("users.user")
-        await sync_to_async(self.organization.add_user)(member, role=OrganizationUserRole.MEMBER)
+        await self.organization.aadd_user(member, role=OrganizationUserRole.MEMBER)
         key = await baker.amake("projects.ProjectKey", project=self.project)
         await self.async_client.aforce_login(member)
         url = reverse(
@@ -212,9 +209,7 @@ class TeamProjectsAPITestCase(TestCase):
         )
 
     async def test_list(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         await project.teams.aadd(self.team)
         not_my_project = await baker.amake("projects.Project")
         res = await self.async_client.get(self.url)
@@ -224,7 +219,7 @@ class TeamProjectsAPITestCase(TestCase):
         # If a user is in multiple orgs, that user will have multiple org users.
         # Make sure endpoint doesn't show projects from other orgs
         second_org = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(second_org.add_user)(self.user, OrganizationUserRole.ADMIN)
+        await second_org.aadd_user(self.user, OrganizationUserRole.ADMIN)
         project_in_second_org = await baker.amake(
             "projects.Project", organization=second_org
         )
@@ -241,7 +236,9 @@ class TeamProjectsAPITestCase(TestCase):
 
     async def test_create(self):
         data = {"name": "test-team"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         res = self.assertContains(res, data["name"], status_code=201)
 
         res = await self.async_client.get(self.url)
@@ -251,9 +248,13 @@ class TeamProjectsAPITestCase(TestCase):
     async def test_projects_api_create_unique_slug(self):
         name = "test project"
         data = {"name": name}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         first_project = await Project.objects.aget()
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, name, status_code=201)
         projects = [p async for p in Project.objects.all()]
         self.assertNotEqual(projects[0].slug, projects[1].slug)
@@ -277,7 +278,9 @@ class TeamProjectsAPITestCase(TestCase):
 
     async def test_project_reserved_words(self):
         data = {"name": "new"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, "new-1", status_code=201)
         await self.async_client.post(self.url, data)
         self.assertFalse(await Project.objects.filter(slug="new").aexists())

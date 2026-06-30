@@ -116,9 +116,7 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(sub.subscription_cycle_end, unix_to_datetime(period_end))
 
     async def test_subscription_events_count_for_period_current(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
@@ -147,9 +145,7 @@ class StripeAPITestCase(TestCase):
         self.assertIn("total", data)
 
     async def test_subscription_events_count_for_period_previous(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         await baker.amake(
             "stripe.StripeSubscription",
             organization=self.organization,
@@ -220,9 +216,7 @@ class StripeAPITestCase(TestCase):
         self.assertEqual(res.json()["total"], 0)
 
     async def test_events_count_daily(self):
-        project = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project = await baker.amake("projects.Project", organization=self.organization)
         period_start = timezone.make_aware(datetime(2020, 1, 1))
         period_end = timezone.make_aware(datetime(2020, 2, 1))
         await baker.amake(

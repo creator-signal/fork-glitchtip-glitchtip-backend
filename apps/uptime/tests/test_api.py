@@ -1,6 +1,5 @@
 from unittest import mock
 
-from asgiref.sync import sync_to_async
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -457,7 +456,7 @@ class UptimeAPITestCase(GlitchTestCase):
         """Users should only access monitors in their organization"""
         user2 = await baker.amake("users.user")
         org2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(org2.add_user)(user2)
+        await org2.aadd_user(user2)
         monitor1 = await baker.amake(
             "uptime.Monitor", url="http://example.com", organization=self.organization
         )
