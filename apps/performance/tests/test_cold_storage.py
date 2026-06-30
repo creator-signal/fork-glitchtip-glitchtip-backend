@@ -248,9 +248,7 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
             self.assertEqual(compact_span_chunks(), 3)
         self.assertTrue(self._exists(self._hour_file()))
         self.assertFalse(self._exists(self._chunk_dir()))
-        self.assertTrue(
-            self._exists(f"{ROLLUP}/org_{self.org.id}/20260510/02.parquet")
-        )
+        self.assertTrue(self._exists(f"{ROLLUP}/org_{self.org.id}/20260510/02.parquet"))
 
     def test_seal_is_idempotent(self):
         """Re-running after a seal is a no-op."""
@@ -288,9 +286,7 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
         with freeze_time("2026-05-11T01:00:00Z"):  # > day_end + grace
             compact_span_chunks()
         self.assertTrue(self._exists(self._day_file()))
-        self.assertFalse(
-            self._exists(f"{RAW}/org_{self.org.id}/20260510")
-        )
+        self.assertFalse(self._exists(f"{RAW}/org_{self.org.id}/20260510"))
         self.assertTrue(self._exists(f"{ROLLUP}/org_{self.org.id}/20260510.parquet"))
 
     def test_rollup_content(self):
@@ -324,10 +320,13 @@ class CompactSpansTestCase(ColdStorageTestMixin, TestCase):
 
         # First pass: seal succeeds, rollup write blows up — exactly the
         # state we need to recover from.
-        with mock.patch(
-            "apps.performance.promotion._write_hour_rollup",
-            side_effect=RuntimeError("transient s3 error"),
-        ), freeze_time("2026-05-10T04:00:00Z"):
+        with (
+            mock.patch(
+                "apps.performance.promotion._write_hour_rollup",
+                side_effect=RuntimeError("transient s3 error"),
+            ),
+            freeze_time("2026-05-10T04:00:00Z"),
+        ):
             compact_span_chunks()
         self.assertTrue(self._exists(self._hour_file()))
         self.assertFalse(self._exists(rollup_path))
@@ -414,9 +413,7 @@ class EnumerateSpanFilesTestCase(ColdStorageTestMixin, TestCase):
         hour_dir = os.path.join(
             self.cold_dir, RAW, f"org_{self.org.id}", "20260510", "02"
         )
-        legacy_dir = os.path.join(
-            self.cold_dir, RAW, f"org_{self.org.id}", "20260510"
-        )
+        legacy_dir = os.path.join(self.cold_dir, RAW, f"org_{self.org.id}", "20260510")
         (chunk_name,) = os.listdir(hour_dir)
         legacy_chunk = f"legacy_{chunk_name}"
         os.rename(
@@ -530,8 +527,13 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
             self.org.id,
             day1,
             [
-                _row(self.org.id, self.project.id, day1 + timedelta(seconds=i),
-                     span_id=f"a{i}", duration=10.0)
+                _row(
+                    self.org.id,
+                    self.project.id,
+                    day1 + timedelta(seconds=i),
+                    span_id=f"a{i}",
+                    duration=10.0,
+                )
                 for i in range(3)
             ],
         )
@@ -539,8 +541,13 @@ class QueryColdStorageTestCase(ColdStorageTestMixin, TestCase):
             self.org.id,
             day2,
             [
-                _row(self.org.id, self.project.id, day2 + timedelta(seconds=i),
-                     span_id=f"b{i}", duration=20.0)
+                _row(
+                    self.org.id,
+                    self.project.id,
+                    day2 + timedelta(seconds=i),
+                    span_id=f"b{i}",
+                    duration=20.0,
+                )
                 for i in range(2)
             ],
         )

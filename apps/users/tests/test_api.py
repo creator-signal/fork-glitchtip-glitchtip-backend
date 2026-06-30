@@ -1,7 +1,6 @@
 from urllib.parse import unquote
 
 from allauth.mfa.models import Authenticator
-from asgiref.sync import sync_to_async
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -116,14 +115,10 @@ class UsersTestCase(GlitchTestCase):
     async def test_organization_members_list(self):
         other_user = await baker.amake("users.user")
         other_organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(other_organization.add_user)(
-            other_user, OrganizationUserRole.ADMIN
-        )
+        await other_organization.aadd_user(other_user, OrganizationUserRole.ADMIN)
 
         user2 = await baker.amake("users.User")
-        await sync_to_async(self.organization.add_user)(
-            user2, OrganizationUserRole.MEMBER
-        )
+        await self.organization.aadd_user(user2, OrganizationUserRole.MEMBER)
         url = reverse("api:list_organization_members", args=[self.organization.slug])
         res = await self.async_client.get(url)
         self.assertContains(res, user2.email)
@@ -249,9 +244,7 @@ class UsersTestCase(GlitchTestCase):
         res = await self.async_client.delete(url, data, content_type="application/json")
         self.assertEqual(res.status_code, 204)
         self.assertFalse(
-            await self.user.emailaddress_set.filter(
-                email=email_address.email
-            ).aexists()
+            await self.user.emailaddress_set.filter(email=email_address.email).aexists()
         )
 
     async def test_emails_confirm(self):
@@ -443,6 +436,4 @@ class UsersTestCase(GlitchTestCase):
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 204)
-        self.assertTrue(
-            await Authenticator.objects.filter(user=self.user).aexists()
-        )
+        self.assertTrue(await Authenticator.objects.filter(user=self.user).aexists())

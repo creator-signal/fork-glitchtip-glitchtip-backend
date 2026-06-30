@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from model_bakery import baker
@@ -56,7 +55,7 @@ class OrganizationsAPITestCase(TestCase):
         await self.org_user.asave()
 
         organization_2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization_2.add_user)(self.user)
+        await organization_2.aadd_user(self.user)
 
         url = reverse("api:get_organization", args=[organization_2.slug])
         res = await self.async_client.get(url)
@@ -68,7 +67,9 @@ class OrganizationsAPITestCase(TestCase):
 
     async def test_organizations_create(self):
         data = {"name": "test"}
-        res = await self.async_client.post(self.url, data, content_type="application/json")
+        res = await self.async_client.post(
+            self.url, data, content_type="application/json"
+        )
         self.assertContains(res, data["name"], status_code=201)
         self.assertEqual(
             await OrganizationUser.objects.filter(
@@ -112,7 +113,7 @@ class OrganizationsAPITestCase(TestCase):
         """
         organization_2 = await baker.amake("organizations_ext.Organization")
 
-        org_2_user = await sync_to_async(organization_2.add_user)(self.user)
+        org_2_user = await organization_2.aadd_user(self.user)
         org_2_user.role = OrganizationUserRole.MEMBER
         await org_2_user.asave()
 
@@ -142,7 +143,7 @@ class OrganizationsAPITestCase(TestCase):
 
         organization_2 = await baker.amake("organizations_ext.Organization")
 
-        org_2_user = await sync_to_async(organization_2.add_user)(self.user)
+        org_2_user = await organization_2.aadd_user(self.user)
         org_2_user.role = OrganizationUserRole.MEMBER
         await org_2_user.asave()
 

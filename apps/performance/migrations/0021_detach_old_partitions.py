@@ -30,9 +30,7 @@ def _detach_and_drop_children(cursor, table_name):
     children = [row[0] for row in cursor.fetchall()]
 
     for child in children:
-        cursor.execute(
-            f"ALTER TABLE {table_name} DETACH PARTITION {child};"
-        )
+        cursor.execute(f"ALTER TABLE {table_name} DETACH PARTITION {child};")
         # Recurse into sub-partitions (e.g. hash children of a range partition)
         _detach_and_drop_children(cursor, child)
         cursor.execute(f"DROP TABLE IF EXISTS {child};")

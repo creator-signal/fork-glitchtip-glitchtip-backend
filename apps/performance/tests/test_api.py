@@ -1,6 +1,5 @@
 from datetime import timedelta
 
-from asgiref.sync import sync_to_async
 from django.utils import timezone
 from model_bakery import baker
 
@@ -184,7 +183,7 @@ class TransactionGroupAPITestCase(GlitchTestCase):
         # Create a second user in a different organization
         user_b = await baker.amake("users.user")
         org_b = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(org_b.add_user)(user_b)
+        await org_b.aadd_user(user_b)
 
         await self.async_client.aforce_login(user_b)
 

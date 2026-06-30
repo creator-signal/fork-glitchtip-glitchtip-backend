@@ -4,7 +4,6 @@ Tests for logs API endpoints.
 
 from datetime import timedelta
 
-from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -129,9 +128,7 @@ class LogsAPITestCase(GlitchTipTestCaseMixin, TestCase):
 
     async def test_list_logs_filter_by_project(self):
         """Test filtering logs by project"""
-        project2 = await baker.amake(
-            "projects.Project", organization=self.organization
-        )
+        project2 = await baker.amake("projects.Project", organization=self.organization)
         await project2.teams.aadd(self.team)
 
         await self.create_log(project=self.project, body="Project 1 log")
@@ -483,7 +480,7 @@ class LogStatsAPITestCase(GlitchTipTestCaseMixin, TestCase):
         """Test stats for org with no data."""
         # Create new org with no stats
         new_org = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(new_org.add_user)(self.user)
+        await new_org.aadd_user(self.user)
 
         url = reverse("api:get_log_stats", kwargs={"organization_slug": new_org.slug})
         res = await self.async_client.get(url)
@@ -559,7 +556,7 @@ class LogResourcesAPITestCase(GlitchTipTestCaseMixin, TestCase):
     async def test_list_resources_empty(self):
         """Test listing resources for org with no data."""
         new_org = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(new_org.add_user)(self.user)
+        await new_org.aadd_user(self.user)
 
         url = reverse(
             "api:list_log_resources", kwargs={"organization_slug": new_org.slug}

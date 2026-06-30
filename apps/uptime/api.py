@@ -332,9 +332,10 @@ async def create_status_page(
     )
     data = payload.dict()
     status_page = await StatusPage.objects.acreate(organization=organization, **data)
-    return Status(201, await StatusPage.objects.prefetch_related("monitors").aget(
-        id=status_page.id
-    ))
+    return Status(
+        201,
+        await StatusPage.objects.prefetch_related("monitors").aget(id=status_page.id),
+    )
 
 
 @router.delete(

@@ -101,9 +101,12 @@ async def create_organization(request: AuthHttpRequest, payload: OrganizationInS
     )
     user_added.send(sender=organization, user=user)
 
-    return Status(201, await get_organizations_queryset(user.id, add_details=True).aget(
-        id=organization.id
-    ))
+    return Status(
+        201,
+        await get_organizations_queryset(user.id, add_details=True).aget(
+            id=organization.id
+        ),
+    )
 
 
 @router.put(

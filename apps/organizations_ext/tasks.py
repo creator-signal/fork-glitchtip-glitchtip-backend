@@ -139,9 +139,9 @@ async def delete_organization(organization_id: int):
     """
     org = await Organization.objects.aget(id=organization_id)
 
-    # Cancel billing in Stripe before destroying the org. A subscription left 
-    # active there keeps charging the customer for an org that no longer exists. 
-    # Done first so a Stripe outage retries the whole task before any data is 
+    # Cancel billing in Stripe before destroying the org. A subscription left
+    # active there keeps charging the customer for an org that no longer exists.
+    # Done first so a Stripe outage retries the whole task before any data is
     # irreversibly deleted.
     if settings.BILLING_ENABLED:
         from apps.stripe.models import StripeSubscription

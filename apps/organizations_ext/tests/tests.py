@@ -1,6 +1,5 @@
 from unittest import mock
 
-from asgiref.sync import sync_to_async
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
@@ -36,13 +35,13 @@ class OrganizationModelTestCase(TestCase):
         """Billing email address"""
         user = await baker.amake("users.user")
         organization = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization.add_user)(user)
+        await organization.aadd_user(user)
 
         # Org 1 has two users and only one of which is an owner
         user2 = await baker.amake("users.user")
         organization2 = await baker.amake("organizations_ext.Organization")
-        await sync_to_async(organization2.add_user)(user2)
-        await sync_to_async(organization.add_user)(user2)
+        await organization2.aadd_user(user2)
+        await organization.aadd_user(user2)
 
         self.assertEqual(organization.email, user.email)
         self.assertEqual(await organization.users.acount(), 2)
@@ -136,9 +135,9 @@ class OrganizationsFilterTestCase(TestCase):
         organizationB = await baker.amake(
             "organizations_ext.Organization", name="B Organization"
         )
-        await sync_to_async(organizationA.add_user)(self.user)
-        await sync_to_async(organizationB.add_user)(self.user)
-        await sync_to_async(organizationZ.add_user)(self.user)
+        await organizationA.aadd_user(self.user)
+        await organizationB.aadd_user(self.user)
+        await organizationZ.aadd_user(self.user)
         res = await self.async_client.get(self.url)
         data = res.json()
         self.assertEqual(data[0]["name"], organizationA.name)

@@ -128,9 +128,7 @@ class OrganizationAdmin(BaseOrganizationAdmin, ImportExportModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if settings.BILLING_ENABLED:
-            qs = qs.select_related(
-                "stripe_primary_subscription__price__product"
-            )
+            qs = qs.select_related("stripe_primary_subscription__price__product")
         return qs
 
 

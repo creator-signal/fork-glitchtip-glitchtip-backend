@@ -307,12 +307,15 @@ async def create_project_key(
         get_projects_queryset(request.auth.user_id, organization_slug),
         slug=project_slug,
     )
-    return Status(201, await ProjectKey.objects.acreate(
-        project=project,
-        name=payload.name,
-        rate_limit_count=payload.rate_limit.count if payload.rate_limit else None,
-        rate_limit_window=payload.rate_limit.window if payload.rate_limit else None,
-    ))
+    return Status(
+        201,
+        await ProjectKey.objects.acreate(
+            project=project,
+            name=payload.name,
+            rate_limit_count=payload.rate_limit.count if payload.rate_limit else None,
+            rate_limit_window=payload.rate_limit.window if payload.rate_limit else None,
+        ),
+    )
 
 
 @router.delete(

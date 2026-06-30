@@ -4,7 +4,6 @@ import re
 import uuid
 from timeit import default_timer as timer
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
 from django.db.models import Value
@@ -100,7 +99,9 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertIn("dateCreated", data["firstRelease"])
 
     async def test_retrieve_without_first_release(self):
-        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        issue = await baker.amake(
+            "issue_events.Issue", project=self.project, short_id=1
+        )
         url = reverse("api:get_issue", kwargs={"issue_id": issue.id})
         res = await self.async_client.get(url)
         data = res.json()
@@ -111,7 +112,9 @@ class IssueAPITestCase(GlitchTestCase):
         self.assertEqual(res.status_code, 200)
 
         not_my_issue = await baker.amake("issue_events.Issue")
-        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        issue = await baker.amake(
+            "issue_events.Issue", project=self.project, short_id=1
+        )
         await baker.amake("issue_events.IssueEvent", issue=issue)
         res = await self.async_client.get(self.list_url)
         self.assertContains(res, issue.title)
@@ -123,7 +126,9 @@ class IssueAPITestCase(GlitchTestCase):
             "projects.Project", organization=self.organization
         )
         not_my_issue = await baker.amake("issue_events.Issue", project=not_my_project)
-        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        issue = await baker.amake(
+            "issue_events.Issue", project=self.project, short_id=1
+        )
         await baker.amake("issue_events.IssueEvent", issue=issue)
 
         url = reverse(
@@ -202,7 +207,8 @@ class IssueAPITestCase(GlitchTestCase):
         # filter) is unambiguous: issues[0] is oldest/smallest, issues[2] newest.
         base = timezone.make_aware(timezone.datetime(2020, 1, 1))
         issues = [
-            await baker.amake("issue_events.Issue", project=self.project) for _ in range(3)
+            await baker.amake("issue_events.Issue", project=self.project)
+            for _ in range(3)
         ]
         for i, issue in enumerate(issues):
             await IssueIndex.objects.filter(issue=issue).aupdate(
@@ -1013,7 +1019,7 @@ class IssueAPITestCase(GlitchTestCase):
     async def test_assign_unassigns_when_membership_removed(self):
         """Removing an OrganizationUser SET_NULLs their issue assignments."""
         other_user = await baker.amake("users.user")
-        other_org_user = await sync_to_async(self.organization.add_user)(other_user)
+        other_org_user = await self.organization.aadd_user(other_user)
         issue = await baker.amake(
             "issue_events.Issue",
             project=self.project,
@@ -1275,7 +1281,9 @@ class IssueCommitsAPITestCase(GlitchTestCase):
         self.async_client.force_login(self.user)
 
     async def test_list_issue_commits_no_release(self):
-        issue = await baker.amake("issue_events.Issue", project=self.project, short_id=1)
+        issue = await baker.amake(
+            "issue_events.Issue", project=self.project, short_id=1
+        )
         url = reverse("api:list_issue_commits", kwargs={"issue_id": issue.id})
         res = await self.async_client.get(url)
         self.assertEqual(res.status_code, 200)

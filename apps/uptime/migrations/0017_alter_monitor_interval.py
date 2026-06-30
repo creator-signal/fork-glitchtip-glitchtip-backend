@@ -5,15 +5,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('uptime', '0016_add_org_date_index_to_hourly_stats'),
+        ("uptime", "0016_add_org_date_index_to_hourly_stats"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='monitor',
-            name='interval',
-            field=models.PositiveIntegerField(default=60, validators=[django.core.validators.MaxValueValidator(86400), django.core.validators.MinValueValidator(1)]),
+            model_name="monitor",
+            name="interval",
+            field=models.PositiveIntegerField(
+                default=60,
+                validators=[
+                    django.core.validators.MaxValueValidator(86400),
+                    django.core.validators.MinValueValidator(1),
+                ],
+            ),
         ),
     ]
