@@ -417,6 +417,7 @@ class IssueEvent(models.Model):
                 condition=models.Q(event_id__isnull=False),
             ),
             GinIndex(fields=["hashes"]),
+            GinIndex(fields=["tags"]),
         ]
 
     def __str__(self):
