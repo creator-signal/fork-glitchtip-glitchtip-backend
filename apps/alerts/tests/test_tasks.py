@@ -72,6 +72,37 @@ class AlertTestCase(GlitchTipTransactionTestCase):
         self.assertEqual(Notification.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 1)
 
+    def test_alert_environment_filter(self):
+        baker.make(
+            "alerts.ProjectAlert",
+            project=self.project,
+            timespan_minutes=10,
+            quantity=1,
+            environment="production",
+        )
+
+        staging_issue = baker.make("issue_events.Issue", project=self.project)
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=staging_issue,
+            organization=staging_issue.project.organization,
+            tags={"environment": "staging"},
+        )
+        process_event_alerts.call()
+        self.assertEqual(Notification.objects.count(), 0)
+
+        production_issue = baker.make("issue_events.Issue", project=self.project)
+        baker.make(
+            "issue_events.IssueEvent",
+            issue=production_issue,
+            organization=production_issue.project.organization,
+            tags={"environment": "production"},
+        )
+        process_event_alerts.call()
+        self.assertEqual(Notification.objects.count(), 1)
+        notification = Notification.objects.get()
+        self.assertEqual(list(notification.issues.all()), [production_issue])
+
     def test_multiple_alerts(self):
         baker.make(
             "alerts.ProjectAlert",

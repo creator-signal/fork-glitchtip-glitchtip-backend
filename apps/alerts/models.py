@@ -23,6 +23,11 @@ class ProjectAlert(CreatedModel):
     uptime = models.BooleanField(
         default=False, help_text="Send alert on any uptime monitor check failure"
     )
+    environment = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Only alert on events from this environment. Blank matches all environments.",
+    )
 
 
 class AlertRecipient(models.Model):

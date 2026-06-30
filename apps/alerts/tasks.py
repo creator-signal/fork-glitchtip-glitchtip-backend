@@ -56,12 +56,17 @@ async def process_event_alerts():
         # Pruning partition optimization
         start_uuid = UUID7Helper._uuid7_for_timestamp(start_time, min_random=True)
         quantity_in_timespan = alert.quantity
+        issueevent_filter = {
+            "issueevent__id__gte": start_uuid,
+            "issueevent__organization_id": alert.project.organization_id,
+        }
+        if alert.environment:
+            issueevent_filter["issueevent__tags__environment"] = alert.environment
         issues = (
             Issue.objects.filter(
                 project_id=alert.project_id,
                 # Filter by UUIDv7 which encodes timestamp (enables partition pruning)
-                issueevent__id__gte=start_uuid,
-                issueevent__organization_id=alert.project.organization_id,
+                **issueevent_filter,
             )
             .exclude(notification__project_alert=alert)
             .annotate(num_events=Count("issueevent"))
