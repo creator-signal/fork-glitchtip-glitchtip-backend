@@ -11,6 +11,41 @@ from .models import File, FileBlob
 logger = logging.getLogger(__name__)
 
 
+async def cleanup_orphaned_file_blobs():
+    """
+    Delete FileBlobs that no File references.
+
+    Orphans arise when multi-chunk uploads are concatenated into a combined
+    blob, when Files are replaced during source-map re-uploads, or when
+    uploads are abandoned before assembly. A 24-hour grace period protects
+    blobs that are in-flight (uploaded but not yet assembled).
+
+    Batches deletes to limit memory and transaction size.
+    """
+    cutoff = now() - timedelta(hours=24)
+    db_alias = settings.MAINTENANCE_DATABASE_ALIAS
+
+    queryset = (
+        FileBlob.objects.using(db_alias)
+        .filter(created__lt=cutoff)
+        .exclude(Exists(File.objects.filter(blob_id=OuterRef("id"))))
+    )
+
+    total_deleted = 0
+    while True:
+        file_blobs = await sync_to_async(list)(queryset.only("id", "blob")[:1000])
+        if not file_blobs:
+            if total_deleted:
+                logger.info("Deleted %d orphaned file blobs", total_deleted)
+            break
+        ids = []
+        for file_blob in file_blobs:
+            ids.append(file_blob.id)
+            await sync_to_async(file_blob.blob.delete)()
+        count, _ = await FileBlob.objects.using(db_alias).filter(id__in=ids).adelete()
+        total_deleted += count
+
+
 async def cleanup_old_files():
     """
     Delete old FileBlobs and their storage files.
