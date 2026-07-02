@@ -90,7 +90,20 @@ class WebhookAttachment:
 @dataclass
 class WebhookPayload:
     text: str
-    attachments: list[WebhookAttachment]
+    attachments: list[WebhookAttachment] | None
+
+    def to_dict(self):
+        return {
+            "text": self.text,
+            "attachments": [
+                {
+                    key: value
+                    for key, value in asdict(attachment).items()
+                    if value is not None and value != []
+                }
+                for attachment in (self.attachments or [])
+            ],
+        }
 
 
 async def send_webhook(
@@ -100,13 +113,13 @@ async def send_webhook(
 ):
     if not await _is_url_allowed(url):
         return None
-    if not attachments:
-        attachments = []
-    data = WebhookPayload(text=message, attachments=attachments)
+    payload = WebhookPayload(text=message, attachments=attachments)
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.post(url, json=asdict(data), timeout=timeout) as resp:
+            async with session.post(
+                url, json=payload.to_dict(), timeout=timeout
+            ) as resp:
                 return resp
     except (TimeoutError, aiohttp.ClientError):
         return None

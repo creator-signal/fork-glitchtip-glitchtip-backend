@@ -954,3 +954,33 @@ class WebhookTestCase(GlitchTipTestCase):
         json_data = json.dumps(payload)
         self.assertIn("GlitchTip Test Notification", json_data)
         self.assertIn(self.project.name, json_data)
+
+    def test_webhook_payload_excludes_none_values(self):
+        """Test WebhookPayload excludes keys with None values."""
+        from ..webhooks import WebhookAttachment, WebhookPayload
+
+        payload = WebhookPayload(
+            text=self.expected_subject,
+            attachments=[
+                WebhookAttachment(
+                    title=self.expected_message_down,
+                    title_link="https://glitchtip.com",
+                    text="",
+                    mrkdown_in=["text"],
+                )
+            ],
+        )
+
+        result = payload.to_dict()
+        expected = {
+            "text": self.expected_subject,
+            "attachments": [
+                {
+                    "title": self.expected_message_down,
+                    "title_link": "https://glitchtip.com",
+                    "text": "",
+                    "mrkdown_in": ["text"],
+                }
+            ],
+        }
+        self.assertEqual(result, expected)
