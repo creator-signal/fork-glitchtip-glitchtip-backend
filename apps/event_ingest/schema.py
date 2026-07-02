@@ -131,34 +131,12 @@ class EventTemplate(LaxIngestSchema):
 
 
 def _normalize_native_debug_id(v):
-    """
-    Native SDKs may send Breakpad-style debug IDs: 32 hex chars plus a
-    trailing appendix/age character, producing a 33-char string that
-    uuid.UUID() rejects.
-
-    Try a plain UUID parse first (fast path, handles the vast majority of
-    inputs). Fall back to normalize_debug_id (symbolic/Rust) for anything
-    that fails -- it handles all Breakpad/debug ID format variants and
-    returns "<uuid>-<appendix>" for non-zero ages, so we strip the suffix
-    and parse the UUID part.
-    """
     if v is None or isinstance(v, uuid.UUID):
         return v
-    s = str(v)
     try:
-        return uuid.UUID(s)
-    except ValueError:
-        pass
-    try:
-        normalized = normalize_debug_id(s)
-        if normalized:
-            try:
-                return uuid.UUID(normalized)
-            except ValueError:
-                return uuid.UUID(normalized.rsplit("-", 1)[0])
+        return uuid.UUID("-".join(normalize_debug_id(str(v)).split("-")[:5]))
     except Exception:
-        pass
-    return v
+        return v
 
 
 # Important, for some reason using Schema will cause the DebugImage union not to work
