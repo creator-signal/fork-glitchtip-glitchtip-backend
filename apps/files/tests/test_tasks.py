@@ -10,12 +10,10 @@ from model_bakery import baker
 from glitchtip.test_utils.test_case import GlitchTipTestCase
 
 from ..maintenance import cleanup_old_files as _cleanup_old_files
-from ..maintenance import cleanup_orphaned_file_blobs as _cleanup_orphaned_file_blobs
 from ..models import File, FileBlob
 from .test_api import generate_file
 
 cleanup_old_files = async_to_sync(_cleanup_old_files)
-cleanup_orphaned_file_blobs = async_to_sync(_cleanup_orphaned_file_blobs)
 
 
 class TasksTestCase(GlitchTipTestCase):
@@ -68,12 +66,12 @@ class TasksTestCase(GlitchTipTestCase):
         self.assertEqual(FileBlob.objects.count(), 1)
 
         # Orphaned blob younger than 24h is kept
-        cleanup_orphaned_file_blobs()
+        cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 1)
 
         # Orphaned blob older than 24h is deleted
         with freeze_time(now() + timedelta(hours=25)):
-            cleanup_orphaned_file_blobs()
+            cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 0)
 
     def test_cleanup_orphaned_file_blobs_keeps_referenced(self):
@@ -84,5 +82,5 @@ class TasksTestCase(GlitchTipTestCase):
         baker.make(File, blob=file_blob)
 
         with freeze_time(now() + timedelta(hours=25)):
-            cleanup_orphaned_file_blobs()
+            cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 1)

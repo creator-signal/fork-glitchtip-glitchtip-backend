@@ -6,7 +6,7 @@ from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.tasks import task
 
-from apps.files.maintenance import cleanup_old_files, cleanup_orphaned_file_blobs
+from apps.files.maintenance import cleanup_old_files
 from apps.issue_events.maintenance import cleanup_old_issue_events, cleanup_old_issues
 from apps.logs.maintenance import cleanup_old_logs
 from apps.performance.maintenance import cleanup_old_transaction_events
@@ -60,7 +60,6 @@ async def perform_maintenance():
         cleanup_old_transaction_events,
     )
     await _run_step("cleanup_old_files", cleanup_old_files)
-    await _run_step("cleanup_orphaned_file_blobs", cleanup_orphaned_file_blobs)
     await _run_step("cleanup_old_issue_events", cleanup_old_issue_events)
     await _run_step("cleanup_old_issues", cleanup_old_issues)
     await _run_step(
