@@ -9,6 +9,7 @@ from django.core.files import File as DjangoFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from model_bakery import baker
+from pydantic import ValidationError
 
 from apps.difs.stacktrace_processor import (
     StacktraceProcessor,
@@ -18,6 +19,7 @@ from apps.difs.stacktrace_processor import (
     jvm_module_to_path,
 )
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
+from apps.event_ingest.schema import NativeDebugImage
 from apps.files.models import File, FileBlob
 from glitchtip.test_utils import generators  # noqa: F401
 from glitchtip.test_utils.test_case import GlitchTestCase
@@ -1125,3 +1127,18 @@ class NormalizeDebugIdTestCase(GlitchTestCase):
         self.assertEqual(meta.images[0].image_addr, "0x100000")
         self.assertIsInstance(meta.images[1], NativeDebugImage)
         self.assertIsInstance(meta.images[2], OtherDebugImage)
+
+    def test_native_debug_image_accepts_breakpad_format(self):
+        """33-char Breakpad-style debug_id (32 hex + appendix) should validate,
+        regardless of the appendix/age value."""
+        base = "114f8cb943bc5bf52c409cabe92c0924"
+        for appendix in ["0", "1", "9", "a", "f"]:
+            breakpad_id = base + appendix
+            image = NativeDebugImage(type="wasm", debug_id=breakpad_id)
+            self.assertIsNotNone(image.debug_id)
+            self.assertEqual(len(str(image.debug_id).replace("-", "")), 32)
+
+    def test_native_debug_image_still_rejects_garbage(self):
+        """Genuinely invalid debug_id should still fail validation as before."""
+        with self.assertRaises(ValidationError):
+            NativeDebugImage(type="wasm", debug_id="not-a-debug-id-at-all")

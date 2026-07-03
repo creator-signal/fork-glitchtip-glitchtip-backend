@@ -20,6 +20,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from symbolic import normalize_debug_id
 
 from apps.issue_events.constants import IssueEventType
 from apps.shared.schema.error import EventProcessingError
@@ -128,6 +129,16 @@ class EventTemplate(LaxIngestSchema):
     post_context: list[str] | None = None
 
 
+
+def _normalize_native_debug_id(v):
+    if v is None or isinstance(v, uuid.UUID):
+        return v
+    try:
+        return uuid.UUID("-".join(normalize_debug_id(str(v)).split("-")[:5]))
+    except Exception:
+        return v
+
+
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class SourceMapImage(BaseModel):
     type: Literal["sourcemap"]
@@ -144,7 +155,9 @@ class JvmDebugImage(BaseModel):
 # Important, for some reason using Schema will cause the DebugImage union not to work
 class NativeDebugImage(BaseModel):
     type: Literal["macho", "elf", "pe", "pe_dotnet", "wasm"]
-    debug_id: uuid.UUID | None = None
+    debug_id: Annotated[
+        uuid.UUID | None, BeforeValidator(_normalize_native_debug_id)
+    ] = None
     debug_checksum: str | None = None
     image_addr: str | None = None
     image_size: int | None = None
