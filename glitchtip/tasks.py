@@ -60,9 +60,7 @@ async def perform_maintenance():
         cleanup_old_transaction_events,
     )
     await _run_step("cleanup_old_files", cleanup_old_files)
-    await _run_step(
-        "cleanup_old_issue_events", cleanup_old_issue_events
-    )
+    await _run_step("cleanup_old_issue_events", cleanup_old_issue_events)
     await _run_step("cleanup_old_issues", cleanup_old_issues)
     await _run_step(
         "cleanup_old_debug_symbol_bundles",
