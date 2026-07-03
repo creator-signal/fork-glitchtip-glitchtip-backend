@@ -49,6 +49,27 @@ class ImporterTestCase(GlitchTipTestCaseMixin, TestCase):
         m.get(self.url + "/api/0/teams/org/team/members/", payload=[])
 
     @aioresponses()
+    async def test_get_follows_pagination(self, m):
+        first_url = self.url + self.importer.projects_url
+        next_url = first_url + "?cursor=abc"
+        m.get(
+            first_url,
+            payload=[{"id": "1"}],
+            headers={"Link": f'<{next_url}>; rel="next"; results="true"; cursor="abc"'},
+        )
+        m.get(
+            next_url,
+            payload=[{"id": "2"}],
+            headers={
+                "Link": f'<{first_url}>; rel="next"; results="false"',
+            },
+        )
+
+        data = await self.importer.get(first_url)
+
+        self.assertEqual(data, [{"id": "1"}, {"id": "2"}])
+
+    @aioresponses()
     def test_import_command(self, m):
         self.set_mocks(m)
 

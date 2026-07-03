@@ -1,3 +1,5 @@
+from urllib.parse import urljoin
+
 import aiohttp
 import tablib
 from asgiref.sync import sync_to_async
@@ -64,9 +66,36 @@ class GlitchTipImporter:
         await self.import_teams()
 
     async def get(self, url: str):
+        data = []
+        next_url = url
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
-            async with session.get(url, headers=self.headers) as res:
-                return await res.json()
+            while next_url:
+                async with session.get(next_url, headers=self.headers) as res:
+                    response_data = await res.json()
+                    if not isinstance(response_data, list):
+                        return response_data
+                    data.extend(response_data)
+                    next_url = self.get_next_url(res, next_url)
+        return data
+
+    @staticmethod
+    def get_next_url(res: aiohttp.ClientResponse, current_url: str) -> str | None:
+        link_header = res.headers.get("Link")
+        if not link_header:
+            return None
+
+        for link in link_header.split(","):
+            parts = [part.strip() for part in link.split(";")]
+            if not parts or not parts[0].startswith("<") or not parts[0].endswith(">"):
+                continue
+            link_url = parts[0][1:-1]
+            params = {}
+            for part in parts[1:]:
+                key, _, value = part.partition("=")
+                params[key.lower()] = value.strip('"')
+            if params.get("rel") == "next" and params.get("results") == "true":
+                return urljoin(current_url, link_url)
+        return None
 
     async def import_organization(self):
         resource = OrganizationResource()
