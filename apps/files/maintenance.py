@@ -11,24 +11,30 @@ from .models import File, FileBlob
 logger = logging.getLogger(__name__)
 
 
+MAX_DELETIONS_PER_RUN = 10_000
+
+
 async def _delete_file_blobs(queryset, label):
     total_deleted = 0
-    while True:
+    while total_deleted < MAX_DELETIONS_PER_RUN:
         file_blobs = [fb async for fb in queryset.only("id", "blob")[:1000].aiterator()]
         if not file_blobs:
-            if total_deleted:
-                logger.info("Deleted %d %s file blobs", total_deleted, label)
             break
         ids = []
         for file_blob in file_blobs:
             ids.append(file_blob.id)
-            await sync_to_async(file_blob.blob.delete)()
+            try:
+                await sync_to_async(file_blob.blob.delete)()
+            except Exception:
+                logger.warning("Failed to delete storage for FileBlob %d", file_blob.id)
         count, _ = (
             await FileBlob.objects.using(settings.MAINTENANCE_DATABASE_ALIAS)
             .filter(id__in=ids)
             .adelete()
         )
         total_deleted += count
+    if total_deleted:
+        logger.info("Deleted %d %s file blobs", total_deleted, label)
 
 
 async def cleanup_old_files():
