@@ -17,6 +17,8 @@ from ..constants import RecipientType
 from ..models import AlertRecipient, Notification
 from ..tasks import process_event_alerts
 from ..webhooks import (
+    WebhookAttachment,
+    WebhookPayload,
     send_issue_as_discord_webhook,
     send_issue_as_feishu_webhook,
     send_issue_as_googlechat_webhook,
@@ -957,7 +959,6 @@ class WebhookTestCase(GlitchTipTestCase):
 
     def test_webhook_payload_excludes_none_values(self):
         """Test WebhookPayload excludes keys with None values."""
-        from ..webhooks import WebhookAttachment, WebhookPayload
 
         payload = WebhookPayload(
             text=self.expected_subject,
