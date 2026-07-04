@@ -39,6 +39,17 @@ _init_pid: int | None = None
 
 def _build_config() -> dict:
     from django.conf import settings
+    from django.core.cache import caches
+    from django_vtasks.conf import settings as vtasks_settings
+
+    # The Rust path builds cache/dedupe/block keys and the vtasks queue key
+    # itself, so it must use the exact prefixes Django's cache and vtasks
+    # backends use. Emitting them (rather than relying on the Rust-side
+    # defaults) makes a non-default cache KEY_PREFIX/VERSION or
+    # VTASKS_VALKEY_PREFIX work instead of silently missing every key — worst
+    # case LPUSHing to a queue the worker never drains. ``make_key("")`` is
+    # exactly the prefix prepended to a raw cache key.
+    cache_key_prefix = caches["default"].make_key("")
 
     return {
         "max_unzipped": settings.GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE,
@@ -57,6 +68,8 @@ def _build_config() -> dict:
         ),
         "cors_allow_all": settings.CORS_ORIGIN_ALLOW_ALL,
         "cors_whitelist": [str(o) for o in settings.CORS_ORIGIN_WHITELIST],
+        "cache_key_prefix": cache_key_prefix,
+        "vtasks_prefix": vtasks_settings.VTASKS_VALKEY_PREFIX,
     }
 
 
@@ -155,6 +168,26 @@ def _report_anomalies(anomalies: list[dict], path: str) -> None:
         )
 
 
+def _cors_headers(scope) -> list:
+    """CORS headers for a response the Rust pipeline didn't build (500/503),
+    matching gt_ingest's ``apply_cors`` so a browser SDK can read the status
+    instead of getting a CORS-blocked opaque error."""
+    from django.conf import settings
+
+    origin = None
+    for name, value in scope.get("headers") or ():
+        if name == b"origin":
+            origin = value.decode("latin1")
+            break
+    if origin is None:
+        return []
+    if settings.CORS_ORIGIN_ALLOW_ALL:
+        return [("Access-Control-Allow-Origin", "*")]
+    if origin in {str(o) for o in settings.CORS_ORIGIN_WHITELIST}:
+        return [("Access-Control-Allow-Origin", origin), ("Vary", "Origin")]
+    return []
+
+
 async def _send_response(send, status: int, headers: list, body: bytes) -> None:
     await send(
         {
@@ -204,7 +237,7 @@ class RustEnvelopeHandler:
                 await _send_response(
                     send,
                     500,
-                    [("Content-Type", "application/json")],
+                    [("Content-Type", "application/json"), *_cors_headers(scope)],
                     b'{"detail": "Internal server error"}',
                 )
             except Exception:
@@ -219,7 +252,7 @@ class RustEnvelopeHandler:
             await _send_response(
                 send,
                 503,
-                [("Content-Type", "application/json")],
+                [("Content-Type", "application/json"), *_cors_headers(scope)],
                 b'{"detail": "Events are not currently being accepted due to maintenance."}',
             )
             return

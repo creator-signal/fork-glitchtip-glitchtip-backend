@@ -66,16 +66,32 @@ async def ingest_transaction(tasks: list):
 async def ingest_user_report(tasks: list):
     messages = _validate_batch(UserReportTaskMessage, tasks)
 
-    # Collect event_ids that need issue lookup
-    event_id_map: dict[uuid.UUID, str | None] = {}
+    # Parse each event_id to a UUID once, dropping (and reporting) any message
+    # whose event_id is present but not a valid UUID. event_id is typed
+    # ``str | None`` and feedback items forward ``associated_event_id`` raw, so
+    # a non-UUID value (e.g. "12345") would raise ValueError here and fail the
+    # whole batch — the per-message guard keeps one poison message from taking
+    # down the other reports.
+    parsed: list[tuple[UserReportTaskMessage, uuid.UUID | None]] = []
     for msg in messages:
         if msg.event_id:
-            event_id_map[uuid.UUID(msg.event_id)] = None
+            try:
+                parsed.append((msg, uuid.UUID(msg.event_id)))
+            except (ValueError, AttributeError, TypeError) as e:
+                capture_exception(e)
+                logger.warning("Dropped user report with invalid event_id", exc_info=e)
+        else:
+            parsed.append((msg, None))
+
+    # Collect event_ids that need issue lookup
+    event_id_map: dict[uuid.UUID, str | None] = {
+        event_uuid: None for _, event_uuid in parsed if event_uuid is not None
+    }
 
     # Bulk lookup: one query for all associated events
     if event_id_map:
         recent_lower = UUID7Helper.from_datetime(timezone.now() - timedelta(weeks=1))
-        org_ids = {msg.organization_id for msg in messages if msg.event_id}
+        org_ids = {msg.organization_id for msg, eu in parsed if eu is not None}
         async for evt in (
             IssueEvent.objects.filter(
                 event_id__in=event_id_map.keys(),
@@ -89,9 +105,8 @@ async def ingest_user_report(tasks: list):
 
     # Build UserReport objects
     reports = []
-    for msg in messages:
-        if msg.event_id:
-            event_uuid = uuid.UUID(msg.event_id)
+    for msg, event_uuid in parsed:
+        if event_uuid is not None:
             issue_id = event_id_map.get(event_uuid)
         else:
             event_uuid = uuid.uuid4()
