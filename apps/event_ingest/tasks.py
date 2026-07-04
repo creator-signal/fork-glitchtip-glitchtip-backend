@@ -5,6 +5,8 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 from django_vtasks import task
+from pydantic import ValidationError
+from sentry_sdk import capture_exception
 
 from apps.event_ingest.schema import (
     InterchangeTransactionEvent,
@@ -19,12 +21,33 @@ from .process_event import process_issue_events, process_transaction_events
 logger = logging.getLogger(__name__)
 
 
+def _validate_batch(schema, tasks: list) -> list:
+    """Validate each batched message independently, dropping (and reporting)
+    any that fail instead of failing the whole batch.
+
+    The ingest views bound what reaches the queue, but they validate more
+    lightly than these schemas (deliberately so for the Rust ingest path),
+    and a single poison message must not take down the other ~99 messages
+    batched with it.
+    """
+    messages = []
+    for t in tasks:
+        try:
+            messages.append(schema(**t["args"][0]))
+        except ValidationError as e:
+            capture_exception(e)
+            logger.warning(
+                "Dropped invalid %s ingest message", schema.__name__, exc_info=e
+            )
+    return messages
+
+
 @task(queue_name="ingest")
 async def ingest_event(tasks: list):
     logger.info(f"Process {len(tasks)} issue event requests")
     read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
     await process_issue_events(
-        [IssueTaskMessage(**task["args"][0]) for task in tasks],
+        _validate_batch(IssueTaskMessage, tasks),
         read_only_db=read_only_db,
     )
 
@@ -34,14 +57,14 @@ async def ingest_transaction(tasks: list):
     logger.info(f"Process {len(tasks)} transaction event requests")
     read_only_db = "read_only" if "read_only" in settings.DATABASES else "default"
     await process_transaction_events(
-        [InterchangeTransactionEvent(**task["args"][0]) for task in tasks],
+        _validate_batch(InterchangeTransactionEvent, tasks),
         read_only_db=read_only_db,
     )
 
 
 @task(queue_name="ingest")
 async def ingest_user_report(tasks: list):
-    messages = [UserReportTaskMessage(**t["args"][0]) for t in tasks]
+    messages = _validate_batch(UserReportTaskMessage, tasks)
 
     # Collect event_ids that need issue lookup
     event_id_map: dict[uuid.UUID, str | None] = {}

@@ -823,6 +823,15 @@ if env.str("DATABASE_HOST", None):
 DATABASE_ENGINE = env.str(
     "DATABASE_ENGINE", "django_async_backend.db.backends.postgresql"
 )
+# Serve POST /api/<project_id>/envelope/ entirely in Rust (gt_rust.ingest):
+# DSN auth, decompression/framing, PII scrubbing, dedupe and vtasks enqueue
+# run on the shared tokio runtime, and the event payload never materializes
+# on the Python heap. The ingest path issues its auth query on the very pool
+# the ORM uses, so enabling it forces the Rust database engine and the
+# gt_rust valkey cache driver (one runtime for ORM + cache + ingest).
+GLITCHTIP_RUST_INGEST = env.bool("GLITCHTIP_RUST_INGEST", False)
+if GLITCHTIP_RUST_INGEST:
+    DATABASE_ENGINE = "gt_rust.django_backend"
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
     # async-backend's postgresql backend extends Django's stock postgresql
@@ -948,6 +957,12 @@ if VALKEY_URL:
         _valkey_options["ssl_keyfile"] = _ssl_key
     if _ssl_reqs := env.str("VALKEY_SSL_CERT_REQS", None):
         _valkey_options["ssl_cert_reqs"] = _ssl_reqs
+    if GLITCHTIP_RUST_INGEST:
+        # The Rust ingest path issues its Valkey commands on the cache
+        # driver's connection, so the cache must run gt_rust's re-exported
+        # driver (same code as vcache's bundled one, but living in the same
+        # .so and tokio runtime as the ingest pipeline and the DB driver).
+        _valkey_options["DRIVER_CLASS"] = "gt_rust.valkey.RustValkeyDriver"
     CACHES = {
         "default": {
             "BACKEND": "django_vcache.backend.ValkeyCache",
@@ -972,6 +987,11 @@ else:  # Fallback to database cache
     INSTALLED_APPS.append("django.contrib.sessions")
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
+
+if GLITCHTIP_RUST_INGEST and not VALKEY_URL:
+    # The Rust ingest path enqueues directly to the Valkey task broker; it has
+    # no database-backend fallback.
+    raise ImproperlyConfigured("GLITCHTIP_RUST_INGEST requires VALKEY_URL")
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
