@@ -75,6 +75,63 @@ class OAuthConsentViewTest(TestCase):
         self.assertEqual(grant["user_id"], self.user.id)
         self.assertEqual(grant["scopes"], ["org:read", "event:read"])
 
+    def test_post_redirects_to_custom_scheme(self):
+        """Native-app MCP clients (e.g. Cursor) use custom-scheme callbacks."""
+        self.client.force_login(self.user)
+        redirect_uri = "cursor://anysphere.cursor-mcp/oauth/callback"
+        signed = _make_signed_data(redirect_uri=redirect_uri)
+        resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp["Location"].startswith(redirect_uri))
+        self.assertIn("code=", resp["Location"])
+
+    @override_settings(
+        GLITCHTIP_MCP_OAUTH_REDIRECT_SCHEMES=["http", "https", "myclient"]
+    )
+    def test_custom_scheme_is_configurable(self):
+        """Schemes not in the default set work once added to the allowlist."""
+        self.client.force_login(self.user)
+        signed = _make_signed_data(redirect_uri="myclient://callback")
+        resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp["Location"].startswith("myclient://callback"))
+
+    @override_settings(GLITCHTIP_MCP_OAUTH_REDIRECT_SCHEMES=["http", "https"])
+    def test_disallowed_scheme_is_rejected(self):
+        """A scheme outside the allowlist is refused (DisallowedRedirect -> 400)."""
+        self.client.force_login(self.user)
+        signed = _make_signed_data(redirect_uri="javascript:alert(1)")
+        resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_loopback_http_redirects(self):
+        """Plaintext http to loopback hosts is allowed (RFC 8252 native apps)."""
+        for redirect_uri in (
+            "http://127.0.0.1:33418/callback",
+            "http://[::1]:9000/callback",
+        ):
+            with self.subTest(redirect_uri=redirect_uri):
+                self.client.force_login(self.user)
+                signed = _make_signed_data(redirect_uri=redirect_uri)
+                resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+                self.assertEqual(resp.status_code, 302)
+                self.assertTrue(resp["Location"].startswith(redirect_uri))
+
+    def test_non_loopback_http_is_rejected(self):
+        """Plaintext http to a non-loopback host is refused per the spec."""
+        self.client.force_login(self.user)
+        signed = _make_signed_data(redirect_uri="http://evil.example.com/callback")
+        resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_non_loopback_https_allowed(self):
+        """https to any host remains allowed."""
+        self.client.force_login(self.user)
+        signed = _make_signed_data(redirect_uri="https://app.example.com/callback")
+        resp = self.client.post(reverse("oauth_consent") + f"?data={signed}")
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp["Location"].startswith("https://app.example.com/callback"))
+
     def test_post_without_state(self):
         self.client.force_login(self.user)
         signed = _make_signed_data(state=None)
