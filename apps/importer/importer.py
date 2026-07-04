@@ -1,4 +1,4 @@
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 import tablib
@@ -20,6 +20,8 @@ from apps.users.models import User
 from apps.users.resources import UserResource
 
 from .exceptions import ImporterException
+
+MAX_IMPORTER_PAGES = 100
 
 
 class GlitchTipImporter:
@@ -68,6 +70,7 @@ class GlitchTipImporter:
     async def get(self, url: str):
         data = []
         next_url = url
+        pages_fetched = 0
         async with aiohttp.ClientSession(**settings.AIOHTTP_CONFIG) as session:
             while next_url:
                 async with session.get(next_url, headers=self.headers) as res:
@@ -75,7 +78,12 @@ class GlitchTipImporter:
                     if not isinstance(response_data, list):
                         return response_data
                     data.extend(response_data)
+                    pages_fetched += 1
                     next_url = self.get_next_url(res, next_url)
+                    if next_url and pages_fetched >= MAX_IMPORTER_PAGES:
+                        raise ImporterException(
+                            f"Importer pagination exceeded {MAX_IMPORTER_PAGES} pages"
+                        )
         return data
 
     @staticmethod
@@ -94,8 +102,25 @@ class GlitchTipImporter:
                 key, _, value = part.partition("=")
                 params[key.lower()] = value.strip('"')
             if params.get("rel") == "next" and params.get("results") == "true":
-                return urljoin(current_url, link_url)
+                next_url = urljoin(current_url, link_url)
+                if not GlitchTipImporter.is_same_origin(current_url, next_url):
+                    raise ImporterException("Importer pagination changed hosts")
+                return next_url
         return None
+
+    @staticmethod
+    def is_same_origin(current_url: str, next_url: str) -> bool:
+        current = urlparse(current_url)
+        next_parsed = urlparse(next_url)
+        return (
+            current.scheme,
+            current.hostname,
+            current.port,
+        ) == (
+            next_parsed.scheme,
+            next_parsed.hostname,
+            next_parsed.port,
+        )
 
     async def import_organization(self):
         resource = OrganizationResource()
