@@ -8,7 +8,6 @@ from ninja import Router, Status
 from ninja.errors import HttpError, Throttled, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
-from organizations.signals import owner_changed
 
 from apps.teams.models import Team
 from apps.teams.schema import OrganizationDetailSchema
@@ -375,9 +374,10 @@ async def set_organization_owner(
     ):
         raise HttpError(403, "Only owner may set organization owner.")
 
+    await organization.achange_owner(new_owner)
+    # achange_owner saves a freshly loaded owner row; sync the cached
+    # relation so resolve_is_owner reflects the change in the response.
     organization.owner.organization_user = new_owner
-    await organization.owner.asave()
-    owner_changed.send(sender=organization, old=old_owner, new=new_owner)
     return new_owner
 
 

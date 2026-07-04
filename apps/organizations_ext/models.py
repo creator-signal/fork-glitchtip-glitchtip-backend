@@ -376,6 +376,19 @@ class Organization(SharedBaseModel, OrganizationBase):
 
         owner_changed.send(sender=self, old=old_owner, new=new_owner)
 
+    async def achange_owner(self, new_owner):
+        """Async version of ``change_owner``."""
+        # Fetch the owner explicitly; the lazy ``self.owner`` accessor would
+        # raise SynchronousOnlyOperation when not already loaded.
+        owner = await self._org_owner_model.objects.select_related(
+            "organization_user"
+        ).aget(organization=self)
+        old_owner = owner.organization_user
+        owner.organization_user = new_owner
+        await owner.asave()
+
+        await owner_changed.asend(sender=self, old=old_owner, new=new_owner)
+
     def is_owner(self, user):
         """
         Returns True is user is the organization's owner, otherwise false
