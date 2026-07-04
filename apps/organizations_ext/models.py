@@ -311,6 +311,8 @@ class Organization(SharedBaseModel, OrganizationBase):
         users_count = self.users.all().count()
         if users_count == 0:
             role = OrganizationUserRole.OWNER
+        # super() sends user_added before the owner record below exists;
+        # receivers must not rely on self.owner for the first user.
         org_user = super().add_user(user, role=role)
         if users_count == 0:
             self._org_owner_model.objects.create(
