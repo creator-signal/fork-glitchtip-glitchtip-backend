@@ -3,7 +3,7 @@ from django.urls import reverse
 from model_bakery import baker
 
 from apps.organizations_ext.constants import OrganizationUserRole
-from apps.organizations_ext.models import OrganizationUser
+from apps.organizations_ext.models import OrganizationOwner, OrganizationUser
 
 
 class OrganizationsAPITestCase(TestCase):
@@ -71,11 +71,12 @@ class OrganizationsAPITestCase(TestCase):
             self.url, data, content_type="application/json"
         )
         self.assertContains(res, data["name"], status_code=201)
-        self.assertEqual(
-            await OrganizationUser.objects.filter(
-                organization__name=data["name"]
-            ).acount(),
-            1,
+        org_user = await OrganizationUser.objects.aget(organization__name=data["name"])
+        self.assertEqual(org_user.role, OrganizationUserRole.OWNER)
+        self.assertTrue(
+            await OrganizationOwner.objects.filter(
+                organization__name=data["name"], organization_user=org_user
+            ).aexists()
         )
 
     async def test_organizations_create_closed_registration_superuser(self):

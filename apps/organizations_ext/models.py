@@ -20,7 +20,7 @@ from organizations.base import (
     OrganizationUserBase,
 )
 from organizations.managers import OrgManager
-from organizations.signals import owner_changed, user_added
+from organizations.signals import owner_changed
 
 from apps.difs.models import DebugInformationFile
 from apps.observability.utils import clear_metrics_cache
@@ -306,42 +306,30 @@ class Organization(SharedBaseModel, OrganizationBase):
 
     def add_user(self, user, role=OrganizationUserRole.MEMBER):
         """
-        Adds a new user and if the first user makes the user an admin and
-        the owner.
+        Adds a new user and if the first user makes the user an owner.
         """
         users_count = self.users.all().count()
         if users_count == 0:
             role = OrganizationUserRole.OWNER
-        org_user = self._org_user_model.objects.create(
-            user=user, organization=self, role=role
-        )
+        # super() sends user_added before the owner record below exists;
+        # receivers must not rely on self.owner for the first user.
+        org_user = super().add_user(user, role=role)
         if users_count == 0:
             self._org_owner_model.objects.create(
                 organization=self, organization_user=org_user
             )
-
-        # User added signal
-        user_added.send(sender=self, user=user)
         return org_user
 
     async def aadd_user(self, user, role=OrganizationUserRole.MEMBER):
-        """
-        Adds a new user asynchronously. If it's the first user, then
-        makes them an admin and the owner.
-        """
+        """Async version of ``add_user``."""
         users_count = await self.users.acount()
         if users_count == 0:
             role = OrganizationUserRole.OWNER
-        org_user = await self._org_user_model.objects.acreate(
-            user=user, organization=self, role=role
-        )
+        org_user = await super().aadd_user(user, role=role)
         if users_count == 0:
             await self._org_owner_model.objects.acreate(
                 organization=self, organization_user=org_user
             )
-
-        # User added signal
-        await user_added.asend(sender=self, user=user)
         return org_user
 
     @property
