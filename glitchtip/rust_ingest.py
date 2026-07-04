@@ -182,6 +182,25 @@ class RustEnvelopeHandler:
         return int(match.group(1)) if match else None
 
     async def __call__(self, scope, receive, send, project_id: int) -> None:
+        try:
+            await self._handle(scope, receive, send, project_id)
+        except Exception as e:
+            # Same contract as Django's handler: an unexpected failure is a
+            # 500, reported, never a dropped connection.
+            sentry_sdk.capture_exception(e)
+            logger.exception("Rust ingest path failed on %s", scope.get("path", ""))
+            try:
+                await _send_response(
+                    send,
+                    500,
+                    [("Content-Type", "application/json")],
+                    b'{"detail": "Internal server error"}',
+                )
+            except Exception:
+                # Response already started — nothing more to send.
+                pass
+
+    async def _handle(self, scope, receive, send, project_id: int) -> None:
         from django.conf import settings
         from gt_rust.ingest import IngestSession
 
