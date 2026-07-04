@@ -270,6 +270,18 @@ class RustIngestTestCase(EventIngestTestCase):
         # The Django view answers non-POST envelope requests.
         self.assertEqual(status, 405)
 
+    async def test_oversized_project_id_falls_through_to_django(self):
+        # A project id past the BIGINT/i64 range can't name a real project
+        # and must not overflow the Rust session arg into a 500 + error
+        # capture; the Rust handler declines it and the Django path answers.
+        _, envelope = self._envelope()
+        status, _, _ = await self._post(
+            envelope.encode(), path="/api/99999999999999999999999/envelope/"
+        )
+        self.assertNotEqual(status, 500)
+        self.assertGreaterEqual(status, 400)
+        self.assertLess(status, 500)
+
     async def test_minidump_envelope_falls_back_to_python_view(self):
         # A garbage minidump exercises the pre-side-effect fallback: the
         # Rust path hands the buffered request to the Django view, which

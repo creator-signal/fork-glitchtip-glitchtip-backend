@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 _ENVELOPE_PATH_RE = re.compile(r"^/api/(\d+)/envelope/$")
 
+# Project ids are BIGINT; the Rust IngestSession takes an i64. A larger id
+# can't name a real project, so it must not overflow the session argument.
+_MAX_PROJECT_ID = 9223372036854775807
+
 _init_pid: int | None = None
 
 
@@ -179,7 +183,14 @@ class RustEnvelopeHandler:
         if scope.get("method") != "POST":
             return None
         match = _ENVELOPE_PATH_RE.match(scope.get("path", ""))
-        return int(match.group(1)) if match else None
+        if not match:
+            return None
+        project_id = int(match.group(1))
+        # Out-of-range: let the Django ingest path answer (403/404) rather
+        # than overflow the i64 session arg into a 500 + error capture.
+        if project_id > _MAX_PROJECT_ID:
+            return None
+        return project_id
 
     async def __call__(self, scope, receive, send, project_id: int) -> None:
         try:
