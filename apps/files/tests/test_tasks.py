@@ -58,3 +58,29 @@ class TasksTestCase(GlitchTipTestCase):
             cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 0)
         self.assertEqual(File.objects.count(), 0)
+
+    def test_cleanup_orphaned_file_blobs(self):
+        file = generate_file()
+        data = {"file_gzip": file}
+        self.client.post(self.url, data)
+        self.assertEqual(FileBlob.objects.count(), 1)
+
+        # Orphaned blob younger than 24h is kept
+        cleanup_old_files()
+        self.assertEqual(FileBlob.objects.count(), 1)
+
+        # Orphaned blob older than 24h is deleted
+        with freeze_time(now() + timedelta(hours=25)):
+            cleanup_old_files()
+        self.assertEqual(FileBlob.objects.count(), 0)
+
+    def test_cleanup_orphaned_file_blobs_keeps_referenced(self):
+        file = generate_file()
+        data = {"file_gzip": file}
+        self.client.post(self.url, data)
+        file_blob = FileBlob.objects.first()
+        baker.make(File, blob=file_blob)
+
+        with freeze_time(now() + timedelta(hours=25)):
+            cleanup_old_files()
+        self.assertEqual(FileBlob.objects.count(), 1)
