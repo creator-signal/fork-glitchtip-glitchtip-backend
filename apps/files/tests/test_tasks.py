@@ -64,15 +64,18 @@ class TasksTestCase(GlitchTipTestCase):
         data = {"file_gzip": file}
         self.client.post(self.url, data)
         self.assertEqual(FileBlob.objects.count(), 1)
+        blob = FileBlob.objects.first().blob
 
         # Orphaned blob younger than 24h is kept
         cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 1)
+        self.assertTrue(blob.storage.exists(blob.name))
 
         # Orphaned blob older than 24h is deleted
         with freeze_time(now() + timedelta(hours=25)):
             cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 0)
+        self.assertFalse(blob.storage.exists(blob.name))
 
     def test_cleanup_orphaned_file_blobs_keeps_referenced(self):
         file = generate_file()
@@ -84,3 +87,5 @@ class TasksTestCase(GlitchTipTestCase):
         with freeze_time(now() + timedelta(hours=25)):
             cleanup_old_files()
         self.assertEqual(FileBlob.objects.count(), 1)
+        blob = file_blob.blob
+        self.assertTrue(blob.storage.exists(blob.name))
