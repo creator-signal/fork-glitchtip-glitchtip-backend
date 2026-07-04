@@ -367,7 +367,7 @@ async def set_organization_owner(
     organization = new_owner.organization
     old_owner = organization.owner.organization_user
     if not (
-        old_owner.pk is user_id
+        old_owner.user_id == user_id
         or await organization.organization_users.filter(
             user=user_id, role=OrganizationUserRole.OWNER
         ).aexists()
