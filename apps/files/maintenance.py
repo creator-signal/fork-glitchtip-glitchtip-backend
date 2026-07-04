@@ -20,19 +20,43 @@ async def _delete_file_blobs(queryset, label):
         file_blobs = [fb async for fb in queryset.only("id", "blob")[:1000].aiterator()]
         if not file_blobs:
             break
-        ids = []
+        ids = [file_blob.id for file_blob in file_blobs]
+        # Delete rows before storage, filtering through the original queryset
+        # so its conditions are re-evaluated at delete time. Uploads dedupe on
+        # checksum with get_or_create, so a blob fetched as orphaned can gain
+        # a File reference before this delete runs; re-checking narrows that
+        # window, and deleting rows first means a skipped blob keeps both its
+        # row and its storage — a crash here can only leak an unreferenced
+        # storage object, never leave a File whose bytes are gone.
+        _, per_model = await queryset.filter(id__in=ids).adelete()
+        deleted_blobs = per_model.get(FileBlob._meta.label, 0)
+        if deleted_blobs == len(ids):
+            survivors = frozenset()
+        else:
+            survivors = {
+                pk
+                async for pk in FileBlob.objects.using(
+                    settings.MAINTENANCE_DATABASE_ALIAS
+                )
+                .filter(id__in=ids)
+                .values_list("id", flat=True)
+                .aiterator()
+            }
         for file_blob in file_blobs:
-            ids.append(file_blob.id)
+            if file_blob.id in survivors:
+                continue
             try:
-                await sync_to_async(file_blob.blob.delete)()
+                # django-storages has no async API, so the storage delete
+                # must hop threads. save=False skips an UPDATE on the
+                # already-deleted row.
+                await sync_to_async(file_blob.blob.delete)(save=False)
             except Exception:
-                logger.warning("Failed to delete storage for FileBlob %d", file_blob.id)
-        count, _ = (
-            await FileBlob.objects.using(settings.MAINTENANCE_DATABASE_ALIAS)
-            .filter(id__in=ids)
-            .adelete()
-        )
-        total_deleted += count
+                logger.warning(
+                    "Failed to delete storage for FileBlob %d",
+                    file_blob.id,
+                    exc_info=True,
+                )
+        total_deleted += deleted_blobs
     if total_deleted:
         logger.info("Deleted %d %s file blobs", total_deleted, label)
 
