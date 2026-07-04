@@ -8,7 +8,7 @@ from ninja import Router, Status
 from ninja.errors import HttpError, Throttled, ValidationError
 from ninja.pagination import paginate
 from organizations.backends import invitation_backend
-from organizations.signals import owner_changed, user_added
+from organizations.signals import owner_changed
 
 from apps.teams.models import Team
 from apps.teams.schema import OrganizationDetailSchema
@@ -92,14 +92,7 @@ async def create_organization(request: AuthHttpRequest, payload: OrganizationInS
     if not await is_organization_creation_open() and not user.is_superuser:
         raise HttpError(403, "Organization creation is not open")
     organization = await Organization.objects.acreate(**payload.dict())
-
-    org_user = await organization._org_user_model.objects.acreate(
-        user=user, organization=organization, role=OrganizationUserRole.OWNER
-    )
-    await organization._org_owner_model.objects.acreate(
-        organization=organization, organization_user=org_user
-    )
-    user_added.send(sender=organization, user=user)
+    await organization.aadd_user(user)
 
     return Status(
         201,
