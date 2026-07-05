@@ -47,7 +47,7 @@ PUT /users/<me_id>/notifications/
 
 
 def generate_user_seed_key(user_id: int):
-    return f"seed{user_id}"
+    return f"users:recovery-seed:{user_id}"
 
 
 def get_user_queryset(user_id: int, add_details=False):
@@ -270,9 +270,10 @@ async def set_recovery_codes(request: AuthHttpRequest, payload: RecoveryCodeSche
     ).adelete()
     try:
         await AsyncRecoveryCodes.aactivate(user, seed=seed)
-    except IntegrityError:
-        # A concurrent confirm for the same seed won the delete/activate race;
-        # the codes the user holds are live either way.
+    except (IntegrityError, ValueError):
+        # A concurrent confirm won the delete/activate race (IntegrityError on
+        # the unique-type insert, or ValueError from aactivate spotting the
+        # winner's row); the codes the user holds are live either way.
         raise HttpError(400, "Recovery codes were already set, use GET first")
     await cache.adelete(generate_user_seed_key(user_id))
     return Status(204, None)
