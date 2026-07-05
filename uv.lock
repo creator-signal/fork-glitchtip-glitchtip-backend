@@ -822,16 +822,17 @@ wheels = [
 ]
 
 [[package]]
-name = "django-allauth"
-version = "65.16.1"
+name = "django-allauth-async"
+version = "65.16.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "asgiref" },
     { name = "django" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/df/357187dfff18c7783e4911827a6c69437e290d7259a32a99c23fcd85997f/django_allauth-65.16.1.tar.gz", hash = "sha256:4425ac3088541c4c54983e16e08f6e3eb9f438dc1b1009534fa51c8bb739ed31", size = 2232835, upload-time = "2026-04-17T18:53:59.475Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/c5/ccd1b11b0dabd4c53afeaabd4425a5b6554bf143b9fbadc0d26b967375fa/django_allauth_async-65.16.1.5.tar.gz", hash = "sha256:29bbc25b8ac639c6280f749e897d7903b3540fba2bedef7e27ab3911ba33e7b4", size = 2370493, upload-time = "2026-07-05T14:36:41.548Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/58/d95b6c3088d83697bfd93782ee57bc6a6462e41eb19121a947b8a015396a/django_allauth-65.16.1-py3-none-any.whl", hash = "sha256:e49df24056bf37c44e56aaad1e51f78994b7d175bc3476d65e8f8f58390a8ce8", size = 2051868, upload-time = "2026-04-17T18:54:12.032Z" },
+    { url = "https://files.pythonhosted.org/packages/26/b7/87ca11871230a2e31ed5d53e9c99f4dd75887d780e8e03d92812e8be1eaf/django_allauth_async-65.16.1.5-py3-none-any.whl", hash = "sha256:667d2fc0cfbd52d0880d29991a62006fac737117e19ca230fdbf4fa169d43dce", size = 2263454, upload-time = "2026-07-05T14:36:39.851Z" },
 ]
 
 [package.optional-dependencies]
@@ -1449,7 +1450,7 @@ dependencies = [
     { name = "boto3" },
     { name = "cxxfilt" },
     { name = "django" },
-    { name = "django-allauth", extra = ["mfa", "socialaccount"] },
+    { name = "django-allauth-async", extra = ["mfa", "socialaccount"] },
     { name = "django-anymail" },
     { name = "django-async-backend" },
     { name = "django-cors-headers" },
@@ -1511,7 +1512,7 @@ requires-dist = [
     { name = "boto3", specifier = "~=1.34" },
     { name = "cxxfilt", specifier = "~=0.3.0" },
     { name = "django", specifier = "~=6.0" },
-    { name = "django-allauth", extras = ["mfa", "socialaccount"], specifier = "~=65.0" },
+    { name = "django-allauth-async", extras = ["mfa", "socialaccount"], specifier = "==65.16.1.5" },
     { name = "django-anymail", specifier = "~=15.0" },
     { name = "django-async-backend", specifier = "~=6.0" },
     { name = "django-cors-headers", specifier = "~=4.0" },
