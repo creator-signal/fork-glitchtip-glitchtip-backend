@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID
 
+from allauth_async.socialaccount.providers.openid_connect import (
+    _openid_config_cache_key,
+)
 from django.conf import settings
+from django.core.cache import cache
 from django.db import connection
 from django.test import (
     SimpleTestCase,
@@ -73,19 +77,19 @@ class SettingsTestCase(TestCase):
                 provider=provider,
             )
         # OIDC discovery is cached; pre-populate to avoid a real outbound
-        # request and to assert the cached value is consumed.
-        from django.core.cache import cache
-
-        from glitchtip.oidc_discovery import _cache_key
-
+        # request and to assert the cached value is consumed. The key uses the
+        # provider's normalized well-known URL, shared with the login flow.
+        cache_key = _openid_config_cache_key(
+            "https://example.com/.well-known/openid-configuration"
+        )
         await cache.aset(
-            _cache_key("https://example.com"),
+            cache_key,
             {"authorization_endpoint": "https://example.com/authorize"},
         )
         try:
             res = await self.async_client.get(self.url)
         finally:
-            await cache.adelete(_cache_key("https://example.com"))
+            await cache.adelete(cache_key)
         self.assertContains(res, social_app.name)
         self.assertContains(res, "https://example.com/authorize")
 
