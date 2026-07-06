@@ -64,11 +64,18 @@ async def process_response(monitor, response):
                     # Save only first 500k chars, to roughly reduce disk usage
                     # Note that a unicode char is not always one byte
                     # Only save on changes
-                    monitor["data"] = {"payload": payload[:PAYLOAD_SAVE_LIMIT]}
+                    monitor["data"] = {
+                        "message": f"Expected body '{monitor['expected_body']}' not found",
+                        "payload": payload[:PAYLOAD_SAVE_LIMIT]
+                    }
         else:
             monitor["is_up"] = True
     else:
         monitor["reason"] = MonitorCheckReason.STATUS
+        monitor["data"] = {
+            "message": f"Expected response code '{monitor['expected_status']}', received '{response.status}'",
+            "status": response.status,
+        }
 
 
 async def fetch(session, monitor):
