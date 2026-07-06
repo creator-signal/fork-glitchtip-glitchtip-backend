@@ -1155,8 +1155,10 @@ ENABLE_ORGANIZATION_CREATION = env.bool(
 )
 
 AUTHENTICATION_BACKENDS = (
-    # Needed to login by username in Django admin, regardless of `allauth`
-    "django.contrib.auth.backends.ModelBackend",
+    # Needed to login by username in Django admin, regardless of `allauth`.
+    # Subclassed to keep the unknown-user dummy hash off the event loop;
+    # revert to django.contrib.auth.backends.ModelBackend on Django 6.1+.
+    "apps.users.auth_backends.ModelBackend",
     # `allauth` authentication methods (login by e-mail), with a native
     # aauthenticate() so async login paths never fall back to thread offload
     "allauth_async.account.auth_backends.AsyncAuthenticationBackend",
