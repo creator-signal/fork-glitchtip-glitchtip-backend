@@ -699,6 +699,68 @@ class NativeSymbolicationTestCase(GlitchTestCase):
         self.assertEqual(result.frames[0]["lineno"], 68)
         self.assertTrue(result.frames[0]["resolved"])
 
+    def test_resolve_expands_inline_frames(self):
+        """Inlined functions should expand into separate stack frames."""
+        # Innermost (first returned by sym_cache.lookup)
+        inner_symbol = MagicMock()
+        inner_symbol.symbol = "core::option::unwrap"
+        inner_symbol.full_path = "/rust/library/core/src/option.rs"
+        inner_symbol.line = 971
+        inner_symbol.lang = "rust"
+
+        # Outer caller that was inlined
+        outer_symbol = MagicMock()
+        outer_symbol.symbol = "myapp::process_data"
+        outer_symbol.full_path = "/src/lib.rs"
+        outer_symbol.line = 42
+        outer_symbol.lang = "rust"
+
+        mock_sym_cache = MagicMock()
+        # lookup returns innermost first
+        mock_sym_cache.lookup.return_value = [inner_symbol, outer_symbol]
+
+        mock_obj = MagicMock()
+        mock_obj.arch = "wasm32"
+
+        mock_archive = MagicMock()
+        mock_archive.iter_objects.return_value = iter([mock_obj])
+
+        stacktrace = {
+            "frames": [
+                {
+                    "instruction_addr": "0x1234",
+                    "image_addr": "0x0",
+                    "function": "wasm-function[42]",
+                }
+            ]
+        }
+
+        with (
+            patch("apps.difs.stacktrace_processor.Archive") as MockArchive,
+            patch("apps.difs.stacktrace_processor.SymCache") as MockSymCache,
+        ):
+            MockArchive.open.return_value = mock_archive
+            MockSymCache.from_object.return_value = mock_sym_cache
+
+            result = StacktraceProcessor.resolve_native_stacktrace(
+                stacktrace, "/fake/symbols.wasm", arch=None
+            )
+
+        self.assertIsNotNone(result)
+        # Two symbols should produce two frames
+        self.assertEqual(len(result.frames), 2)
+        self.assertEqual(result.score, 2)
+
+        # Outermost (caller) should be first after reversal
+        self.assertEqual(result.frames[0]["filename"], "/src/lib.rs")
+        self.assertEqual(result.frames[0]["lineno"], 42)
+        self.assertEqual(result.frames[0]["function"], "myapp::process_data")
+
+        # Innermost should be second
+        self.assertEqual(result.frames[1]["filename"], "/rust/library/core/src/option.rs")
+        self.assertEqual(result.frames[1]["lineno"], 971)
+        self.assertEqual(result.frames[1]["function"], "core::option::unwrap")
+
 
 class HasNativeFramesTestCase(GlitchTestCase):
     """Test frame-based detection of native vs proguard events."""

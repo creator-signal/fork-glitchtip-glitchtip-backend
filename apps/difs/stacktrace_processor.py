@@ -304,46 +304,58 @@ class StacktraceProcessor:
                 )
                 instruction_addr = parse_addr(frame.get("instruction_addr"))
                 addr = instruction_addr - image_addr
-                symbol = sym_cache.lookup(addr)
-                digested_symbol = digest_symbol(symbol)
+                symbols = list(sym_cache.lookup(addr))
 
-                if digested_symbol is not None:
-                    frame["resolved"] = True
-                    frame["filename"] = digested_symbol.full_path
-                    frame["lineno"] = digested_symbol.line
+                if not symbols:
+                    resolved_frames.append(frame)
+                    continue
+
+                # Expand inline chain: each symbol becomes its own frame.
+                # The list is innermost-first; reverse so outermost (caller)
+                # comes first, matching stack trace convention.
+                for i, sym in enumerate(reversed(symbols)):
+                    if sym.lang == "unknown" and not sym.symbol:
+                        continue
+                    inline_frame = copy.copy(frame)
+                    inline_frame["resolved"] = True
+                    inline_frame["filename"] = sym.full_path
+                    inline_frame["abs_path"] = sym.full_path
+                    inline_frame["lineno"] = sym.line
                     try:
-                        frame["function"] = cxxfilt.demangle(digested_symbol.symbol)
-                    except cxxfilt.InvalidName:
-                        frame["function"] = (
-                            digested_symbol.symbol
-                        )  # Keep original if demangling fails
+                        from rust_demangler import demangle as rust_demangle
+                        inline_frame["function"] = rust_demangle(sym.symbol)
+                    except Exception:
+                        try:
+                            inline_frame["function"] = cxxfilt.demangle(sym.symbol)
+                        except cxxfilt.InvalidName:
+                            inline_frame["function"] = sym.symbol
                     score = score + 1
 
                     # Extract source context from source bundle if available
                     if (
                         project_id
                         and debug_id
-                        and digested_symbol.full_path
-                        and digested_symbol.line > 0
+                        and sym.full_path
+                        and sym.line > 0
                     ):
                         source_bundle = find_source_bundle(project_id, debug_id)
                         if source_bundle:
                             source_lines = extract_source_from_bundle(
-                                source_bundle, digested_symbol.full_path
+                                source_bundle, sym.full_path
                             )
-                            if source_lines and digested_symbol.line <= len(
+                            if source_lines and sym.line <= len(
                                 source_lines
                             ):
-                                line_num = digested_symbol.line - 1  # 0-indexed
-                                frame["context_line"] = source_lines[line_num]
-                                frame["pre_context"] = source_lines[
+                                line_num = sym.line - 1  # 0-indexed
+                                inline_frame["context_line"] = source_lines[line_num]
+                                inline_frame["pre_context"] = source_lines[
                                     max(0, line_num - 5) : line_num
                                 ]
-                                frame["post_context"] = source_lines[
+                                inline_frame["post_context"] = source_lines[
                                     line_num + 1 : min(len(source_lines), line_num + 6)
                                 ]
 
-                resolved_frames.append(frame)
+                    resolved_frames.append(inline_frame)
 
             return ResolvedStacktrace(score=score, frames=resolved_frames)
         except Exception as e:
