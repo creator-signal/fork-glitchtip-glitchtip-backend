@@ -632,7 +632,7 @@ MIDDLEWARE += [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.locale.LocaleMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
+    "allauth_async.account.middleware.AsyncAccountMiddleware",
 ]
 
 if "GRANIAN_STATIC_PATH_MOUNT" in os.environ:
@@ -1127,6 +1127,8 @@ HEADLESS_FRONTEND_URLS = {
 }
 HEADLESS_CLIENTS = ("browser",)
 HEADLESS_SERVE_SPECIFICATION = True
+MFA_ADAPTER = "allauth_async.mfa.adapter.AsyncDefaultMFAAdapter"
+HEADLESS_ADAPTER = "allauth_async.headless.adapter.AsyncDefaultHeadlessAdapter"
 MFA_TOTP_ISSUER = GLITCHTIP_URL.hostname
 MFA_TOTP_TOLERANCE = 1
 MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
@@ -1153,10 +1155,13 @@ ENABLE_ORGANIZATION_CREATION = env.bool(
 )
 
 AUTHENTICATION_BACKENDS = (
-    # Needed to login by username in Django admin, regardless of `allauth`
-    "django.contrib.auth.backends.ModelBackend",
-    # `allauth` specific authentication methods, such as login by e-mail
-    "allauth.account.auth_backends.AuthenticationBackend",
+    # Needed to login by username in Django admin, regardless of `allauth`.
+    # Subclassed to keep the unknown-user dummy hash off the event loop;
+    # revert to django.contrib.auth.backends.ModelBackend on Django 6.1+.
+    "apps.users.auth_backends.ModelBackend",
+    # `allauth` authentication methods (login by e-mail), with a native
+    # aauthenticate() so async login paths never fall back to thread offload
+    "allauth_async.account.auth_backends.AsyncAuthenticationBackend",
 )
 
 NINJA_PAGINATION_CLASS = "glitchtip.api.pagination.AsyncLinkHeaderPagination"
