@@ -1,6 +1,5 @@
 import contextlib
 import json
-import os
 import tempfile
 import zipfile
 from hashlib import sha1
@@ -750,12 +749,17 @@ class IsInAppFilteringTestCase(GlitchTestCase):
             self.assertFalse(
                 _is_in_app({"function": "std::panic::catch_unwind"})
             )
-            self.assertFalse(
+            # "libstd" contains "std" but not "std::" — substring must include the colons
+            self.assertTrue(
                 _is_in_app({"filename": "/rust/libstd/panic.rs"})
             )
 
     def test_resolve_native_sets_in_app_on_frames(self):
-        """resolve_native_stacktrace sets in_app on every output frame."""
+        """resolve_native_stacktrace sets in_app on every output frame.
+
+        _is_in_app runs AFTER resolution, so it sees the resolved
+        filename and function — not the pre-resolution frame fields.
+        """
         mock_symbol = MagicMock()
         mock_symbol.symbol = "core::option::unwrap"
         mock_symbol.full_path = "/rust/library/core/src/option.rs"
@@ -786,7 +790,7 @@ class IsInAppFilteringTestCase(GlitchTestCase):
             patch("apps.difs.stacktrace_processor.SymCache") as MockSymCache,
             patch(
                 "apps.difs.stacktrace_processor._IN_APP_EXCLUDE",
-                ["wasm-function"],
+                ["/rust/library/"],
             ),
         ):
             MockArchive.open.return_value = mock_archive
