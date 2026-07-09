@@ -129,7 +129,7 @@ if not DEBUG and not TESTING:
 # check a matching ceiling.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
-    5 * 1024 * 1024,  # 5 MB
+    32 * 1024 * 1024,  # 32 MiB
 )
 
 # Raw request body cap before view handling. For ingest endpoints gt_rust
@@ -139,11 +139,12 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
 # source-map chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk,
 # so this does not need to cover them.
 #
-# 15 MB default gives plenty of headroom over the 5 MB ingest cap for any
-# non-ingest JSON bodies (webhooks, bulk invites, assemble manifests) while
-# still killing the pre-existing 4 GB DoS vector. Operators can raise via env;
-# if GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE is itself raised above 15 MB, this
-# default scales with it so the two stay coherent.
+# Default is max(15 MB, ingest cap + 1 MB) so it always clears the ingest
+# ceiling: at the 32 MiB ingest cap that's ~33 MiB, headroom for any
+# non-ingest JSON body (webhooks, bulk invites, assemble manifests) while still
+# killing the pre-existing 4 GB DoS vector. The Rust ingest path frames one item
+# at a time, so the larger decompressed ceiling is bounded per-request memory,
+# not a spike. Operators can raise or lower either via env.
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
     "DATA_UPLOAD_MAX_MEMORY_SIZE",
     default=max(15 * 1024 * 1024, GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE + 1024 * 1024),
@@ -823,6 +824,15 @@ if env.str("DATABASE_HOST", None):
 DATABASE_ENGINE = env.str(
     "DATABASE_ENGINE", "django_async_backend.db.backends.postgresql"
 )
+# Serve POST /api/<project_id>/envelope/ entirely in Rust (gt_rust.ingest):
+# DSN auth, decompression/framing, PII scrubbing, dedupe and vtasks enqueue
+# run on the shared tokio runtime, and the event payload never materializes
+# on the Python heap. The ingest path issues its auth query on the very pool
+# the ORM uses, so enabling it forces the Rust database engine and the
+# gt_rust valkey cache driver (one runtime for ORM + cache + ingest).
+GLITCHTIP_RUST_INGEST = env.bool("GLITCHTIP_RUST_INGEST", False)
+if GLITCHTIP_RUST_INGEST:
+    DATABASE_ENGINE = "gt_rust.django_backend"
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
     # async-backend's postgresql backend extends Django's stock postgresql
@@ -948,6 +958,12 @@ if VALKEY_URL:
         _valkey_options["ssl_keyfile"] = _ssl_key
     if _ssl_reqs := env.str("VALKEY_SSL_CERT_REQS", None):
         _valkey_options["ssl_cert_reqs"] = _ssl_reqs
+    if GLITCHTIP_RUST_INGEST:
+        # The Rust ingest path issues its Valkey commands on the cache
+        # driver's connection, so the cache must run gt_rust's re-exported
+        # driver (same code as vcache's bundled one, but living in the same
+        # .so and tokio runtime as the ingest pipeline and the DB driver).
+        _valkey_options["DRIVER_CLASS"] = "gt_rust.valkey.RustValkeyDriver"
     CACHES = {
         "default": {
             "BACKEND": "django_vcache.backend.ValkeyCache",
@@ -972,6 +988,11 @@ else:  # Fallback to database cache
     INSTALLED_APPS.append("django.contrib.sessions")
     if "django_vtasks.db" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_vtasks.db")
+
+if GLITCHTIP_RUST_INGEST and not VALKEY_URL:
+    # The Rust ingest path enqueues directly to the Valkey task broker; it has
+    # no database-backend fallback.
+    raise ImproperlyConfigured("GLITCHTIP_RUST_INGEST requires VALKEY_URL")
 
 SESSION_COOKIE_AGE = env.int("SESSION_COOKIE_AGE", global_settings.SESSION_COOKIE_AGE)
 
