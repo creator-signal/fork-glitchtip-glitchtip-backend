@@ -129,7 +129,7 @@ if not DEBUG and not TESTING:
 # check a matching ceiling.
 GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     "GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE",
-    5 * 1024 * 1024,  # 5 MB
+    32 * 1024 * 1024,  # 32 MiB
 )
 
 # Raw request body cap before view handling. For ingest endpoints gt_rust
@@ -139,11 +139,12 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
 # source-map chunks) go through FILE_UPLOAD_MAX_MEMORY_SIZE and spill to disk,
 # so this does not need to cover them.
 #
-# 15 MB default gives plenty of headroom over the 5 MB ingest cap for any
-# non-ingest JSON bodies (webhooks, bulk invites, assemble manifests) while
-# still killing the pre-existing 4 GB DoS vector. Operators can raise via env;
-# if GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE is itself raised above 15 MB, this
-# default scales with it so the two stay coherent.
+# Default is max(15 MB, ingest cap + 1 MB) so it always clears the ingest
+# ceiling: at the 32 MiB ingest cap that's ~33 MiB, headroom for any
+# non-ingest JSON body (webhooks, bulk invites, assemble manifests) while still
+# killing the pre-existing 4 GB DoS vector. The Rust ingest path frames one item
+# at a time, so the larger decompressed ceiling is bounded per-request memory,
+# not a spike. Operators can raise or lower either via env.
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
     "DATA_UPLOAD_MAX_MEMORY_SIZE",
     default=max(15 * 1024 * 1024, GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE + 1024 * 1024),

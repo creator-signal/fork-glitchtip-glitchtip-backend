@@ -175,6 +175,33 @@ class RustIngestTestCase(EventIngestTestCase):
         await self._drain_rust_queue()
         self.assertEqual(await IssueEvent.objects.acount(), 0)
 
+    async def test_header_dsn_auth_no_query_credential(self):
+        """Worst case: the credential is *only* in the envelope-header ``dsn`` —
+        no query string, no auth header. The Python view denies this (it reads
+        only the query / Authorization / X-Sentry-Auth); the Rust path recovers
+        the public key from the header and accepts, so a mis-configured SDK's
+        events are ingested instead of silently dropped."""
+        data, _ = self._envelope()
+        data[0]["dsn"] = (
+            f"https://{self.projectkey.public_key}@localhost/{self.project.id}"
+        )
+        status, _, body = await self._post(list_to_envelope(data).encode(), query="")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["id"], data[0]["event_id"])
+        await self._drain_rust_queue()
+        self.assertEqual(await IssueEvent.objects.acount(), 1)
+
+    async def test_header_dsn_bad_key_denied(self):
+        """A bogus key in the envelope-header DSN, with no query credential, is
+        denied — the header path rejects junk, it does not wave it through."""
+        data, _ = self._envelope()
+        data[0]["dsn"] = f"https://{uuid.uuid4().hex}@localhost/{self.project.id}"
+        status, _, body = await self._post(list_to_envelope(data).encode(), query="")
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body), {"detail": "Denied"})
+        await self._drain_rust_queue()
+        self.assertEqual(await IssueEvent.objects.acount(), 0)
+
     async def test_hard_throttle(self):
         await self.organization.__class__.objects.filter(
             id=self.organization.id
