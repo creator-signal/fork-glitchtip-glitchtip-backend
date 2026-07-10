@@ -5,14 +5,18 @@ Tests for log ingestion pipeline.
 import json
 import time
 from datetime import datetime, timezone
+from unittest import mock
 
 from django.core.cache import cache
+from django.db.utils import IntegrityError
 from django.tasks import task_backends
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import run_async_closing
+from apps.shared.raw_sql import copy_rows
+from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
 from ..constants import LogLevel
@@ -143,6 +147,60 @@ class LogIngestProcessingTestCase(TransactionTestCase):
             "projects.Project", organization__scrub_ip_addresses=False
         )
         self.organization = self.project.organization
+
+    LOG_EVENT_COLUMNS = [
+        "id",
+        "trace_id",
+        "organization_id",
+        "project_id",
+        "span_id",
+        "level",
+        "severity_number",
+        "body",
+        "service",
+        "environment",
+        "host",
+        "data",
+    ]
+
+    def test_copy_fallback_on_duplicate(self):
+        """A conflicting COPY falls back to the conflict-tolerant INSERT."""
+        now = datetime.now(timezone.utc)
+        message = LogTaskMessage(
+            project_id=self.project.id,
+            organization_id=self.organization.id,
+            received=now,
+            logs=[{"timestamp": now.timestamp(), "level": "info", "body": "dup"}],
+        )
+        with mock.patch(
+            "apps.logs.process_logs.copy_rows",
+            side_effect=IntegrityError("duplicate key"),
+        ):
+            count = process_log_events([message])
+        self.assertEqual(count, 1)
+        self.assertEqual(LogEvent.objects.count(), 1)
+
+    def test_copy_rows_duplicate_raises_integrity_error(self):
+        """copy_rows surfaces primary-key conflicts as Django's IntegrityError."""
+        row = (
+            str(UUID7Helper.from_datetime()),
+            None,
+            self.organization.id,
+            self.project.id,
+            None,
+            int(LogLevel.INFO),
+            None,
+            "copied body",
+            "",
+            "",
+            "",
+            "{}",
+        )
+        run_async_closing(copy_rows, "logs_logevent", self.LOG_EVENT_COLUMNS, [row])
+        self.assertEqual(LogEvent.objects.count(), 1)
+        with self.assertRaises(IntegrityError):
+            run_async_closing(copy_rows, "logs_logevent", self.LOG_EVENT_COLUMNS, [row])
+        self.assertEqual(LogEvent.objects.count(), 1)
 
     def test_process_single_log(self):
         """Test processing a single log event"""

@@ -5,8 +5,10 @@ import tempfile
 import uuid
 import zipfile
 from hashlib import sha1
+from unittest import mock
 
 from django.core.files import File as DjangoFile
+from django.db.utils import IntegrityError
 from django.tasks import task_backends
 from django.test import override_settings
 from django.urls import reverse
@@ -60,6 +62,15 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     - Default, Error, and CSP types
     - Graceful failure such as duplicate event ids or invalid data
     """
+
+    def test_copy_fallback_on_duplicate(self):
+        """A conflicting COPY falls back to the conflict-tolerant INSERT."""
+        with mock.patch(
+            "apps.event_ingest.process_event.copy_rows",
+            side_effect=IntegrityError("duplicate key"),
+        ):
+            self.process_events([{}, {}])
+        self.assertEqual(IssueEvent.objects.count(), 2)
 
     def test_two_events(self):
         # TODO: re-add assertNumQueries once unit tests run on the async

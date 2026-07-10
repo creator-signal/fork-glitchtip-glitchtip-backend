@@ -3,8 +3,10 @@
 Uses django-async-backend's native async cursor via ``async_connections``.
 """
 
+from collections.abc import Iterable
 from typing import Any
 
+from django.db import connections
 from django_async_backend.db import async_connections
 
 
@@ -127,3 +129,48 @@ async def fetchall_unnest(
         return [], []
     columns = [list(c) for c in zip(*value_params)]
     return await fetchall(sql, columns, db_alias=db_alias)
+
+
+def copy_from_supported(db_alias: str = "default") -> bool:
+    """Whether :func:`copy_rows` (psycopg ``COPY FROM STDIN``) applies.
+
+    The Rust driver caps its per-connection buffers internally, so its
+    INSERT path doesn't retain batch-sized memory and COPY buys nothing
+    there; it also has its own COPY semantics. libpq has no such cap —
+    a composed INSERT permanently grows the connection's wire buffer to
+    the statement size — so COPY is the bounded bulk-write path for the
+    psycopg engine specifically.
+    """
+    return "gt_rust" not in connections.databases[db_alias]["ENGINE"]
+
+
+async def copy_rows(
+    table: str,
+    columns: list[str],
+    rows: Iterable[tuple],
+    db_alias: str = "default",
+) -> int:
+    """COPY ``rows`` into ``table`` (text format, streamed row-by-row).
+
+    Unlike a composed INSERT statement — which stages the entire batch in
+    the connection's libpq output buffer and permanently grows it to the
+    largest batch ever sent — COPY streams in small chunks, so connection
+    memory stays bounded regardless of batch size. It also skips composing
+    the batch into one SQL string in Python.
+
+    COPY cannot express ON CONFLICT: a conflicting row aborts the whole
+    batch (raised as ``django.db.IntegrityError``). Callers that need
+    conflict tolerance must catch it and fall back to their INSERT path.
+    """
+    cols = ", ".join(f'"{c}"' for c in columns)
+    count = 0
+    async with await async_connections[db_alias].cursor() as cursor:
+        # ``cursor.copy`` reaches the underlying psycopg cursor via the
+        # wrapper's attribute proxy, which doesn't wrap exceptions — do it
+        # here so callers see Django's IntegrityError, not psycopg's.
+        with cursor.db.wrap_database_errors:
+            async with cursor.copy(f'COPY "{table}" ({cols}) FROM STDIN') as copy:
+                for row in rows:
+                    await copy.write_row(row)
+                    count += 1
+    return count
