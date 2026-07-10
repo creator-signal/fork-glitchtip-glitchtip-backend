@@ -7,7 +7,7 @@ from uuid import UUID
 import orjson
 from django.db.utils import IntegrityError
 
-from apps.shared.raw_sql import copy_from_supported, copy_rows, execute_unnest
+from apps.shared.raw_sql import copy_rows, execute_unnest
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -282,44 +282,39 @@ async def process_log_events(messages: list) -> int:
     if not log_rows:
         return 0
 
-    inserted = False
-    if copy_from_supported():
-        # Log bodies and attributes can be large; stream the batch with COPY
-        # so it never sits whole in the connection's wire buffer (see
-        # copy_rows). IntegrityError — an id collision (near-impossible
-        # with uuid7) or e.g. a missing partition — retries via the INSERT
-        # below, which no-ops duplicates and surfaces real errors as before.
-        try:
-            await copy_rows(
-                "logs_logevent",
-                [
-                    "id",
-                    "trace_id",
-                    "organization_id",
-                    "project_id",
-                    "span_id",
-                    "level",
-                    "severity_number",
-                    "body",
-                    "service",
-                    "environment",
-                    "host",
-                    "data",
-                ],
-                log_rows,
-            )
-            inserted = True
-        except IntegrityError as e:
-            logger.info(
-                "Log event COPY failed (%s); retrying with conflict-tolerant INSERT",
-                type(e).__name__,
-            )
-    if not inserted:
-        # Column-major UNNEST — one round-trip, one statement shape
-        # regardless of batch size, and avoids the 65535 bind-param cap
-        # that VALUES would hit on wide schemas. ``ON CONFLICT DO NOTHING``
-        # tolerates the rare duplicate id when two clients emit the same
-        # UUIDv7 timestamp+random in the same microsecond.
+    # Log bodies and attributes can be large; stream the batch with COPY
+    # so it never sits whole in the connection's wire buffer and the
+    # server skips parsing a megabyte statement (see copy_rows).
+    # IntegrityError — an id collision (near-impossible with uuid7) or
+    # e.g. a missing partition — retries via the conflict-tolerant
+    # INSERT below, which no-ops duplicates and surfaces real errors as
+    # before.
+    try:
+        await copy_rows(
+            "logs_logevent",
+            [
+                "id",
+                "trace_id",
+                "organization_id",
+                "project_id",
+                "span_id",
+                "level",
+                "severity_number",
+                "body",
+                "service",
+                "environment",
+                "host",
+                "data",
+            ],
+            log_rows,
+        )
+    except IntegrityError as e:
+        logger.info(
+            "Log event COPY failed (%s); retrying with conflict-tolerant INSERT",
+            type(e).__name__,
+        )
+        # Column-major UNNEST sidesteps the 65535 bind-param cap;
+        # ``ON CONFLICT DO NOTHING`` tolerates duplicate ids.
         await execute_unnest(
             sql=(
                 "INSERT INTO logs_logevent "

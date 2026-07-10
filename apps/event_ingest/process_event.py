@@ -29,7 +29,6 @@ from apps.performance.histogram import (
 )
 from apps.performance.parameterize import parameterize_description
 from apps.shared.raw_sql import (
-    copy_from_supported,
     copy_rows,
     execute,
     execute_mogrified_values,
@@ -1192,45 +1191,40 @@ async def process_issue_events(
             )
             for e in issue_events
         ]
-        inserted = False
-        if copy_from_supported():
-            # Event payloads are the largest values ingest writes; stream
-            # them with COPY so the batch never sits whole in the
-            # connection's wire buffer (see copy_rows). IntegrityError —
-            # an id collision (near-impossible with uuid7) or e.g. a
-            # missing partition — retries via the INSERT below, which
-            # no-ops duplicates and surfaces real errors as before.
-            try:
-                await copy_rows(
-                    "issue_events_issueevent",
-                    [
-                        "id",
-                        "event_id",
-                        "timestamp",
-                        "issue_id",
-                        "organization_id",
-                        "release_id",
-                        "type",
-                        "level",
-                        "title",
-                        "transaction",
-                        "data",
-                        "tags",
-                        "hashes",
-                    ],
-                    ((*row[:-1], [row[-1]]) for row in value_params),
-                )
-                inserted = True
-            except IntegrityError as e:
-                logger.info(
-                    "Issue event COPY failed (%s); retrying with "
-                    "conflict-tolerant INSERT",
-                    type(e).__name__,
-                )
-        if not inserted:
-            # Column-major unnest sidesteps the 65535 bind-param cap and
-            # skips per-row mogrify; ON CONFLICT DO NOTHING tolerates
-            # duplicate ids (redelivered batch or uuid7 collision).
+        # Event payloads are the largest values ingest writes; stream
+        # them with COPY so the batch never sits whole in the
+        # connection's wire buffer and the server skips parsing a
+        # megabyte statement (see copy_rows). IntegrityError — an id
+        # collision (near-impossible with uuid7) or e.g. a missing
+        # partition — retries via the conflict-tolerant INSERT below,
+        # which no-ops duplicates and surfaces real errors as before.
+        try:
+            await copy_rows(
+                "issue_events_issueevent",
+                [
+                    "id",
+                    "event_id",
+                    "timestamp",
+                    "issue_id",
+                    "organization_id",
+                    "release_id",
+                    "type",
+                    "level",
+                    "title",
+                    "transaction",
+                    "data",
+                    "tags",
+                    "hashes",
+                ],
+                ((*row[:-1], [row[-1]]) for row in value_params),
+            )
+        except IntegrityError as e:
+            logger.info(
+                "Issue event COPY failed (%s); retrying with conflict-tolerant INSERT",
+                type(e).__name__,
+            )
+            # Column-major unnest sidesteps the 65535 bind-param cap;
+            # ON CONFLICT DO NOTHING tolerates duplicate ids.
             await execute_unnest(
                 sql=(
                     "INSERT INTO issue_events_issueevent "

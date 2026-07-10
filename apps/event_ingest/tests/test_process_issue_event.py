@@ -5,7 +5,7 @@ import tempfile
 import uuid
 import zipfile
 from hashlib import sha1
-from unittest import mock, skipUnless
+from unittest import mock
 
 from django.core.files import File as DjangoFile
 from django.db.utils import IntegrityError
@@ -29,7 +29,6 @@ from apps.issue_events.models import (
 )
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
-from apps.shared.raw_sql import copy_from_supported
 from glitchtip.utils import get_random_string
 
 from ..process_event import process_issue_events
@@ -64,10 +63,6 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     - Graceful failure such as duplicate event ids or invalid data
     """
 
-    @skipUnless(
-        copy_from_supported(),
-        "COPY write path applies to the psycopg driver; the Rust postgres driver keeps its INSERT path (its buffers are capped driver-side)",
-    )
     def test_copy_fallback_on_duplicate(self):
         """A conflicting COPY falls back to the conflict-tolerant INSERT."""
         with mock.patch(

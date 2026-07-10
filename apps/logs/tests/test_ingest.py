@@ -5,7 +5,7 @@ Tests for log ingestion pipeline.
 import json
 import time
 from datetime import datetime, timezone
-from unittest import mock, skipUnless
+from unittest import mock
 
 from django.core.cache import cache
 from django.db.utils import IntegrityError
@@ -16,7 +16,7 @@ from django_async_backend.db import async_connections
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import run_async_closing
-from apps.shared.raw_sql import copy_from_supported, copy_rows
+from apps.shared.raw_sql import copy_rows
 from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
@@ -164,10 +164,6 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         "data",
     ]
 
-    @skipUnless(
-        copy_from_supported(),
-        "COPY write path applies to the psycopg driver; the Rust postgres driver keeps its INSERT path (its buffers are capped driver-side)",
-    )
     def test_copy_fallback_on_duplicate(self):
         """A conflicting COPY falls back to the conflict-tolerant INSERT."""
         now = datetime.now(timezone.utc)
@@ -186,10 +182,6 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         self.assertEqual(count, 1)
         self.assertEqual(LogEvent.objects.count(), 1)
 
-    @skipUnless(
-        copy_from_supported(),
-        "COPY write path applies to the psycopg driver; the Rust postgres driver keeps its INSERT path (its buffers are capped driver-side)",
-    )
     def test_copy_rows_with_debug_cursor(self):
         """copy_rows works under the debug cursor (DEBUG=True dev setups),
         whose ``copy`` override is an async generator for COPY TO reads."""
@@ -220,10 +212,6 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         self.assertEqual(count, 1)
         self.assertEqual(LogEvent.objects.count(), 1)
 
-    @skipUnless(
-        copy_from_supported(),
-        "COPY write path applies to the psycopg driver; the Rust postgres driver keeps its INSERT path (its buffers are capped driver-side)",
-    )
     def test_copy_rows_duplicate_raises_integrity_error(self):
         """copy_rows surfaces primary-key conflicts as Django's IntegrityError."""
         row = (

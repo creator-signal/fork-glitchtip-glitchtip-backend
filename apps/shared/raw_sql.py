@@ -6,9 +6,7 @@ Uses django-async-backend's native async cursor via ``async_connections``.
 from collections.abc import Iterable
 from typing import Any
 
-from django.db import connections
 from django_async_backend.db import async_connections
-from psycopg import sql as pg_sql
 
 
 async def fetchall(
@@ -132,21 +130,6 @@ async def fetchall_unnest(
     return await fetchall(sql, columns, db_alias=db_alias)
 
 
-def copy_from_supported(db_alias: str = "default") -> bool:
-    """Whether :func:`copy_rows` (psycopg ``COPY FROM STDIN``) applies.
-
-    Both database ENGINEs speak postgres; this distinguishes the
-    *driver*. The Rust driver (``gt_rust.django_backend``) caps its
-    per-connection buffers internally, so its INSERT path doesn't retain
-    batch-sized memory and COPY buys nothing there; it also has its own
-    COPY semantics. libpq has no such cap — a composed INSERT
-    permanently grows the connection's wire buffer to the statement
-    size — so COPY is the bounded bulk-write path for the psycopg
-    driver specifically.
-    """
-    return "gt_rust" not in connections.databases[db_alias]["ENGINE"]
-
-
 async def copy_rows(
     table: str,
     columns: list[str],
@@ -167,18 +150,20 @@ async def copy_rows(
     Must run in autocommit (the async-backend default) — inside a
     transaction a failed COPY leaves it aborted, so a fallback INSERT
     would fail too.
+
+    Runs on either database driver: both cursors expose the psycopg-shaped
+    ``copy()`` context manager with ``write_row()``.
     """
-    stmt = pg_sql.SQL("COPY {} ({}) FROM STDIN").format(
-        pg_sql.Identifier(table),
-        pg_sql.SQL(", ").join(pg_sql.Identifier(c) for c in columns),
-    )
+    quoted = [table, *columns]
+    cols = ", ".join('"' + c.replace('"', '""') + '"' for c in quoted[1:])
+    stmt = 'COPY "' + table.replace('"', '""') + f'" ({cols}) FROM STDIN'
     count = 0
     async with await async_connections[db_alias].cursor() as cursor:
-        # Go straight to the psycopg cursor: the wrapper's attribute proxy
+        # Go straight to the driver cursor: the wrapper's attribute proxy
         # doesn't wrap exceptions (handled here so callers see Django's
-        # IntegrityError), and the debug wrapper's ``copy`` override is an
-        # async generator built for COPY TO iteration — it can't serve as
-        # the COPY FROM context manager.
+        # IntegrityError), and the psycopg debug wrapper's ``copy``
+        # override is an async generator built for COPY TO iteration — it
+        # can't serve as the COPY FROM context manager.
         with cursor.db.wrap_database_errors:
             async with cursor.cursor.copy(stmt) as copy:
                 for row in rows:
