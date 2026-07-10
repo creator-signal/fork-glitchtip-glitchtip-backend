@@ -17,6 +17,7 @@ from apps.difs.stacktrace_processor import (
     extract_source_from_bundle,
     find_source_bundle,
     jvm_module_to_path,
+    open_source_bundle,
 )
 from apps.difs.tasks import ChecksumMismatched, difs_create_file_from_chunks
 from apps.event_ingest.schema import NativeDebugImage
@@ -487,6 +488,37 @@ struct ContentView: View {
         lines = extract_source_from_bundle(dif, "/NonExistent.swift")
 
         self.assertIsNone(lines)
+
+    def test_extract_source_from_bundle_relative_path(self):
+        """Relative paths (no leading /) should resolve correctly in source bundles.
+
+        Rust builds with trim-paths produce relative paths like
+        winit-0.30.9/src/lib.rs instead of absolute ones.
+        """
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        source_code = "pub fn init() {}\n"
+        relative_path = "winit-0.30.9/src/lib.rs"
+
+        dif = self.create_source_bundle(debug_id, source_code, f"/{relative_path}")
+
+        lines = extract_source_from_bundle(dif, relative_path)
+
+        self.assertIsNotNone(lines)
+        self.assertEqual(lines[0], "pub fn init() {}")
+
+    def test_open_source_bundle_relative_path(self):
+        """open_source_bundle lookup should handle relative paths the same way."""
+        debug_id = "93ec5160-1d69-3227-8410-c2687fce4ea2"
+        source_code = "pub fn init() {}\n"
+        relative_path = "winit-0.30.9/src/lib.rs"
+
+        dif = self.create_source_bundle(debug_id, source_code, f"/{relative_path}")
+
+        with open_source_bundle(dif) as get_source_lines:
+            lines = get_source_lines(relative_path)
+
+        self.assertIsNotNone(lines)
+        self.assertEqual(lines[0], "pub fn init() {}")
 
 
 class JvmSourceContextTestCase(GlitchTestCase):
