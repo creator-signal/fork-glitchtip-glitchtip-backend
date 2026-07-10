@@ -26,10 +26,6 @@ from glitchtip.memory_trim import PeriodicMemoryTrim  # noqa: E402
 
 application = IngestDispatcher(application)
 
-# Periodically return freed memory to the OS in every server process (the
-# scheduled maintenance task only trims the one pod that runs it).
-application = PeriodicMemoryTrim(application)
-
 _embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
 if _embed_worker:
     from django_vtasks.asgi import get_worker_application
@@ -216,3 +212,10 @@ except ImportError:
     # Graceful fallback if granian can't be imported (custom installations, etc.)
     # The wrapper is safe to use with uwsgi but this provides defensive error handling
     pass
+
+# Outermost so lifespan startup reaches it even in embed-worker mode (the
+# vtasks wrapper consumes lifespan without forwarding it inward): a pod
+# receiving no HTTP traffic still starts its trim timer. Periodically
+# returns freed memory to the OS in every ASGI process — the scheduled
+# maintenance task only trims the one pod that runs it.
+application = PeriodicMemoryTrim(application)

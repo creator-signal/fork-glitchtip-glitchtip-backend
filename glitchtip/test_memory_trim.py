@@ -1,7 +1,7 @@
 import asyncio
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from glitchtip.memory_trim import PeriodicMemoryTrim
 
@@ -35,19 +35,44 @@ class PeriodicMemoryTrimTestCase(SimpleTestCase):
         with mock.patch("glitchtip.memory_trim.malloc_trim") as trim:
             await wrapper({"type": "http"}, None, None)
             self.assertIsNotNone(wrapper._task)
-            await asyncio.sleep(0.05)
+            self.addCleanup(wrapper._task.cancel)
+            await asyncio.sleep(0.1)
             self.assertGreater(trim.call_count, 0)
-        wrapper._task.cancel()
 
     async def test_timer_started_once(self):
         wrapper = PeriodicMemoryTrim(MockASGIApp(), interval=60)
         await wrapper({"type": "http"}, None, None)
         task = wrapper._task
+        self.addCleanup(task.cancel)
         await wrapper({"type": "http"}, None, None)
         self.assertIs(wrapper._task, task)
-        task.cancel()
 
-    def test_env_interval(self):
-        with mock.patch.dict("os.environ", {"GLITCHTIP_MALLOC_TRIM_INTERVAL": "120"}):
-            wrapper = PeriodicMemoryTrim(MockASGIApp())
+    async def test_lifespan_shutdown_cancels_timer(self):
+        wrapper = PeriodicMemoryTrim(MockASGIApp(), interval=60)
+
+        messages = [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+
+        async def receive():
+            return messages.pop(0)
+
+        received = []
+
+        class DrainingApp:
+            async def __call__(self, scope, wrapped_receive, send):
+                received.append(await wrapped_receive())
+                received.append(await wrapped_receive())
+
+        wrapper.app = DrainingApp()
+        await wrapper({"type": "lifespan"}, receive, None)
+        # Messages pass through unchanged and the timer is cancelled.
+        self.assertEqual(
+            [m["type"] for m in received],
+            ["lifespan.startup", "lifespan.shutdown"],
+        )
+        await asyncio.sleep(0)
+        self.assertTrue(wrapper._task.cancelled())
+
+    @override_settings(GLITCHTIP_MALLOC_TRIM_INTERVAL=120)
+    def test_settings_interval(self):
+        wrapper = PeriodicMemoryTrim(MockASGIApp())
         self.assertEqual(wrapper.interval, 120)
