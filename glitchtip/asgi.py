@@ -22,8 +22,13 @@ print_startup_banner()
 
 # Route ingest paths to a lightweight handler with minimal middleware
 from glitchtip.ingest_asgi import IngestDispatcher  # noqa: E402
+from glitchtip.memory_trim import PeriodicMemoryTrim  # noqa: E402
 
 application = IngestDispatcher(application)
+
+# Periodically return freed memory to the OS in every server process (the
+# scheduled maintenance task only trims the one pod that runs it).
+application = PeriodicMemoryTrim(application)
 
 _embed_worker = os.environ.get("GLITCHTIP_EMBED_WORKER") == "true"
 if _embed_worker:
