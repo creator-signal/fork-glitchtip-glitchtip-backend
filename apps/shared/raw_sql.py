@@ -135,12 +135,14 @@ async def fetchall_unnest(
 def copy_from_supported(db_alias: str = "default") -> bool:
     """Whether :func:`copy_rows` (psycopg ``COPY FROM STDIN``) applies.
 
-    The Rust driver caps its per-connection buffers internally, so its
-    INSERT path doesn't retain batch-sized memory and COPY buys nothing
-    there; it also has its own COPY semantics. libpq has no such cap —
-    a composed INSERT permanently grows the connection's wire buffer to
-    the statement size — so COPY is the bounded bulk-write path for the
-    psycopg engine specifically.
+    Both database ENGINEs speak postgres; this distinguishes the
+    *driver*. The Rust driver (``gt_rust.django_backend``) caps its
+    per-connection buffers internally, so its INSERT path doesn't retain
+    batch-sized memory and COPY buys nothing there; it also has its own
+    COPY semantics. libpq has no such cap — a composed INSERT
+    permanently grows the connection's wire buffer to the statement
+    size — so COPY is the bounded bulk-write path for the psycopg
+    driver specifically.
     """
     return "gt_rust" not in connections.databases[db_alias]["ENGINE"]
 

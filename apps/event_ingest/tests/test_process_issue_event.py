@@ -64,7 +64,10 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     - Graceful failure such as duplicate event ids or invalid data
     """
 
-    @skipUnless(copy_from_supported(), "COPY applies to the psycopg engine only")
+    @skipUnless(
+        copy_from_supported(),
+        "COPY write path applies to the psycopg driver; the Rust postgres driver keeps its INSERT path (its buffers are capped driver-side)",
+    )
     def test_copy_fallback_on_duplicate(self):
         """A conflicting COPY falls back to the conflict-tolerant INSERT."""
         with mock.patch(
