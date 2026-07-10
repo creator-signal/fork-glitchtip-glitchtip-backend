@@ -5,17 +5,18 @@ Tests for log ingestion pipeline.
 import json
 import time
 from datetime import datetime, timezone
-from unittest import mock
+from unittest import mock, skipUnless
 
 from django.core.cache import cache
 from django.db.utils import IntegrityError
 from django.tasks import task_backends
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django_async_backend.db import async_connections
 from model_bakery import baker
 
 from apps.event_ingest.tests.utils import run_async_closing
-from apps.shared.raw_sql import copy_rows
+from apps.shared.raw_sql import copy_from_supported, copy_rows
 from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
@@ -163,6 +164,7 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         "data",
     ]
 
+    @skipUnless(copy_from_supported(), "COPY applies to the psycopg engine only")
     def test_copy_fallback_on_duplicate(self):
         """A conflicting COPY falls back to the conflict-tolerant INSERT."""
         now = datetime.now(timezone.utc)
@@ -175,11 +177,44 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         with mock.patch(
             "apps.logs.process_logs.copy_rows",
             side_effect=IntegrityError("duplicate key"),
-        ):
+        ) as copy_mock:
             count = process_log_events([message])
+        copy_mock.assert_called_once()
         self.assertEqual(count, 1)
         self.assertEqual(LogEvent.objects.count(), 1)
 
+    @skipUnless(copy_from_supported(), "COPY applies to the psycopg engine only")
+    def test_copy_rows_with_debug_cursor(self):
+        """copy_rows works under the debug cursor (DEBUG=True dev setups),
+        whose ``copy`` override is an async generator for COPY TO reads."""
+        row = (
+            str(UUID7Helper.from_datetime()),
+            None,
+            self.organization.id,
+            self.project.id,
+            None,
+            int(LogLevel.INFO),
+            None,
+            "debug cursor body",
+            "",
+            "",
+            "",
+            "{}",
+        )
+
+        async def run():
+            conn = async_connections["default"]
+            conn.force_debug_cursor = True
+            try:
+                return await copy_rows("logs_logevent", self.LOG_EVENT_COLUMNS, [row])
+            finally:
+                conn.force_debug_cursor = False
+
+        count = run_async_closing(run)
+        self.assertEqual(count, 1)
+        self.assertEqual(LogEvent.objects.count(), 1)
+
+    @skipUnless(copy_from_supported(), "COPY applies to the psycopg engine only")
     def test_copy_rows_duplicate_raises_integrity_error(self):
         """copy_rows surfaces primary-key conflicts as Django's IntegrityError."""
         row = (

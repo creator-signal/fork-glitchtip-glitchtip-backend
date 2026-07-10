@@ -1196,9 +1196,10 @@ async def process_issue_events(
         if copy_from_supported():
             # Event payloads are the largest values ingest writes; stream
             # them with COPY so the batch never sits whole in the
-            # connection's wire buffer (see copy_rows). The only conflict
-            # possible is a uuid7 primary-key collision, so the INSERT
-            # fallback below almost never runs.
+            # connection's wire buffer (see copy_rows). IntegrityError —
+            # an id collision (near-impossible with uuid7) or e.g. a
+            # missing partition — retries via the INSERT below, which
+            # no-ops duplicates and surfaces real errors as before.
             try:
                 await copy_rows(
                     "issue_events_issueevent",
@@ -1220,10 +1221,11 @@ async def process_issue_events(
                     ((*row[:-1], [row[-1]]) for row in value_params),
                 )
                 inserted = True
-            except IntegrityError:
+            except IntegrityError as e:
                 logger.info(
-                    "Issue event COPY hit a duplicate id; retrying with "
-                    "conflict-tolerant INSERT"
+                    "Issue event COPY failed (%s); retrying with "
+                    "conflict-tolerant INSERT",
+                    type(e).__name__,
                 )
         if not inserted:
             # Column-major unnest sidesteps the 65535 bind-param cap and

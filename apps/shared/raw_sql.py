@@ -8,6 +8,7 @@ from typing import Any
 
 from django.db import connections
 from django_async_backend.db import async_connections
+from psycopg import sql as pg_sql
 
 
 async def fetchall(
@@ -161,15 +162,23 @@ async def copy_rows(
     COPY cannot express ON CONFLICT: a conflicting row aborts the whole
     batch (raised as ``django.db.IntegrityError``). Callers that need
     conflict tolerance must catch it and fall back to their INSERT path.
+    Must run in autocommit (the async-backend default) — inside a
+    transaction a failed COPY leaves it aborted, so a fallback INSERT
+    would fail too.
     """
-    cols = ", ".join(f'"{c}"' for c in columns)
+    stmt = pg_sql.SQL("COPY {} ({}) FROM STDIN").format(
+        pg_sql.Identifier(table),
+        pg_sql.SQL(", ").join(pg_sql.Identifier(c) for c in columns),
+    )
     count = 0
     async with await async_connections[db_alias].cursor() as cursor:
-        # ``cursor.copy`` reaches the underlying psycopg cursor via the
-        # wrapper's attribute proxy, which doesn't wrap exceptions — do it
-        # here so callers see Django's IntegrityError, not psycopg's.
+        # Go straight to the psycopg cursor: the wrapper's attribute proxy
+        # doesn't wrap exceptions (handled here so callers see Django's
+        # IntegrityError), and the debug wrapper's ``copy`` override is an
+        # async generator built for COPY TO iteration — it can't serve as
+        # the COPY FROM context manager.
         with cursor.db.wrap_database_errors:
-            async with cursor.copy(f'COPY "{table}" ({cols}) FROM STDIN') as copy:
+            async with cursor.cursor.copy(stmt) as copy:
                 for row in rows:
                     await copy.write_row(row)
                     count += 1

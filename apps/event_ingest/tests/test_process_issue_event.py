@@ -5,7 +5,7 @@ import tempfile
 import uuid
 import zipfile
 from hashlib import sha1
-from unittest import mock
+from unittest import mock, skipUnless
 
 from django.core.files import File as DjangoFile
 from django.db.utils import IntegrityError
@@ -29,6 +29,7 @@ from apps.issue_events.models import (
 )
 from apps.projects.models import IssueEventProjectHourlyStatistic
 from apps.releases.models import Release
+from apps.shared.raw_sql import copy_from_supported
 from glitchtip.utils import get_random_string
 
 from ..process_event import process_issue_events
@@ -63,13 +64,15 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     - Graceful failure such as duplicate event ids or invalid data
     """
 
+    @skipUnless(copy_from_supported(), "COPY applies to the psycopg engine only")
     def test_copy_fallback_on_duplicate(self):
         """A conflicting COPY falls back to the conflict-tolerant INSERT."""
         with mock.patch(
             "apps.event_ingest.process_event.copy_rows",
             side_effect=IntegrityError("duplicate key"),
-        ):
+        ) as copy_mock:
             self.process_events([{}, {}])
+        copy_mock.assert_called_once()
         self.assertEqual(IssueEvent.objects.count(), 2)
 
     def test_two_events(self):

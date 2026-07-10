@@ -286,8 +286,9 @@ async def process_log_events(messages: list) -> int:
     if copy_from_supported():
         # Log bodies and attributes can be large; stream the batch with COPY
         # so it never sits whole in the connection's wire buffer (see
-        # copy_rows). The only conflict possible is a uuid7 primary-key
-        # collision, so the INSERT fallback below almost never runs.
+        # copy_rows). IntegrityError — an id collision (near-impossible
+        # with uuid7) or e.g. a missing partition — retries via the INSERT
+        # below, which no-ops duplicates and surfaces real errors as before.
         try:
             await copy_rows(
                 "logs_logevent",
@@ -308,10 +309,10 @@ async def process_log_events(messages: list) -> int:
                 log_rows,
             )
             inserted = True
-        except IntegrityError:
+        except IntegrityError as e:
             logger.info(
-                "Log event COPY hit a duplicate id; retrying with "
-                "conflict-tolerant INSERT"
+                "Log event COPY failed (%s); retrying with conflict-tolerant INSERT",
+                type(e).__name__,
             )
     if not inserted:
         # Column-major UNNEST — one round-trip, one statement shape
