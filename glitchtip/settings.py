@@ -847,11 +847,12 @@ for db_config in DATABASES.values():
             "max_size": env.int("DATABASE_POOL_MAX_SIZE", 20),
             "timeout": env.int("DATABASE_POOL_TIMEOUT", 30),
         }
-        # Retire pooled connections periodically. A connection retains buffer
-        # memory sized to the largest message it ever carried; recycling keeps
-        # that bounded. The driver jitters the deadline to avoid reconnect
-        # stampedes. 0 keeps the driver's own default lifetime.
-        _pool_max_lifetime = env.int("DATABASE_POOL_MAX_LIFETIME", 1800)
+        # Optional pooled-connection recycling horizon. A connection retains
+        # buffer memory sized to the largest message it ever carried;
+        # recycling bounds how long that lasts. Unset keeps the driver's
+        # default lifetime; drivers jitter the deadline to avoid reconnect
+        # stampedes.
+        _pool_max_lifetime = env.int("DATABASE_POOL_MAX_LIFETIME", 0)
         if _pool_max_lifetime > 0:
             options["pool"]["max_lifetime"] = _pool_max_lifetime
 
