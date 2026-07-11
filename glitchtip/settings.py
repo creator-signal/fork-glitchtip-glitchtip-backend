@@ -1063,13 +1063,13 @@ if os.getenv("EMAIL_USE_TLS"):
     EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS")
 if os.getenv("EMAIL_USE_SSL"):
     EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL")
-if os.getenv("EMAIL_TIMEOUT"):
-    EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT")
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", 10)
 if os.getenv("EMAIL_FILE_PATH"):
     EMAIL_FILE_PATH = env.str("EMAIL_FILE_PATH")
-if os.getenv(
-    "EMAIL_URL"
-):  # Careful, this will override most EMAIL_*** settings. Set them all individually, or use EMAIL_URL to set them all at once, but don't do both.
+
+if os.getenv("EMAIL_URL"):
+    # Careful, this will override most EMAIL_*** settings. Set them all individually,
+    # or use EMAIL_URL to set them all at once, but don't do both.
     EMAIL_CONFIG = env.email_url("EMAIL_URL")
     vars().update(EMAIL_CONFIG)
 EMAIL_INVITE_THROTTLE_COUNT = env.int("EMAIL_THROTTLE_COUNT", 50)
