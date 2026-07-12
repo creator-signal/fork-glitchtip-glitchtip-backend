@@ -820,6 +820,10 @@ if env.str("DATABASE_HOST", None):
 # Opt-in: set DATABASE_ENGINE=gt_rust.django_backend to run the ORM on the Rust
 # Postgres driver instead — one shared tokio pool serving sync + async, on the
 # same runtime as the valkey driver. Behavior is unchanged unless switched.
+# The Rust driver needs COPY ... FROM STDIN support for the ingest write path
+# (older builds fail loudly at the missing cursor.copy()) and ideally the
+# psycopg-shaped sqlstate diagnostics that ship alongside it — without them
+# the COPY conflict fallback falls back to message-prefix matching.
 DATABASE_ENGINE = env.str(
     "DATABASE_ENGINE", "django_async_backend.db.backends.postgresql"
 )

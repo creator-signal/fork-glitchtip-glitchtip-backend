@@ -175,6 +175,11 @@ async def copy_rows(
 
 UNIQUE_VIOLATION = "23505"
 
+# Distinguishes "driver has no sqlstate attribute" (fall back to the
+# message prefix) from "attribute present but None" (a client-side
+# error — known non-conflict, fail closed).
+_SQLSTATE_MISSING = object()
+
 
 def is_unique_violation(exc: Exception) -> bool:
     """True when a Django ``IntegrityError`` wraps a unique violation.
@@ -187,4 +192,15 @@ def is_unique_violation(exc: Exception) -> bool:
     the underlying DB-API exception (Django chains it as ``__cause__``),
     so this check is driver-agnostic.
     """
-    return getattr(exc.__cause__, "sqlstate", None) == UNIQUE_VIOLATION
+    cause = exc.__cause__
+    if cause is None:
+        return False
+    sqlstate = getattr(cause, "sqlstate", _SQLSTATE_MISSING)
+    if sqlstate is not _SQLSTATE_MISSING:
+        return sqlstate == UNIQUE_VIOLATION
+    # gt_rust builds that predate the structured ``sqlstate`` attribute
+    # still prefix every server error message with its SQLSTATE code, so
+    # an anchored prefix check keeps the fallback working there instead
+    # of silently failing whole batches on a genuine duplicate. (psycopg
+    # always has the attribute, so it never reaches this line.)
+    return str(cause).startswith(f"[{UNIQUE_VIOLATION}]")

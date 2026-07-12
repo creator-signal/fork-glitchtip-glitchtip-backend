@@ -252,6 +252,26 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         self.assertTrue(is_unique_violation(ctx.exception))
         self.assertEqual(ctx.exception.__cause__.sqlstate, "23505")
 
+    def test_is_unique_violation_message_prefix_fallback(self):
+        """Driver exceptions without a sqlstate attribute (gt_rust builds
+        predating structured diagnostics) are matched by their anchored
+        [SQLSTATE] message prefix — and only for 23505."""
+        dup = IntegrityError("duplicate key")
+        dup.__cause__ = Exception("[23505] duplicate key value")
+        self.assertTrue(is_unique_violation(dup))
+        partition = IntegrityError("no partition")
+        partition.__cause__ = Exception("[23514] no partition of relation")
+        self.assertFalse(is_unique_violation(partition))
+        # An attribute of None (psycopg client-side errors) means "known
+        # non-conflict", not "fall back to the message" — it must fail
+        # closed even when untrusted text in the message mimics the prefix.
+        client_side = IntegrityError("client-side")
+        cause = Exception("[23505] attacker-controlled text")
+        cause.sqlstate = None
+        client_side.__cause__ = cause
+        self.assertFalse(is_unique_violation(client_side))
+        self.assertFalse(is_unique_violation(IntegrityError("no cause")))
+
     def test_process_single_log(self):
         """Test processing a single log event"""
         now = datetime.now(timezone.utc)
