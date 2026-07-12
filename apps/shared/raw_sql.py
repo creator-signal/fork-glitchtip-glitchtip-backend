@@ -146,7 +146,8 @@ async def copy_rows(
 
     COPY cannot express ON CONFLICT: a conflicting row aborts the whole
     batch (raised as ``django.db.IntegrityError``). Callers that need
-    conflict tolerance must catch it and fall back to their INSERT path.
+    conflict tolerance must catch it, confirm the conflict with
+    :func:`is_unique_violation`, and fall back to their INSERT path.
     Must run in autocommit (the async-backend default) — inside a
     transaction a failed COPY leaves it aborted, so a fallback INSERT
     would fail too.
@@ -170,3 +171,20 @@ async def copy_rows(
                     await copy.write_row(row)
                     count += 1
     return count
+
+
+UNIQUE_VIOLATION = "23505"
+
+
+def is_unique_violation(exc: Exception) -> bool:
+    """True when a Django ``IntegrityError`` wraps a unique violation.
+
+    ``IntegrityError`` covers all of SQLSTATE class 23 — unique violation,
+    but also e.g. a missing partition (23514) or a foreign-key violation —
+    and only the unique violation is worth retrying through a
+    conflict-tolerant INSERT; the rest would fail identically. Both
+    database drivers expose the psycopg-shaped ``sqlstate`` attribute on
+    the underlying DB-API exception (Django chains it as ``__cause__``),
+    so this check is driver-agnostic.
+    """
+    return getattr(exc.__cause__, "sqlstate", None) == UNIQUE_VIOLATION

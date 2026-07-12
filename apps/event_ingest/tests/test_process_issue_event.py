@@ -39,7 +39,7 @@ from ..schema import (
     IssueTaskMessage,
     SecuritySchema,
 )
-from .utils import EventIngestTestCase, run_async_closing
+from .utils import EventIngestTestCase, fake_integrity_error, run_async_closing
 
 
 def _process_issue_events(*args, **kwargs):
@@ -64,14 +64,25 @@ class IssueEventIngestTestCase(EventIngestTestCase):
     """
 
     def test_copy_fallback_on_duplicate(self):
-        """A conflicting COPY falls back to the conflict-tolerant INSERT."""
+        """A unique-violation COPY falls back to the conflict-tolerant INSERT."""
         with mock.patch(
             "apps.event_ingest.process_event.copy_rows",
-            side_effect=IntegrityError("duplicate key"),
+            side_effect=fake_integrity_error("23505"),
         ) as copy_mock:
             self.process_events([{}, {}])
         copy_mock.assert_called_once()
         self.assertEqual(IssueEvent.objects.count(), 2)
+
+    def test_copy_non_unique_integrity_error_propagates(self):
+        """A non-conflict IntegrityError (e.g. a missing partition, 23514)
+        must not retry through the INSERT — it would fail identically."""
+        with mock.patch(
+            "apps.event_ingest.process_event.copy_rows",
+            side_effect=fake_integrity_error("23514"),
+        ):
+            with self.assertRaises(IntegrityError):
+                self.process_events([{}, {}])
+        self.assertEqual(IssueEvent.objects.count(), 0)
 
     def test_two_events(self):
         # TODO: re-add assertNumQueries once unit tests run on the async

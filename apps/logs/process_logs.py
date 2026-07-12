@@ -7,7 +7,7 @@ from uuid import UUID
 import orjson
 from django.db.utils import IntegrityError
 
-from apps.shared.raw_sql import copy_rows, execute_unnest
+from apps.shared.raw_sql import copy_rows, execute_unnest, is_unique_violation
 from glitchtip.partition_manager import UUID7Helper
 
 from .constants import LEVEL_MAP, LogLevel
@@ -284,11 +284,14 @@ async def process_log_events(messages: list) -> int:
 
     # Log bodies and attributes can be large; stream the batch with COPY
     # so it never sits whole in the connection's wire buffer and the
-    # server skips parsing a megabyte statement (see copy_rows).
-    # IntegrityError — an id collision (near-impossible with uuid7) or
-    # e.g. a missing partition — retries via the conflict-tolerant
-    # INSERT below, which no-ops duplicates and surfaces real errors as
-    # before.
+    # server skips parsing a megabyte statement (see copy_rows). COPY
+    # cannot express ON CONFLICT, so a duplicate id aborts the whole
+    # batch — retry it through the conflict-tolerant INSERT below, which
+    # no-ops the duplicates and keeps the rest. Only a genuine unique
+    # violation takes that path; any other IntegrityError (e.g. a
+    # missing partition — log ids embed the client timestamp, so a
+    # partition-gap incident is the realistic member of this class)
+    # would fail the INSERT identically, so it propagates at once.
     try:
         await copy_rows(
             "logs_logevent",
@@ -309,9 +312,11 @@ async def process_log_events(messages: list) -> int:
             log_rows,
         )
     except IntegrityError as e:
+        if not is_unique_violation(e):
+            raise
         logger.info(
-            "Log event COPY failed (%s); retrying with conflict-tolerant INSERT",
-            type(e).__name__,
+            "Log event COPY hit a unique violation; "
+            "retrying with conflict-tolerant INSERT"
         )
         # Column-major UNNEST sidesteps the 65535 bind-param cap;
         # ``ON CONFLICT DO NOTHING`` tolerates duplicate ids.

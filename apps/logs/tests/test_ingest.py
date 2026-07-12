@@ -15,8 +15,8 @@ from django.urls import reverse
 from django_async_backend.db import async_connections
 from model_bakery import baker
 
-from apps.event_ingest.tests.utils import run_async_closing
-from apps.shared.raw_sql import copy_rows
+from apps.event_ingest.tests.utils import fake_integrity_error, run_async_closing
+from apps.shared.raw_sql import copy_rows, is_unique_violation
 from glitchtip.partition_manager import UUID7Helper
 from glitchtip.test_utils.test_case import GlitchTipTestCaseMixin
 
@@ -164,23 +164,36 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         "data",
     ]
 
-    def test_copy_fallback_on_duplicate(self):
-        """A conflicting COPY falls back to the conflict-tolerant INSERT."""
+    def _log_message(self, body: str) -> LogTaskMessage:
         now = datetime.now(timezone.utc)
-        message = LogTaskMessage(
+        return LogTaskMessage(
             project_id=self.project.id,
             organization_id=self.organization.id,
             received=now,
-            logs=[{"timestamp": now.timestamp(), "level": "info", "body": "dup"}],
+            logs=[{"timestamp": now.timestamp(), "level": "info", "body": body}],
         )
+
+    def test_copy_fallback_on_duplicate(self):
+        """A unique-violation COPY falls back to the conflict-tolerant INSERT."""
         with mock.patch(
             "apps.logs.process_logs.copy_rows",
-            side_effect=IntegrityError("duplicate key"),
+            side_effect=fake_integrity_error("23505"),
         ) as copy_mock:
-            count = process_log_events([message])
+            count = process_log_events([self._log_message("dup")])
         copy_mock.assert_called_once()
         self.assertEqual(count, 1)
         self.assertEqual(LogEvent.objects.count(), 1)
+
+    def test_copy_non_unique_integrity_error_propagates(self):
+        """A non-conflict IntegrityError (e.g. a missing partition, 23514)
+        must not retry through the INSERT — it would fail identically."""
+        with mock.patch(
+            "apps.logs.process_logs.copy_rows",
+            side_effect=fake_integrity_error("23514"),
+        ):
+            with self.assertRaises(IntegrityError):
+                process_log_events([self._log_message("gap")])
+        self.assertEqual(LogEvent.objects.count(), 0)
 
     def test_copy_rows_with_debug_cursor(self):
         """copy_rows works under the debug cursor (DEBUG=True dev setups),
@@ -230,9 +243,14 @@ class LogIngestProcessingTestCase(TransactionTestCase):
         )
         run_async_closing(copy_rows, "logs_logevent", self.LOG_EVENT_COLUMNS, [row])
         self.assertEqual(LogEvent.objects.count(), 1)
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises(IntegrityError) as ctx:
             run_async_closing(copy_rows, "logs_logevent", self.LOG_EVENT_COLUMNS, [row])
         self.assertEqual(LogEvent.objects.count(), 1)
+        # The chained driver exception carries the psycopg-shaped sqlstate
+        # the COPY fallback keys on — the cross-driver contract
+        # is_unique_violation() relies on.
+        self.assertTrue(is_unique_violation(ctx.exception))
+        self.assertEqual(ctx.exception.__cause__.sqlstate, "23505")
 
     def test_process_single_log(self):
         """Test processing a single log event"""

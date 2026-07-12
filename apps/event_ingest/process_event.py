@@ -36,6 +36,7 @@ from apps.shared.raw_sql import (
     fetchall,
     fetchall_mogrified_values,
     fetchall_unnest,
+    is_unique_violation,
 )
 from apps.sourcecode.models import DebugSymbolBundle
 from glitchtip.cold_storage import is_duckdb_available
@@ -1194,10 +1195,13 @@ async def process_issue_events(
         # Event payloads are the largest values ingest writes; stream
         # them with COPY so the batch never sits whole in the
         # connection's wire buffer and the server skips parsing a
-        # megabyte statement (see copy_rows). IntegrityError — an id
-        # collision (near-impossible with uuid7) or e.g. a missing
-        # partition — retries via the conflict-tolerant INSERT below,
-        # which no-ops duplicates and surfaces real errors as before.
+        # megabyte statement (see copy_rows). COPY cannot express ON
+        # CONFLICT, so a duplicate id aborts the whole batch — retry it
+        # through the conflict-tolerant INSERT below, which no-ops the
+        # duplicates and keeps the rest. Only a genuine unique violation
+        # takes that path; any other IntegrityError (e.g. a missing
+        # partition) would fail the INSERT identically, so it propagates
+        # at once.
         try:
             await copy_rows(
                 "issue_events_issueevent",
@@ -1219,9 +1223,11 @@ async def process_issue_events(
                 ((*row[:-1], [row[-1]]) for row in value_params),
             )
         except IntegrityError as e:
+            if not is_unique_violation(e):
+                raise
             logger.info(
-                "Issue event COPY failed (%s); retrying with conflict-tolerant INSERT",
-                type(e).__name__,
+                "Issue event COPY hit a unique violation; "
+                "retrying with conflict-tolerant INSERT"
             )
             # Column-major unnest sidesteps the 65535 bind-param cap;
             # ON CONFLICT DO NOTHING tolerates duplicate ids.
