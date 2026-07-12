@@ -153,7 +153,10 @@ async def copy_rows(
     would fail too.
 
     Runs on either database driver: both cursors expose the psycopg-shaped
-    ``copy()`` context manager with ``write_row()``.
+    ``copy()`` context manager with ``write_row()``. gt_rust additionally
+    exposes ``write_rows()``, which encodes the batch in Rust (C-API field
+    access, one Python↔Rust crossing per ~64 KiB chunk) — measurably less
+    CPU per batch than the per-row loop, so prefer it when present.
     """
     quoted = [table, *columns]
     cols = ", ".join('"' + c.replace('"', '""') + '"' for c in quoted[1:])
@@ -167,9 +170,16 @@ async def copy_rows(
         # can't serve as the COPY FROM context manager.
         with cursor.db.wrap_database_errors:
             async with cursor.cursor.copy(stmt) as copy:
-                for row in rows:
-                    await copy.write_row(row)
-                    count += 1
+                write_rows = getattr(copy, "write_rows", None)
+                if write_rows is not None:
+                    if not isinstance(rows, (list, tuple)):
+                        rows = list(rows)
+                    await write_rows(rows)
+                    count = len(rows)
+                else:
+                    for row in rows:
+                        await copy.write_row(row)
+                        count += 1
     return count
 
 
