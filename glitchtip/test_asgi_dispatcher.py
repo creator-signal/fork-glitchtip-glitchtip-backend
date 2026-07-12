@@ -1,8 +1,13 @@
 import asyncio
+from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 
-from glitchtip.asgi import MCPDjangoDispatcher
+from glitchtip.asgi import (
+    MCPDjangoDispatcher,
+    RecycleConnectionsMiddleware,
+    _recycle_db_connections,
+)
 
 
 class MockASGIApp:
@@ -118,3 +123,81 @@ class MCPDjangoDispatcherTestCase(SimpleTestCase):
         self.assertTrue(mcp_app.stopped)
         self.assertEqual(sent[0]["type"], "lifespan.startup.complete")
         self.assertEqual(sent[1]["type"], "lifespan.shutdown.complete")
+
+
+class RecycleConnectionsMiddlewareTestCase(SimpleTestCase):
+    async def test_http_recycles_before_and_after_request(self):
+        """Stale DB connections are recycled around each HTTP request.
+
+        The MCP sub-app never passes through Django's request signals or
+        MIDDLEWARE, so this wrapper must recycle the connection itself both
+        before (replace a connection that died while idle) and after
+        (return it, mirroring request_finished) the app runs.
+        """
+        order = []
+        inner = MockASGIApp()
+
+        async def track_app(scope, receive, send):
+            order.append("app")
+            await inner(scope, receive, send)
+
+        async def track_recycle():
+            order.append("recycle")
+
+        with mock.patch(
+            "glitchtip.asgi._recycle_db_connections", side_effect=track_recycle
+        ):
+            middleware = RecycleConnectionsMiddleware(track_app)
+            scope = {"type": "http", "path": "/mcp", "method": "POST"}
+            await middleware(scope, lambda: None, lambda msg: None)
+
+        self.assertTrue(inner.called)
+        self.assertEqual(order, ["recycle", "app", "recycle"])
+
+    async def test_non_http_scope_skips_recycle(self):
+        """Lifespan/websocket scopes never touch the ORM and pass through."""
+        inner = MockASGIApp()
+        with mock.patch(
+            "glitchtip.asgi._recycle_db_connections", new_callable=mock.AsyncMock
+        ) as recycle:
+            middleware = RecycleConnectionsMiddleware(inner)
+            scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
+            await middleware(scope, lambda: None, lambda msg: None)
+
+        self.assertTrue(inner.called)
+        recycle.assert_not_awaited()
+
+    async def test_recycle_runs_after_request_raises(self):
+        """Cleanup still runs (in finally) when the wrapped app errors."""
+
+        async def failing_app(scope, receive, send):
+            raise RuntimeError("boom")
+
+        with mock.patch(
+            "glitchtip.asgi._recycle_db_connections", new_callable=mock.AsyncMock
+        ) as recycle:
+            middleware = RecycleConnectionsMiddleware(failing_app)
+            scope = {"type": "http", "path": "/mcp", "method": "POST"}
+            with self.assertRaises(RuntimeError):
+                await middleware(scope, lambda: None, lambda msg: None)
+
+        # Once before the request, once in the finally.
+        self.assertEqual(recycle.await_count, 2)
+
+
+class RecycleDBConnectionsTestCase(TransactionTestCase):
+    async def test_recycle_leaves_connection_usable(self):
+        """_recycle_db_connections is safe against live connections.
+
+        Recycling should recover a dead connection (via
+        close_if_unusable_or_obsolete) without breaking subsequent queries,
+        so a query works both before and after a recycle.
+        """
+        from apps.projects.models import Project
+
+        # Warm a connection with a real query, recycle, then query again.
+        await Project.objects.acount()
+        await _recycle_db_connections()
+        # Would raise "the connection is closed" if recycling left the
+        # store wedged instead of reconnecting on demand.
+        await Project.objects.acount()

@@ -7,6 +7,7 @@ For more information on this file, see
 https://docs.djangoproject.com/en/dev/howto/deployment/asgi/
 """
 
+import asyncio
 import os
 
 from django.core.asgi import get_asgi_application
@@ -111,8 +112,6 @@ class MCPDjangoDispatcher:
             await self.mcp_app(scope, receive, send)
             return
 
-        import asyncio
-
         django_queue: asyncio.Queue = asyncio.Queue()
         mcp_queue: asyncio.Queue = asyncio.Queue()
         django_ok = asyncio.Event()
@@ -178,7 +177,67 @@ class MCPDjangoDispatcher:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+from asgiref.sync import sync_to_async  # noqa: E402
 from django.conf import settings  # noqa: E402
+from django.db import close_old_connections  # noqa: E402
+from django_async_backend.db import close_old_async_connections  # noqa: E402
+
+
+class RecycleConnectionsMiddleware:
+    """Recycle stale Django DB connections around a mounted ASGI sub-app.
+
+    The MCP Starlette app is mounted directly in the ASGI callable, so its
+    requests never pass through Django's ``BaseHandler`` nor the configured
+    ``MIDDLEWARE``. Neither of Django's two connection-recycling mechanisms
+    fires for it:
+
+    * the sync, thread-local store (``django.db.connections``), normally
+      recycled by ``close_old_connections`` on the ``request_started`` /
+      ``request_finished`` signals that ``BaseHandler`` emits; and
+    * django-async-backend's per-task ``async_connections`` store, normally
+      recycled by the ``close_async_connections`` middleware.
+
+    A connection that dies while held (Postgres failover, pgbouncer restart,
+    ``pg_terminate_backend``, a network blip) is therefore never detected or
+    replaced, and every later MCP DB query raises
+    ``OperationalError: the connection is closed`` until the worker is
+    restarted. The regular request path recovers on its own because those
+    signals/middleware recycle the dead connection on the next request.
+
+    This wrapper mirrors that behaviour: it recycles both stores before and
+    after each HTTP request the sub-app handles. ``close_old_connections``
+    is a sync signal receiver, so it is run through ``sync_to_async`` (which
+    is thread-sensitive by default) — the same thread-sensitive executor the
+    async ORM uses for its sync work — so it sees and recycles the very
+    connection wrappers the sub-app's ``aget``/``async for`` queries opened.
+    On a healthy connection both calls are no-ops, so steady-state cost is
+    negligible.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        # Only HTTP requests touch the ORM; forward lifespan/websocket as-is.
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        # Recycle before the request so a connection that died while idle is
+        # replaced up front rather than surfacing as a 500 on the first query.
+        await _recycle_db_connections()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            # shield so a client disconnect mid-response can't cancel cleanup
+            # and leak the connection into the next request (mirrors
+            # django_async_backend.middleware.close_async_connections).
+            await asyncio.shield(_recycle_db_connections())
+
+
+async def _recycle_db_connections():
+    await sync_to_async(close_old_connections)()
+    await close_old_async_connections()
+
 
 if settings.GLITCHTIP_ENABLE_MCP:
     from apps.mcp.server import mcp as _mcp_server
@@ -186,7 +245,7 @@ if settings.GLITCHTIP_ENABLE_MCP:
     _mcp_app = _mcp_server.streamable_http_app()
     application = MCPDjangoDispatcher(
         django_app=application,
-        mcp_app=_mcp_app,
+        mcp_app=RecycleConnectionsMiddleware(_mcp_app),
         django_lifespan=_embed_worker,
     )
 
