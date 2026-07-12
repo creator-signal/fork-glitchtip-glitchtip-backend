@@ -22,6 +22,7 @@ print_startup_banner()
 
 # Route ingest paths to a lightweight handler with minimal middleware
 from glitchtip.ingest_asgi import IngestDispatcher  # noqa: E402
+from glitchtip.memory_trim import PeriodicMemoryTrim  # noqa: E402
 
 application = IngestDispatcher(application)
 
@@ -211,3 +212,10 @@ except ImportError:
     # Graceful fallback if granian can't be imported (custom installations, etc.)
     # The wrapper is safe to use with uwsgi but this provides defensive error handling
     pass
+
+# Outermost so lifespan startup reaches it even in embed-worker mode (the
+# vtasks wrapper consumes lifespan without forwarding it inward): a pod
+# receiving no HTTP traffic still starts its trim timer. Periodically
+# returns freed memory to the OS in every ASGI process — the scheduled
+# maintenance task only trims the one pod that runs it.
+application = PeriodicMemoryTrim(application)

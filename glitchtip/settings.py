@@ -132,6 +132,10 @@ GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE = env.int(
     5 * 1024 * 1024,  # 5 MB
 )
 
+# Mean seconds between in-process gc.collect() + malloc_trim() passes that
+# return freed heap pages to the OS (see glitchtip/memory_trim.py). 0 disables.
+GLITCHTIP_MALLOC_TRIM_INTERVAL = env.int("GLITCHTIP_MALLOC_TRIM_INTERVAL", 3600)
+
 # Raw request body cap before view handling. For ingest endpoints gt_rust
 # enforces GLITCHTIP_MAX_UNZIPPED_PAYLOAD_SIZE on the decompressed bytes, but
 # the *compressed* body Django reads is smaller than that, so this only needs
