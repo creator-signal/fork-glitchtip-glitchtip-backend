@@ -1,6 +1,7 @@
 import asyncio
 from unittest import mock
 
+from asgiref.sync import sync_to_async
 from django.test import SimpleTestCase, TransactionTestCase
 
 from glitchtip.asgi import (
@@ -185,19 +186,54 @@ class RecycleConnectionsMiddlewareTestCase(SimpleTestCase):
         self.assertEqual(recycle.await_count, 2)
 
 
-class RecycleDBConnectionsTestCase(TransactionTestCase):
-    async def test_recycle_leaves_connection_usable(self):
-        """_recycle_db_connections is safe against live connections.
+def _kill_thread_local_connection():
+    """Simulate a failover: drop the backing socket but leave the wrapper
+    thinking it is still connected (as it would be after the server closed
+    the connection out from under us). Run this via ``sync_to_async`` so it
+    hits the same thread-sensitive executor thread the async ORM uses."""
+    from django.db import connection
 
-        Recycling should recover a dead connection (via
-        close_if_unusable_or_obsolete) without breaking subsequent queries,
-        so a query works both before and after a recycle.
+    if connection.connection is not None:
+        connection.connection.close()
+    connection.errors_occurred = True
+
+
+class RecycleDBConnectionsTestCase(TransactionTestCase):
+    async def test_recycle_is_a_noop_on_healthy_connection(self):
+        """Recycling must not break a live connection (the steady-state path)."""
+        from apps.projects.models import Project
+
+        await Project.objects.acount()
+        await _recycle_db_connections()
+        await Project.objects.acount()
+
+    async def test_middleware_recovers_dead_connection(self):
+        """The #489 scenario: a connection that dies while held is recovered.
+
+        Without recycling, the wrapper keeps its dead handle and the next
+        query raises "the connection is closed". Driving a query through the
+        middleware after the connection is killed must succeed, because the
+        pre-request recycle returns the dead connection and the query
+        reconnects.
         """
         from apps.projects.models import Project
 
-        # Warm a connection with a real query, recycle, then query again.
+        # Warm the sync connection on the shared thread-sensitive thread.
         await Project.objects.acount()
-        await _recycle_db_connections()
-        # Would raise "the connection is closed" if recycling left the
-        # store wedged instead of reconnecting on demand.
-        await Project.objects.acount()
+        await sync_to_async(_kill_thread_local_connection)()
+
+        result = {}
+
+        async def app(scope, receive, send):
+            result["count"] = await Project.objects.acount()
+
+        middleware = RecycleConnectionsMiddleware(app)
+        await middleware(
+            {"type": "http", "path": "/mcp", "method": "POST"},
+            lambda: None,
+            lambda msg: None,
+        )
+
+        # Query after the recycle succeeded; a wedged connection would have
+        # raised OperationalError instead of reaching this assertion.
+        self.assertIn("count", result)

@@ -8,11 +8,14 @@ https://docs.djangoproject.com/en/dev/howto/deployment/asgi/
 """
 
 import asyncio
+import logging
 import os
 
 from django.core.asgi import get_asgi_application
 
 from glitchtip.startup import print_startup_banner
+
+logger = logging.getLogger(__name__)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "glitchtip.settings")
 
@@ -188,30 +191,41 @@ class RecycleConnectionsMiddleware:
 
     The MCP Starlette app is mounted directly in the ASGI callable, so its
     requests never pass through Django's ``BaseHandler`` nor the configured
-    ``MIDDLEWARE``. Neither of Django's two connection-recycling mechanisms
-    fires for it:
+    ``MIDDLEWARE`` — so neither of the hooks that normally return DB
+    connections to the pool each request fires for it:
 
-    * the sync, thread-local store (``django.db.connections``), normally
-      recycled by ``close_old_connections`` on the ``request_started`` /
-      ``request_finished`` signals that ``BaseHandler`` emits; and
-    * django-async-backend's per-task ``async_connections`` store, normally
-      recycled by the ``close_async_connections`` middleware.
+    * ``close_old_connections`` on the ``request_started`` /
+      ``request_finished`` signals ``BaseHandler`` emits (the sync,
+      thread-local ``django.db.connections`` store); and
+    * the ``close_async_connections`` middleware (django-async-backend's
+      per-task ``async_connections`` store).
 
     A connection that dies while held (Postgres failover, pgbouncer restart,
-    ``pg_terminate_backend``, a network blip) is therefore never detected or
-    replaced, and every later MCP DB query raises
-    ``OperationalError: the connection is closed`` until the worker is
-    restarted. The regular request path recovers on its own because those
-    signals/middleware recycle the dead connection on the next request.
+    ``pg_terminate_backend``, a network blip) is therefore never returned to
+    the pool: the sub-app pins one dead connection indefinitely and every
+    later MCP DB query raises ``OperationalError: the connection is closed``
+    until the worker is restarted — while the rest of GlitchTip self-heals,
+    because its request path returns connections each request and the pool
+    refills with live ones.
 
-    This wrapper mirrors that behaviour: it recycles both stores before and
-    after each HTTP request the sub-app handles. ``close_old_connections``
-    is a sync signal receiver, so it is run through ``sync_to_async`` (which
-    is thread-sensitive by default) — the same thread-sensitive executor the
-    async ORM uses for its sync work — so it sees and recycles the very
-    connection wrappers the sub-app's ``aget``/``async for`` queries opened.
-    On a healthy connection both calls are no-ops, so steady-state cost is
+    This wrapper restores that per-request recycle for the sub-app. Every MCP
+    query — OAuth/token auth and the tool handlers alike — reaches the DB via
+    Django's native async ORM (``aget`` / ``async for``), which runs its sync
+    work through ``sync_to_async`` on the process-wide thread-sensitive
+    executor thread; the connection wrapper therefore lives in the *sync*,
+    thread-local store on that one thread. Running ``close_old_connections``
+    through ``sync_to_async`` lands it on that same thread, so it recycles the
+    exact wrapper those queries use — including the queries the MCP SDK
+    dispatches in its stateless child task, which shares the same executor
+    thread (no ``ThreadSensitiveContext`` splits the MCP path). MCP does not
+    currently touch the ``async_connections`` store, but ``close_old_async_-
+    connections`` is called too for parity with the normal request path. On a
+    healthy connection both calls are no-ops, so steady-state cost is
     negligible.
+
+    Recovery matches the rest of GlitchTip: a request in flight during the
+    switchover may still see a transient error, but the sub-app no longer
+    stays wedged afterwards.
     """
 
     def __init__(self, app):
@@ -222,8 +236,8 @@ class RecycleConnectionsMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        # Recycle before the request so a connection that died while idle is
-        # replaced up front rather than surfacing as a 500 on the first query.
+        # Recycle before the request too, so a connection that died while the
+        # wrapper sat idle between requests is returned to the pool up front.
         await _recycle_db_connections()
         try:
             await self.app(scope, receive, send)
@@ -235,8 +249,16 @@ class RecycleConnectionsMiddleware:
 
 
 async def _recycle_db_connections():
-    await sync_to_async(close_old_connections)()
-    await close_old_async_connections()
+    # Guard like glitchtip.task_signals._close_async_connections: returning a
+    # broken connection can itself raise (e.g. putconn under
+    # wrap_database_errors during a failover), and an unhandled raise here
+    # would 500 the request (pre-call) or mask the response's own exception
+    # (post-call). Log and move on; the next query reconnects on demand.
+    try:
+        await sync_to_async(close_old_connections)()
+        await close_old_async_connections()
+    except Exception:
+        logger.exception("Failed to recycle DB connections for MCP request")
 
 
 if settings.GLITCHTIP_ENABLE_MCP:
