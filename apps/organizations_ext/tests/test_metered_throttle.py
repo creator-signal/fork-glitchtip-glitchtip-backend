@@ -11,7 +11,7 @@ from apps.stripe.constants import SubscriptionStatus
 from apps.stripe.exceptions import StripeError
 from apps.stripe.models import StripeSubscription
 
-from ..tasks import check_organization_throttle
+from ..tasks import _persist_overage, _rollback_overage, check_organization_throttle
 
 _check = async_to_sync(check_organization_throttle.func)
 
@@ -204,3 +204,41 @@ class MeteredThrottleTestCase(TestCase):
 
         mock_meter = self._run(org, 150_000)  # no growth -> nothing to report
         mock_meter.assert_not_awaited()
+
+    def test_cap_lowered_then_restored_bills_only_growth(self):
+        # Lowering the cap below already-reported units must not regress the
+        # counter — a lower base would re-bill recorded units on later growth.
+        org, sub = self._make_org()
+        self._run(org, 150_000)  # counter -> 50,000
+
+        org.overage_spend_cap_cents = 500  # ~3,333 affordable units
+        org.save(update_fields=["overage_spend_cap_cents"])
+        mock_meter = self._run(org, 160_000)
+        mock_meter.assert_not_awaited()
+        sub.refresh_from_db()
+        self.assertEqual(sub.overage_units_reported, 50_000)
+
+        org.overage_spend_cap_cents = CAP_CENTS
+        org.save(update_fields=["overage_spend_cap_cents"])
+        mock_meter = self._run(org, 160_000)  # overage 60,000; delta 10,000
+        self.assertEqual(mock_meter.await_args.args[2], 10_000)
+
+    def test_stale_persist_cannot_regress_counter(self):
+        # A writer that lost the lock race must not move the counter backwards:
+        # deltas recomputed from the lower base would re-bill recorded units.
+        org, sub = self._make_org()
+        self._run(org, 180_000)  # counter -> 80,000
+        sub.refresh_from_db()
+        async_to_sync(_persist_overage)(sub, sub.overage_period_start, 50_000)
+        sub.refresh_from_db()
+        self.assertEqual(sub.overage_units_reported, 80_000)
+
+    def test_rollback_only_reverts_own_write(self):
+        # Rollback is conditional on the counter still holding the write-ahead
+        # value; a superseded write must not be stomped back.
+        org, sub = self._make_org()
+        self._run(org, 150_000)  # counter -> 50,000
+        sub.refresh_from_db()
+        async_to_sync(_rollback_overage)(sub, sub.overage_period_start, 40_000, 10_000)
+        sub.refresh_from_db()
+        self.assertEqual(sub.overage_units_reported, 50_000)
