@@ -13,11 +13,12 @@ is an ``sk_test`` key, so it can never mutate a live Stripe account. It creates
 Then it syncs everything into the local DB via ``sync_stripe_models``.
 
 ``--verify`` instead runs read-only checks and is allowed with a live key: it
-confirms the meter, overage product, and metered price exist and that the live
-tier schedule matches ``GLITCHTIP_OVERAGE_TIERS``. Live provisioning is done by
-hand (this command won't mutate a live account), and the local cap math trusts
-the settings schedule — drift between the two can bill an org past its
-advertised spend cap, so verify after any manual change.
+confirms the meter, overage product, and metered price exist, that the live
+tier schedule matches ``GLITCHTIP_OVERAGE_TIERS``, and that an event
+destination delivers meter error reports. Live provisioning is done by hand
+(this command won't mutate a live account), and the local cap math trusts the
+settings schedule — drift between the two can bill an org past its advertised
+spend cap, so verify after any manual change.
 """
 
 import json
@@ -34,6 +35,7 @@ from apps.stripe.client import (
     list_prices,
     list_products,
     stripe_get,
+    stripe_get_v2,
     stripe_post,
 )
 from apps.stripe.exceptions import StripeError
@@ -62,6 +64,18 @@ async def _find_metered_prices(product_id: str, meter_id: str) -> list:
 async def _find_metered_price(product_id: str, meter_id: str):
     prices = await _find_metered_prices(product_id, meter_id)
     return prices[0] if prices else None
+
+
+async def _list_event_destinations() -> list[dict]:
+    """All v2 event destinations, following pagination."""
+    destinations: list[dict] = []
+    endpoint = "core/event_destinations?limit=100"
+    while endpoint:
+        page = json.loads(await stripe_get_v2(endpoint))
+        destinations += page.get("data") or []
+        next_url = page.get("next_page_url") or ""
+        endpoint = next_url.split("/v2/", 1)[1] if "/v2/" in next_url else ""
+    return destinations
 
 
 async def _verify(stdout) -> None:
@@ -112,6 +126,41 @@ async def _verify(stdout) -> None:
             await stripe_get(f"prices/{price.id}", {"expand": ["tiers"]})
         )
         problems += [f"price {price.id}: {p}" for p in tier_problems(raw_price)]
+
+    # Meter events validate asynchronously; failures only reach the webhook
+    # handler if an event destination for the error report exists. Without one
+    # they are silent under-billing.
+    error_report = "v1.billing.meter.error_report_triggered"
+    subscribed = [
+        d
+        for d in await _list_event_destinations()
+        if d.get("status") == "enabled"
+        and (
+            error_report in (d.get("enabled_events") or [])
+            or "*" in (d.get("enabled_events") or [])
+        )
+    ]
+    if subscribed:
+        # Print type and endpoint so the operator can eyeball that it actually
+        # points at this install's /stripe/webhook/meter/.
+        for dest in subscribed:
+            endpoint_url = (dest.get("webhook_endpoint") or {}).get("url") or ""
+            stdout(
+                f"Meter error-report event destination: {dest.get('id')} "
+                f"({dest.get('type')}) {endpoint_url}".rstrip()
+            )
+        if not settings.STRIPE_WEBHOOK_SECRET_METER:
+            problems.append(
+                "STRIPE_WEBHOOK_SECRET_METER is not set; deliveries to "
+                "/stripe/webhook/meter/ would fail signature verification."
+            )
+    else:
+        problems.append(
+            f"No enabled event destination subscribes to {error_report}; async "
+            "meter ingestion failures would go unreported. Create one pointing "
+            "at /stripe/webhook/meter/ and set STRIPE_WEBHOOK_SECRET_METER to "
+            "its signing secret."
+        )
     if problems:
         raise CommandError("\n".join(problems))
 

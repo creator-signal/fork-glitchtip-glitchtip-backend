@@ -144,7 +144,11 @@ class TierVerifyTestCase(SimpleTestCase):
 COMMAND = "apps.stripe.management.commands.provision_overage_billing"
 
 
-@override_settings(GLITCHTIP_OVERAGE_TIERS=TEST_TIERS, STRIPE_SECRET_KEY="sk_live_x")
+@override_settings(
+    GLITCHTIP_OVERAGE_TIERS=TEST_TIERS,
+    STRIPE_SECRET_KEY="sk_live_x",
+    STRIPE_WEBHOOK_SECRET_METER="whsec_meter",
+)
 class VerifyCommandTestCase(SimpleTestCase):
     """The --verify contract: read-only, so allowed where provisioning refuses."""
 
@@ -155,7 +159,9 @@ class VerifyCommandTestCase(SimpleTestCase):
         price.recurring = {"meter": "mtr_1", "interval": interval}
         return price
 
-    def _verify(self, prices, raw_tiers=None):
+    def _verify(
+        self, prices, raw_tiers=None, destinations=None, destination_pages=None
+    ):
         meter = MagicMock(id="mtr_1")
         product = MagicMock(id="prod_1")
         product.metadata = {"product_type": "overage"}
@@ -168,6 +174,16 @@ class VerifyCommandTestCase(SimpleTestCase):
                 {"up_to": None, "unit_amount_decimal": "5"},
             ],
         }
+        if destination_pages is None:
+            if destinations is None:
+                destinations = [
+                    {
+                        "id": "ed_1",
+                        "status": "enabled",
+                        "enabled_events": ["v1.billing.meter.error_report_triggered"],
+                    }
+                ]
+            destination_pages = [{"data": destinations}]
         with (
             patch(f"{COMMAND}.find_meter", new=AsyncMock(return_value=meter)),
             patch(
@@ -179,6 +195,10 @@ class VerifyCommandTestCase(SimpleTestCase):
                 new=AsyncMock(return_value=prices),
             ),
             patch(f"{COMMAND}.stripe_get", new=AsyncMock(return_value=json.dumps(raw))),
+            patch(
+                f"{COMMAND}.stripe_get_v2",
+                new=AsyncMock(side_effect=[json.dumps(p) for p in destination_pages]),
+            ),
         ):
             call_command("provision_overage_billing", "--verify")
 
@@ -212,3 +232,45 @@ class VerifyCommandTestCase(SimpleTestCase):
         with self.assertRaises(CommandError) as ctx:
             self._verify([self._price(interval="year")])
         self.assertIn("interval", str(ctx.exception))
+
+    def test_verify_fails_without_error_report_destination(self):
+        # Meter events validate asynchronously; without a destination for the
+        # error report, ingestion failures are silent under-billing.
+        with self.assertRaises(CommandError) as ctx:
+            self._verify([self._price()], destinations=[])
+        self.assertIn("event destination", str(ctx.exception))
+
+    def test_verify_fails_with_disabled_destination(self):
+        with self.assertRaises(CommandError) as ctx:
+            self._verify(
+                [self._price()],
+                destinations=[
+                    {
+                        "id": "ed_1",
+                        "status": "disabled",
+                        "enabled_events": ["v1.billing.meter.error_report_triggered"],
+                    }
+                ],
+            )
+        self.assertIn("event destination", str(ctx.exception))
+
+    def test_verify_accepts_wildcard_destination(self):
+        self._verify(
+            [self._price()],
+            destinations=[{"id": "ed_1", "status": "enabled", "enabled_events": ["*"]}],
+        )
+
+    def test_verify_follows_destination_pagination(self):
+        pages = [
+            {"data": [], "next_page_url": "/v2/core/event_destinations?page=2"},
+            {"data": [{"id": "ed_2", "status": "enabled", "enabled_events": ["*"]}]},
+        ]
+        self._verify([self._price()], destination_pages=pages)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET_METER=None)
+    def test_verify_fails_without_meter_webhook_secret(self):
+        # A destination without the local signing secret still means every
+        # delivery 403s — the same silent gap.
+        with self.assertRaises(CommandError) as ctx:
+            self._verify([self._price()])
+        self.assertIn("STRIPE_WEBHOOK_SECRET_METER", str(ctx.exception))
