@@ -1,7 +1,11 @@
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
-from apps.stripe.management.commands.provision_overage_billing import _tier_problems
-from apps.stripe.overage import cost_cents_for_units, units_for_budget
+from apps.stripe.overage import cost_cents_for_units, tier_problems, units_for_budget
 
 # A small, easy-to-reason-about graduated schedule: $0.10/unit for the first
 # 100 units, then $0.05/unit beyond.
@@ -86,7 +90,7 @@ class TierVerifyTestCase(SimpleTestCase):
         return raw
 
     def test_matching_schedule_has_no_problems(self):
-        self.assertEqual(_tier_problems(self._raw_price()), [])
+        self.assertEqual(tier_problems(self._raw_price()), [])
 
     def test_matching_is_numeric_not_textual(self):
         raw = self._raw_price(
@@ -95,7 +99,7 @@ class TierVerifyTestCase(SimpleTestCase):
                 {"up_to": None, "unit_amount_decimal": "5.0"},
             ]
         )
-        self.assertEqual(_tier_problems(raw), [])
+        self.assertEqual(tier_problems(raw), [])
 
     def test_rate_drift_is_reported(self):
         raw = self._raw_price(
@@ -104,8 +108,9 @@ class TierVerifyTestCase(SimpleTestCase):
                 {"up_to": None, "unit_amount_decimal": "5"},
             ]
         )
-        self.assertEqual(len(_tier_problems(raw)), 1)
-        self.assertIn("tier 0", _tier_problems(raw)[0])
+        problems = tier_problems(raw)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("tier 0", problems[0])
 
     def test_boundary_drift_is_reported(self):
         raw = self._raw_price(
@@ -114,14 +119,16 @@ class TierVerifyTestCase(SimpleTestCase):
                 {"up_to": None, "unit_amount_decimal": "5"},
             ]
         )
-        self.assertIn("tier 0", _tier_problems(raw)[0])
+        problems = tier_problems(raw)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("tier 0", problems[0])
 
     def test_missing_tier_is_reported(self):
         raw = self._raw_price(tiers=[{"up_to": None, "unit_amount_decimal": "10"}])
-        self.assertTrue(any("1 tiers" in p for p in _tier_problems(raw)))
+        self.assertTrue(any("1 tiers" in p for p in tier_problems(raw)))
 
     def test_volume_mode_is_reported(self):
-        problems = _tier_problems(self._raw_price(tiers_mode="volume"))
+        problems = tier_problems(self._raw_price(tiers_mode="volume"))
         self.assertTrue(any("tiers_mode" in p for p in problems))
 
     def test_flat_amount_is_reported(self):
@@ -131,4 +138,77 @@ class TierVerifyTestCase(SimpleTestCase):
                 {"up_to": None, "unit_amount_decimal": "5"},
             ]
         )
-        self.assertTrue(any("flat_amount" in p for p in _tier_problems(raw)))
+        self.assertTrue(any("flat_amount" in p for p in tier_problems(raw)))
+
+
+COMMAND = "apps.stripe.management.commands.provision_overage_billing"
+
+
+@override_settings(GLITCHTIP_OVERAGE_TIERS=TEST_TIERS, STRIPE_SECRET_KEY="sk_live_x")
+class VerifyCommandTestCase(SimpleTestCase):
+    """The --verify contract: read-only, so allowed where provisioning refuses."""
+
+    def _price(self, id="price_1", active=True, interval="month"):
+        price = MagicMock()
+        price.id = id
+        price.active = active
+        price.recurring = {"meter": "mtr_1", "interval": interval}
+        return price
+
+    def _verify(self, prices, raw_tiers=None):
+        meter = MagicMock(id="mtr_1")
+        product = MagicMock(id="prod_1")
+        product.metadata = {"product_type": "overage"}
+        raw = {
+            "tiers_mode": "graduated",
+            "currency": "usd",
+            "tiers": raw_tiers
+            or [
+                {"up_to": 100, "unit_amount_decimal": "10"},
+                {"up_to": None, "unit_amount_decimal": "5"},
+            ],
+        }
+        with (
+            patch(f"{COMMAND}.find_meter", new=AsyncMock(return_value=meter)),
+            patch(
+                f"{COMMAND}._find_product_by_type",
+                new=AsyncMock(return_value=product),
+            ),
+            patch(
+                f"{COMMAND}._find_metered_prices",
+                new=AsyncMock(return_value=prices),
+            ),
+            patch(f"{COMMAND}.stripe_get", new=AsyncMock(return_value=json.dumps(raw))),
+        ):
+            call_command("provision_overage_billing", "--verify")
+
+    def test_verify_passes_with_live_key(self):
+        self._verify([self._price()])
+
+    def test_provision_refuses_live_key(self):
+        with self.assertRaises(CommandError):
+            call_command("provision_overage_billing")
+
+    def test_verify_fails_on_tier_drift(self):
+        with self.assertRaises(CommandError) as ctx:
+            self._verify(
+                [self._price()],
+                raw_tiers=[
+                    {"up_to": 100, "unit_amount_decimal": "15"},
+                    {"up_to": None, "unit_amount_decimal": "5"},
+                ],
+            )
+        self.assertIn("tier 0", str(ctx.exception))
+
+    def test_verify_fails_on_multiple_active_prices(self):
+        with self.assertRaises(CommandError) as ctx:
+            self._verify([self._price("price_1"), self._price("price_2")])
+        self.assertIn("2 active metered prices", str(ctx.exception))
+
+    def test_verify_ignores_archived_prices(self):
+        self._verify([self._price("price_old", active=False), self._price()])
+
+    def test_verify_fails_on_annual_interval(self):
+        with self.assertRaises(CommandError) as ctx:
+            self._verify([self._price(interval="year")])
+        self.assertIn("interval", str(ctx.exception))

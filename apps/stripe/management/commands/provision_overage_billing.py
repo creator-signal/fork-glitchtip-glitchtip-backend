@@ -21,7 +21,6 @@ advertised spend cap, so verify after any manual change.
 """
 
 import json
-from decimal import Decimal
 
 from asgiref.sync import async_to_sync
 from django.conf import settings
@@ -37,7 +36,9 @@ from apps.stripe.client import (
     stripe_get,
     stripe_post,
 )
+from apps.stripe.exceptions import StripeError
 from apps.stripe.maintenance import sync_stripe_models
+from apps.stripe.overage import tier_problems
 
 
 async def _find_product_by_type(product_type: str):
@@ -48,50 +49,19 @@ async def _find_product_by_type(product_type: str):
     return None
 
 
-async def _find_metered_price(product_id: str, meter_id: str):
+async def _find_metered_prices(product_id: str, meter_id: str) -> list:
+    prices = []
     async for page in list_prices():
         for price in page:
             recurring = price.recurring or {}
             if price.product == product_id and recurring.get("meter") == meter_id:
-                return price
-    return None
+                prices.append(price)
+    return prices
 
 
-def _tier_problems(raw_price: dict) -> list[str]:
-    """Differences between a Stripe price's tiers and GLITCHTIP_OVERAGE_TIERS."""
-    problems = []
-    if raw_price.get("tiers_mode") != "graduated":
-        problems.append(
-            f"tiers_mode is {raw_price.get('tiers_mode')!r}, expected 'graduated'."
-        )
-    if raw_price.get("currency") != "usd":
-        problems.append(f"currency is {raw_price.get('currency')!r}, expected 'usd'.")
-    tiers = raw_price.get("tiers") or []
-    expected = [
-        (up_to, Decimal(rate) * 100) for up_to, rate in settings.GLITCHTIP_OVERAGE_TIERS
-    ]
-    actual = [
-        (tier.get("up_to"), Decimal(tier.get("unit_amount_decimal") or "0"))
-        for tier in tiers
-    ]
-    if len(actual) != len(expected):
-        problems.append(
-            f"{len(actual)} tiers in Stripe vs {len(expected)} in settings."
-        )
-    for i, ((up_to, cents), (live_up_to, live_cents)) in enumerate(
-        zip(expected, actual)
-    ):
-        if up_to != live_up_to or cents != live_cents:
-            problems.append(
-                f"tier {i}: Stripe has (up_to={live_up_to}, {live_cents} cents/unit),"
-                f" settings has (up_to={up_to}, {cents} cents/unit)."
-            )
-    for i, tier in enumerate(tiers):
-        # Local cost/cap math is per-unit only; a flat amount would invoice
-        # beyond what units_for_budget accounts for.
-        if tier.get("flat_amount") or tier.get("flat_amount_decimal"):
-            problems.append(f"tier {i} has a flat_amount; only per-unit is supported.")
-    return problems
+async def _find_metered_price(product_id: str, meter_id: str):
+    prices = await _find_metered_prices(product_id, meter_id)
+    return prices[0] if prices else None
 
 
 async def _verify(stdout) -> None:
@@ -115,17 +85,33 @@ async def _verify(stdout) -> None:
             "must not appear in the public plan list."
         )
 
-    price = await _find_metered_price(product.id, meter.id)
-    if price is None:
-        raise CommandError(
-            f"No metered price on product {product.id} bound to meter {meter.id}."
+    active = [p for p in await _find_metered_prices(product.id, meter.id) if p.active]
+    if not active:
+        problems.append(
+            f"No active metered price on product {product.id} bound to "
+            f"meter {meter.id}."
         )
-    stdout(f"Metered price {price.id}")
-
-    raw_price = json.loads(
-        await stripe_get(f"prices/{price.id}", {"expand": ["tiers"]})
-    )
-    problems += _tier_problems(raw_price)
+        raise CommandError("\n".join(problems))
+    if len(active) > 1:
+        # configure_overage attaches a single price chosen from the local DB;
+        # verifying one while the app attaches another would hide drift.
+        ids = ", ".join(p.id for p in active)
+        problems.append(
+            f"{len(active)} active metered prices bound to the meter ({ids}); "
+            "archive all but one."
+        )
+    for price in active:
+        stdout(f"Metered price {price.id}")
+        recurring = price.recurring or {}
+        if recurring.get("interval") != "month":
+            problems.append(
+                f"price {price.id}: interval is {recurring.get('interval')!r}, "
+                "expected 'month' (local cap math assumes monthly resets)."
+            )
+        raw_price = json.loads(
+            await stripe_get(f"prices/{price.id}", {"expand": ["tiers"]})
+        )
+        problems += [f"price {price.id}: {p}" for p in tier_problems(raw_price)]
     if problems:
         raise CommandError("\n".join(problems))
 
@@ -220,7 +206,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if options["verify"]:
-            async_to_sync(_verify)(lambda msg: self.stdout.write(msg))
+            try:
+                async_to_sync(_verify)(lambda msg: self.stdout.write(msg))
+            except StripeError as e:
+                raise CommandError(
+                    f"Stripe API error (status={e.status}): {e.message}"
+                ) from e
             self.stdout.write(
                 self.style.SUCCESS("Overage billing configuration verified.")
             )
