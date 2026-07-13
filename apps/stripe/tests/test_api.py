@@ -80,6 +80,21 @@ class StripeAPITestCase(TestCase):
         )
         self.assertEqual(res.status_code, 200)
 
+    async def test_create_stripe_session_rejects_metered_price(self):
+        # The metered overage price is attached via configure_overage, never
+        # sold through checkout.
+        overage_product = await baker.amake(
+            "stripe.StripeProduct", events=0, is_overage=True
+        )
+        metered_price = await baker.amake(
+            "stripe.StripePrice", product=overage_product, price=0, is_metered=True
+        )
+        url = reverse("api:create_stripe_session", args=[self.organization.slug])
+        res = await self.async_client.post(
+            url, {"price": metered_price.stripe_id}, content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 404)
+
     @patch("apps.stripe.api.create_portal_session", new_callable=AsyncMock)
     async def test_manage_billing(self, mock_create_portal_session):
         mock_create_portal_session.return_value = {"url": "test"}

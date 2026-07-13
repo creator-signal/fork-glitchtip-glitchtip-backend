@@ -227,9 +227,10 @@ async def create_stripe_session(
     else:
         customer = await create_customer(organization)
         customer_id = customer.id
-    # Ensure price exists
+    # Ensure the price exists and is a base plan; the metered overage price is
+    # attached via configure_overage, never sold through checkout.
     price_id = payload.price
-    await aget_object_or_404(StripePrice, stripe_id=price_id)
+    await aget_object_or_404(StripePrice, stripe_id=price_id, is_metered=False)
     return await create_session(price_id, customer_id, organization_slug)
 
 
