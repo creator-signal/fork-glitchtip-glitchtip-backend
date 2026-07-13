@@ -1,5 +1,6 @@
 from django.test import SimpleTestCase, override_settings
 
+from apps.stripe.management.commands.provision_overage_billing import _tier_problems
 from apps.stripe.overage import cost_cents_for_units, units_for_budget
 
 # A small, easy-to-reason-about graduated schedule: $0.10/unit for the first
@@ -65,3 +66,69 @@ class OverageDefaultScheduleTestCase(SimpleTestCase):
     def test_budget_converts_to_units(self):
         # $20 budget, first tier $0.00015/event -> floor(20 / 0.00015) = 133,333
         self.assertEqual(units_for_budget(2000), 133_333)
+
+
+@override_settings(GLITCHTIP_OVERAGE_TIERS=TEST_TIERS)
+class TierVerifyTestCase(SimpleTestCase):
+    """--verify's schedule comparison between a live Stripe price and settings."""
+
+    def _raw_price(self, **overrides):
+        # Stripe's unit_amount_decimal is in cents: $0.10/unit -> "10".
+        raw = {
+            "tiers_mode": "graduated",
+            "currency": "usd",
+            "tiers": [
+                {"up_to": 100, "unit_amount_decimal": "10"},
+                {"up_to": None, "unit_amount_decimal": "5"},
+            ],
+        }
+        raw.update(overrides)
+        return raw
+
+    def test_matching_schedule_has_no_problems(self):
+        self.assertEqual(_tier_problems(self._raw_price()), [])
+
+    def test_matching_is_numeric_not_textual(self):
+        raw = self._raw_price(
+            tiers=[
+                {"up_to": 100, "unit_amount_decimal": "10.00"},
+                {"up_to": None, "unit_amount_decimal": "5.0"},
+            ]
+        )
+        self.assertEqual(_tier_problems(raw), [])
+
+    def test_rate_drift_is_reported(self):
+        raw = self._raw_price(
+            tiers=[
+                {"up_to": 100, "unit_amount_decimal": "15"},
+                {"up_to": None, "unit_amount_decimal": "5"},
+            ]
+        )
+        self.assertEqual(len(_tier_problems(raw)), 1)
+        self.assertIn("tier 0", _tier_problems(raw)[0])
+
+    def test_boundary_drift_is_reported(self):
+        raw = self._raw_price(
+            tiers=[
+                {"up_to": 200, "unit_amount_decimal": "10"},
+                {"up_to": None, "unit_amount_decimal": "5"},
+            ]
+        )
+        self.assertIn("tier 0", _tier_problems(raw)[0])
+
+    def test_missing_tier_is_reported(self):
+        raw = self._raw_price(tiers=[{"up_to": None, "unit_amount_decimal": "10"}])
+        self.assertTrue(any("1 tiers" in p for p in _tier_problems(raw)))
+
+    def test_volume_mode_is_reported(self):
+        problems = _tier_problems(self._raw_price(tiers_mode="volume"))
+        self.assertTrue(any("tiers_mode" in p for p in problems))
+
+    def test_flat_amount_is_reported(self):
+        raw = self._raw_price(
+            tiers=[
+                {"up_to": 100, "unit_amount_decimal": "10", "flat_amount": 500},
+                {"up_to": None, "unit_amount_decimal": "5"},
+            ]
+        )
+        self.assertTrue(any("flat_amount" in p for p in _tier_problems(raw)))

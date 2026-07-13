@@ -89,9 +89,16 @@ async def _report_overage(
     Meter events sum per cycle, so we only send the increase since the last
     report; the counter resets on cycle rollover. A per-subscription cache lock
     serializes concurrent throttle checks so they can't report overlapping
-    deltas under different idempotency keys and over-charge.
+    deltas and over-charge.
+
+    The meter-event identifier is keyed on the base counter the delta was
+    computed from. A re-send before the counter was persisted (crash, expired
+    lock) then carries the same identifier, so Stripe's uniqueness window
+    absorbs it — the failure direction is undercharging by the usage growth
+    between the sends, never billing past the cap.
     """
     from apps.stripe.client import create_meter_event
+    from apps.stripe.exceptions import StripeError
     from apps.stripe.models import StripeSubscription
 
     if not org.stripe_customer_id:
@@ -113,7 +120,7 @@ async def _report_overage(
                 await _persist_overage(sub, cycle_start, billable_units)
             return
 
-        identifier = f"{sub.stripe_id}:{cycle_start.isoformat()}:{billable_units}"
+        identifier = f"{sub.stripe_id}:{cycle_start.isoformat()}:{reported}"
         try:
             await create_meter_event(
                 settings.GLITCHTIP_OVERAGE_METER_EVENT_NAME,
@@ -121,6 +128,18 @@ async def _report_overage(
                 delta,
                 identifier,
             )
+        except StripeError as e:
+            # A 400 (e.g. duplicate identifier) can never succeed on retry;
+            # treat it as recorded and advance the counter. Retrying it past
+            # Stripe's uniqueness window would double-bill the original delta,
+            # while advancing at worst undercharges. Other statuses are
+            # transient: keep the counter so the next check retries the same
+            # delta under the same identifier.
+            logger.exception(
+                "Overage meter event failed for org %s (status=%s)", org.id, e.status
+            )
+            if e.status != 400:
+                return
         except Exception:
             logger.exception("Failed to report overage meter event for org %s", org.id)
             return

@@ -264,8 +264,13 @@ async def stripe_create_subscription(request: AuthHttpRequest, payload: Subscrip
         organization_users__role=OrganizationUserRole.OWNER,
         organization_users__user=request.auth.user_id,
     )
+    # is_metered excludes the overage price, which also stores price=0 (its
+    # cost lives in tiers) but is never a valid base plan.
     price = await aget_object_or_404(
-        StripePrice.objects.select_related("product"), stripe_id=payload.price, price=0
+        StripePrice.objects.select_related("product"),
+        stripe_id=payload.price,
+        price=0,
+        is_metered=False,
     )
     if organization.stripe_customer_id:
         customer_id = organization.stripe_customer_id
@@ -548,9 +553,11 @@ async def configure_overage(
 ):
     """Enable/disable metered overage billing and set the spend cap (owner-only).
 
-    Enabling attaches the metered overage price as a second subscription item;
-    disabling removes it. Either way a throttle re-check is enqueued so the new
-    headroom (or block) takes effect promptly.
+    Enabling attaches the metered overage price as a second subscription item.
+    Disabling only clears the flag: the item stays attached (dormant, billing
+    zero) so a re-enable within the same cycle can't re-bill reported usage.
+    Either way a throttle re-check is enqueued so the new headroom (or block)
+    takes effect promptly.
     """
     org = await aget_object_or_404(
         Organization.objects.select_related(

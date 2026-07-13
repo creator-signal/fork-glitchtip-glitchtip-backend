@@ -378,11 +378,6 @@ async def add_subscription_item(
     return SubscriptionItem.model_validate_json(response)
 
 
-async def delete_subscription_item(item_id: str) -> None:
-    """Remove a subscription item (e.g. when overage billing is disabled)."""
-    await stripe_delete(f"subscription_items/{item_id}")
-
-
 async def create_meter_event(
     event_name: str,
     customer_id: str,
