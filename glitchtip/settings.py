@@ -874,6 +874,42 @@ if env.str("DATABASE_HOST", None):
 DATABASE_ENGINE = env.str(
     "DATABASE_ENGINE", "django_async_backend.db.backends.postgresql"
 )
+# Valkey/Redis connection. VALKEY_URL is the source of truth — supports any scheme
+# that django-vcache understands: redis://, rediss://, valkey://, valkeys://, sentinel://
+# Component env vars (VALKEY_HOST, etc.) are a convenience for simple single-node setups.
+VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
+if VALKEY_HOST:
+    VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
+    VALKEY_DATABASE = env.str("VALKEY_DATABASE", env.str("REDIS_DATABASE", "0"))
+    VALKEY_PASSWORD = env.str("VALKEY_PASSWORD", env.str("REDIS_PASSWORD", None))
+    if VALKEY_PASSWORD:
+        VALKEY_URL = (
+            f"redis://:{VALKEY_PASSWORD}@{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
+        )
+    else:
+        VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
+else:
+    VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
+
+# Serve POST /api/<project_id>/envelope/ entirely in Rust (gt_rust.ingest):
+# DSN auth, decompression/framing, PII scrubbing, dedupe and vtasks enqueue
+# run on the shared tokio runtime, and the event payload never materializes
+# on the Python heap. The ingest path issues its auth query on the very pool
+# the ORM uses, so enabling it forces the Rust database engine (the cache
+# already runs gt_rust's valkey driver unconditionally).
+GLITCHTIP_RUST_INGEST = env.bool("GLITCHTIP_RUST_INGEST", False)
+if GLITCHTIP_RUST_INGEST and not VALKEY_URL:
+    # The Rust enqueue path currently speaks only the Valkey task broker.
+    # The crate's postgres-broker arm exists but is not yet exercised (see
+    # the rust-ingest plan); until it is, valkey-less deploys keep the
+    # Python ingest path rather than hard-failing at startup.
+    logging.getLogger(__name__).warning(
+        "GLITCHTIP_RUST_INGEST requires VALKEY_URL until the postgres task "
+        "broker port lands; serving ingest via the Python path."
+    )
+    GLITCHTIP_RUST_INGEST = False
+if GLITCHTIP_RUST_INGEST:
+    DATABASE_ENGINE = "gt_rust.django_backend"
 # Add other settings that apply to both methods.
 for db_config in DATABASES.values():
     # async-backend's postgresql backend extends Django's stock postgresql
@@ -909,22 +945,6 @@ for db_config in DATABASES.values():
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Valkey/Redis connection. VALKEY_URL is the source of truth — supports any scheme
-# that django-vcache understands: redis://, rediss://, valkey://, valkeys://, sentinel://
-# Component env vars (VALKEY_HOST, etc.) are a convenience for simple single-node setups.
-VALKEY_HOST = env.str("VALKEY_HOST", env.str("REDIS_HOST", None))
-if VALKEY_HOST:
-    VALKEY_PORT = env.str("VALKEY_PORT", env.str("REDIS_PORT", "6379"))
-    VALKEY_DATABASE = env.str("VALKEY_DATABASE", env.str("REDIS_DATABASE", "0"))
-    VALKEY_PASSWORD = env.str("VALKEY_PASSWORD", env.str("REDIS_PASSWORD", None))
-    if VALKEY_PASSWORD:
-        VALKEY_URL = (
-            f"redis://:{VALKEY_PASSWORD}@{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
-        )
-    else:
-        VALKEY_URL = f"redis://{VALKEY_HOST}:{VALKEY_PORT}/{VALKEY_DATABASE}"
-else:
-    VALKEY_URL = env.str("VALKEY_URL", env.str("REDIS_URL", "redis://redis:6379/0"))
 db = DATABASES["default"]
 # Use Specified broker url, valkey url, or fallback to postgresql
 IS_LOAD_TEST = env("IS_LOAD_TEST")
