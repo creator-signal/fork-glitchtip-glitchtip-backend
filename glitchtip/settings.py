@@ -725,6 +725,14 @@ STRIPE_WEBHOOK_SECRET = env.str("STRIPE_WEBHOOK_SECRET", None)
 STRIPE_WEBHOOK_SECRET_SUBSCRIPTION = env.str(
     "STRIPE_WEBHOOK_SECRET_SUBSCRIPTION", STRIPE_WEBHOOK_SECRET
 )
+# Signing secret of the v2 event destination that delivers billing-meter
+# error reports (v1.billing.meter.error_report_triggered) to
+# /stripe/webhook/meter/. Event destinations have their own secrets, so unlike
+# STRIPE_WEBHOOK_SECRET_SUBSCRIPTION there is deliberately no fallback to the
+# classic secret — that value can never verify these deliveries, and falling
+# back would turn "unset" into quiet signature failures instead of a loud
+# not-configured error.
+STRIPE_WEBHOOK_SECRET_METER = env.str("STRIPE_WEBHOOK_SECRET_METER", None)
 STRIPE_REGION = env.str("STRIPE_REGION", "")  # Sets stripe customer metadata
 STRIPE_REGION_DOMAINS = env.dict(
     "STRIPE_REGION_DOMAINS", default={}
