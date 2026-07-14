@@ -1332,10 +1332,15 @@ class CacheConfigTestCase(TestCase):
         )
         self.assertEqual(info["cache_options"]["ssl_cert_reqs"], "none")
 
-    def test_no_tls_options_means_no_options_key(self):
-        """Without TLS env vars, OPTIONS is not set (empty dict from probe)."""
+    def test_no_tls_options_means_default_driver_only(self):
+        """Without TLS env vars, OPTIONS carries only the gt_rust driver
+        routing — always present: the cache and task broker run on gt_rust's
+        single shared tokio runtime, and that wiring is not configurable."""
         info = self._probe({"VALKEY_URL": "redis://valkey:6379/0"})
-        self.assertEqual(info["cache_options"], {})
+        self.assertEqual(
+            info["cache_options"],
+            {"DRIVER_CLASS": "gt_rust.valkey.RustValkeyDriver"},
+        )
 
     def test_empty_valkey_url_falls_back_to_db(self):
         """VALKEY_URL="" → database cache + DB task backend."""

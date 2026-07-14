@@ -998,7 +998,8 @@ USE_ASYNC_SERVER = env.bool("USE_ASYNC_SERVER", True)
 # VALKEY_SSL_CA_CERTS, VALKEY_SSL_CERTFILE, VALKEY_SSL_KEYFILE env vars.
 # Set VALKEY_SSL_CERT_REQS=none to skip certificate verification.
 if VALKEY_URL:
-    _valkey_options = {}
+    # Route the cache (django-vtasks) through single gt-rust tokio pool
+    _valkey_options = {"DRIVER_CLASS": "gt_rust.valkey.RustValkeyDriver"}
     if _ssl_ca := env.str("VALKEY_SSL_CA_CERTS", None):
         _valkey_options["ssl_ca_certs"] = _ssl_ca
     if _ssl_cert := env.str("VALKEY_SSL_CERTFILE", None):
