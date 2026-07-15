@@ -83,6 +83,15 @@ async def list_issue_event(
     # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
     return get_queryset(request, issue_id=issue_id).order_by("-id")
 
+@router.get("organizations/{slug:organization_slug}/issues/{int:issue_id}/events/", response=list[IssueEventSchema])
+@paginate
+@has_permission(["event:read", "event:write", "event:admin"])
+async def list_organization_issue_event(
+    request: AuthHttpRequest, response: HttpResponse, issue_id: int, organization_slug: str
+):
+    # Order by -id (UUIDv7) for partition pruning; equivalent to -received ordering
+    return get_queryset(request, issue_id=issue_id, organization_slug=organization_slug).order_by("-id")
+
 
 @router.get(
     "/issues/{int:issue_id}/events/latest/",
@@ -105,6 +114,75 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     # Filter by organization_id to enable hash sub-partition pruning
     qs = (
         get_queryset(request, issue_id)
+        .filter(organization_id=issue.project.organization_id)
+        .order_by("-id")
+    )
+    qs = qs.annotate(
+        previous=Subquery(
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
+        ),
+    )
+    event = await qs.afirst()
+    if event:
+        event.next = None  # We know the next after "latest" must be None
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    from ..cold_storage import is_duckdb_available
+
+    if not is_duckdb_available():
+        raise Http404()
+
+    # Narrow date range using issue.last_seen to avoid scanning all cold
+    # storage files. Buffer by 1 day to account for clock skew.
+    cold_end = issue.last_seen + timedelta(days=1)
+    cold_start = issue.last_seen - timedelta(days=1)
+    cold_event = await asyncio.to_thread(
+        _get_cold_events_for_issue,
+        issue_id=issue_id,
+        organization_id=issue.project.organization_id,
+        start_dt=cold_start,
+        end_dt=cold_end,
+        limit=1,
+    )
+    if not cold_event:
+        raise Http404()
+
+    event = cold_event[0]
+    event.issue = issue
+    event.previous = None
+    event.next = None
+    event.user_report = await get_user_report(event.id)
+    return event
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/issues/{int:issue_id}/events/latest/",
+    response=IssueEventDetailSchema,
+    by_alias=True,
+)
+@has_permission(["event:read", "event:write", "event:admin"])
+async def get_organization_latest_issue_event(
+    request: AuthHttpRequest,
+    organization_slug: str, 
+    issue_id: int):
+    # Resolve issue first to get organization_id for hash partition pruning
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id, 
+            project__organization__users=request.auth.user_id, 
+            project__organization__slug=organization_slug
+        )
+        .select_related("project__organization", "index")
+        .afirst()
+    )
+    if not issue:
+        raise Http404()
+
+    # Filter by organization_id to enable hash sub-partition pruning
+    qs = (
+        get_queryset(request, issue_id, organization_slug=organization_slug)
         .filter(organization_id=issue.project.organization_id)
         .order_by("-id")
     )
@@ -188,6 +266,70 @@ async def get_issue_event(request: AuthHttpRequest, issue_id: int, event_id: uui
     issue = (
         await Issue.objects.filter(
             id=issue_id, project__organization__users=request.auth.user_id
+        )
+        .select_related("project__organization", "index")
+        .afirst()
+    )
+    if not issue:
+        raise Http404()
+
+    cold_event = await asyncio.to_thread(
+        _get_event_from_cold, event_id, issue.project.organization_id
+    )
+    if not cold_event:
+        raise Http404()
+
+    cold_event.issue = issue
+    cold_event.previous = None
+    cold_event.next = None
+    cold_event.user_report = await get_user_report(cold_event.id)
+    return cold_event
+
+
+@router.get(
+    "organizations/{slug:organization_slug}/issues/{int:issue_id}/events/{event_id}/",
+    response=IssueEventDetailSchema,
+    by_alias=True,
+)
+@has_permission(["event:read", "event:write", "event:admin"])
+async def get_organization_issue_event(request: AuthHttpRequest, organization_slug: str, issue_id: int, event_id: uuid.UUID ):
+    qs = get_queryset(request, issue_id, organization_slug=organization_slug)
+    # Use id (UUIDv7) for prev/next navigation - enables partition pruning
+    qs = qs.annotate(
+        previous=Subquery(
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
+        ),
+        next=Subquery(qs.filter(id__gt=OuterRef("id")).order_by("id").values("id")[:1]),
+    )
+
+    if is_uuid7(event_id):
+        event = await qs.filter(id=event_id).afirst()
+    else:
+        # Client-provided sentry SDK event_id (typically UUIDv4).
+        # Include organization_id to prune hash sub-partitions.
+        org_id = await (
+            Issue.objects.filter(
+                id=issue_id, 
+                project__organization__users=request.auth.user_id,
+                project__organization__slug=organization_slug
+            )
+            .values_list("project__organization_id", flat=True)
+            .afirst()
+        )
+        if not org_id:
+            raise Http404()
+        event = await qs.filter(event_id=event_id, organization_id=org_id).afirst()
+
+    if event:
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    issue = (
+        await Issue.objects.filter(
+            id=issue_id,
+            project__organization__users=request.auth.user_id,
+            project__organization__slug=organization_slug
         )
         .select_related("project__organization", "index")
         .afirst()
