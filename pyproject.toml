@@ -31,7 +31,10 @@ dependencies = [
     # Library-only: psycopg.sql composition and Jsonb/Json parameter
     # wrappers, plus the import Django's stock postgresql backend performs.
     # No database I/O flows through psycopg (gt_rust.django_backend is the
-    # only engine), so the C accelerator and pool extras are unnecessary.
+    # only engine), so no extras here — the pure-Python impl over the
+    # image's libpq5 is sufficient. NB: django-async-backend currently
+    # pins psycopg[binary], so the C impl still installs transitively;
+    # if that pin ever relaxes, nothing here needs it.
     "psycopg~=3.1",
     "django-ninja~=1.5",
     "boto3~=1.34",

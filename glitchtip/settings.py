@@ -938,6 +938,17 @@ for db_config in DATABASES.values():
         if _pool_max_lifetime > 0:
             options["pool"]["max_lifetime"] = _pool_max_lifetime
 
+    if not db_config.get("HOST"):
+        # psycopg fell back to the libpq unix socket for an empty host; the
+        # Rust driver instead connects to TCP localhost:5432. Unix-socket
+        # deployments must name the socket directory explicitly.
+        logging.getLogger(__name__).warning(
+            "Database HOST is empty: the Rust driver will connect to TCP "
+            "localhost:5432, not the libpq unix socket. For socket "
+            "deployments set the host to the socket directory "
+            "(e.g. /var/run/postgresql)."
+        )
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 db = DATABASES["default"]

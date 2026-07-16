@@ -64,12 +64,7 @@ async def fetchall_mogrified_values(
     conn = async_connections[db_alias]
     parts: list[str] = []
     for row in value_params:
-        # compose_sql may return bytes (psycopg2-style) or str
-        # (psycopg3 ClientCursor). Normalise before joining.
-        part = await conn.ops.compose_sql(values_fragment, row)
-        if isinstance(part, (bytes, bytearray)):
-            part = part.decode()
-        parts.append(part)
+        parts.append(await conn.ops.compose_sql(values_fragment, row))
     final = sql_template.format(values=",".join(parts))
     async with await conn.cursor() as cursor:
         await cursor.execute(final)
@@ -89,10 +84,7 @@ async def execute_mogrified_values(
     conn = async_connections[db_alias]
     parts: list[str] = []
     for row in value_params:
-        part = await conn.ops.compose_sql(values_fragment, row)
-        if isinstance(part, (bytes, bytearray)):
-            part = part.decode()
-        parts.append(part)
+        parts.append(await conn.ops.compose_sql(values_fragment, row))
     final = sql_template.format(values=",".join(parts))
     async with await conn.cursor() as cursor:
         await cursor.execute(final)
@@ -153,10 +145,9 @@ async def copy_rows(
     would fail too.
 
     The gt_rust cursor exposes the psycopg-shaped ``copy()`` context
-    manager with ``write_row()``, plus ``write_rows()``, which encodes the
-    batch in Rust (C-API field access, one Python↔Rust crossing per
-    ~64 KiB chunk) — measurably less CPU per batch than the per-row loop,
-    so prefer it when present (the per-row loop covers older builds).
+    manager; ``write_rows()`` encodes the whole batch in Rust (C-API field
+    access, one Python↔Rust crossing per ~64 KiB chunk) — measurably less
+    CPU per batch than a per-row loop.
     """
     quoted = [table, *columns]
     cols = ", ".join('"' + c.replace('"', '""') + '"' for c in quoted[1:])
@@ -170,25 +161,14 @@ async def copy_rows(
         # can't serve as the COPY FROM context manager.
         with cursor.db.wrap_database_errors:
             async with cursor.cursor.copy(stmt) as copy:
-                write_rows = getattr(copy, "write_rows", None)
-                if write_rows is not None:
-                    if not isinstance(rows, (list, tuple)):
-                        rows = list(rows)
-                    await write_rows(rows)
-                    count = len(rows)
-                else:
-                    for row in rows:
-                        await copy.write_row(row)
-                        count += 1
+                if not isinstance(rows, (list, tuple)):
+                    rows = list(rows)
+                await copy.write_rows(rows)
+                count = len(rows)
     return count
 
 
 UNIQUE_VIOLATION = "23505"
-
-# Distinguishes "driver has no sqlstate attribute" (fall back to the
-# message prefix) from "attribute present but None" (a client-side
-# error — known non-conflict, fail closed).
-_SQLSTATE_MISSING = object()
 
 
 def is_unique_violation(exc: Exception) -> bool:
@@ -199,16 +179,11 @@ def is_unique_violation(exc: Exception) -> bool:
     and only the unique violation is worth retrying through a
     conflict-tolerant INSERT; the rest would fail identically. The gt_rust
     driver exposes the psycopg-shaped ``sqlstate`` attribute on the
-    underlying DB-API exception (Django chains it as ``__cause__``).
+    underlying DB-API exception (Django chains it as ``__cause__``); a
+    ``sqlstate`` of None means a client-side error — known non-conflict,
+    fail closed.
     """
     cause = exc.__cause__
     if cause is None:
         return False
-    sqlstate = getattr(cause, "sqlstate", _SQLSTATE_MISSING)
-    if sqlstate is not _SQLSTATE_MISSING:
-        return sqlstate == UNIQUE_VIOLATION
-    # gt_rust builds that predate the structured ``sqlstate`` attribute
-    # still prefix every server error message with its SQLSTATE code, so
-    # an anchored prefix check keeps the fallback working there instead
-    # of silently failing whole batches on a genuine duplicate.
-    return str(cause).startswith(f"[{UNIQUE_VIOLATION}]")
+    return getattr(cause, "sqlstate", None) == UNIQUE_VIOLATION
