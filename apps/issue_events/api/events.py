@@ -38,6 +38,65 @@ async def get_user_report(event_id: uuid.UUID) -> UserReport | None:
     return await UserReport.objects.filter(event_id=event_id).afirst()
 
 
+async def _get_latest_event_for_issue(
+    request: AuthHttpRequest,
+    issue: Issue,
+    issue_id: int,
+    organization_slug: str | None = None,
+):
+    """Return the latest IssueEvent for an already-resolved issue.
+
+    Shared by the bare and organization-scoped ``.../events/latest/`` routes so the
+    hash-partition pruning, the ``previous`` subquery, and the cold-storage fallback
+    live in one place. ``organization_slug`` (when set) further scopes the hot
+    queryset; the caller is responsible for resolving ``issue``.
+    """
+    # Filter by organization_id to enable hash sub-partition pruning
+    qs = (
+        get_queryset(request, issue_id, organization_slug=organization_slug)
+        .filter(organization_id=issue.project.organization_id)
+        .order_by("-id")
+    )
+    qs = qs.annotate(
+        previous=Subquery(
+            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
+        ),
+    )
+    event = await qs.afirst()
+    if event:
+        event.next = None  # We know the next after "latest" must be None
+        event.user_report = await get_user_report(event.id)
+        return event
+
+    # Fall back to cold storage
+    from ..cold_storage import is_duckdb_available
+
+    if not is_duckdb_available():
+        raise Http404()
+
+    # Narrow date range using issue.last_seen to avoid scanning all cold
+    # storage files. Buffer by 1 day to account for clock skew.
+    cold_end = issue.last_seen + timedelta(days=1)
+    cold_start = issue.last_seen - timedelta(days=1)
+    cold_event = await asyncio.to_thread(
+        _get_cold_events_for_issue,
+        issue_id=issue_id,
+        organization_id=issue.project.organization_id,
+        start_dt=cold_start,
+        end_dt=cold_end,
+        limit=1,
+    )
+    if not cold_event:
+        raise Http404()
+
+    event = cold_event[0]
+    event.issue = issue
+    event.previous = None
+    event.next = None
+    event.user_report = await get_user_report(event.id)
+    return event
+
+
 def _get_event_from_cold(event_id: uuid.UUID, organization_id: int):
     """Try to find an event in cold storage by its UUIDv7 id."""
     from ..cold_storage import get_event_from_cold, is_duckdb_available
@@ -110,51 +169,7 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
     )
     if not issue:
         raise Http404()
-
-    # Filter by organization_id to enable hash sub-partition pruning
-    qs = (
-        get_queryset(request, issue_id)
-        .filter(organization_id=issue.project.organization_id)
-        .order_by("-id")
-    )
-    qs = qs.annotate(
-        previous=Subquery(
-            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
-        ),
-    )
-    event = await qs.afirst()
-    if event:
-        event.next = None  # We know the next after "latest" must be None
-        event.user_report = await get_user_report(event.id)
-        return event
-
-    # Fall back to cold storage
-    from ..cold_storage import is_duckdb_available
-
-    if not is_duckdb_available():
-        raise Http404()
-
-    # Narrow date range using issue.last_seen to avoid scanning all cold
-    # storage files. Buffer by 1 day to account for clock skew.
-    cold_end = issue.last_seen + timedelta(days=1)
-    cold_start = issue.last_seen - timedelta(days=1)
-    cold_event = await asyncio.to_thread(
-        _get_cold_events_for_issue,
-        issue_id=issue_id,
-        organization_id=issue.project.organization_id,
-        start_dt=cold_start,
-        end_dt=cold_end,
-        limit=1,
-    )
-    if not cold_event:
-        raise Http404()
-
-    event = cold_event[0]
-    event.issue = issue
-    event.previous = None
-    event.next = None
-    event.user_report = await get_user_report(event.id)
-    return event
+    return await _get_latest_event_for_issue(request, issue, issue_id)
 
 
 @router.get(
@@ -164,66 +179,23 @@ async def get_latest_issue_event(request: AuthHttpRequest, issue_id: int):
 )
 @has_permission(["event:read", "event:write", "event:admin"])
 async def get_organization_latest_issue_event(
-    request: AuthHttpRequest,
-    organization_slug: str, 
-    issue_id: int):
+    request: AuthHttpRequest, organization_slug: str, issue_id: int
+):
     # Resolve issue first to get organization_id for hash partition pruning
     issue = (
         await Issue.objects.filter(
-            id=issue_id, 
-            project__organization__users=request.auth.user_id, 
-            project__organization__slug=organization_slug
+            id=issue_id,
+            project__organization__users=request.auth.user_id,
+            project__organization__slug=organization_slug,
         )
         .select_related("project__organization", "index")
         .afirst()
     )
     if not issue:
         raise Http404()
-
-    # Filter by organization_id to enable hash sub-partition pruning
-    qs = (
-        get_queryset(request, issue_id, organization_slug=organization_slug)
-        .filter(organization_id=issue.project.organization_id)
-        .order_by("-id")
+    return await _get_latest_event_for_issue(
+        request, issue, issue_id, organization_slug=organization_slug
     )
-    qs = qs.annotate(
-        previous=Subquery(
-            qs.filter(id__lt=OuterRef("id")).order_by("-id").values("id")[:1]
-        ),
-    )
-    event = await qs.afirst()
-    if event:
-        event.next = None  # We know the next after "latest" must be None
-        event.user_report = await get_user_report(event.id)
-        return event
-
-    # Fall back to cold storage
-    from ..cold_storage import is_duckdb_available
-
-    if not is_duckdb_available():
-        raise Http404()
-
-    # Narrow date range using issue.last_seen to avoid scanning all cold
-    # storage files. Buffer by 1 day to account for clock skew.
-    cold_end = issue.last_seen + timedelta(days=1)
-    cold_start = issue.last_seen - timedelta(days=1)
-    cold_event = await asyncio.to_thread(
-        _get_cold_events_for_issue,
-        issue_id=issue_id,
-        organization_id=issue.project.organization_id,
-        start_dt=cold_start,
-        end_dt=cold_end,
-        limit=1,
-    )
-    if not cold_event:
-        raise Http404()
-
-    event = cold_event[0]
-    event.issue = issue
-    event.previous = None
-    event.next = None
-    event.user_report = await get_user_report(event.id)
-    return event
 
 
 @router.get(
