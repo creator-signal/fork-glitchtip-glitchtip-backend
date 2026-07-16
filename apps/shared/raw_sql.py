@@ -152,11 +152,11 @@ async def copy_rows(
     transaction a failed COPY leaves it aborted, so a fallback INSERT
     would fail too.
 
-    Runs on either database driver: both cursors expose the psycopg-shaped
-    ``copy()`` context manager with ``write_row()``. gt_rust additionally
-    exposes ``write_rows()``, which encodes the batch in Rust (C-API field
-    access, one Python↔Rust crossing per ~64 KiB chunk) — measurably less
-    CPU per batch than the per-row loop, so prefer it when present.
+    The gt_rust cursor exposes the psycopg-shaped ``copy()`` context
+    manager with ``write_row()``, plus ``write_rows()``, which encodes the
+    batch in Rust (C-API field access, one Python↔Rust crossing per
+    ~64 KiB chunk) — measurably less CPU per batch than the per-row loop,
+    so prefer it when present (the per-row loop covers older builds).
     """
     quoted = [table, *columns]
     cols = ", ".join('"' + c.replace('"', '""') + '"' for c in quoted[1:])
@@ -197,10 +197,9 @@ def is_unique_violation(exc: Exception) -> bool:
     ``IntegrityError`` covers all of SQLSTATE class 23 — unique violation,
     but also e.g. a missing partition (23514) or a foreign-key violation —
     and only the unique violation is worth retrying through a
-    conflict-tolerant INSERT; the rest would fail identically. Both
-    database drivers expose the psycopg-shaped ``sqlstate`` attribute on
-    the underlying DB-API exception (Django chains it as ``__cause__``),
-    so this check is driver-agnostic.
+    conflict-tolerant INSERT; the rest would fail identically. The gt_rust
+    driver exposes the psycopg-shaped ``sqlstate`` attribute on the
+    underlying DB-API exception (Django chains it as ``__cause__``).
     """
     cause = exc.__cause__
     if cause is None:
@@ -211,6 +210,5 @@ def is_unique_violation(exc: Exception) -> bool:
     # gt_rust builds that predate the structured ``sqlstate`` attribute
     # still prefix every server error message with its SQLSTATE code, so
     # an anchored prefix check keeps the fallback working there instead
-    # of silently failing whole batches on a genuine duplicate. (psycopg
-    # always has the attribute, so it never reaches this line.)
+    # of silently failing whole batches on a genuine duplicate.
     return str(cause).startswith(f"[{UNIQUE_VIOLATION}]")
