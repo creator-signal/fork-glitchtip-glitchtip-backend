@@ -1542,7 +1542,7 @@ class OrganizationScopedIssueAPITestCase(GlitchTestCase):
 
     def detail_url(self, organization_slug: str, issue_id: int) -> str:
         return reverse(
-            "api:get_org_issues",
+            "api:organization_get_issue",
             kwargs={"organization_slug": organization_slug, "issue_id": issue_id},
         )
 
