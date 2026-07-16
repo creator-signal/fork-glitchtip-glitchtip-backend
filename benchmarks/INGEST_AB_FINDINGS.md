@@ -82,5 +82,61 @@ Observations:
   early-reject draining) and its junk-flood p95 latency is higher while
   its CPU is less than half — revisit when Phase 4 touches backpressure.
 
+## 2026-07-16 — master checkpoint (granian 2.7.9, glitchtip-rust 0.6.1, django-vtasks 3.0.0)
+
+Environment: same laptop (Intel Core Ultra 7 258V); `WEB_CPUS=2 WEB_MEM=2g`;
+`--segments 4 -n 2000 -c 100`; fresh stack; master `66b85f88`; run stamp
+`baseline_gtr061_granian279.json`. Comparator: 2026-07-15 pre-train master
+(granian 2.7.3, gt-rust 0.6.0, vtasks 2.x), stamp `baseline_gtr060_lock.json`,
+same parameters. **Attribution caveat:** the image moved in four ways at once
+(granian 2.7.3→2.7.9 incl. the 2.7.7 async-leak fix, django-vtasks 3.0.0
+embedded worker, gt-rust 0.6.1, new ASGI dispatcher + lifespan wiring) — this
+is a master-to-master checkpoint, not a granian isolate.
+
+Noise note: `py.prodmix` seg 1 was contaminated by host activity (18.1 s CPU
+vs 8.2–10.0 s in the other segments; 109 rps; p95 1674 ms — the rust half of
+the same segment was normal). Python junk segments are bimodal (4.5 vs 7.0 s)
+for the same reason. Rust segments were stable throughout (junk CPU spread
+2.17–2.21 s). Python figures below quote the median (and seg-1-excluded mean
+where noted); this run is the argument for moving the rig to a quiet desktop.
+
+| workload | metric | python | rust | delta |
+|----------|--------|-------:|-----:|------:|
+| prodmix | CPU s / 10k accepted events (median) | 57.4 (54.3 excl. seg 1) | 28.9 | **−50%** |
+| prodmix | settled RSS first→last (MB) | 278→285 | 211→228 | — |
+| prodmix | RPS | 195 | 393 | +101% |
+| junk | CPU s / 10k requests (median) | 28.3 | 10.9 | **−61%** |
+| oversized | CPU s / 10k requests (median) | 235 | 167 | −29% |
+| oversized | settled RSS during segments (MB) | 645–1030 | 240–261 | — |
+| header_dsn | CPU s / 10k requests | 24.3 | 17.8 | −27% |
+| burst | base → peak → settled RSS (MB) | 284→501→439 | 224→233→222 | — |
+
+Arm-over-arm observations vs the 2.7.3 image:
+
+- **All Phase 3b gates hold**; CPU deltas match the prior baseline within
+  noise. The Rust burst profile improved: peak-over-base +9.4 MB (was
+  +25.3) and it settles marginally *below* its pre-burst baseline (was
+  +11.7 above).
+- **Absolute resting RSS is higher in both arms** (+32 MB rust, +64 MB py
+  at the final segments) and the old run's idle-time decay is gone — the
+  2.7.3 image released ~50 MB during the burst workload's 45 s idle
+  windows (rust 228→174 MB) and decayed further over the tail (py
+  882→350 MB); the 2.7.9 image holds a flat plateau instead. Consistent
+  with the granian 2.7.7 leak fix changing free/reuse patterns (memory
+  retained in arenas and reused rather than churned and trimmed). Not a
+  leak signal: within-run endpoints are flat and burst settles to base.
+- **Python burst throughput +40%** (154→216 rps); py oversized RPS also
+  +38% — the allocation-heaviest paths benefit most from the leak fix.
+  (py header_dsn RPS −27%, but its segments sit in this run's noise band.)
+- **A small per-request CPU uptick on the rust junk path**: mean
+  1.79→2.19 s/segment (≈ +0.2 ms/request), and the new run's spread is
+  tight (2.17–2.21 s), so it's real within this run. The py arm's cheap
+  paths don't confirm a matching constant (junk clean-segment median is
+  flat; header_dsn is +0.5 ms/req but noise-contaminated), so arm
+  attribution is open — candidates are the new ASGI dispatcher hop and
+  vtasks-3.0 worker drain. Re-measure on a quiet host before chasing.
+- Known opens unchanged (Phase 4): rust junk ~0.1% client resets (9/8000);
+  rust junk p95 higher than py while its CPU is under half.
+
 Re-record after each phase lands (Rust MR → wheel tag → backend bump) and
 append a dated section; keep prior baselines for arm-over-arm comparison.
