@@ -1,6 +1,9 @@
 # Unreleased
 
-- Change: The Rust PostgreSQL driver (`gt_rust.django_backend`) is now the only database engine (the internal `DATABASE_ENGINE` opt-in flag is removed). psycopg remains installed as a library (SQL composition, JSON parameter wrappers) but no database I/O flows through it. Operator-facing differences from the psycopg engine: an empty database HOST connects to TCP localhost rather than the libpq unix socket (set the host to the socket directory explicitly; a startup warning flags this), and `DATABASE_CONN_MAX_AGE > 0` no longer yields unpooled persistent connections — the Rust driver always pools internally.
+- Change: The Rust PostgreSQL driver (`gt_rust.django_backend`) is now the only database engine (the internal `DATABASE_ENGINE` opt-in flag is removed). psycopg remains installed as a library (SQL composition, JSON parameter wrappers) but no database I/O flows through it. Operator-facing difference from the psycopg engine: `DATABASE_CONN_MAX_AGE > 0` no longer yields unpooled persistent connections — the Rust driver always pools internally. (Empty database HOST means the local unix socket, matching psycopg, as of glitchtip-rust 0.6.1.)
+- Feat: django-vtasks 3.0 — `run_after` delayed tasks are honored, orphan rescue is safe with multiple workers per host (liveness markers), unique-task keys are stable across processes, and the embedded worker stops on SIGTERM even when the server's request drain hangs.
+- Fix: granian 2.7.9 — fixes an upstream memory leak in async application calls (2.7.7) and a WSGI threadpool starvation bug (2.7.9).
+- Deps: glitchtip-rust 0.6.1 (DB-API `Binary` constructor, libpq-parity empty-host default, warnings for dropped connection OPTIONS), django-vtasks 3.0.0, granian 2.7.9.
 
 # 6.2.1
 

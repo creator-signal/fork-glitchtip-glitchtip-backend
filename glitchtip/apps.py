@@ -8,20 +8,6 @@ class GlitchtipConfig(AppConfig):
         from . import task_signals  # noqa: F401
 
         self._skip_hstore_oid_lookup()
-        self._add_dbapi_binary()
-
-    @staticmethod
-    def _add_dbapi_binary():
-        # Django's BinaryField calls ``connection.Database.Binary()`` (the
-        # DB-API 2.0 constructor) in get_db_prep_value — the DB task broker's
-        # payload column hits it. gt_rust.dbapi lacks the attribute until
-        # glitchtip-rust 0.6.1; ``bytes`` is the correct constructor (the
-        # driver marshals bytes params to BYTEA). Remove once the pin
-        # reaches 0.6.1.
-        from gt_rust import dbapi
-
-        if not hasattr(dbapi, "Binary"):
-            dbapi.Binary = bytes
 
     @staticmethod
     def _skip_hstore_oid_lookup():
