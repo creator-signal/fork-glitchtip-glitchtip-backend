@@ -6,10 +6,10 @@ worker tasks consume what Rust enqueued. That covers the full contract: DSN
 auth against the shared Postgres pool, Valkey block/dedupe caches, the vtasks
 wire format, and worker-side re-validation of the payloads.
 
-Skipped unless ``GLITCHTIP_RUST_INGEST`` is enabled: the Rust path requires
-the ``gt_rust.django_backend`` engine and the gt_rust Valkey cache driver
-(both forced by the flag), so these run in a dedicated flag-on test lane
-while the default suite keeps covering the Python view.
+Skipped unless ``GLITCHTIP_RUST_INGEST`` is enabled: the flag wires the Rust
+ASGI dispatch in (the ``gt_rust.django_backend`` engine and gt_rust Valkey
+cache driver it relies on run unconditionally), so these run in a dedicated
+flag-on test lane while the default suite keeps covering the Python view.
 """
 
 import importlib

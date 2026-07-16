@@ -100,7 +100,8 @@ class AsgiIngestTestMixin:
 def fake_integrity_error(sqlstate: str) -> IntegrityError:
     """An IntegrityError chained the way Django raises it: ``__cause__``
     is the driver exception carrying the psycopg-shaped ``sqlstate``
-    (both database drivers expose it). For faking copy_rows failures."""
+    (gt_rust's dbapi mirrors psycopg's diagnostics). For faking copy_rows
+    failures."""
     cause = Exception(f"[{sqlstate}] integrity constraint violation")
     cause.sqlstate = sqlstate
     error = IntegrityError("integrity constraint violation")
