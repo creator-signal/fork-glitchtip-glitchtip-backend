@@ -1,3 +1,7 @@
+# Unreleased
+
+- Change: The Rust PostgreSQL driver (`gt_rust.django_backend`) is now the only database engine (the internal `DATABASE_ENGINE` opt-in flag is removed). psycopg remains installed as a library (SQL composition, JSON parameter wrappers) but no database I/O flows through it. Operator-facing differences from the psycopg engine: an empty database HOST connects to TCP localhost rather than the libpq unix socket (set the host to the socket directory explicitly; a startup warning flags this), and `DATABASE_CONN_MAX_AGE > 0` no longer yields unpooled persistent connections — the Rust driver always pools internally.
+
 # 6.2.1
 
 - Feat: Optional server-side PII scrubbing at ingest — a last-line-of-defense scrubber that redacts secrets and sensitive data from events and logs before they are enqueued or persisted, for operators who cannot rely on every client SDK being configured to scrub.
