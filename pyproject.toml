@@ -58,7 +58,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "locust~=2.10",
     "freezegun~=1.1",
     "model-bakery-async~=1.23",
     "django-debug-toolbar~=7.0",

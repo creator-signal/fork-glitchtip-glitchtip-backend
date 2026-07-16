@@ -36,7 +36,6 @@ env = environ.FileAwareEnv(
     AZURE_ACCOUNT_KEY=(str, None),
     AZURE_CONTAINER=(str, None),
     AZURE_URL_EXPIRATION_SECS=(int, None),
-    IS_LOAD_TEST=(bool, False),
     GS_BUCKET_NAME=(str, None),
     GS_PROJECT_ID=(str, None),
     DEBUG=(bool, False),
@@ -950,10 +949,6 @@ for db_config in DATABASES.values():
         )
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-db = DATABASES["default"]
-# Use Specified broker url, valkey url, or fallback to postgresql
-IS_LOAD_TEST = env("IS_LOAD_TEST")
 
 # Time in seconds to debounce some frequently run tasks
 TASK_DEBOUNCE_DELAY = env.int("TASK_DEBOUNCE_DELAY", 30)
