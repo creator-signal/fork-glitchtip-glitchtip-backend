@@ -77,11 +77,18 @@ TRANSACTION_NAMES = [f"GET /api/resource-{i}/" for i in range(10)]
 # per-payload random strings with random.choices would dominate generator CPU.
 # ---------------------------------------------------------------------------
 
-_WORDS = [
-    "".join(random.choices(string.ascii_lowercase, k=random.randint(3, 10)))
-    for _ in range(512)
-]
-_TEXT_POOL = " ".join(random.choices(_WORDS, k=1_200_000))  # ~8 MiB
+_TEXT_POOL = ""
+
+
+def init_text_pool() -> None:
+    """Built after random.seed(args.seed) so --seed reproduces payload
+    content run-to-run, not just the request mix."""
+    global _TEXT_POOL
+    words = [
+        "".join(random.choices(string.ascii_lowercase, k=random.randint(3, 10)))
+        for _ in range(512)
+    ]
+    _TEXT_POOL = " ".join(random.choices(words, k=1_200_000))  # ~8 MiB
 
 
 def rand_text(n: int) -> str:
@@ -217,7 +224,7 @@ def make_log_envelope(size: int) -> tuple[bytes, dict]:
 
 
 def make_ignored_item() -> tuple[bytes, dict]:
-    """Item types every SDK sends that GlitchTip validates and drops."""
+    """Item types every SDK sends that GlitchTip drops without parsing."""
     ts = datetime.now(timezone.utc).isoformat()
     if random.random() < 0.5:
         item_type, payload = (
@@ -404,15 +411,18 @@ class SegmentStats:
         self._lock = threading.Lock()
         self.statuses: dict[int, int] = {}
         self.errors = 0
+        self.accepted_events = 0
         self.latencies: list[float] = []
 
-    def record(self, status: int | None, elapsed: float):
+    def record(self, status: int | None, elapsed: float, is_event: bool):
         with self._lock:
             self.latencies.append(elapsed)
             if status is None:
                 self.errors += 1
             else:
                 self.statuses[status] = self.statuses.get(status, 0) + 1
+                if is_event and 200 <= status < 300:
+                    self.accepted_events += 1
 
     @property
     def accepted(self) -> int:
@@ -421,19 +431,19 @@ class SegmentStats:
 
 def fire(
     client: httpx.Client,
-    requests: list[tuple[str, bytes, dict]],
+    requests: list[tuple[str, bytes, dict, bool]],
     concurrency: int,
 ) -> SegmentStats:
     stats = SegmentStats()
 
     def send(req):
-        url, body, headers = req
+        url, body, headers, is_event = req
         t0 = time.monotonic()
         try:
             r = client.post(url, content=body, headers=headers)
-            stats.record(r.status_code, time.monotonic() - t0)
+            stats.record(r.status_code, time.monotonic() - t0, is_event)
         except Exception:
-            stats.record(None, time.monotonic() - t0)
+            stats.record(None, time.monotonic() - t0, is_event)
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(send, req) for req in requests]
@@ -444,7 +454,11 @@ def fire(
 
 def build_requests(
     arm: Arm, workload: str, n: int, args
-) -> list[tuple[str, bytes, dict]]:
+) -> list[tuple[str, bytes, dict, bool]]:
+    """Request tuples are (url, body, headers, is_event) — is_event marks
+    requests that carry an ingestible event/transaction/log, so accepted
+    ENVELOPES (2xx) and accepted EVENTS can be counted separately (ignored
+    item types also 200)."""
     reqs = []
     if workload == "prodmix":
         kinds = []
@@ -462,7 +476,7 @@ def build_requests(
                 body, headers = make_log_envelope(size)
             else:
                 body, headers = make_ignored_item()
-            reqs.append((arm.envelope_url, body, headers))
+            reqs.append((arm.envelope_url, body, headers, kind != "ignored"))
     elif workload == "junk":
         for _ in range(n):
             body, headers, bad_key = make_junk()
@@ -471,14 +485,14 @@ def build_requests(
                 if bad_key
                 else arm.envelope_url
             )
-            reqs.append((url, body, headers))
+            reqs.append((url, body, headers, False))
     elif workload == "oversized":
         body, headers = make_oversized()
-        reqs = [(arm.envelope_url, body, headers)] * n
+        reqs = [(arm.envelope_url, body, headers, False)] * n
     elif workload == "header_dsn":
         for _ in range(n):
             body, headers = make_error_event(4096, header_extra={"dsn": arm.dsn})
-            reqs.append((arm.envelope_url_bare, body, headers))
+            reqs.append((arm.envelope_url_bare, body, headers, True))
     else:
         raise ValueError(workload)
     return reqs
@@ -489,14 +503,32 @@ def build_requests(
 # ---------------------------------------------------------------------------
 
 
-_WORKLOAD_IDS = {"prodmix": 1, "junk": 2, "oversized": 3, "header_dsn": 4, "burst": 5}
+_WORKLOAD_IDS = {
+    "prodmix": 1,
+    "junk": 2,
+    "oversized": 3,
+    "header_dsn": 4,
+    "burst": 5,
+    "warmup": 6,
+}
 
 
 def reseed(args, workload: str, seg: int) -> None:
     """Reseed per (workload, segment) so both arms build byte-identical
     request lists — otherwise they consume different slices of the global
-    RNG stream and the workloads are only statistically similar."""
-    random.seed(args.seed * 1_000_003 + _WORKLOAD_IDS[workload] * 1_009 + seg)
+    RNG stream and the workloads are only statistically similar.
+
+    ``run_nonce`` (fresh entropy per run) is mixed in so a rerun against a
+    warm stack never regenerates the previous run's event ids: the server
+    dedupes event ids in cache for ~5 minutes, and replayed ids would keep
+    the 200 responses while silently skipping enqueue + worker processing.
+    """
+    random.seed(
+        args.run_nonce * 2_147_483_659
+        + args.seed * 1_000_003
+        + _WORKLOAD_IDS[workload] * 1_009
+        + seg
+    )
 
 
 def run_segment(client: httpx.Client, arm: Arm, workload: str, seg: int, args) -> dict:
@@ -523,6 +555,7 @@ def run_segment(client: httpx.Client, arm: Arm, workload: str, seg: int, args) -
         "rps": round(len(reqs) / wall, 1) if wall else 0.0,
         "p50_ms": round(lats[len(lats) // 2] * 1000, 1) if lats else 0.0,
         "p95_ms": round(lats[int(len(lats) * 0.95)] * 1000, 1) if lats else 0.0,
+        "accepted_events": stats.accepted_events,
         "cpu_s": round(after["cpu_s"] - before["cpu_s"], 3),
         "drain_s": round(drain_s, 1),
         "drained": drained,
@@ -533,7 +566,7 @@ def run_segment(client: httpx.Client, arm: Arm, workload: str, seg: int, args) -
     if record["restarted"]:
         flags += "  !! WORKER RESTARTED — segment invalid"
     if not drained:
-        flags += "  !! drain timeout"
+        flags += "  !! drain timeout — segment invalid"
     print(
         f"  [{workload}] seg {seg} {arm.name:>4}: "
         f"acc={record['accepted']:>5}/{record['n']} err={record['errors']} "
@@ -568,7 +601,7 @@ def run_burst(client: httpx.Client, arm: Arm, args) -> dict:
     t0 = time.monotonic()
     stats = fire(client, reqs, args.burst_concurrency)
     wall = time.monotonic() - t0
-    arm.wait_drained(timeout=args.drain_timeout)
+    _, drained = arm.wait_drained(timeout=args.drain_timeout)
     stop.set()
     t.join()
 
@@ -584,13 +617,18 @@ def run_burst(client: httpx.Client, arm: Arm, args) -> dict:
         "baseline_rss_mb": round(baseline["rss"] / 1048576, 1),
         "peak_rss_mb": round(max(peak_rss) / 1048576, 1),
         "settled_rss_mb": round(settled["rss"] / 1048576, 1),
+        "drained": drained,
         "restarted": settled["start_time"] != baseline["start_time"],
     }
+    flags = ""
+    if record["restarted"]:
+        flags += "  !! WORKER RESTARTED"
+    if not drained:
+        flags += "  !! drain timeout — settled RSS not settled"
     print(
         f"  [burst] {arm.name:>4}: acc={record['accepted']}/{record['n']} "
         f"rss base={record['baseline_rss_mb']}MB peak={record['peak_rss_mb']}MB "
-        f"settled={record['settled_rss_mb']}MB"
-        f"{'  !! WORKER RESTARTED' if record['restarted'] else ''}",
+        f"settled={record['settled_rss_mb']}MB{flags}",
         flush=True,
     )
     return record
@@ -601,48 +639,78 @@ def run_burst(client: httpx.Client, arm: Arm, args) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def lstsq_slope(xs: list[float], ys: list[float]) -> float:
+def lstsq(xs: list[float], ys: list[float]) -> tuple[float, float]:
+    """Least-squares slope and R**2."""
     n = len(xs)
     if n < 2:
-        return 0.0
+        return 0.0, 0.0
     mx, my = sum(xs) / n, sum(ys) / n
-    denom = sum((x - mx) ** 2 for x in xs)
-    if denom == 0:
-        return 0.0
-    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    if sxx == 0:
+        return 0.0, 0.0
+    slope = sxy / sxx
+    r2 = (sxy * sxy) / (sxx * syy) if syy else 1.0
+    return slope, r2
+
+
+def median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    n = len(xs)
+    return (xs[n // 2] + xs[(n - 1) // 2]) / 2 if xs else 0.0
 
 
 def aggregate(segments: list[dict], arm: str, workload: str) -> dict | None:
     segs = [
         s
         for s in segments
-        if s["arm"] == arm and s["workload"] == workload and not s["restarted"]
+        if s["arm"] == arm
+        and s["workload"] == workload
+        and not s["restarted"]
+        and s["drained"]  # a timed-out drain undercounts CPU and bleeds
+        # leftover processing into the same arm's next segment
     ]
     if not segs:
         return None
     total_n = sum(s["n"] for s in segs)
     total_accepted = sum(s["accepted"] for s in segs)
+    total_events = sum(s["accepted_events"] for s in segs)
     total_cpu = sum(s["cpu_s"] for s in segs)
-    # header_dsn/junk/oversized are mostly-rejected by design on one or both
-    # arms — normalize their CPU per request, prodmix per accepted envelope.
-    denom = total_accepted if workload == "prodmix" else total_n
+    total_wall = sum(s["wall_s"] for s in segs)
+    # prodmix normalizes per accepted EVENT (ignored item types also return
+    # 200, so plain 2xx would inflate the denominator ~18%); the mostly-
+    # rejected-by-design workloads normalize per request.
+    denom = total_events if workload == "prodmix" else total_n
+    per_seg = [
+        s["cpu_s"] / (s["accepted_events"] if workload == "prodmix" else s["n"]) * 1e4
+        for s in segs
+        if (s["accepted_events"] if workload == "prodmix" else s["n"])
+    ]
     out = {
         "segments": len(segs),
         "requests": total_n,
         "accepted": total_accepted,
+        "accepted_events": total_events,
         "errors": sum(s["errors"] for s in segs),
         "cpu_s": round(total_cpu, 2),
         "cpu_s_per_10k": round(total_cpu / denom * 10_000, 2) if denom else None,
-        "rps_mean": round(sum(s["rps"] for s in segs) / len(segs), 1),
+        "cpu_s_per_10k_median": round(median(per_seg), 2) if per_seg else None,
+        "rps": round(total_n / total_wall, 1) if total_wall else 0.0,
         "p95_ms_mean": round(sum(s["p95_ms"] for s in segs) / len(segs), 1),
     }
     if workload == "prodmix":
         cum, xs, ys = 0, [], []
         for s in segs:
-            cum += s["accepted"]
+            cum += s["accepted_events"]
             xs.append(float(cum))
             ys.append(s["rss_settled_mb"])
-        out["rss_slope_mb_per_10k"] = round(lstsq_slope(xs, ys) * 10_000, 2)
+        # The first segment absorbs plateau/allocator warmup that the short
+        # warmup pass doesn't burn off; a least-squares line over that
+        # saturating curve would report the transient as slope.
+        slope, r2 = lstsq(xs[1:], ys[1:])
+        out["rss_slope_mb_per_10k"] = round(slope * 10_000, 2)
+        out["rss_slope_r2"] = round(r2, 2)
         out["rss_first_mb"] = ys[0]
         out["rss_last_mb"] = ys[-1]
     return out
@@ -659,19 +727,23 @@ def print_comparison(results: dict, workloads: list[str], arms: list[str]) -> No
         per_arm = {a: results["aggregates"].get(a, {}).get(workload) for a in arms}
         if not all(per_arm.values()):
             continue
-        denom_label = "accepted" if workload == "prodmix" else "requests"
+        denom_label = "accepted events" if workload == "prodmix" else "requests"
         print(f"\n[{workload}]  (CPU normalized per 10k {denom_label})")
-        keys = ["cpu_s_per_10k", "rps_mean", "p95_ms_mean"]
+        keys = ["cpu_s_per_10k", "cpu_s_per_10k_median", "rps", "p95_ms_mean"]
         if workload == "prodmix":
-            keys.insert(1, "rss_slope_mb_per_10k")
+            keys.insert(2, "rss_slope_mb_per_10k")
         header = (
             f"  {'metric':<24}" + "".join(f"{a:>12}" for a in arms) + f"{'delta':>12}"
         )
         print(header)
         for key in keys:
-            vals = [per_arm[a][key] for a in arms]
+            vals = [per_arm[a].get(key) for a in arms]
             delta = ""
-            if len(vals) == 2 and vals[0]:
+            if (
+                len(vals) == 2
+                and all(isinstance(v, (int, float)) for v in vals)
+                and vals[0]
+            ):
                 delta = f"{(vals[1] - vals[0]) / abs(vals[0]) * 100:+.1f}%"
             print(f"  {key:<24}" + "".join(f"{v:>12}" for v in vals) + f"{delta:>12}")
     bursts = results.get("burst", [])
@@ -698,8 +770,13 @@ def main():
     )
     parser.add_argument(
         "--workloads",
-        default="prodmix,junk,oversized,header_dsn,burst",
-        help="Comma-separated subset of prodmix,junk,oversized,header_dsn,burst",
+        default="prodmix,junk,burst,oversized,header_dsn",
+        help="Comma-separated subset of prodmix,junk,burst,oversized,"
+        "header_dsn — run in the given order. The default runs burst before"
+        " the two workloads whose RSS history is asymmetric BY DESIGN"
+        " (oversized buffers on the Python arm only; header_dsn ingests on"
+        " the Rust arm only), so the burst comparison starts from"
+        " symmetric heaps.",
     )
     parser.add_argument(
         "--segments",
@@ -755,8 +832,13 @@ def main():
     args.requests_for = lambda workload: (
         max(50, args.requests // 20) if workload == "oversized" else args.requests
     )
+    # Fresh entropy per run, mixed into every reseed() (see its docstring):
+    # a rerun against a warm stack must not replay the previous run's event
+    # ids into the server's ~5-minute dedupe window.
+    args.run_nonce = random.SystemRandom().getrandbits(31)
 
     random.seed(args.seed)
+    init_text_pool()
     arms = []
     for pair in args.arms.split(","):
         name, url = pair.split("=", 1)
@@ -787,10 +869,29 @@ def main():
     transport = httpx.HTTPTransport(retries=0, limits=limits)
     segments: list[dict] = []
     bursts: list[dict] = []
+
+    def dump_partial():
+        # Persist raw data after every segment so a crash (scrape error,
+        # container OOM) never discards an hour of measurements.
+        if args.json_out:
+            with open(args.json_out, "w") as f:
+                json.dump(
+                    {
+                        "config": {
+                            k: v for k, v in vars(args).items() if not callable(v)
+                        },
+                        "segments": segments,
+                        "burst": bursts,
+                    },
+                    f,
+                    indent=2,
+                )
+
     with httpx.Client(timeout=120, transport=transport) as client:
         if args.warmup:
             print(f"\nWarmup ({args.warmup} prodmix requests per arm)...", flush=True)
             for arm in arms:
+                reseed(args, "warmup", 0)
                 fire(
                     client,
                     build_requests(arm, "prodmix", args.warmup, args),
@@ -799,34 +900,35 @@ def main():
                 arm.wait_drained(timeout=args.drain_timeout)
 
         for workload in workloads:
-            if workload == "burst":
-                continue
             print(f"\n=== workload: {workload} ===", flush=True)
+            if workload == "burst":
+                for arm in arms:
+                    bursts.append(run_burst(client, arm, args))
+                    dump_partial()
+                continue
             for seg in range(args.segments):
                 # Alternate which arm goes first so time-of-run drift
                 # (DB growth, page cache) cancels out across segments.
                 order = arms if seg % 2 == 0 else list(reversed(arms))
                 for arm in order:
                     segments.append(run_segment(client, arm, workload, seg, args))
-
-        if "burst" in workloads:
-            print("\n=== workload: burst ===", flush=True)
-            for arm in arms:
-                bursts.append(run_burst(client, arm, args))
+                    dump_partial()
 
     arm_names = [a.name for a in arms]
+    aggregates = {}
+    for a in arm_names:
+        aggregates[a] = {}
+        for w in workloads:
+            if w == "burst":
+                continue
+            agg = aggregate(segments, a, w)
+            if agg:
+                aggregates[a][w] = agg
     results = {
         "config": {k: v for k, v in vars(args).items() if not callable(v)},
         "segments": segments,
         "burst": bursts,
-        "aggregates": {
-            a: {
-                w: aggregate(segments, a, w)
-                for w in workloads
-                if w != "burst" and aggregate(segments, a, w)
-            }
-            for a in arm_names
-        },
+        "aggregates": aggregates,
     }
 
     invalid = [s for s in segments if s["restarted"]]
