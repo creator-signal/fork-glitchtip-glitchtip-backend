@@ -130,7 +130,7 @@ async def get_issue(request: AuthHttpRequest, issue_id: int):
     by_alias=True,
 )
 @has_permission(["event:read", "event:write", "event:admin"])
-async def get_org_issues(request: AuthHttpRequest, organization_slug: str, issue_id: int):
+async def organization_get_issue(request: AuthHttpRequest, organization_slug: str, issue_id: int):
     qs = await get_queryset(request.auth.user_id, organization_slug=organization_slug)
     qs = qs.annotate(
         user_report_count=Count("userreport", distinct=True),
