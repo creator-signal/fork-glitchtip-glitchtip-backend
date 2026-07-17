@@ -135,6 +135,22 @@ Arm-over-arm observations vs the 2.7.3 image:
   flat; header_dsn is +0.5 ms/req but noise-contaminated), so arm
   attribution is open — candidates are the new ASGI dispatcher hop and
   vtasks-3.0 worker drain. Re-measure on a quiet host before chasing.
+  **Resolved 2026-07-16 — measurement artifact, no regression.** Re-run
+  junk-only (6 segments) on a quiet dedicated desktop (AMD 6C/12T,
+  podman rootless, same harness/params): old 229b4265 image vs new
+  master image land within 1% (rust median 3.52 vs 3.55 cpu-s/10k,
+  segment spread 0.70–0.74 vs 0.70–0.76 s; py 17.62 vs 17.02). The
+  laptop delta was clock-frequency drift: `process_cpu_seconds_total`
+  counts time, not cycles, and the power-limited laptop sustains
+  different effective clocks run-to-run (±20%) while staying thermally
+  stable *within* a run — hence the deceptively tight per-run spread.
+  Consequence for this doc: on the laptop only within-run interleaved
+  A/B deltas are trustworthy; cross-run CPU and RPS comparisons (e.g.
+  the py burst/oversized RPS gains above, and their granian-leak-fix
+  attribution) carry that ±20% band. The RSS observations are
+  unaffected (bytes don't scale with clocks). Absolute CPU numbers are
+  ~3–5× lower on the desktop and not comparable across machines;
+  future cross-run baselines move to the desktop rig.
 - Known opens unchanged (Phase 4): rust junk ~0.1% client resets (9/8000);
   rust junk p95 higher than py while its CPU is under half.
 
