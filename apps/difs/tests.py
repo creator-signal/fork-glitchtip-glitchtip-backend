@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from apps.difs.stacktrace_processor import (
     StacktraceProcessor,
+    _is_in_app,
     digest_symbol,
     extract_source_from_bundle,
     find_source_bundle,
@@ -698,6 +699,109 @@ class NativeSymbolicationTestCase(GlitchTestCase):
         self.assertEqual(result.frames[0]["filename"], "/lib/main.dart")
         self.assertEqual(result.frames[0]["lineno"], 68)
         self.assertTrue(result.frames[0]["resolved"])
+
+
+class IsInAppFilteringTestCase(GlitchTestCase):
+    """Test _is_in_app() and GLITCHTIP_IN_APP_EXCLUDE frame filtering."""
+
+    def test_is_in_app_true_when_no_exclude_list(self):
+        """Empty _IN_APP_EXCLUDE means all frames are in_app=True."""
+        with patch("apps.difs.stacktrace_processor._IN_APP_EXCLUDE", []):
+            self.assertTrue(_is_in_app({"filename": "/usr/lib/libc.so.6"}))
+            self.assertTrue(_is_in_app({"function": "malloc"}))
+            self.assertTrue(_is_in_app({}))
+
+    def test_is_in_app_false_when_filename_matches(self):
+        """Frame filename containing an exclude pattern → in_app=False."""
+        with patch("apps.difs.stacktrace_processor._IN_APP_EXCLUDE", ["/usr/lib/"]):
+            self.assertFalse(_is_in_app({"filename": "/usr/lib/libc.so.6"}))
+
+    def test_is_in_app_false_when_function_matches(self):
+        """Frame function containing an exclude pattern → in_app=False."""
+        with patch(
+            "apps.difs.stacktrace_processor._IN_APP_EXCLUDE", ["wasm-function"]
+        ):
+            self.assertFalse(_is_in_app({"function": "wasm-function[42]"}))
+
+    def test_is_in_app_true_when_no_pattern_matches(self):
+        """Frame with no matching substrings → in_app=True."""
+        with patch("apps.difs.stacktrace_processor._IN_APP_EXCLUDE", ["/usr/lib/"]):
+            self.assertTrue(
+                _is_in_app({"filename": "/home/user/src/main.rs"})
+            )
+            self.assertTrue(
+                _is_in_app({"function": "myapp::process_data"})
+            )
+
+    def test_is_in_app_handles_missing_fields(self):
+        """Missing filename or function defaults to empty string, does not throw."""
+        with patch("apps.difs.stacktrace_processor._IN_APP_EXCLUDE", ["malloc"]):
+            self.assertTrue(_is_in_app({}))
+            self.assertTrue(
+                _is_in_app({"filename": "/src/lib.rs"})
+            )
+
+    def test_is_in_app_substring_not_exact_match(self):
+        """Exclude patterns are substring matches, not exact or regex."""
+        with patch(
+            "apps.difs.stacktrace_processor._IN_APP_EXCLUDE", ["std::"]
+        ):
+            self.assertFalse(
+                _is_in_app({"function": "std::panic::catch_unwind"})
+            )
+            # "libstd" contains "std" but not "std::" — substring must include the colons
+            self.assertTrue(
+                _is_in_app({"filename": "/rust/libstd/panic.rs"})
+            )
+
+    def test_resolve_native_sets_in_app_on_frames(self):
+        """resolve_native_stacktrace sets in_app on every output frame.
+
+        _is_in_app runs AFTER resolution, so it sees the resolved
+        filename and function — not the pre-resolution frame fields.
+        """
+        mock_symbol = MagicMock()
+        mock_symbol.symbol = "core::option::unwrap"
+        mock_symbol.full_path = "/rust/library/core/src/option.rs"
+        mock_symbol.line = 971
+        mock_symbol.lang = "rust"
+
+        mock_sym_cache = MagicMock()
+        mock_sym_cache.lookup.return_value = [mock_symbol]
+
+        mock_obj = MagicMock()
+        mock_obj.arch = "wasm32"
+
+        mock_archive = MagicMock()
+        mock_archive.get_object.return_value = mock_obj
+
+        stacktrace = {
+            "frames": [
+                {
+                    "instruction_addr": "0x1234",
+                    "image_addr": "0x0",
+                    "function": "wasm-function[42]",
+                }
+            ]
+        }
+
+        with (
+            patch("apps.difs.stacktrace_processor.Archive") as MockArchive,
+            patch("apps.difs.stacktrace_processor.SymCache") as MockSymCache,
+            patch(
+                "apps.difs.stacktrace_processor._IN_APP_EXCLUDE",
+                ["/rust/library/"],
+            ),
+        ):
+            MockArchive.open.return_value = mock_archive
+            MockSymCache.from_object.return_value = mock_sym_cache
+
+            result = StacktraceProcessor.resolve_native_stacktrace(
+                stacktrace, "/fake/symbols.wasm", arch="wasm32"
+            )
+
+        self.assertIsNotNone(result)
+        self.assertFalse(result.frames[0]["in_app"])
 
 
 class HasNativeFramesTestCase(GlitchTestCase):

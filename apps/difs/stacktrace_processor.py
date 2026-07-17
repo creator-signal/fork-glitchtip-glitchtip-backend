@@ -1,12 +1,31 @@
 import contextlib
 import copy
 import logging
+import os
 import zipfile
 
 import cxxfilt
 from symbolic import Archive, ProguardMapper, SymCache, normalize_debug_id, parse_addr
 
 alternative_arch = {"x86": ["x86", "x86_64"]}
+
+# Comma-separated substrings to match against filename or function name.
+# Matching frames are marked in_app=False.
+_IN_APP_EXCLUDE = [
+    p.strip()
+    for p in os.environ.get("GLITCHTIP_IN_APP_EXCLUDE", "").split(",")
+    if p.strip()
+]
+
+
+def _is_in_app(frame: dict) -> bool:
+    """Return False if the frame matches any in-app exclusion pattern."""
+    if not _IN_APP_EXCLUDE:
+        return True
+    path = frame.get("filename") or ""
+    fn = frame.get("function") or ""
+    combined = path + "\0" + fn
+    return not any(pattern in combined for pattern in _IN_APP_EXCLUDE)
 
 
 class ResolvedStacktrace:
@@ -343,6 +362,7 @@ class StacktraceProcessor:
                                     line_num + 1 : min(len(source_lines), line_num + 6)
                                 ]
 
+                frame["in_app"] = _is_in_app(frame)
                 resolved_frames.append(frame)
 
             return ResolvedStacktrace(score=score, frames=resolved_frames)
