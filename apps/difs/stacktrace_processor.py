@@ -83,7 +83,7 @@ def extract_source_from_bundle(source_bundle, file_path):
         with difs_concat_file_blobs_to_disk([source_bundle.file.blob]) as temp_file:
             with zipfile.ZipFile(temp_file.name, "r") as zf:
                 # Source bundles store files with a 'files/' prefix
-                bundle_path = f"files{file_path}"
+                bundle_path = f"files/{file_path.lstrip('/')}"
 
                 if bundle_path in zf.namelist():
                     content = zf.read(bundle_path).decode("utf-8")
@@ -136,7 +136,7 @@ def open_source_bundle(source_bundle_dif):
             namelist = set(zf.namelist())
 
             def get_source_lines(file_path):
-                bundle_path = f"files{file_path}"
+                bundle_path = f"files/{file_path.lstrip('/')}"
                 if bundle_path in namelist:
                     return zf.read(bundle_path).decode("utf-8").splitlines()
                 return None
