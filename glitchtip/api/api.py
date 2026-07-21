@@ -39,6 +39,7 @@ from apps.users.api import router as users_router
 from apps.users.models import User
 from apps.users.schema import UserSchema
 from apps.wizard.api import router as wizard_router
+from creativesignal.auth import first_user_bootstrap_allowed
 from glitchtip.constants import SOCIAL_ADAPTER_MAP
 
 from ..schema import CamelSchema
@@ -195,7 +196,10 @@ async def get_settings(request: HttpRequest):
 
     enable_user_registration = settings.ENABLE_USER_REGISTRATION
     enable_social_apps_user_registration = settings.ENABLE_SOCIAL_APPS_USER_REGISTRATION
-    if not (enable_user_registration and enable_social_apps_user_registration):
+    if (
+        first_user_bootstrap_allowed()
+        and not (enable_user_registration and enable_social_apps_user_registration)
+    ):
         no_users = not await User.objects.aexists()
         enable_user_registration = enable_user_registration or no_users
         enable_social_apps_user_registration = (
