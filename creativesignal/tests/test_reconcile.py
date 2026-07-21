@@ -33,6 +33,7 @@ class ZitadelReconcileTestCase(TestCase):
             client_id="local-client",
             client_secret=secret,
             operator_email="operator@creatorsignal.test",
+            operator_subject="zitadel-operator-1",
             discovery_url=(
                 "http://auth.localhost:48080/.well-known/openid-configuration"
             ),
@@ -71,6 +72,13 @@ class ZitadelReconcileTestCase(TestCase):
                     primary=True,
                 ).exists()
             )
+            self.assertTrue(
+                SocialAccount.objects.filter(
+                    user=operator,
+                    provider="zitadel",
+                    uid="zitadel-operator-1",
+                ).exists()
+            )
             organization_user = OrganizationUser.objects.get(
                 organization=organization,
                 user=operator,
@@ -98,6 +106,21 @@ class ZitadelReconcileTestCase(TestCase):
             status = json.loads((directory / "status.json").read_text())
             self.assertEqual(status["event"], "glitchtip.reconciled")
             self.assertNotIn("rotated-secret", json.dumps(status))
+
+    def test_operator_subject_conflict_fails_closed(self):
+        with TemporaryDirectory() as temporary_directory:
+            other_user = User.objects.create(email="other@creatorsignal.test")
+            SocialAccount.objects.create(
+                user=other_user,
+                provider="zitadel",
+                uid="zitadel-operator-1",
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "operator subject is already linked to another GlitchTip user",
+            ):
+                reconcile(self.config(Path(temporary_directory)))
 
     def test_authorized_zitadel_user_joins_operator_team(self):
         with TemporaryDirectory() as temporary_directory:
