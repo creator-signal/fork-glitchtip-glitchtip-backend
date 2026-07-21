@@ -17,12 +17,17 @@ ENABLE_SOCIAL_APPS_USER_REGISTRATION=true
 ENABLE_ORGANIZATION_CREATION=false
 ```
 
-Mount three non-empty files in
+Mount four non-empty files in
 `GLITCHTIP_ZITADEL_CREDENTIAL_DIRECTORY` (default `/run/zitadel`):
 
 - `client-id`
 - `client-secret`
 - `operator-email`
+- `operator-subject`
+
+The subject is the immutable ZITADEL user ID for the configured operator. The
+reconciler binds that exact subject to the pre-provisioned account and fails
+closed if either side is already linked differently.
 
 Set `ZITADEL_DISCOVERY_URL` to the complete discovery URL and mount a writable,
 private `GLITCHTIP_BOOTSTRAP_DIRECTORY` (default `/run/bootstrap`) for generated
