@@ -41,6 +41,7 @@ jobs:
       VALKEY_URL: redis://127.0.0.1:6379
       DEBUG: "true"
       ENABLE_TEST_API: "true"
+      ENABLE_OPEN_USER_REGISTRATION: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
