@@ -614,6 +614,7 @@ if DEBUG_TOOLBAR:
 INSTALLED_APPS += [
     "storages",
     "django_vtasks",
+    "creativesignal",
     "glitchtip",
     "apps.alerts",
     "apps.environments",
@@ -655,6 +656,7 @@ PROMETHEUS_EXPORT_MIGRATIONS = False
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "creativesignal.middleware.SsoOnlyMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
@@ -1223,6 +1225,7 @@ ENABLE_USER_REGISTRATION = env.bool("ENABLE_USER_REGISTRATION", True)
 ENABLE_SOCIAL_APPS_USER_REGISTRATION = env.bool(
     "ENABLE_SOCIAL_APPS_USER_REGISTRATION", ENABLE_USER_REGISTRATION
 )
+CREATOR_SIGNAL_SSO_ONLY = env.bool("CREATOR_SIGNAL_SSO_ONLY", False)
 ENABLE_ORGANIZATION_CREATION = env.bool(
     "ENABLE_OPEN_USER_REGISTRATION", env.bool("ENABLE_ORGANIZATION_CREATION", False)
 )
