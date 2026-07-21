@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 from allauth.account.models import EmailAddress
-from allauth.socialaccount.models import SocialApp
+from allauth.socialaccount.models import SocialAccount, SocialApp
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -89,6 +89,7 @@ class ReconcileConfig:
     client_id: str
     client_secret: str
     operator_email: str
+    operator_subject: str
     discovery_url: str
     bootstrap_directory: Path
 
@@ -104,6 +105,7 @@ class ReconcileConfig:
             client_id=required_file(credential_directory / "client-id"),
             client_secret=required_file(credential_directory / "client-secret"),
             operator_email=required_file(credential_directory / "operator-email"),
+            operator_subject=required_file(credential_directory / "operator-subject"),
             discovery_url=os.environ.get(
                 "ZITADEL_DISCOVERY_URL",
                 "https://auth.creatorsignal.me/.well-known/openid-configuration",
@@ -186,6 +188,34 @@ def reconcile(config: ReconcileConfig) -> dict[str, object]:
             user=user,
             email=config.operator_email,
             defaults={"verified": True, "primary": True},
+        )
+
+        subject_account = (
+            SocialAccount.objects.select_for_update()
+            .filter(provider=PROVIDER_ID, uid=config.operator_subject)
+            .first()
+        )
+        if subject_account is not None and subject_account.user_id != user.id:
+            raise RuntimeError(
+                "ZITADEL operator subject is already linked to another GlitchTip user"
+            )
+        different_subject = (
+            SocialAccount.objects.select_for_update()
+            .filter(provider=PROVIDER_ID, user=user)
+            .exclude(uid=config.operator_subject)
+            .first()
+        )
+        if different_subject is not None:
+            raise RuntimeError(
+                "GlitchTip operator is already linked to a different ZITADEL subject"
+            )
+        SocialAccount.objects.update_or_create(
+            provider=PROVIDER_ID,
+            uid=config.operator_subject,
+            defaults={
+                "user": user,
+                "extra_data": {"email": config.operator_email},
+            },
         )
 
         organization, _ = Organization.objects.update_or_create(
