@@ -69,6 +69,22 @@ PROJECTS = (
         UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"),
         "creator-signal-strapi.dsn",
     ),
+    ProjectDefinition(
+        41405,
+        "Sales Pulse Admin browser",
+        "sales-pulse-admin-browser",
+        "javascript-nextjs",
+        UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5"),
+        "sales-pulse-admin-browser.dsn",
+    ),
+    ProjectDefinition(
+        41406,
+        "Sales Pulse Admin server",
+        "sales-pulse-admin-server",
+        "javascript-node",
+        UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6"),
+        "sales-pulse-admin-server.dsn",
+    ),
 )
 
 
