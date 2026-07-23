@@ -102,7 +102,7 @@ class ZitadelReconcileTestCase(TestCase):
                     (41404, "creator-signal-strapi"),
                     (41405, "sales-pulse-admin-browser"),
                     (41406, "sales-pulse-admin-server"),
-                    (41407, "sales-pulse-extension"),
+                    (41407, "sales-pulse-browser-extension"),
                 ],
             )
             self.assertEqual(len({definition.public_key for definition in PROJECTS}), 7)
