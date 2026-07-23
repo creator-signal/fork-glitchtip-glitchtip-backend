@@ -90,8 +90,8 @@ class ZitadelReconcileTestCase(TestCase):
                 slug="creator-signal-operators",
             )
             self.assertIn(organization_user, team.members.all())
-            self.assertEqual(Project.objects.filter(organization=organization).count(), 6)
-            self.assertEqual(ProjectKey.objects.count(), 6)
+            self.assertEqual(Project.objects.filter(organization=organization).count(), 7)
+            self.assertEqual(ProjectKey.objects.count(), 7)
 
             self.assertEqual(
                 [(definition.project_id, definition.slug) for definition in PROJECTS],
@@ -102,10 +102,11 @@ class ZitadelReconcileTestCase(TestCase):
                     (41404, "creator-signal-strapi"),
                     (41405, "sales-pulse-admin-browser"),
                     (41406, "sales-pulse-admin-server"),
+                    (41407, "sales-pulse-extension"),
                 ],
             )
-            self.assertEqual(len({definition.public_key for definition in PROJECTS}), 6)
-            self.assertEqual(len({definition.dsn_file for definition in PROJECTS}), 6)
+            self.assertEqual(len({definition.public_key for definition in PROJECTS}), 7)
+            self.assertEqual(len({definition.dsn_file for definition in PROJECTS}), 7)
 
             for definition in PROJECTS:
                 project = Project.objects.get(
