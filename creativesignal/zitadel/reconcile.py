@@ -85,6 +85,14 @@ PROJECTS = (
         UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6"),
         "sales-pulse-admin-server.dsn",
     ),
+    ProjectDefinition(
+        41407,
+        "Sales Pulse browser extension",
+        "sales-pulse-browser-extension",
+        "javascript",
+        UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7"),
+        "sales-pulse-extension.dsn",
+    ),
 )
 
 
