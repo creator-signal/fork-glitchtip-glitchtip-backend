@@ -39,10 +39,12 @@ python -m creativesignal.configure_zitadel
 
 The command is idempotent. It creates or updates the `zitadel` OIDC provider,
 the Creator Signal organisation, provider association, operator team, initial
-operator and four governed projects. A changed client secret is updated without
+operator and seven governed projects. A changed client secret is updated without
 creating another provider. Credential values are never included in output. The generated Admin DSNs are
 `sales-pulse-admin-browser.dsn` and `sales-pulse-admin-server.dsn`; consumers
-must not reuse either DSN for customer-facing runtimes.
+must not reuse either DSN for customer-facing runtimes. The Sales Pulse server
+relay alone consumes `sales-pulse-extension.dsn`; the browser extension never
+contains or sends directly to a GlitchTip DSN.
 
 ZITADEL must restrict the application to assigned project roles. The callback
 URLs are:
