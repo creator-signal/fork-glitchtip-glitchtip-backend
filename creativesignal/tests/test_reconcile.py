@@ -90,8 +90,8 @@ class ZitadelReconcileTestCase(TestCase):
                 slug="creator-signal-operators",
             )
             self.assertIn(organization_user, team.members.all())
-            self.assertEqual(Project.objects.filter(organization=organization).count(), 7)
-            self.assertEqual(ProjectKey.objects.count(), 7)
+            self.assertEqual(Project.objects.filter(organization=organization).count(), 8)
+            self.assertEqual(ProjectKey.objects.count(), 8)
 
             self.assertEqual(
                 [(definition.project_id, definition.slug) for definition in PROJECTS],
@@ -99,14 +99,15 @@ class ZitadelReconcileTestCase(TestCase):
                     (41401, "sales-pulse-web"),
                     (41402, "sales-pulse-worker"),
                     (41403, "creator-signal-public-site"),
-                    (41404, "creator-signal-strapi"),
+                    (41404, "creator-signal-instatic-admin-browser"),
                     (41405, "sales-pulse-admin-browser"),
                     (41406, "sales-pulse-admin-server"),
                     (41407, "sales-pulse-browser-extension"),
+                    (41408, "creator-signal-instatic-server"),
                 ],
             )
-            self.assertEqual(len({definition.public_key for definition in PROJECTS}), 7)
-            self.assertEqual(len({definition.dsn_file for definition in PROJECTS}), 7)
+            self.assertEqual(len({definition.public_key for definition in PROJECTS}), 8)
+            self.assertEqual(len({definition.dsn_file for definition in PROJECTS}), 8)
 
             for definition in PROJECTS:
                 project = Project.objects.get(
@@ -121,6 +122,57 @@ class ZitadelReconcileTestCase(TestCase):
             status = json.loads((directory / "status.json").read_text())
             self.assertEqual(status["event"], "glitchtip.reconciled")
             self.assertNotIn("rotated-secret", json.dumps(status))
+
+    def test_reconcile_migrates_the_unused_strapi_project_to_instatic_admin(self):
+        with TemporaryDirectory() as temporary_directory:
+            organization = Organization.objects.create(
+                name="Creator Signal",
+                slug="creator-signal",
+                open_membership=False,
+                is_deleted=False,
+            )
+            Project.objects.create(
+                id=41404,
+                name="Creator Signal Strapi",
+                slug="creator-signal-strapi",
+                organization=organization,
+                platform="javascript-node",
+            )
+
+            reconcile(self.config(Path(temporary_directory)))
+
+            migrated = Project.objects.get(id=41404)
+            self.assertEqual(migrated.slug, "creator-signal-instatic-admin-browser")
+            self.assertEqual(migrated.name, "Creator Signal Instatic Admin browser")
+            self.assertEqual(migrated.platform, "javascript")
+
+    def test_reconcile_rejects_a_conflicting_project_identity(self):
+        with TemporaryDirectory() as temporary_directory:
+            organization = Organization.objects.create(
+                name="Creator Signal",
+                slug="creator-signal",
+                open_membership=False,
+                is_deleted=False,
+            )
+            Project.objects.create(
+                id=41404,
+                name="Legacy",
+                slug="legacy-project",
+                organization=organization,
+                platform="javascript-node",
+            )
+            conflicting = Project.objects.create(
+                id=51404,
+                name="Conflicting Instatic Admin",
+                organization=organization,
+                platform="javascript",
+            )
+            Project.objects.filter(id=conflicting.id).update(
+                slug="creator-signal-instatic-admin-browser"
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "project identity conflict"):
+                reconcile(self.config(Path(temporary_directory)))
 
     def test_operator_subject_conflict_fails_closed(self):
         with TemporaryDirectory() as temporary_directory:
