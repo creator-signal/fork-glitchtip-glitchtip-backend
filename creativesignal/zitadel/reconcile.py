@@ -63,11 +63,11 @@ PROJECTS = (
     ),
     ProjectDefinition(
         41404,
-        "Creator Signal Strapi",
-        "creator-signal-strapi",
-        "javascript-node",
+        "Creator Signal Instatic Admin browser",
+        "creator-signal-instatic-admin-browser",
+        "javascript",
         UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"),
-        "creator-signal-strapi.dsn",
+        "creator-signal-instatic-admin-browser.dsn",
     ),
     ProjectDefinition(
         41405,
@@ -92,6 +92,14 @@ PROJECTS = (
         "javascript",
         UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7"),
         "sales-pulse-extension.dsn",
+    ),
+    ProjectDefinition(
+        41408,
+        "Creator Signal Instatic server",
+        "creator-signal-instatic-server",
+        "javascript-node",
+        UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8"),
+        "creator-signal-instatic-server.dsn",
     ),
 )
 
@@ -272,10 +280,23 @@ def reconcile(config: ReconcileConfig) -> dict[str, object]:
 
         reconciled_projects = []
         for definition in PROJECTS:
-            project = Project.objects.filter(
-                slug=definition.slug,
+            project_by_slug = Project.objects.filter(
                 organization=organization,
+                slug=definition.slug,
             ).first()
+            project_by_id = Project.objects.filter(
+                organization=organization,
+                id=definition.project_id,
+            ).first()
+            if (
+                project_by_slug is not None
+                and project_by_id is not None
+                and project_by_slug.id != project_by_id.id
+            ):
+                raise RuntimeError(
+                    f"project identity conflict for {definition.slug}"
+                )
+            project = project_by_slug or project_by_id
             if project is None:
                 project = Project.objects.create(
                     id=definition.project_id,
@@ -285,9 +306,10 @@ def reconcile(config: ReconcileConfig) -> dict[str, object]:
                     platform=definition.platform,
                 )
             else:
+                project.slug = definition.slug
                 project.name = definition.name
                 project.platform = definition.platform
-                project.save(update_fields=["name", "platform"])
+                project.save(update_fields=["slug", "name", "platform"])
             team.projects.add(project)
 
             project_key = ProjectKey.objects.filter(project=project).order_by("id").first()
